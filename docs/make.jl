@@ -1,3 +1,3 @@
 using Documenter, MultistateModels
 
-# makedocs(sitename="MultistateModels.jl")
+makedocs(sitename="MultistateModels.jl")

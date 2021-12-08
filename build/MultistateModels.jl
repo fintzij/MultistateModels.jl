@@ -1,7 +1,6 @@
 module MultistateModels
 
 using AbstractMCMC
-using DataFrames
 using Distributions
 using StatsModels
 
