@@ -15,6 +15,7 @@ JuliaDB = "a93385a2-3734-596a-9a66-3cfbb77141e6"
 StatsModels = "3eaba693-59b7-5ba5-a881-562e759f1c8d"
 
 [compat]
+JuliaDB = "0.13"
 julia = "1"
 
 [extras]
