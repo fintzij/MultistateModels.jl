@@ -63,8 +63,45 @@ function create_tmat(hazinfo::DataFrame)
     return tmat
 end
 
+"""
+    parse_hazard(hazards::Hazard)
+
+Takes the formula in a Hazard object and modifies it to have the specified baseline hazard function. 
+
+For exponential hazards, maps @formula(lambda ~ trt) -> @formula(lambda ~ 1 + trt)
+
+For Weibull hazards, maps @formula(lambda ~ trt) -> (@formula(shape ~ 1 + trt), @formula(scale ~ 1 + trt))
+
+shapes = exp.(modelmatrix(weibull_formula_1) \beta_shapes)
+scales = exp.(modelmatrix(weibull_formula_2) \beta_scales)
+
+function weibull_hazard(t, shapes, scales) 
+    shapes .* (scales .^ shapes) .* (t .^ (shapes .- 1))
+end
+
+# f1 is a hazard
+function f1(t, x)
+    ...
+end
+
+# cumulative hazard
+function F1(f, t0, t1, x)
+    integrate(f, t0, t1, x)
+end 
+
+# total hazard
+function T(F..., t0, t1, x)
+    sum(F...)
+end
+
+# survival function
+function S(T)
+    exp(-T)
+end
+"""
+
 ### function to make a multistate model
-function MultistateModel(hazards::Hazard...)
+function MultistateModel(hazards::Hazard...; data = nothing)
 
     # enumerate the hazards and reorder 
     hazinfo = enumerate_hazards(hazards...)

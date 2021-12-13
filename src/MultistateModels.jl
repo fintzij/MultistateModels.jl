@@ -1,9 +1,9 @@
 module MultistateModels
 
-using AbstractMCMC
 using DataFrames
 using Distributions
 using StatsModels
+using Symbolics
 
 # Write your package code here.
 export
