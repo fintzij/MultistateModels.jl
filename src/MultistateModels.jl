@@ -2,6 +2,7 @@ module MultistateModels
 
 using DataFrames
 using Distributions
+using StatsFuns
 using StatsModels
 using Symbolics
 

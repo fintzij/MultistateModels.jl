@@ -17,7 +17,7 @@ h23 = Hazard(@formula(lambda23 ~ 1), "wei", 2, 3);
 # two objects, θ (parameters) and X (data)
 # LHS of the following are log-hazards, RHS parameterizes the log-hazards
 # want the following behavior:
-# log(λ_12) ~ θ12_intercept + θ12_trt * X_trt 
+# log(λ_12) ~ θ12_intercept + θ12_trt * X_trt + θ12 * BP
 # log(λ_13) ~ θ13_intercept
 # log(λ_23_scale) ~ θ23_scale_intercept + θ23_scale_trt * X_trt
 # log(λ_23_shape) ~ θ_shape_intercept + θ23_scale_trt * X_trt
@@ -27,6 +27,59 @@ h23 = Hazard(@formula(lambda23 ~ 1), "wei", 2, 3);
 
 hazards = (h12, h23, h13)
 
+# exponential case
+function hazard_exp(t, parameters, data; loghaz = true)
+
+    log_haz = data * parameters
+
+    if loghaz == true 
+        return exp(log_haz)
+    end
+
+    return log_haz
+end
+
+# weibull case
+function hazard_weibull(t, parameters, data; loghaz = true, scale_inds, shape_inds)
+
+    # compute parameters
+    log_shape = data * parameters[shape_inds] # log(p)
+    log_scale = data * parameters[scale_inds] # log(lambda)
+
+    # calculate hazard
+    # p=shape, lambda=scale, 
+    # h(t)= p * lambda^p* t^(p-1)
+    # log(h(t)) = log(p) + p * log(lambda) + (p-1) * log(t)
+    log_haz = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
+
+    if loghaz != true 
+        return exp(log_haz)
+    end
+
+    return log_haz
+end
+
+function total_haz(log_hazards...; logtothaz = true)
+
+    log_tot_haz = logsumexp(log_hazards)
+
+    if logtothaz != true
+        return exp(log_tot_haz)
+    end
+
+    return log_tot_haz
+end
+
+i = (a = 5, b = [1, 2, 3])
+
+function t(x;args...)
+
+    if
+    return x
+end
+
+
+# some experiments with Julia
 using StableRNGs; rng = StableRNG(1);
 
 f = @formula(y ~ 1)
@@ -44,7 +97,6 @@ f = apply_schema(f, schema(f, df_blank))
 
 # to get coeficient names as symbols
 Meta.parse.(coefnames(f)[2])
-
 
 while t < tmax
     hazards(pars, data)
