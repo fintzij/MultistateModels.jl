@@ -72,12 +72,10 @@ end
 
 i = (a = 5, b = [1, 2, 3])
 
-function t(x;args...)
-
-    if
-    return x
+v = [1 2 3 4]
+function changevec(v) 
+    return exp(v[2])
 end
-
 
 # some experiments with Julia
 using StableRNGs; rng = StableRNG(1);
@@ -93,7 +91,7 @@ df_blank[:,f.lhs] = 0.0
 schema(df)
 schema(f, df_blank) 
 
-f = apply_schema(f, schema(f, df_blank))
+f = apply_schema(f, schema(f, df)) 
 
 # to get coeficient names as symbols
 Meta.parse.(coefnames(f)[2])
@@ -103,3 +101,40 @@ while t < tmax
     lik = hazards(event) * S(hazards, t0, t1, pars)
     statenext = rand(hazards(tnext) / sum(hazards(tnext)))
 end
+
+"""
+    parse_hazard(hazards::Hazard)
+
+Takes the formula in a Hazard object and modifies it to have the specified baseline hazard function. 
+
+For exponential hazards, maps @formula(lambda ~ trt) -> @formula(lambda ~ 1 + trt)
+
+For Weibull hazards, maps @formula(lambda ~ trt) -> (@formula(shape ~ 1 + trt), @formula(scale ~ 1 + trt))
+
+shapes = exp.(modelmatrix(weibull_formula_1) \beta_shapes)
+scales = exp.(modelmatrix(weibull_formula_2) \beta_scales)
+
+function weibull_hazard(t, shapes, scales) 
+    shapes .* (scales .^ shapes) .* (t .^ (shapes .- 1))
+end
+
+# f1 is a hazard
+function f1(t, x)
+    ...
+end
+
+# cumulative hazard
+function F1(f, t0, t1, x)
+    integrate(f, t0, t1, x)
+end 
+
+# total hazard
+function T(F..., t0, t1, x)
+    sum(F...)
+end
+
+# survival function
+function S(T)
+    exp(-T)
+end
+"""

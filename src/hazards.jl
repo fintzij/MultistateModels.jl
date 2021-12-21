@@ -10,112 +10,93 @@ struct Hazard
     stateto::Int64     # destination state number
 end
 
-"""
-    get_hazinfo(hazards::Hazard...; enumerate = true)
+# this needs more thought - internal hazard type
+struct _Hazard
+    hazfun::Function
+    hazfam::String
+    statefrom::Int64
+    stateto::Int64
+    inds::Vector{Int64}
+    data::Array{Float64,2}
+end
 
-Generate a matrix whose columns record the origin state, destination state, and transition number for a collection of hazards. Optionally, reorder the hazards by origin state, then by destination state.
-"""
-function enumerate_hazards(hazards::Hazard...)
+# covariate adjustment
+function cov_adjust(parameters::Vector{Float64}, data::Array{Float64,2}, inds::Vector{Int64})
+    return data * parameters[inds]
+end
 
-    n_haz = length(hazards)
-
-    # initialize state space information
-    hazinfo = 
-        DataFrames.DataFrame(
-            statefrom = zeros(Int64, n_haz),
-            stateto = zeros(Int64, n_haz),
-            trans = zeros(Int64, n_haz),
-            order = collect(1:n_haz))
-
-    # grab the origin and destination states for each hazard
-    for i in eachindex(hazards)
-        hazinfo.statefrom[i] = hazards[i].statefrom
-        hazinfo.stateto[i] = hazards[i].stateto
+# exponential hazard
+function haz_exp(t::Float64, log_rate::Float64; loghaz = true)
+    if loghaz == true 
+        return log_rate
+    else 
+        return exp(log_rate)
     end
-
-    # enumerate and sort hazards
-    sort!(hazinfo, [:statefrom, :stateto])
-    hazinfo[:,:trans] = collect(1:n_haz)
-
-    # return the hazard information
-    return hazinfo
 end
 
-"""
-    create_tmat(hazards::Hazard...)
+function haz_exp(t::Float64, parameters::Vector{Float64}, data::Array{Float64,2}; loghaz = true, rate_inds::Vector{Int64})
 
-Generate a matrix enumerating instantaneous transitions, used internally. Origin states correspond to rows, destination states to columns, and zero entries indicate that an instantaneous state transition is not possible. Transitions are enumerated in non-zero elements of the matrix. 
-"""
-function create_tmat(hazinfo::DataFrame)
-    
-    # initialize the transition matrix
-    statespace = sort(unique([hazinfo[:,:statefrom] hazinfo[:, :stateto]]))
-    n_states = length(statespace)
+    log_haz = data * parameters
 
-    # initialize transition matrix
-    tmat = zeros(Int64, n_states, n_states)
-
-    for i in axes(hazinfo, 1)
-        tmat[hazinfo.statefrom[i], hazinfo.stateto[i]] = 
-            hazinfo.trans[i]
+    # calculate log-hazard
+    if loghaz == true 
+        return log_haz
+    else 
+        return exp(log_haz)
     end
-
-    return tmat
 end
 
-"""
-    parse_hazard(hazards::Hazard)
+function haz_exp(t::Float64, parameters::Vector{Float64}; loghaz::Bool = true, rate_inds::Vector{Int64})
 
-Takes the formula in a Hazard object and modifies it to have the specified baseline hazard function. 
+    log_haz = parameters[rate_inds]
 
-For exponential hazards, maps @formula(lambda ~ trt) -> @formula(lambda ~ 1 + trt)
-
-For Weibull hazards, maps @formula(lambda ~ trt) -> (@formula(shape ~ 1 + trt), @formula(scale ~ 1 + trt))
-
-shapes = exp.(modelmatrix(weibull_formula_1) \beta_shapes)
-scales = exp.(modelmatrix(weibull_formula_2) \beta_scales)
-
-function weibull_hazard(t, shapes, scales) 
-    shapes .* (scales .^ shapes) .* (t .^ (shapes .- 1))
+    # calculate log-hazard
+    if loghaz == true 
+        return log_haz
+    else 
+        return exp(log_haz)
+    end
 end
 
-# f1 is a hazard
-function f1(t, x)
-    ...
+# weibull case
+function haz_wei(t::Float64, parameters::Vector{Float64}, data::Array{Float64,2}; 
+    loghaz = true, scale_inds::Vector{Float64}, shape_inds::Vector{Float64})
+
+    # compute parameters
+    log_shape = data * parameters[shape_inds] # log(p)
+    log_scale = data * parameters[scale_inds] # log(lambda)
+
+    # calculate log-hazard
+    log_haz = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
+
+    # calculate log-hazard
+    if loghaz == true 
+        return log_haz
+    else 
+        return exp(log_haz)
+    end
 end
 
-# cumulative hazard
-function F1(f, t0, t1, x)
-    integrate(f, t0, t1, x)
-end 
+function haz_wei(t::Float64, parameters::Vector{Float64}; 
+    loghaz = true, scale_inds::Vector{Float64}, shape_inds::Vector{Float64})
+    # method for covariate-free Weibull
+    # compute parameters
+    log_shape = parameters[shape_inds] # log(p)
+    log_scale = parameters[scale_inds] # log(lambda)
 
-# total hazard
-function T(F..., t0, t1, x)
-    sum(F...)
+    # calculate log-hazard
+    log_haz = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
+
+    # calculate log-hazard
+    if loghaz == true 
+        return log_haz
+    else 
+        return exp(log_haz)
+    end
 end
 
-# survival function
-function S(T)
-    exp(-T)
-end
-"""
-
-### function to make a multistate model
-function MultistateModel(hazards::Hazard...; data = nothing)
-
-    # enumerate the hazards and reorder 
-    hazinfo = enumerate_hazards(hazards...)
-
-    # reorder hazards and pop the order column in hazinfo
-    hazards = hazards[hazinfo.order]
-    select!(hazinfo, Not(:order))
-
-    # compile matrix enumerating instantaneous state transitions
-    tmat = create_tmat(hazinfo)
-
-    # need:
-    # - wrappers for formula schema
-    # - function to parse cause-specific hazards for each origin state and return total hazard
+# gamma case
+function haz_gamma(t::Float64, parameters::Vector{Float64}, data; loghaz = true, scale_inds, shape_inds)
 
 end
 
