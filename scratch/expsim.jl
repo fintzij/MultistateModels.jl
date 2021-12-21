@@ -54,6 +54,48 @@ while(keep_going == true)
     end
 end
 
-simone = function(hazards, total_hazards, parameters, tmat, data, tmax, initial_state) 
+add2 = function(x,y)
+    x+y
+end
+
+
+simone = function(hazards, total_hazards, tmat::Array{Int64}, state0::Int64, time0::Float64, tmax::Float64, parameters, data) 
     
+    state_cur = state0
+    time_cur = time0
+
+    state_vec = [state_cur]
+    time_vec = [time_cur]
+
+    keep_going = true
+
+    haz_prop = zeros(Float64, length(total_hazards)) 
+
+    while keep_going == true
+        
+        # sample the next event time
+        time_next = -log.(rand(1)) / total_hazards[state_cur]
+
+        # if time_next <= tmax, save the sime and sample the next state
+        if(time_next <= tmax) 
+            
+            # calculate the hazards
+            for c ∈ axes(tmat, 2)
+
+                # fill out the hazards
+                if(tmat[state_cur, c] == 0)
+                    haz_prop = 0.0
+                else
+                    haz_prop = hazards[tmat[state_cur, c]](time_next, parameters, data)
+                end
+            end
+
+            state_next = sample(aweights(haz_prop))
+
+        else
+            keep_going = false
+        end
+    end
+
+    return ()
 end
