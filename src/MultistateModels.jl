@@ -4,7 +4,6 @@ using DataFrames
 using Distributions
 using StatsFuns
 using StatsModels
-using Symbolics
 
 # Write your package code here.
 export
@@ -13,5 +12,6 @@ export
     MultistateModel
 
 include("hazards.jl")
+include("modelgeneration.jl")
 
 end

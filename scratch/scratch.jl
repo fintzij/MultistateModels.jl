@@ -1,12 +1,25 @@
-using MultistateModels, DataFrames, StatsModels, Symbolics
+using DataFrames
+using Distributions
+using StatsFuns
+using StatsModels
+using MultistateModels
 
 #### Minimal model
 h12 = Hazard(@formula(lambda12 ~ 1), "exp", 1, 2);
 h13 = Hazard(@formula(lambda13 ~ 1), "exp", 1, 3);
 h23 = Hazard(@formula(lambda23 ~ 1), "wei", 2, 3);
 
+hazards = (h12, h23, h13)
+
+# work towards this
+call_hazard(hazards, which_hazard, t, parameters; loghaz = give_log) # returns the hazard
+
+# or in other words
+hazards[which_hazard].hazfun(t, parameters, hazards[which_hazard].data; loghaz = give_log, hazards[which_hazard].inds)
+
+
 # data from user can be null, four parameters: 
-    # λ12_intercept, λ13_intercept, λ23_intercept_scale, λ23_intercept_shape
+# λ12_intercept, λ13_intercept, λ23_intercept_scale, λ23_intercept_shape
 
 # if any hazards depend on covariates, require data. need to check for this.
 # if so, a minimal dataset contains enough information to apply_schema
@@ -22,10 +35,7 @@ h23 = Hazard(@formula(lambda23 ~ 1), "wei", 2, 3);
 # log(λ_23_scale) ~ θ23_scale_intercept + θ23_scale_trt * X_trt
 # log(λ_23_shape) ~ θ_shape_intercept + θ23_scale_trt * X_trt
 
-# Q: how do we get StatsModels to give us the correct design matrix for each hazard? What does the user need to give in terms of data?
-# Q: what do we parse out to Symbolics? 
 
-hazards = (h12, h23, h13)
 
 # exponential case
 function hazard_exp(t, parameters, data; loghaz = true)

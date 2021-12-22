@@ -51,6 +51,39 @@ function create_tmat(hazinfo::DataFrame)
     return tmat
 end
 
+# if no covariate data
+function build_hazards(hazards::Hazard..., data::DataFrame)
+    
+    # initialize the arrays of hazards
+    _hazards = []
+
+    # assign a hazard function
+    for h in axes(hazards) 
+
+        # here is where we manipulate the model formula and call StatsModels.jl stuff
+        if isnothing(data) 
+
+        else
+
+        end
+
+        # now we get the functions and other objects for the mutable struct
+        if hazards[h].family == "exp" 
+
+            _hazfun = MultistateModels.haz_exp
+            
+
+        elseif hazards[h].family == "wei"
+        elseif hazards[h].family == "gam"
+        elseif hazards[h].family == "gg"
+        else # semi-parametric family
+        end
+
+        # and we push the mutable struct to the array
+        push!(_hazards, _haz)
+    end
+end
+
 ### function to make a multistate model
 function MultistateModel(hazards::Hazard...; data = nothing)
 
@@ -64,7 +97,28 @@ function MultistateModel(hazards::Hazard...; data = nothing)
     # compile matrix enumerating instantaneous state transitions
     tmat = create_tmat(hazinfo)
 
+    # generate tuple for compiled hazard functions
+    # _hazards is a tuple of hazard functions
+    # _hazdat is a tuple of design matrices
+    _hazards, _hazdat = build_hazards(hazards, data)
+
+    # generate tuple for total hazards ? 
+    #_totalhazards, _tothazdat = build_tothazards(_hazards, tmat)
+
+    
+
     # need:
+
+    # Q: data + parameters separate from tuple of hazard functions?
+    # OR
+    # Q: data + parameters that are local to each hazard function?
+
+    simulate(model_object)
+    fit(model_object)
+
+    model_object.fit
+    model_object.sim
+
     # - wrappers for formula schema
     # - function to parse cause-specific hazards for each origin state and return total hazard
 
