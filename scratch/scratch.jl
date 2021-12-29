@@ -11,12 +11,66 @@ h23 = Hazard(@formula(lambda23 ~ 1), "wei", 2, 3);
 
 hazards = (h12, h23, h13)
 
+# then go from hazards -> _hazards
+# _hazards is an array of mutable structs
+# in each struct:
+# hazard function, data, parameters, ...
+# with(_hazards[1], hazfun(t, parameters, data; give_log))
+
 # work towards this
-call_hazard(hazards, which_hazard, t, parameters; loghaz = give_log) # returns the hazard
+call_hazard(_hazards, which_hazard, t; loghaz = give_log) # returns the hazard
 
 # or in other words
 hazards[which_hazard].hazfun(t, parameters, hazards[which_hazard].data; loghaz = give_log, hazards[which_hazard].inds)
 
+# thinking about how data looks
+# Q1: what should a dataset from the user look like?
+# Q2: if/how a user-supplied dataset should be reshaped internally?
+
+# obstype: observation scheme
+# 0: exactly observed data => tstart,tstop are jump times in a sample path
+# 1: interval censored panel data => state known at tstart,tstop, but not path in between
+# 2: interval censored, measurement error about states at tstart, tstop => standard HMM
+# 3: interval censored, measurement error about path between tstart, tstop (e.g., actt worst state) => e.g., know the worst state between tstart, tstop but not the state at the endpoints
+
+# with the following, we always know where covariates start
+# minimal dataset, :statefrom[1] is the initial state, :stateto gets ignored
+# [:id :tstart :tstop :statefrom :stateto :obstype :x1 :x2 ...] 
+
+# for exactly observes sample paths
+# simulation: :tstart and :tstop are t0 and tmax for each person
+# inference: :tstart and :tstop are interval endpoints in a jump chain (might need reshaping to get jump chains for sample paths)
+
+# for interval censored panel data (case 1)
+# simulation + inference: :tstart and :tstop are times at which the process is observed
+
+dat_exact = 
+    DataFrame(id = collect(1:3),
+              tstart = [0, 0, 0],
+              tstop = [10, 10, 10],
+              statefrom = [1, 2, 1],
+              stateto = [3, 3, 3],
+              obstype = zeros(3))
+
+dat_exact2 = 
+    DataFrame(id = collect(1:3),
+              tstart = [0, 0, 0],
+              tstop = [10, 10, 10],
+              statefrom = [1, 2, 1],
+              stateto = [3, 3, 3],
+              obstype = zeros(3),
+              trt = [0, 1, 0],
+              age = [23, 32, 50])
+
+dat_interval = 
+    DataFrame(id = [1, 1, 2, 2, 3, 3],
+              tstart = [0, 1, 0, 1, 0, 1],
+              tstop = [1, 2, 1, 2, 1, 2],
+              statefrom = [1, 1, 2, 2, 1, 1], # only the first statefrom counts for simulation
+              stateto = [1, 1, 1, 1, 1, 1],
+              obstype = ones(6),
+              trt = [0, 0, 1, 1, 0, 0],
+              age = [23, 23, 32, 32, 50, 50])
 
 # data from user can be null, four parameters: 
 # λ12_intercept, λ13_intercept, λ23_intercept_scale, λ23_intercept_shape
@@ -35,22 +89,16 @@ hazards[which_hazard].hazfun(t, parameters, hazards[which_hazard].data; loghaz =
 # log(λ_23_scale) ~ θ23_scale_intercept + θ23_scale_trt * X_trt
 # log(λ_23_shape) ~ θ_shape_intercept + θ23_scale_trt * X_trt
 
-
-
-# exponential case
-function hazard_exp(t, parameters, data; loghaz = true)
-
-    log_haz = data * parameters
-
-    if loghaz == true 
-        return exp(log_haz)
-    end
-
-    return log_haz
+# see here: https://stackoverflow.com/questions/67123916/julia-function-inside-a-struct-and-method-constructor
+Base.@kwdef mutable struct Model2
+    p::Float64
+    n::Int64
+    f::Function
 end
 
+
 # weibull case
-function hazard_weibull(t, parameters, data; loghaz = true, scale_inds, shape_inds)
+function hazard_weibull(t, parameters, data; loghaz = true, shape_inds = 1, scale_inds = 2)
 
     # compute parameters
     log_shape = data * parameters[shape_inds] # log(p)
@@ -60,10 +108,10 @@ function hazard_weibull(t, parameters, data; loghaz = true, scale_inds, shape_in
     # p=shape, lambda=scale, 
     # h(t)= p * lambda^p* t^(p-1)
     # log(h(t)) = log(p) + p * log(lambda) + (p-1) * log(t)
-    log_haz = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
+    log_haz = log_shape + exp.(log_shape) * log_scale + expm1.(log_shape) * log(t)
 
     if loghaz != true 
-        return exp(log_haz)
+        return exp.(log_haz)
     end
 
     return log_haz
@@ -112,22 +160,8 @@ while t < tmax
     statenext = rand(hazards(tnext) / sum(hazards(tnext)))
 end
 
-"""
-    parse_hazard(hazards::Hazard)
 
-Takes the formula in a Hazard object and modifies it to have the specified baseline hazard function. 
-
-For exponential hazards, maps @formula(lambda ~ trt) -> @formula(lambda ~ 1 + trt)
-
-For Weibull hazards, maps @formula(lambda ~ trt) -> (@formula(shape ~ 1 + trt), @formula(scale ~ 1 + trt))
-
-shapes = exp.(modelmatrix(weibull_formula_1) \beta_shapes)
-scales = exp.(modelmatrix(weibull_formula_2) \beta_scales)
-
-function weibull_hazard(t, shapes, scales) 
-    shapes .* (scales .^ shapes) .* (t .^ (shapes .- 1))
-end
-
+````
 # f1 is a hazard
 function f1(t, x)
     ...
