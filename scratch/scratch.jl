@@ -5,9 +5,9 @@ using StatsModels
 using MultistateModels
 
 #### Minimal model
-h12 = Hazard(@formula(lambda12 ~ 1), "exp", 1, 2);
-h13 = Hazard(@formula(lambda13 ~ 1), "exp", 1, 3);
-h23 = Hazard(@formula(lambda23 ~ 1), "wei", 2, 3);
+h12 = Hazard(@formula(0 ~ trt), "exp", 1, 2);
+h13 = Hazard(@formula(0 ~ trt*age), "exp", 1, 3);
+h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3);
 
 hazards = (h12, h23, h13)
 
@@ -97,25 +97,6 @@ Base.@kwdef mutable struct Model2
 end
 
 
-# weibull case
-function hazard_weibull(t, parameters, data; loghaz = true, shape_inds = 1, scale_inds = 2)
-
-    # compute parameters
-    log_shape = data * parameters[shape_inds] # log(p)
-    log_scale = data * parameters[scale_inds] # log(lambda)
-
-    # calculate hazard
-    # p=shape, lambda=scale, 
-    # h(t)= p * lambda^p* t^(p-1)
-    # log(h(t)) = log(p) + p * log(lambda) + (p-1) * log(t)
-    log_haz = log_shape + exp.(log_shape) * log_scale + expm1.(log_shape) * log(t)
-
-    if loghaz != true 
-        return exp.(log_haz)
-    end
-
-    return log_haz
-end
 
 function total_haz(log_hazards...; logtothaz = true)
 
@@ -138,7 +119,10 @@ end
 # some experiments with Julia
 using StableRNGs; rng = StableRNG(1);
 
-f = @formula(y ~ 1)
+f = @formula(0 ~ 1)
+s = apply_schema(f, schema(f, dat_exact))
+modelcols(s, dat_exact) 
+
 df = DataFrame(y = rand(rng, 9), a = 1:9, b = rand(rng, 9), c = repeat(["a","b","c"], 3), e = rand(rng, 9) * 10)
 
 # going to need to append the variable names to the data frame 

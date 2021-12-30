@@ -2,8 +2,8 @@ module MultistateModels
 
 using DataFrames
 using Distributions
-using StatsFuns
 using StatsModels
+using StatsFuns
 
 # Write your package code here.
 export

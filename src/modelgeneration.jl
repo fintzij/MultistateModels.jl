@@ -54,18 +54,19 @@ end
 # if no covariate data
 function build_hazards(hazards::Hazard..., data::DataFrame)
     
+    # check for covariates in dataset
+    # any_covariates = DataFrames.ncols(data) > 6
+
     # initialize the arrays of hazards
     _hazards = []
 
     # assign a hazard function
     for h in axes(hazards) 
 
-        # here is where we manipulate the model formula and call StatsModels.jl stuff
-        if isnothing(data) 
+        # generate the model matrix
+        hazschema = apply_schema(hazards[h].hazard,schema(hazards[h].hazard, data))
 
-        else
-
-        end
+        hazdat = modelcols(hazschema, data)
 
         # now we get the functions and other objects for the mutable struct
         if hazards[h].family == "exp" 
@@ -85,7 +86,10 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
 end
 
 ### function to make a multistate model
-function MultistateModel(hazards::Hazard...; data = nothing)
+function MultistateModel(hazards::Hazard...; data::DataFrame)
+
+    # function to check data formatting
+    # checkdat()
 
     # enumerate the hazards and reorder 
     hazinfo = enumerate_hazards(hazards...)
@@ -98,9 +102,8 @@ function MultistateModel(hazards::Hazard...; data = nothing)
     tmat = create_tmat(hazinfo)
 
     # generate tuple for compiled hazard functions
-    # _hazards is a tuple of hazard functions
-    # _hazdat is a tuple of design matrices
-    _hazards, _hazdat = build_hazards(hazards, data)
+    # _hazards is a tuple of _Hazard objects
+    _hazards = build_hazards(hazards, data)
 
     # generate tuple for total hazards ? 
     #_totalhazards, _tothazdat = build_tothazards(_hazards, tmat)
