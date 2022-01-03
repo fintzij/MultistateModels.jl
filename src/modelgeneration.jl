@@ -64,21 +64,30 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
     for h in axes(hazards) 
 
         # generate the model matrix
-        hazschema = apply_schema(hazards[h].hazard,schema(hazards[h].hazard, data))
+        hazschema = 
+            apply_schema(hazards[h].hazard, 
+                         schema(hazards[h].hazard, 
+                                data))
 
         hazdat = modelcols(hazschema, data)
 
         # now we get the functions and other objects for the mutable struct
         if hazards[h].family == "exp" 
-
             _hazfun = MultistateModels.haz_exp
-            
-
         elseif hazards[h].family == "wei"
+            _hazfun = MultistateModels.haz_wei
         elseif hazards[h].family == "gam"
         elseif hazards[h].family == "gg"
         else # semi-parametric family
         end
+
+        # note: want a symbol that names the hazard + vector of symbols for parameters
+        _hazards[h] = 
+            _Hazard(hazards[h].statefrom,
+                    hazards[h].stateto,
+                    hazards[h].family,
+                    hazdat,
+                    )
 
         # and we push the mutable struct to the array
         push!(_hazards, _haz)
