@@ -11,6 +11,8 @@ struct Hazard
 end
 
 Base.@kwdef mutable struct _Hazard
+    hazname::Symbol
+    hazpars::Vector{Symbol}
     statefrom::Int64
     stateto::Int64
     hazfam::String 

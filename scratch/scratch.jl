@@ -5,8 +5,8 @@ using StatsModels
 using MultistateModels
 
 #### Minimal model
-h12 = Hazard(@formula(0 ~ trt), "exp", 1, 2);
-h13 = Hazard(@formula(0 ~ trt*age), "exp", 1, 3);
+h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2);
+h13 = Hazard(@formula(0 ~ 1 + trt*age), "exp", 1, 3);
 h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3);
 
 hazards = (h12, h23, h13)

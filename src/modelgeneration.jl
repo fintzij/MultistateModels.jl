@@ -63,19 +63,40 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
     # assign a hazard function
     for h in axes(hazards) 
 
+        # name for the hazard
+        hazname = "h"*string(hazards[h].statefrom)*string(hazards[h].stateto)
+
         # generate the model matrix
         hazschema = 
             apply_schema(hazards[h].hazard, 
                          schema(hazards[h].hazard, 
                                 data))
 
-        hazdat = modelcols(hazschema, data)
+        # grab the design matrix 
+        hazdat = modelcols(hazschema, data)[2]
 
         # now we get the functions and other objects for the mutable struct
-        if hazards[h].family == "exp" 
+        if hazards[h].family == "exp"
+
+            # hazard function
             _hazfun = MultistateModels.haz_exp
+
+            # number of parameters
+            npars = ncol(hazdat)
+
+            # vector for parameters
+            hazpars = Vector{Float64, npars}
+            parnames = hazname*"_".*coefnames(hazschema)[2]
+
         elseif hazards[h].family == "wei"
+
+            # hazard function
             _hazfun = MultistateModels.haz_wei
+
+            # number of parameters
+            npars = 2 * ncol(hazdat)
+
+            # vector for parameters
         elseif hazards[h].family == "gam"
         elseif hazards[h].family == "gg"
         else # semi-parametric family
@@ -83,11 +104,14 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
 
         # note: want a symbol that names the hazard + vector of symbols for parameters
         _hazards[h] = 
-            _Hazard(hazards[h].statefrom,
-                    hazards[h].stateto,
-                    hazards[h].family,
-                    hazdat,
-                    )
+            _Hazard(
+                Symbol(haznames),
+                Symbol.(parnames),
+                hazards[h].statefrom,
+                hazards[h].stateto,
+                hazards[h].family,
+                hazdat,
+                )
 
         # and we push the mutable struct to the array
         push!(_hazards, _haz)
