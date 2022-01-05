@@ -79,42 +79,44 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
         if hazards[h].family == "exp"
 
             # hazard function
-            _hazfun = MultistateModels.haz_exp
+            hazfun = MultistateModels.haz_exp
 
             # number of parameters
-            npars = ncol(hazdat)
+            npars = size(hazdat)[2]
 
             # vector for parameters
-            hazpars = Vector{Float64, npars}
+            hazpars = zeros(Float64, npars)
             parnames = hazname*"_".*coefnames(hazschema)[2]
 
         elseif hazards[h].family == "wei"
 
             # hazard function
-            _hazfun = MultistateModels.haz_wei
+            hazfun = MultistateModels.haz_wei
 
             # number of parameters
-            npars = 2 * ncol(hazdat)
+            npars = 2 * size(hazdat)[2]
 
             # vector for parameters
+            hazpars = zeros(Float64, npars)
+            parnames = hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]
+
         elseif hazards[h].family == "gam"
         elseif hazards[h].family == "gg"
         else # semi-parametric family
         end
 
         # note: want a symbol that names the hazard + vector of symbols for parameters
-        _hazards[h] = 
+        push!(
+            _hazards,
             _Hazard(
-                Symbol(haznames),
+                Symbol(hazname),
                 Symbol.(parnames),
                 hazards[h].statefrom,
                 hazards[h].stateto,
                 hazards[h].family,
                 hazdat,
-                )
-
-        # and we push the mutable struct to the array
-        push!(_hazards, _haz)
+                hazpars,
+                hazfun))
     end
 end
 

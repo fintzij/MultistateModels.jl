@@ -72,22 +72,6 @@ dat_interval =
               trt = [0, 0, 1, 1, 0, 0],
               age = [23, 23, 32, 32, 50, 50])
 
-# data from user can be null, four parameters: 
-# λ12_intercept, λ13_intercept, λ23_intercept_scale, λ23_intercept_shape
-
-# if any hazards depend on covariates, require data. need to check for this.
-# if so, a minimal dataset contains enough information to apply_schema
-
-# before applying schema, remove lhs from each formula and save it somewhere.
-# if we don't remove it then StatsModels looks for lhs in the dataset
-
-# two objects, θ (parameters) and X (data)
-# LHS of the following are log-hazards, RHS parameterizes the log-hazards
-# want the following behavior:
-# log(λ_12) ~ θ12_intercept + θ12_trt * X_trt + θ12 * BP
-# log(λ_13) ~ θ13_intercept
-# log(λ_23_scale) ~ θ23_scale_intercept + θ23_scale_trt * X_trt
-# log(λ_23_shape) ~ θ_shape_intercept + θ23_scale_trt * X_trt
 
 # see here: https://stackoverflow.com/questions/67123916/julia-function-inside-a-struct-and-method-constructor
 Base.@kwdef mutable struct Model2
@@ -109,34 +93,6 @@ function total_haz(log_hazards...; logtothaz = true)
     return log_tot_haz
 end
 
-i = (a = 5, b = [1, 2, 3])
-
-v = [1 2 3 4]
-function changevec(v) 
-    return exp(v[2])
-end
-
-# some experiments with Julia
-using StableRNGs; rng = StableRNG(1);
-
-f = @formula(0 ~ 1)
-s = apply_schema(f, schema(f, dat_exact))
-modelcols(s, dat_exact) 
-
-df = DataFrame(y = rand(rng, 9), a = 1:9, b = rand(rng, 9), c = repeat(["a","b","c"], 3), e = rand(rng, 9) * 10)
-
-# going to need to append the variable names to the data frame 
-# StatsModels is expecting outcome data
-df_blank = DataFrame(xblank = 1.0)
-df_blank[:,f.lhs] = 0.0
-
-schema(df)
-schema(f, df_blank) 
-
-f = apply_schema(f, schema(f, df)) 
-
-# to get coeficient names as symbols
-Meta.parse.(coefnames(f)[2])
 
 while t < tmax
     hazards(pars, data)
