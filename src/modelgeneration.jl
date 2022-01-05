@@ -118,6 +118,8 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
                 hazpars,
                 hazfun))
     end
+    
+    return _hazards
 end
 
 ### function to make a multistate model

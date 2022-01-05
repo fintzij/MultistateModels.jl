@@ -21,7 +21,7 @@ Base.@kwdef mutable struct _Hazard
     hazfun::Function
 end
 
-function haz_exp(t::Float64, parameters::Vector{Float64}, data::Array{Float64,2}; give_log = true)
+function haz_exp(t::Float64, parameters::Vector{Float64}, data::Array{Float64,2}; give_log = true, args...)
 
     log_haz = data * parameters
 
@@ -33,11 +33,11 @@ function haz_exp(t::Float64, parameters::Vector{Float64}, data::Array{Float64,2}
 end
 
 # weibull case
-function haz_wei(t::Float64, parameters::Vector{Float64}, data::Array{Float64,2}; give_log = true)
+function haz_wei(t::Float64, parameters::Vector{Float64}, data::Array{Float64,2}; give_log = true, args...)
 
     # compute parameters
-    log_shape = data * parameters[args.shape_inds] # log(p)
-    log_scale = data * parameters[args.scale_inds] # log(lambda)
+    log_shape = data * parameters[args[:shape_inds]] # log(p)
+    log_scale = data * parameters[args[:scale_inds]] # log(lambda)
 
     # calculate log-hazard
     log_haz = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
