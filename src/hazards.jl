@@ -10,18 +10,33 @@ struct Hazard
     stateto::Int64     # destination state number
 end
 
-Base.@kwdef mutable struct _Hazard
+# abstract type for internal hazard structs
+abstract type _Hazard end
+
+# specialized subtypes for parametric hazards
+# having subtypes => no need for a strict signature
+Base.@kwdef mutable struct _Exponential <: _Hazard
     hazname::Symbol
     hazpars::Vector{Symbol}
     statefrom::Int64
-    stateto::Int64
-    hazfam::String 
+    stateto::Int64 
     data::Array{Float64}
     parameters::Vector{Float64}
-    hazfun::Function
 end
 
-function haz_exp(t::Float64, parameters::Vector{Float64}, data::Array{Float64,2}; give_log = true, args...)
+# redefine haz_exp + haz_wei to dispatch on the internal struct, a la distributions.jl
+Base.@kwdef mutable struct _Weibull <: _Hazard
+    hazname::Symbol
+    hazpars::Vector{Symbol}
+    statefrom::Int64
+    stateto::Int64 
+    data::Array{Float64}
+    parameters::Vector{Float64}
+    hazfun::Function = MultistateModels.haz_exp
+    # or should we have loghaz = data * parameters?
+end
+
+function call_haz(t::Float64, _haz::_Exponential; give_log = true)
 
     log_haz = data * parameters
 

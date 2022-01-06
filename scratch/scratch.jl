@@ -27,7 +27,7 @@ hazards[which_hazard].hazfun(t, parameters, hazards[which_hazard].data; loghaz =
 # Q1: what should a dataset from the user look like?
 # Q2: if/how a user-supplied dataset should be reshaped internally?
 
-function add1(x; kwargs...)
+function add1(x; kwargs = nothing)
     x += 1
     x -= kwargs[:subtracted]
 end

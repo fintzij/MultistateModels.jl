@@ -84,6 +84,8 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
             # number of parameters
             npars = size(hazdat)[2]
 
+            # no need for parameter indices
+
             # vector for parameters
             hazpars = zeros(Float64, npars)
             parnames = hazname*"_".*coefnames(hazschema)[2]
@@ -118,7 +120,7 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
                 hazpars,
                 hazfun))
     end
-    
+
     return _hazards
 end
 
