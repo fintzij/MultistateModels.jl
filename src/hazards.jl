@@ -14,8 +14,15 @@ end
 abstract type _Hazard end
 
 # specialized subtypes for parametric hazards
-# having subtypes => no need for a strict signature
 Base.@kwdef mutable struct _Exponential <: _Hazard
+    hazname::Symbol
+    hazpars::Vector{Symbol}
+    statefrom::Int64
+    stateto::Int64 
+    parameters::Vector{Float64}
+end
+
+Base.@kwdef mutable struct _ExponentialReg <: _Hazard
     hazname::Symbol
     hazpars::Vector{Symbol}
     statefrom::Int64
@@ -30,21 +37,27 @@ Base.@kwdef mutable struct _Weibull <: _Hazard
     hazpars::Vector{Symbol}
     statefrom::Int64
     stateto::Int64 
-    data::Array{Float64}
     parameters::Vector{Float64}
-    hazfun::Function = MultistateModels.haz_exp
-    # or should we have loghaz = data * parameters?
 end
 
-function call_haz(t::Float64, _haz::_Exponential; give_log = true)
+Base.@kwdef mutable struct _WeibullReg <: _Hazard
+    hazname::Symbol
+    hazpars::Vector{Symbol}
+    statefrom::Int64
+    stateto::Int64 
+    data::Array{Float64}
+    parameters::Vector{Float64}
+end
 
-    log_haz = data * parameters
+### callers for hazard functions
+# exponential hazard, no covariate adjustment
+function call_haz(t::Float64, _hazard::_Exponential; give_log = true)
+    give_log ? _hazard.parameters : exp.(hazard.parameters)
+end
 
-    if give_log == true 
-        return log_haz
-    else 
-        return exp(log_haz)
-    end
+# exponential hazard with covariate adjustment
+function call_haz(t::Float64, _hazard::_ExponentialReg; give_log = true)
+    give_log ? _hazard.parameters * _hazard.data : exp.(_hazard.parameters * _hazard.data)
 end
 
 # weibull case
