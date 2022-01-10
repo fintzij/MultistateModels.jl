@@ -19,7 +19,7 @@ Base.@kwdef mutable struct _Exponential <: _Hazard
     hazpars::Vector{Symbol}
     statefrom::Int64
     stateto::Int64 
-    parameters::Vector{Float64}
+    parameters::Vector{Float64} 
 end
 
 Base.@kwdef mutable struct _ExponentialReg <: _Hazard
@@ -28,7 +28,7 @@ Base.@kwdef mutable struct _ExponentialReg <: _Hazard
     statefrom::Int64
     stateto::Int64 
     data::Array{Float64}
-    parameters::Vector{Float64}
+    parameters::Vector{Float64} 
 end
 
 # redefine haz_exp + haz_wei to dispatch on the internal struct, a la distributions.jl
@@ -45,38 +45,51 @@ Base.@kwdef mutable struct _WeibullReg <: _Hazard
     hazpars::Vector{Symbol}
     statefrom::Int64
     stateto::Int64 
+    scaleinds::UnitRange{Int64}
+    shapeinds::UnitRange{Int64}
     data::Array{Float64}
     parameters::Vector{Float64}
 end
 
 ### callers for hazard functions
 # exponential hazard, no covariate adjustment
-function call_haz(t::Float64, _hazard::_Exponential; give_log = true)
-    give_log ? _hazard.parameters : exp.(hazard.parameters)
+function call_haz(_hazard::_Exponential; give_log = true)
+    log_haz = _hazard.parameters[1]
+    give_log ? log_haz : exp(log_haz)
 end
 
 # exponential hazard with covariate adjustment
-function call_haz(t::Float64, _hazard::_ExponentialReg; give_log = true)
-    give_log ? _hazard.parameters * _hazard.data : exp.(_hazard.parameters * _hazard.data)
+function call_haz(_hazard::_ExponentialReg, rowind::Int64; give_log = true)
+    log_haz = dot(_hazard.parameters, _hazard.data[rowind,:])
+    give_log ? log_haz : exp(log_haz)
 end
 
-# weibull case
-function haz_wei(t::Float64, parameters::Vector{Float64}, data::Array{Float64,2}; give_log = true, args...)
+# weibull case no covariate adjustment
+function call_haz(t::Float64, _hazard::_Weibull; give_log = true)
 
-    # compute parameters
-    log_shape = data * parameters[args[:shape_inds]] # log(p)
-    log_scale = data * parameters[args[:scale_inds]] # log(lambda)
+    # scale and shape
+    log_scale = _hazard.parameters[1]
+    log_shape = _hazard.parameters[2]
 
-    # calculate log-hazard
+    # compute hazard
     log_haz = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
 
-    # calculate log-hazard
-    if give_log == true 
-        return log_haz
-    else 
-        return exp(log_haz)
-    end
+    give_log ? log_haz : exp(log_haz)
 end
+
+# weibull with covariate adjustment
+function call_haz(t::Float64, _hazard::_WeibullReg; give_log = true)
+
+    # scale and shape
+    log_scale = _hazard.parameters[_hazard.scaleinds]
+    log_shape = _hazard.parameters[_hazard.shapeinds]
+
+    # compute hazard
+    log_haz = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
+
+    give_log ? log_haz : exp(log_haz)
+end
+
 
 # gamma case
 # function haz_gamma(t::Float64, parameters::Vector{Float64}, data; loghaz = true, scale_inds, shape_inds)
