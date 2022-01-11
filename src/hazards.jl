@@ -17,16 +17,12 @@ abstract type _Hazard end
 Base.@kwdef mutable struct _Exponential <: _Hazard
     hazname::Symbol
     hazpars::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64 
     parameters::Vector{Float64} 
 end
 
 Base.@kwdef mutable struct _ExponentialReg <: _Hazard
     hazname::Symbol
     hazpars::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64 
     data::Array{Float64}
     parameters::Vector{Float64} 
 end
@@ -35,16 +31,12 @@ end
 Base.@kwdef mutable struct _Weibull <: _Hazard
     hazname::Symbol
     hazpars::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64 
     parameters::Vector{Float64}
 end
 
 Base.@kwdef mutable struct _WeibullReg <: _Hazard
     hazname::Symbol
     hazpars::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64 
     scaleinds::UnitRange{Int64}
     shapeinds::UnitRange{Int64}
     data::Array{Float64}
