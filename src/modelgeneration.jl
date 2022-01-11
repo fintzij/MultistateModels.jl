@@ -88,6 +88,22 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
             hazpars = zeros(Float64, npars)
             parnames = hazname*"_".*coefnames(hazschema)[2]
 
+            # generate hazard struct
+            if npars == 1
+                haz_struct = 
+                    _Exponential(
+                        Symbol(hazname),
+                        Symbol.(parnames),
+                        hazpars)
+            else
+                haz_struct = 
+                    _ExponentialReg(
+                        Symbol(hazname),
+                        Symbol.(parnames),
+                        hazdat,
+                        hazpars)
+            end
+
         elseif hazards[h].family == "wei"
 
             # hazard function
@@ -98,7 +114,22 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
 
             # vector for parameters
             hazpars = zeros(Float64, npars)
-            parnames = hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]
+            parnames = hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2]
+
+            # generate hazard struct
+            if npars == 2
+                haz_struct = 
+                    _Weibull(
+                        Symbol(hazname),
+                        Symbol.(parnames),
+                        hazpars)
+            else
+                haz_struct = 
+                    _WeibullReg(
+                        Symbol(hazname),
+                        Symbol.(parnames),
+                        )
+            end
 
         elseif hazards[h].family == "gam"
         elseif hazards[h].family == "gg"
@@ -106,18 +137,10 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
         end
 
         # note: want a symbol that names the hazard + vector of symbols for parameters
-        push!(
-            _hazards,
-            _Hazard(
-                Symbol(hazname),
-                Symbol.(parnames),
-                hazards[h].statefrom,
-                hazards[h].stateto,
-                hazards[h].family,
-                hazdat,
-                hazpars,
-                hazfun))
+        push!(_hazards, haz_struct)
     end
+
+    return _hazards
 end
 
 ### function to make a multistate model
