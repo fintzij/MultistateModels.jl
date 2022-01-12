@@ -52,7 +52,7 @@ function create_tmat(hazinfo::DataFrame)
 end
 
 # if no covariate data
-function build_hazards(hazards::Hazard..., data::DataFrame)
+function build_hazards(hazards::Hazard...; data::DataFrame)
     
     # check for covariates in dataset
     # any_covariates = DataFrames.ncols(data) > 6
@@ -129,7 +129,9 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
                         Symbol(hazname),
                         Symbol.(parnames),
                         UnitRange(1, npars / 2),
-                        UnitRange(1 + npars / 2, npars))
+                        UnitRange(1 + npars / 2, npars),
+                        hazdat,
+                        hazpars)
             end
 
         elseif hazards[h].family == "gam"
@@ -145,7 +147,7 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
 end
 
 ### function to make a multistate model
-function MultistateModel(hazards::Hazard...; data::DataFrame)
+function MultistateModel(hazards::Hazard...;data::DataFrame)
 
     # function to check data formatting
     # checkdat()
@@ -175,11 +177,11 @@ function MultistateModel(hazards::Hazard...; data::DataFrame)
     # OR
     # Q: data + parameters that are local to each hazard function?
 
-    simulate(model_object)
-    fit(model_object)
+    # simulate(model_object)
+    # fit(model_object)
 
-    model_object.fit
-    model_object.sim
+    # model_object.fit
+    # model_object.sim
 
     # - wrappers for formula schema
     # - function to parse cause-specific hazards for each origin state and return total hazard
