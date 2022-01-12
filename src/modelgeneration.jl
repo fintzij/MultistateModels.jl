@@ -128,7 +128,8 @@ function build_hazards(hazards::Hazard..., data::DataFrame)
                     _WeibullReg(
                         Symbol(hazname),
                         Symbol.(parnames),
-                        )
+                        UnitRange(1, npars / 2),
+                        UnitRange(1 + npars / 2, npars))
             end
 
         elseif hazards[h].family == "gam"
