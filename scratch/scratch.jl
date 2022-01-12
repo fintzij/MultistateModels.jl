@@ -11,26 +11,6 @@ h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3);
 
 hazards = (h12, h23, h13)
 
-# then go from hazards -> _hazards
-# _hazards is an array of mutable structs
-# in each struct:
-# hazard function, data, parameters, ...
-# with(_hazards[1], hazfun(t, parameters, data; give_log))
-
-# work towards this
-call_hazard(_hazards, which_hazard, t; loghaz = give_log, args...) # returns the hazard
-
-# or in other words
-hazards[which_hazard].hazfun(t, parameters, hazards[which_hazard].data; loghaz = give_log, hazards[which_hazard].inds)
-
-# thinking about how data looks
-# Q1: what should a dataset from the user look like?
-# Q2: if/how a user-supplied dataset should be reshaped internally?
-
-function add1(x; kwargs = nothing)
-    x += 1
-    x -= kwargs[:subtracted]
-end
 
 # obstype: observation scheme
 # 0: exactly observed data => tstart,tstop are jump times in a sample path

@@ -51,17 +51,13 @@ function create_tmat(hazinfo::DataFrame)
     return tmat
 end
 
-# if no covariate data
+# mutable structs
 function build_hazards(hazards::Hazard...; data::DataFrame)
-    
-    # check for covariates in dataset
-    # any_covariates = DataFrames.ncols(data) > 6
-
     # initialize the arrays of hazards
     _hazards = []
 
     # assign a hazard function
-    for h in axes(hazards) 
+    for h in eachindex(hazards) 
 
         # name for the hazard
         hazname = "h"*string(hazards[h].statefrom)*string(hazards[h].stateto)
@@ -77,9 +73,6 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
 
         # now we get the functions and other objects for the mutable struct
         if hazards[h].family == "exp"
-
-            # hazard function
-            hazfun = MultistateModels.haz_exp
 
             # number of parameters
             npars = size(hazdat)[2]
@@ -106,18 +99,15 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
 
         elseif hazards[h].family == "wei"
 
-            # hazard function
-            hazfun = MultistateModels.haz_wei
-
             # number of parameters
-            npars = 2 * size(hazdat)[2]
+            npars = size(hazdat, 2)
 
             # vector for parameters
-            hazpars = zeros(Float64, npars)
-            parnames = hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2]
+            hazpars = zeros(Float64, npars * 2)
+            parnames = vec(hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2])
 
             # generate hazard struct
-            if npars == 2
+            if npars == 1
                 haz_struct = 
                     _Weibull(
                         Symbol(hazname),
@@ -128,8 +118,8 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _WeibullReg(
                         Symbol(hazname),
                         Symbol.(parnames),
-                        UnitRange(1, npars / 2),
-                        UnitRange(1 + npars / 2, npars),
+                        UnitRange(1, npars),
+                        UnitRange(1 + npars, 2 * npars),
                         hazdat,
                         hazpars)
             end
@@ -164,7 +154,7 @@ function MultistateModel(hazards::Hazard...;data::DataFrame)
 
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
-    _hazards = build_hazards(hazards, data)
+    _hazards = build_hazards(hazards...; data = data)
 
     # generate tuple for total hazards ? 
     #_totalhazards, _tothazdat = build_tothazards(_hazards, tmat)

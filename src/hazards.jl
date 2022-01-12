@@ -45,13 +45,13 @@ end
 
 ### callers for hazard functions
 # exponential hazard, no covariate adjustment
-function call_haz(_hazard::_Exponential; give_log = true)
+function call_haz(t::Float64, _hazard::_Exponential; give_log = true)
     log_haz = _hazard.parameters[1]
     give_log ? log_haz : exp(log_haz)
 end
 
 # exponential hazard with covariate adjustment
-function call_haz(_hazard::_ExponentialReg, rowind::Int64; give_log = true)
+function call_haz(t::Float64, _hazard::_ExponentialReg, rowind::Int64; give_log = true)
     log_haz = dot(_hazard.parameters, _hazard.data[rowind,:])
     give_log ? log_haz : exp(log_haz)
 end
