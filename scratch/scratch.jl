@@ -1,6 +1,7 @@
 using DataFrames
 using Distributions
 using StatsFuns
+using LinearAlgebra
 using StatsModels
 using MultistateModels
 
@@ -22,7 +23,7 @@ hazards = (h12, h23, h13)
 # minimal dataset, :statefrom[1] is the initial state, :stateto gets ignored
 # [:id :tstart :tstop :statefrom :stateto :obstype :x1 :x2 ...] 
 
-# for exactly observes sample paths
+# for exactly observed sample paths
 # simulation: :tstart and :tstop are t0 and tmax for each person
 # inference: :tstart and :tstop are interval endpoints in a jump chain (might need reshaping to get jump chains for sample paths)
 

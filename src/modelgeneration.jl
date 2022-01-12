@@ -1,7 +1,7 @@
 """
-    get_hazinfo(hazards::Hazard...; enumerate = true)
+    enumerate_hazards(hazards::Hazard...)
 
-Generate a matrix whose columns record the origin state, destination state, and transition number for a collection of hazards. Optionally, reorder the hazards by origin state, then by destination state.
+Generate a matrix whose columns record the origin state, destination state, and transition number for a collection of hazards. The hazards are reordered by origin state, then by destination state. `hazards::Hazard...` is an iterable collection of user-supplied `Hazard` objects.
 """
 function enumerate_hazards(hazards::Hazard...)
 
@@ -30,9 +30,9 @@ function enumerate_hazards(hazards::Hazard...)
 end
 
 """
-    create_tmat(hazards::Hazard...)
+    create_tmat(hazinfo::DataFrame)
 
-Generate a matrix enumerating instantaneous transitions, used internally. Origin states correspond to rows, destination states to columns, and zero entries indicate that an instantaneous state transition is not possible. Transitions are enumerated in non-zero elements of the matrix. 
+Generate a matrix enumerating instantaneous transitions. Origin states correspond to rows, destination states to columns, and zero entries indicate that an instantaneous state transition is not possible. Transitions are enumerated in non-zero elements of the matrix. `hazinfo` is the output of a call to `enumerate_hazards`.
 """
 function create_tmat(hazinfo::DataFrame)
     
@@ -52,9 +52,18 @@ function create_tmat(hazinfo::DataFrame)
 end
 
 # mutable structs
+
+"""
+    build_hazards(hazards:Hazard...; data:DataFrame)
+
+Accept iterable collection of `Hazard` objects, plus data. Return internal array of internal _Hazard subtypes called _hazards.
+
+_hazards[1] corresponds to the first allowable transition enumerated in a transition matrix (in row major order), _hazards[2] to the second and so on... So _hazards will have length equal to number of allowable transitions.
+"""
 function build_hazards(hazards::Hazard...; data::DataFrame)
+    
     # initialize the arrays of hazards
-    _hazards = []
+    _hazards = Vector{_Hazard}(undef, length(hazards))
 
     # assign a hazard function
     for h in eachindex(hazards) 
@@ -130,10 +139,33 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
         end
 
         # note: want a symbol that names the hazard + vector of symbols for parameters
-        push!(_hazards, haz_struct)
+        _hazards[h] = haz_struct
     end
 
     return _hazards
+end
+
+### Total hazards
+"""
+    build_totalhazards(_hazards, tmat)
+
+This function accepts the internal array _hazards corresponding to allowable transitions, and the transition matrix tmat
+
+This function returns a vector of functions for the total hazard out of each state. The total hazard for each aborbing state always returns 0.
+"""
+function build_totalhazards(_hazards, tmat)
+
+    # initialize a vector for total hazards
+    # _totalhazards = Vector{Function}(undef, size(tmat, 1))
+# or do we want this
+
+    _totalhazards = Vector{_TotalHazard}(undef, size(tmat, 1))
+
+# so that we call total hazards via
+    call_tothaz(t::Float64, statecur::Int64, _totalhazards::Vector{_TotalHazard})
+
+    # 
+
 end
 
 ### function to make a multistate model
@@ -157,9 +189,7 @@ function MultistateModel(hazards::Hazard...;data::DataFrame)
     _hazards = build_hazards(hazards...; data = data)
 
     # generate tuple for total hazards ? 
-    #_totalhazards, _tothazdat = build_tothazards(_hazards, tmat)
-
-    
+    _totalhazards = build_totalhazards(_hazards, tmat)    
 
     # need:
 

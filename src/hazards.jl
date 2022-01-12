@@ -43,6 +43,24 @@ Base.@kwdef mutable struct _WeibullReg <: _Hazard
     parameters::Vector{Float64}
 end
 
+### struct for total hazards
+abstract type _TotalHazard end
+
+struct _TotalHazard
+    absorbing::Bool
+    components::Vector{Int64}
+end
+
+function call_tothaz(t::Float64, statecur::Int64, _totalhazard::_TotalHazard, _hazards::Vector{_Hazard}; give_log = true)
+
+    if _totalhazard[statecur].absorbing
+        return 0.0
+    else
+        # log total hazard
+        log_tot_haz = call_haz.() 
+    end
+end
+
 ### callers for hazard functions
 # exponential hazard, no covariate adjustment
 function call_haz(t::Float64, _hazard::_Exponential; give_log = true)
@@ -82,6 +100,8 @@ function call_haz(t::Float64, _hazard::_WeibullReg; give_log = true)
     give_log ? log_haz : exp(log_haz)
 end
 
+# caller for total hazards
+call_tothaz(t::Float64, _hazards::Vector{_Hazard})
 
 # gamma case
 # function haz_gamma(t::Float64, parameters::Vector{Float64}, data; loghaz = true, scale_inds, shape_inds)
