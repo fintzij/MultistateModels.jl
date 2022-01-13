@@ -46,24 +46,31 @@ end
 ### struct for total hazards
 abstract type _TotalHazard end
 
-struct _TotalHazard
-    absorbing::Bool
+# for absorbing states, contains nothing
+struct _TotalHazardAbsorbing <: _TotalHazard 
+end
+
+# method for call_tothaz for absorbing states, just returns 0.0
+function call_tothaz(t::Float64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard})
+    0.0
+end
+
+# for transient states
+struct _TotalHazardTransient <: _TotalHazard
     components::Vector{Int64}
 end
 
-function call_tothaz(t::Float64, statecur::Int64, _totalhazard::_TotalHazard, _hazards::Vector{_Hazard}; give_log = true)
-
-    if _totalhazard[statecur].absorbing
-        return 0.0
-    else
+# method for call_tothaz for transient states, returns Float64?
+function call_tothaz(t::Float64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
         # log total hazard
-        log_tot_haz = call_haz.() 
-    end
+        log_tot_haz = 
+            StatsFuns.logsumexp(
+                map(x -> call_haz(t, x), _hazards[_totalhazard.components])) 
 end
 
 ### callers for hazard functions
 # exponential hazard, no covariate adjustment
-function call_haz(t::Float64, _hazard::_Exponential; give_log = true)
+function call_haz(t::Float64, _hazard::_Exponential, rowind::Int64; give_log = true)
     log_haz = _hazard.parameters[1]
     give_log ? log_haz : exp(log_haz)
 end
@@ -88,11 +95,11 @@ function call_haz(t::Float64, _hazard::_Weibull; give_log = true)
 end
 
 # weibull with covariate adjustment
-function call_haz(t::Float64, _hazard::_WeibullReg; give_log = true)
+function call_haz(t::Float64, _hazard::_WeibullReg, rowind::Int64; give_log = true)
 
     # scale and shape
-    log_scale = _hazard.parameters[_hazard.scaleinds]
-    log_shape = _hazard.parameters[_hazard.shapeinds]
+    log_scale = dot(_hazard.parameters[_hazard.scaleinds], _hazard.data[rowind,:])
+    log_shape = dot(_hazard.parameters[_hazard.shapeinds], _hazard.data[rowind,:])
 
     # compute hazard
     log_haz = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
