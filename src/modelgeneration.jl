@@ -96,6 +96,7 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _Exponential(
                         Symbol(hazname),
                         Symbol.(parnames),
+                        hazdat,
                         hazpars)
             else
                 haz_struct = 
@@ -121,6 +122,9 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _Weibull(
                         Symbol(hazname),
                         Symbol.(parnames),
+                        UnitRange(1, npars),
+                        UnitRange(1 + npars, 2 * npars),
+                        hazdat,
                         hazpars)
             else
                 haz_struct = 
@@ -153,20 +157,20 @@ This function accepts the internal array _hazards corresponding to allowable tra
 
 This function returns a vector of functions for the total hazard out of each state. The total hazard for each aborbing state always returns 0.
 """
-function build_totalhazards(_hazards, tmat)
+# function build_totalhazards(_hazards, tmat)
 
-    # initialize a vector for total hazards
-    # _totalhazards = Vector{Function}(undef, size(tmat, 1))
-# or do we want this
+#     # initialize a vector for total hazards
+#     # _totalhazards = Vector{Function}(undef, size(tmat, 1))
+# # or do we want this
 
-    _totalhazards = Vector{_TotalHazard}(undef, size(tmat, 1))
+#     _totalhazards = Vector{_TotalHazard}(undef, size(tmat, 1))
 
-# so that we call total hazards via
-    call_tothaz(t::Float64, statecur::Int64, _totalhazards::Vector{_TotalHazard})
+# # so that we call total hazards via
+#     call_tothaz(t::Float64, statecur::Int64, _totalhazards::Vector{_TotalHazard})
 
-    # 
+#     # 
 
-end
+# end
 
 ### function to make a multistate model
 function MultistateModel(hazards::Hazard...;data::DataFrame)
@@ -189,7 +193,7 @@ function MultistateModel(hazards::Hazard...;data::DataFrame)
     _hazards = build_hazards(hazards...; data = data)
 
     # generate tuple for total hazards ? 
-    _totalhazards = build_totalhazards(_hazards, tmat)    
+    # _totalhazards = build_totalhazards(_hazards, tmat)    
 
     # need:
 
