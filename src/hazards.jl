@@ -10,10 +10,14 @@ struct Hazard
     stateto::Int64     # destination state number
 end
 
-# abstract type for internal hazard structs
+"""
+Abstract struct for internal _Hazard types
+"""
 abstract type _Hazard end
 
-# specialized subtypes for parametric hazards
+"""
+Exponential cause-specific hazard.
+"""
 Base.@kwdef mutable struct _Exponential <: _Hazard
     hazname::Symbol
     hazpars::Vector{Symbol}
@@ -21,6 +25,9 @@ Base.@kwdef mutable struct _Exponential <: _Hazard
     parameters::Vector{Float64} 
 end
 
+"""
+Exponential cause-specific hazard with covariate adjustment. Rate is a log-linear function of covariates.
+"""
 Base.@kwdef mutable struct _ExponentialReg <: _Hazard
     hazname::Symbol
     hazpars::Vector{Symbol}
@@ -28,8 +35,9 @@ Base.@kwdef mutable struct _ExponentialReg <: _Hazard
     parameters::Vector{Float64} 
 end
 
-# redefine haz_exp + haz_wei to dispatch on the internal struct, a la distributions.jl
-# _Weibull has "dummy" scaleinds, shapeinds, and data to match with WeibullReg so call_haz methods have same signature
+"""
+Weibull cause-specific hazard.
+"""
 Base.@kwdef mutable struct _Weibull <: _Hazard
     hazname::Symbol
     hazpars::Vector{Symbol}
@@ -39,6 +47,9 @@ Base.@kwdef mutable struct _Weibull <: _Hazard
     parameters::Vector{Float64}
 end
 
+"""
+Weibull cause-specific hazard with covariate adjustment. Scale and shape are log-linear functions of covariates.
+"""
 Base.@kwdef mutable struct _WeibullReg <: _Hazard
     hazname::Symbol
     hazpars::Vector{Symbol}
@@ -48,24 +59,34 @@ Base.@kwdef mutable struct _WeibullReg <: _Hazard
     parameters::Vector{Float64}
 end
 
-### struct for total hazards
+"""
+Abstract type for total hazards.
+"""
 abstract type _TotalHazard end
 
-# for absorbing states, contains nothing
+"""
+Total hazard for absorbing states, contains nothing as the total hazard is always zero.
+"""
 struct _TotalHazardAbsorbing <: _TotalHazard 
 end
 
-# method for call_tothaz for absorbing states, just returns 0.0
+"""
+Function call for total hazard for an absorbing state, always returns zero.
+"""
 function call_tothaz(t::Float64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard})
     0.0
 end
 
-# for transient states
+"""
+Total hazard struct for transient states, contains the indices of cause-specific hazards that contribute to the total hazard.
+"""
 struct _TotalHazardTransient <: _TotalHazard
     components::Vector{Int64}
 end
 
-# method for call_tothaz for transient states, returns Float64?
+"""
+Function call to return the log-total hazard out of an origin state. 
+"""
 function call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
     # log total hazard
     log_tot_haz = 
@@ -76,20 +97,25 @@ function call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransi
     give_log ? log_tot_haz : exp(log_tot_haz)
 end
 
-### callers for hazard functions
-# exponential hazard, no covariate adjustment
+"""
+Caller for exponential cause-specific hazards.
+"""
 function call_haz(t::Float64, rowind::Int64, _hazard::_Exponential; give_log = true)
     log_haz = _hazard.parameters[1]
     give_log ? log_haz : exp(log_haz)
 end
 
-# exponential hazard with covariate adjustment
+"""
+Caller for exponential cause-specific hazards with covariate adjustment.
+"""
 function call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialReg; give_log = true)
     log_haz = dot(_hazard.parameters, _hazard.data[rowind,:])
     give_log ? log_haz : exp(log_haz)
 end
 
-# weibull case no covariate adjustment
+"""
+Caller for Weibull cause-specific hazards.
+"""
 function call_haz(t::Float64, rowind::Int64, _hazard::_Weibull; give_log = true)
 
     # scale and shape
@@ -102,7 +128,9 @@ function call_haz(t::Float64, rowind::Int64, _hazard::_Weibull; give_log = true)
     give_log ? log_haz : exp(log_haz)
 end
 
-# weibull with covariate adjustment
+"""
+Caller for Weibull cause-specific hazards with covariate adjustment.
+"""
 function call_haz(t::Float64, rowind::Int64, _hazard::_WeibullReg; give_log = true)
 
     # scale and shape
