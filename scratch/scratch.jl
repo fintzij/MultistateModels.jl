@@ -68,24 +68,6 @@ end
 
 
 
-function total_haz(log_hazards...; logtothaz = true)
-
-    log_tot_haz = logsumexp(log_hazards)
-
-    if logtothaz != true
-        return exp(log_tot_haz)
-    end
-
-    return log_tot_haz
-end
-
-
-while t < tmax
-    hazards(pars, data)
-    lik = hazards(event) * S(hazards, t0, t1, pars)
-    statenext = rand(hazards(tnext) / sum(hazards(tnext)))
-end
-
 
 ````
 # f1 is a hazard

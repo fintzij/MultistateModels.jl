@@ -155,24 +155,34 @@ end
 
 This function accepts the internal array _hazards corresponding to allowable transitions, and the transition matrix tmat
 
-This function returns a vector of functions for the total hazard out of each state. The total hazard for each aborbing state always returns 0.
+This function returns a vector of _TotalHazard objects for each origin state, which may be of subtype `_TotalHazardAbsorbing` or `_TotalHazardTransient`. 
 """
-# function build_totalhazards(_hazards, tmat)
+function build_totalhazards(_hazards, tmat)
 
-#     # initialize a vector for total hazards
-#     # _totalhazards = Vector{Function}(undef, size(tmat, 1))
-# # or do we want this
+    # initialize a vector for total hazards
+    _totalhazards = Vector{_TotalHazard}(undef, size(tmat, 1))
 
-#     _totalhazards = Vector{_TotalHazard}(undef, size(tmat, 1))
+    # populate the vector of total hazards
+    for h in eachindex(_hazards) 
+        if sum(tmat[h,:]) == 0
+            _totalhazards[h] = 
+                _TotalHazardAbsorbing()
+        else
+            _totalhazards[h] = 
+                _TotalHazardTransient(
+findall(tmat[h,:] .!= 0)
+                )
+        end
+    end
 
-# # so that we call total hazards via
-#     call_tothaz(t::Float64, statecur::Int64, _totalhazards::Vector{_TotalHazard})
+    return _totalhazards
+end
 
-#     # 
+"""
+    MultistateModel(hazards::Hazard...; data::DataFrame)
 
-# end
-
-### function to make a multistate model
+Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateProcess` that can be used for simulation and inference.
+"""
 function MultistateModel(hazards::Hazard...;data::DataFrame)
 
     # function to check data formatting
@@ -193,7 +203,7 @@ function MultistateModel(hazards::Hazard...;data::DataFrame)
     _hazards = build_hazards(hazards...; data = data)
 
     # generate tuple for total hazards ? 
-    # _totalhazards = build_totalhazards(_hazards, tmat)    
+    _totalhazards = build_totalhazards(_hazards, tmat)    
 
     # need:
 
