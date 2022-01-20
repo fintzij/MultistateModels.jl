@@ -1,4 +1,4 @@
-    """
+"""
     Hazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
 
 Composite type for a cause-specific hazard function. Documentation to follow. 

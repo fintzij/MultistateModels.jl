@@ -1,5 +1,6 @@
 module MultistateModels
 
+using Chain
 using DataFrames
 using Distributions
 using LinearAlgebra

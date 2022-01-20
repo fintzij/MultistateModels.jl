@@ -1,8 +1,9 @@
 # set up a MultistateModel object
-using MultistateModels
+using Chain
 using DataFrames
+using MultistateModels
 
-h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2);
+h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2);
 h13 = Hazard(@formula(0 ~ 1 + trt*age), "exp", 1, 3);
 h23 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 3);
 
@@ -36,4 +37,4 @@ dat_interval =
 
 # hazards = (h12, h23, h13)
 
-MultistateModel(h12, h13, h23; data = dat_exact2)
+# MultistateModel(h12, h13, h23; data = dat_exact2)
