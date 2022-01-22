@@ -11,9 +11,10 @@ using StatsFuns
 export
     @formula,
     Hazard,
-    MultistateModel
+    multistatemodel
 
 include("hazards.jl")
 include("modelgeneration.jl")
+include("typedefs.jl")
 
 end

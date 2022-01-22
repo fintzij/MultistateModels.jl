@@ -3,7 +3,7 @@
 
 Mutable struct that fully specifies a multistate process for simulation or inference. 
 """
-Base.@kwdef mutable struct MultistateProcess 
+Base.@kwdef mutable struct MultistateModel 
     data::DataFrame
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}

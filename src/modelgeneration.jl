@@ -179,11 +179,11 @@ findall(tmat[h,:] .!= 0)
 end
 
 """
-    MultistateModel(hazards::Hazard...; data::DataFrame)
+    multistatemodel(hazards::Hazard...; data::DataFrame)
 
-Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateProcess` that can be used for simulation and inference.
+Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference.
 """
-function MultistateModel(hazards::Hazard...;data::DataFrame)
+function multistatemodel(hazards::Hazard...;data::DataFrame)
 
     # function to check data formatting
     # checkdat()
