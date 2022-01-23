@@ -13,8 +13,13 @@ export
     Hazard,
     multistatemodel
 
+# typedefs
+include("common.jl")
+
+# hazard related functions
 include("hazards.jl")
+
+# model generation
 include("modelgeneration.jl")
-include("typedefs.jl")
 
 end

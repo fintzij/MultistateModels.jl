@@ -95,16 +95,16 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                 haz_struct = 
                     _Exponential(
                         Symbol(hazname),
-                        Symbol.(parnames),
                         hazdat,
-                        hazpars)
+                        hazpars,
+                        [Symbol.(parnames)]) # make sure this is a vector
             else
                 haz_struct = 
                     _ExponentialReg(
                         Symbol(hazname),
-                        Symbol.(parnames),
                         hazdat,
-                        hazpars)
+                        hazpars,
+                        Symbol.(parnames))
             end
 
         elseif hazards[h].family == "wei"
@@ -121,20 +121,20 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                 haz_struct = 
                     _Weibull(
                         Symbol(hazname),
+                        hazdat,
+                        hazpars,
                         Symbol.(parnames),
                         UnitRange(1, npars),
-                        UnitRange(1 + npars, 2 * npars),
-                        hazdat,
-                        hazpars)
+                        UnitRange(1 + npars, 2 * npars))
             else
                 haz_struct = 
                     _WeibullReg(
                         Symbol(hazname),
+                        hazdat,
+                        hazpars,
                         Symbol.(parnames),
                         UnitRange(1, npars),
-                        UnitRange(1 + npars, 2 * npars),
-                        hazdat,
-                        hazpars)
+                        UnitRange(1 + npars, 2 * npars))
             end
 
         elseif hazards[h].family == "gam"
@@ -205,19 +205,14 @@ function multistatemodel(hazards::Hazard...;data::DataFrame)
     # generate tuple for total hazards ? 
     _totalhazards = build_totalhazards(_hazards, tmat)    
 
-    # need:
+    # return the multistate model
+    model = 
+        MultistateModel(
+            data,
+            _hazards,
+            _totalhazards,
+            tmat
+        )
 
-    # Q: data + parameters separate from tuple of hazard functions?
-    # OR
-    # Q: data + parameters that are local to each hazard function?
-
-    # simulate(model_object)
-    # fit(model_object)
-
-    # model_object.fit
-    # model_object.sim
-
-    # - wrappers for formula schema
-    # - function to parse cause-specific hazards for each origin state and return total hazard
-
+    return model
 end

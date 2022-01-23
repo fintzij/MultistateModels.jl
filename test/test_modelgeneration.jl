@@ -6,20 +6,7 @@
 # 2. function to validate data
 # 3. validate MultistateModel object    
 
-# hazards, out of order
-hazards = (h12, h23, h13)
-
-# select a dataset
-data = dat_interval
-
-# step through model generation
-hazinfo = MultistateModels.enumerate_hazards(hazards...)
-
-hazards = hazards[hazinfo.order]
-select!(hazinfo, Not(:order))
-
-# create transition matrix
-tmat = MultistateModels.create_tmat(hazinfo)
+msm = multistatemodel(h12, h23, h13; data = dat_exact2)
 
 # function that enumerates the hazards
 @testset "test_enumerate_hazards" begin

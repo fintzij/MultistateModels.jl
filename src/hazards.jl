@@ -1,4 +1,3 @@
-
 """
 Function call for total hazard for an absorbing state, always returns zero.
 """

@@ -1,16 +1,4 @@
 """
-    MultistateProcess(data::DataFrame, hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard}, tmat::Matrix{Int64})
-
-Mutable struct that fully specifies a multistate process for simulation or inference. 
-"""
-Base.@kwdef mutable struct MultistateModel 
-    data::DataFrame
-    hazards::Vector{_Hazard}
-    totalhazards::Vector{_TotalHazard}
-    tmat::Matrix{Int64}
-end
-
-"""
     Hazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
 
 Composite type for a cause-specific hazard function. Documentation to follow. 
@@ -32,9 +20,9 @@ Exponential cause-specific hazard.
 """
 Base.@kwdef mutable struct _Exponential <: _Hazard
     hazname::Symbol
-    hazpars::Vector{Symbol}
     data::Array{Float64}
     parameters::Vector{Float64} 
+    parnames::Vector{Symbol}
 end
 
 """
@@ -42,9 +30,9 @@ Exponential cause-specific hazard with covariate adjustment. Rate is a log-linea
 """
 Base.@kwdef mutable struct _ExponentialReg <: _Hazard
     hazname::Symbol
-    hazpars::Vector{Symbol}
     data::Array{Float64}
     parameters::Vector{Float64} 
+    parnames::Vector{Symbol}
 end
 
 """
@@ -52,11 +40,11 @@ Weibull cause-specific hazard.
 """
 Base.@kwdef mutable struct _Weibull <: _Hazard
     hazname::Symbol
-    hazpars::Vector{Symbol}
-    scaleinds::UnitRange{Int64} # always 1
-    shapeinds::UnitRange{Int64} # always 2
     data::Array{Float64} # just an intercept
     parameters::Vector{Float64}
+    parnames::Vector{Symbol}
+    scaleinds::UnitRange{Int64} # always 1
+    shapeinds::UnitRange{Int64} # always 2
 end
 
 """
@@ -64,11 +52,11 @@ Weibull cause-specific hazard with covariate adjustment. Scale and shape are log
 """
 Base.@kwdef mutable struct _WeibullReg <: _Hazard
     hazname::Symbol
+    data::Array{Float64}
     hazpars::Vector{Symbol}
+    parameters::Vector{Float64}
     scaleinds::UnitRange{Int64}
     shapeinds::UnitRange{Int64}
-    data::Array{Float64}
-    parameters::Vector{Float64}
 end
 
 """
@@ -87,4 +75,16 @@ Total hazard struct for transient states, contains the indices of cause-specific
 """
 struct _TotalHazardTransient <: _TotalHazard
     components::Vector{Int64}
+end
+
+"""
+    MultistateProcess(data::DataFrame, hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard}, tmat::Matrix{Int64})
+
+Mutable struct that fully specifies a multistate process for simulation or inference. 
+"""
+Base.@kwdef mutable struct MultistateModel 
+    data::DataFrame
+    hazards::Vector{_Hazard}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
 end
