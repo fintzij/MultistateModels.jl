@@ -73,12 +73,14 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
 
         # generate the model matrix
         hazschema = 
-            apply_schema(hazards[h].hazard, 
-                         schema(hazards[h].hazard, 
-                                data))
+            StatsModels.apply_schema(
+                hazards[h].hazard, 
+                 StatsModels.schema(
+                     hazards[h].hazard, 
+                     data))
 
         # grab the design matrix 
-        hazdat = modelcols(hazschema, data)[2]
+        hazdat = StatsModels.modelcols(hazschema, data)[2]
 
         # now we get the functions and other objects for the mutable struct
         if hazards[h].family == "exp"
@@ -163,7 +165,7 @@ function build_totalhazards(_hazards, tmat)
     _totalhazards = Vector{_TotalHazard}(undef, size(tmat, 1))
 
     # populate the vector of total hazards
-    for h in eachindex(_hazards) 
+    for h in eachindex(_totalhazards) 
         if sum(tmat[h,:]) == 0
             _totalhazards[h] = 
                 _TotalHazardAbsorbing()

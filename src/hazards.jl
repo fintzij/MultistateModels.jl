@@ -53,8 +53,9 @@ function call_haz(t::Float64, rowind::Int64, _hazard::_Weibull; give_log = true)
     log_scale = _hazard.parameters[1]
     log_shape = _hazard.parameters[2]
 
-    # compute hazard
-    log_haz = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
+    # compute hazard - do we need a special case for t=0?
+    log_haz = 
+        log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t) 
 
     give_log ? log_haz : exp(log_haz)
 end
@@ -70,8 +71,9 @@ function call_haz(t::Float64, rowind::Int64, _hazard::_WeibullReg; give_log = tr
     log_scale = dot(_hazard.parameters[_hazard.scaleinds], _hazard.data[rowind,:])
     log_shape = dot(_hazard.parameters[_hazard.shapeinds], _hazard.data[rowind,:])
 
-    # compute hazard
-    log_haz = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
+    # compute hazard - do we need a special case for t = 0?
+    log_haz = 
+        log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
 
     give_log ? log_haz : exp(log_haz)
 end
