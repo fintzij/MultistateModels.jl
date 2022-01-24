@@ -53,8 +53,8 @@ Weibull cause-specific hazard with covariate adjustment. Scale and shape are log
 Base.@kwdef mutable struct _WeibullReg <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    hazpars::Vector{Symbol}
     parameters::Vector{Float64}
+    parnames::Vector{Symbol}
     scaleinds::UnitRange{Int64}
     shapeinds::UnitRange{Int64}
 end

@@ -1,4 +1,6 @@
 """
+    call_tothaz(t::Float64, totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard})
+
 Function call for total hazard for an absorbing state, always returns zero.
 """
 function call_tothaz(t::Float64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard})
@@ -6,6 +8,8 @@ function call_tothaz(t::Float64, _totalhazard::_TotalHazardAbsorbing, _hazards::
 end
 
 """
+    call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+
 Function call to return the log-total hazard out of an origin state. 
 """
 function call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
@@ -19,6 +23,8 @@ function call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransi
 end
 
 """
+    call_haz(t::Float64, rowind::Int64, _hazard::_Exponential; give_log = true)
+
 Caller for exponential cause-specific hazards.
 """
 function call_haz(t::Float64, rowind::Int64, _hazard::_Exponential; give_log = true)
@@ -27,6 +33,8 @@ function call_haz(t::Float64, rowind::Int64, _hazard::_Exponential; give_log = t
 end
 
 """
+    call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialReg; give_log = true)
+
 Caller for exponential cause-specific hazards with covariate adjustment.
 """
 function call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialReg; give_log = true)
@@ -35,6 +43,8 @@ function call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialReg; give_log 
 end
 
 """
+    call_haz(t::Float64, rowind::Int64, _hazard::_Weibull; give_log = true)
+
 Caller for Weibull cause-specific hazards.
 """
 function call_haz(t::Float64, rowind::Int64, _hazard::_Weibull; give_log = true)
@@ -50,6 +60,8 @@ function call_haz(t::Float64, rowind::Int64, _hazard::_Weibull; give_log = true)
 end
 
 """
+    call_haz(t::Float64, rowind::Int64, _hazard::_WeibullReg; give_log = true)
+
 Caller for Weibull cause-specific hazards with covariate adjustment.
 """
 function call_haz(t::Float64, rowind::Int64, _hazard::_WeibullReg; give_log = true)

@@ -8,37 +8,55 @@
 
 msm = multistatemodel(h12, h23, h13; data = dat_exact2)
 
-# function that enumerates the hazards
-@testset "test_enumerate_hazards" begin
-    @test nrow(hazinfo) == length(hazards)
-
-    # check that primary order is by state from
-    @test all(hazinfo.statefrom .== sort(hazinfo.statefrom))
+# validate the transition matrix
+@testset "test_tmat" begin
     
-    # and then that secondary order is state to within state from
-    sorted_stateto = 
-        @chain hazinfo begin
-            groupby(:statefrom)
-            combine(:stateto => (x -> (Bool(all(x .== sort(x))))) => :sorted)
-        end
+    # check that primary order is by origin state
+    # and that secondary order is by destination
+    @test msm.tmat[[4,7,8]] == [1,2,3]
+    @test all(msm.tmat[Not([4,7,8])] .== 0)
 
-    @test all(sorted_stateto.sorted .== 1)
-
-    # double check that order of hazards corresponds to hazinfo
-    for h in eachindex(hazards)
-        @test hazards[h].statefrom == hazinfo.statefrom[h]
-        @test hazards[h].stateto == hazinfo.stateto[h]
-    end
 end
 
 # tests for individual hazards
-@testset "test_hazards_for_numerical_issues" begin
-    @test 1 == 1
+@testset "test_hazards_exp" begin
+    
+    # set parameters, no covariate adjustment
+    msm.hazards[1].parameters[1] = 0.8
+
+    @test call_haz(0.0, 0, msm.hazards[1]; give_log = true) == 0.8
+
+    @test call_haz(0.0, 0, msm.hazards[1]; give_log = false) == exp(0.8)
+
+    # set parameters, exponential with covariate adjustment
+    pars = [0.0, 0.6, -0.4, 0.15]
+    
+    msm.hazards[2].parameters[1:4] = pars
+
+    # correct values
+    truevals = 
+        [dat_exact2.trt[1] * pars[2] + dat_exact2.age[1] * pars[3] + 
+        dat_exact2.trt[1] * dat_exact2.age[1] * pars[4],
+        dat_exact2.trt[2] * pars[2] + dat_exact2.age[2] * pars[3] + 
+        dat_exact2.trt[2] * dat_exact2.age[2] * pars[4],
+        dat_exact2.trt[3] * pars[2] + dat_exact2.age[3] * pars[3] + 
+        dat_exact2.trt[3] * dat_exact2.age[3] * pars[4]]
+    
+    for h in Base.OneTo(3)
+        @test MultistateModels.call_haz(0.0, h, msm.hazards[2]; give_log = true) = 
+            truevals[h]
+
+        @test call_haz(0.0, h, msm.hazards[2]; give_log = false) = 
+            exp(truevals[h])
+    end
 end
 
-# tests for total hazards
 
-# basic structure of a testset
-@testset "arithmetic" begin
-    @test 1+1 == 2
+@testset "test_weibull_exp" begin
+
+    # set parameters, no covariate adjustment
+    msm.hazards
+
+    # set parameters, weibull with covariate adjustment
+
 end
