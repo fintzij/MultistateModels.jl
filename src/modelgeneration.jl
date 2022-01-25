@@ -172,7 +172,7 @@ function build_totalhazards(_hazards, tmat)
         else
             _totalhazards[h] = 
                 _TotalHazardTransient(
-findall(tmat[h,:] .!= 0)
+tmat[h, findall(tmat[h,:] .!= 0)]
                 )
         end
     end

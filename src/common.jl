@@ -71,7 +71,7 @@ struct _TotalHazardAbsorbing <: _TotalHazard
 end
 
 """
-Total hazard struct for transient states, contains the indices of cause-specific hazards that contribute to the total hazard.
+Total hazard struct for transient states, contains the indices of cause-specific hazards that contribute to the total hazard. The components::Vector{Int64} are indices of Vector{_Hazard} when call_tothaz needs to extract the correct cause-specific hazards.
 """
 struct _TotalHazardTransient <: _TotalHazard
     components::Vector{Int64}

@@ -1,18 +1,31 @@
 """
-    call_tothaz(t::Float64, totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard})
+    # Arguments 
+- `t::Float64`: current time
+- `rowind::Int64`: row index in data
+- `_totalhazard::_TotalHazardAbsorbing`: total hazard from an absorbing state, empty but indicates the type for dispatch
+- `_hazards::_Hazard`: vector of cause-specific hazards
+- `give_log::Bool`: should the log total hazard be returned (default)
 
-Function call for total hazard for an absorbing state, always returns zero.
+Return the total hazard for an absorbing state, which is always zero.
 """
-function call_tothaz(t::Float64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard})
-    0.0
+function call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true)
+    give_log ? -Inf : 0
 end
 
 """
     call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
 
-Function call to return the log-total hazard out of an origin state. 
+Return the log-total hazard out of a transient state. 
+
+# Arguments 
+- `t::Float64`: current time
+- `rowind::Int64`: row index in data
+- `_totalhazard::_TotalHazardTransient`: total hazard from transient state, contains indices for hazards that contribute to the total hazard
+- `_hazards::_Hazard`: vector of cause-specific hazards
+- `give_log::Bool`: should the log total hazard be returned (default)
 """
 function call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+
     # log total hazard
     log_tot_haz = 
         StatsFuns.logsumexp(
@@ -25,7 +38,7 @@ end
 """
     call_haz(t::Float64, rowind::Int64, _hazard::_Exponential; give_log = true)
 
-Caller for exponential cause-specific hazards.
+Return the exponential cause-specific hazards.
 """
 function call_haz(t::Float64, rowind::Int64, _hazard::_Exponential; give_log = true)
     log_haz = _hazard.parameters[1]
@@ -35,7 +48,7 @@ end
 """
     call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialReg; give_log = true)
 
-Caller for exponential cause-specific hazards with covariate adjustment.
+Return the exponential cause-specific hazards with covariate adjustment.
 """
 function call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialReg; give_log = true)
     log_haz = dot(_hazard.parameters, _hazard.data[rowind,:])
@@ -45,7 +58,7 @@ end
 """
     call_haz(t::Float64, rowind::Int64, _hazard::_Weibull; give_log = true)
 
-Caller for Weibull cause-specific hazards.
+Return the Weibull cause-specific hazards.
 """
 function call_haz(t::Float64, rowind::Int64, _hazard::_Weibull; give_log = true)
 
@@ -63,7 +76,7 @@ end
 """
     call_haz(t::Float64, rowind::Int64, _hazard::_WeibullReg; give_log = true)
 
-Caller for Weibull cause-specific hazards with covariate adjustment.
+Return the Weibull cause-specific hazards with covariate adjustment.
 """
 function call_haz(t::Float64, rowind::Int64, _hazard::_WeibullReg; give_log = true)
 
