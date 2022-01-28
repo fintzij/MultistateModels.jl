@@ -77,6 +77,9 @@ struct _TotalHazardTransient <: _TotalHazard
     components::Vector{Int64}
 end
 
+
+
+
 """
     MultistateProcess(data::DataFrame, hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard}, tmat::Matrix{Int64})
 

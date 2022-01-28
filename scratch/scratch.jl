@@ -4,6 +4,8 @@ using StatsFuns
 using LinearAlgebra
 using StatsModels
 using MultistateModels
+using Quadrature
+using QuadGK
 
 #### Minimal model
 h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2);
@@ -90,3 +92,31 @@ function S(T)
     exp(-T)
 end
 """
+
+### Experiments with quadrature
+
+# functions to be integrated have signature f(x,p) or f(dx,x,p)
+# x is the variable of integration, p are parameters, dx is in-place syntax
+
+function testhaz(t,p)
+    exp.(p[1] + p[2] * t)
+end
+
+prob = QuadratureProblem(testhaz, 0, 1, [0.2, 0.5];  nout=1, batch = 0, N = 50)
+@time solve(prob, QuadGKJL())[1]
+
+function th(t,p)
+    sin.(t)
+end
+
+prob = QuadratureProblem(th, -10, 10; nout=1, reltol=1e-6, order = 5)
+@time solve(prob, QuadGKJL())
+
+function th10k()
+    for i in 1:100000
+        solve(prob, QuadGKJL())
+    end
+end
+@time th10k()
+
+

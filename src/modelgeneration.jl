@@ -56,7 +56,9 @@ end
 """
     build_hazards(hazards:Hazard...; data:DataFrame)
 
-Accept iterable collection of `Hazard` objects, plus data. Return internal array of internal _Hazard subtypes called _hazards.
+Return internal array of internal _Hazard subtypes called _hazards.
+
+Accept iterable collection of `Hazard` objects, plus data. 
 
 _hazards[1] corresponds to the first allowable transition enumerated in a transition matrix (in row major order), _hazards[2] to the second and so on... So _hazards will have length equal to number of allowable transitions.
 """
@@ -155,9 +157,9 @@ end
 """
     build_totalhazards(_hazards, tmat)
 
-This function accepts the internal array _hazards corresponding to allowable transitions, and the transition matrix tmat
+ Return a vector of _TotalHazard objects for each origin state, which may be of subtype `_TotalHazardAbsorbing` or `_TotalHazardTransient`. 
 
-This function returns a vector of _TotalHazard objects for each origin state, which may be of subtype `_TotalHazardAbsorbing` or `_TotalHazardTransient`. 
+ Accepts the internal array _hazards corresponding to allowable transitions, and the transition matrix tmat
 """
 function build_totalhazards(_hazards, tmat)
 
@@ -178,6 +180,25 @@ tmat[h, findall(tmat[h,:] .!= 0)]
     end
 
     return _totalhazards
+end
+
+### Cumulative hazards
+"""
+    build_cumulativehazards(_totalhazard::_TotalHazard)
+
+"""
+function build_cumulativehazards(_totalhazards::_TotalHazard)
+
+    # initialize a vector of cumulative hazards
+    _cumulativehazards = Vector{_CumulativeHazard}(undef, length(_totalhazards))
+
+    for h in eachindex(_cumulativehazards)
+        if(isa(_totalhazards[h], _TotalHazardAbsorbing))
+        else
+
+        end
+    end
+    
 end
 
 """
@@ -204,8 +225,10 @@ function multistatemodel(hazards::Hazard...;data::DataFrame)
     # _hazards is a tuple of _Hazard objects
     _hazards = build_hazards(hazards...; data = data)
 
-    # generate tuple for total hazards ? 
-    _totalhazards = build_totalhazards(_hazards, tmat)    
+    # generate vector for total hazards 
+    _totalhazards = build_totalhazards(_hazards, tmat)  
+    
+    # generate vector for cumulative hazards
 
     # return the multistate model
     model = 

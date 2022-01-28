@@ -1,4 +1,29 @@
 """
+    call_cumulhaz()
+
+Return something.
+"""
+function call_cumulhaz(_totalhazard::_TotalHazardTransient, _hazard::_Hazard, lb::Float64, ub::Float64, rowind::Int64; reltol = 1e-6, abstol = 1e-6, maxiters = 100)
+    # delete me
+    #prob = QuadratureProblem(th, -10, 10; nout=1, reltol=1e-6, order = 5)
+    #solve(prob, QuadGKJL())
+
+    # solve the quadrature problem
+    soln = 
+        Quadrature.solve(
+            QuadratureProblem(
+                t -> call_tothaz(t, rowind, _totalhazard, _hazards; give_log = false),
+                lb, 
+                ub
+            ), 
+            QuadGKJL();
+            reltol = reltol,
+            abstol = abstol)
+
+end
+
+
+"""
     # Arguments 
 - `t::Float64`: current time
 - `rowind::Int64`: row index in data
@@ -8,7 +33,7 @@
 
 Return the total hazard for an absorbing state, which is always zero.
 """
-function call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true)
+function call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = false)
     give_log ? -Inf : 0
 end
 
