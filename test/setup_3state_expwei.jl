@@ -35,3 +35,6 @@ dat_interval =
               obstype = ones(6),
               trt = [0, 0, 1, 1, 0, 0],
               age = [23, 23, 32, 32, 50, 50])
+
+# create multistate model object
+msm_expwei = multistatemodel(h12, h23, h13, h21; data = dat_exact2)

@@ -115,3 +115,22 @@ function call_haz(t::Float64, rowind::Int64, _hazard::_WeibullReg; give_log = tr
 
     give_log ? log_haz : exp(log_haz)
 end
+
+"""
+    call_haz(t::Float64, rowind::Int64, _hazard::_WeibullPH; give_log = true)
+
+Return the Weibull cause-specific proportional hazards.
+"""
+function call_haz(t::Float64, rowind::Int64, _hazard::_WeibullPH; give_log = true)
+
+    # scale and shape
+    log_scale = _hazard.parameters[1]
+    log_shape = _hazard.parameters[2]
+    log_PH = dot(_hazard.parameters[3:end], _hazard.data[rowind,:])
+
+    # compute hazard - do we need a special case for t = 0?
+    log_haz = 
+        log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t) + log_PH
+
+    give_log ? log_haz : exp(log_haz)
+end

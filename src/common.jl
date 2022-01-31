@@ -5,7 +5,7 @@ Composite type for a cause-specific hazard function. Documentation to follow.
 """
 struct Hazard
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
-    family::String     # one of "exp", "wei", "gg", or "sp"
+    family::String     # one of "exp", "wei", "weiPH", gg", or "sp"
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
 end
@@ -43,8 +43,6 @@ Base.@kwdef mutable struct _Weibull <: _Hazard
     data::Array{Float64} # just an intercept
     parameters::Vector{Float64}
     parnames::Vector{Symbol}
-    scaleinds::UnitRange{Int64} # always 1
-    shapeinds::UnitRange{Int64} # always 2
 end
 
 """
@@ -57,6 +55,16 @@ Base.@kwdef mutable struct _WeibullReg <: _Hazard
     parnames::Vector{Symbol}
     scaleinds::UnitRange{Int64}
     shapeinds::UnitRange{Int64}
+end
+
+"""
+Weibull cause-specific proportional hazard. The baseline hazard is Weibull and covariates have a multiplicative effect vis-a-vis the baseline hazard.
+"""
+Base.@kwdef mutable struct _WeibullPH <: _Hazard
+    hazname::Symbol
+    data::Array{Float64}
+    parameters::Vector{Float64}
+    parnames::Vector{Symbol}
 end
 
 """

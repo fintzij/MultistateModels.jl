@@ -111,26 +111,57 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                         Symbol.(parnames))
             end
 
-        elseif hazards[h].family == "wei"
+        elseif hazards[h].family == "wei" || hazards[h].family == "weiPH"
 
             # number of parameters
             npars = size(hazdat, 2)
 
-            # vector for parameters
-            hazpars = zeros(Float64, npars * 2)
-            parnames = vec(hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2])
-
             # generate hazard struct
             if npars == 1
+
+                # vector for parameters
+                hazpars = zeros(Float64, npars * 2)
+                
+                # parameter names
+                parnames = vec(hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2])
+
+                # create struct
                 haz_struct = 
                     _Weibull(
                         Symbol(hazname),
                         hazdat,
                         hazpars,
-                        Symbol.(parnames),
-                        UnitRange(1, npars),
-                        UnitRange(1 + npars, 2 * npars))
+                        Symbol.(parnames))
+                        
+            elseif hazards[h].family == "weiPH"
+
+                # vector for parameters
+                hazpars = zeros(Float64, 1 + npars)
+                
+                # parameter names
+                parnames = 
+                    vcat(
+                        hazname * "_scale",
+                        hazname * "_shape",
+                        hazname*"_".*coefnames(hazschema)[2][Not(1)])
+                        
+
+                haz_struct = 
+                    _WeibullPH(
+                        Symbol(hazname),
+                        hazdat[:,Not(1)],
+                        hazpars,
+                        Symbol.(parnames))
+
             else
+
+                # vector for parameters
+                hazpars = zeros(Float64, npars * 2)
+                
+                # parameter names
+                parnames = vec(hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2])
+
+                # generate struct
                 haz_struct = 
                     _WeibullReg(
                         Symbol(hazname),
