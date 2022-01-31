@@ -119,3 +119,14 @@ end
         end
     end
 end
+
+@testset "test_cumulativehazards" begin
+
+    msm_expwei.hazards[1].parameters[1] = 0.8
+    msm_expwei.hazards[2].parameters[1:4] = [0.8, 0.6, -0.4, 0.15]
+    msm_expwei.hazards[3].parameters[1:2] = [0.8, 1.2]
+    msm_expwei.hazards[4].parameters[1:4] = [0.8, 0.25, 1.2, 0.5]
+
+    
+    
+end

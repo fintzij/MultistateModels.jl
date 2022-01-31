@@ -4,24 +4,18 @@
 Return something.
 """
 function call_cumulhaz(_totalhazard::_TotalHazardTransient, _hazard::_Hazard, lb::Float64, ub::Float64, rowind::Int64; reltol = 1e-6, abstol = 1e-6, maxiters = 100)
-    # delete me
-    #prob = QuadratureProblem(th, -10, 10; nout=1, reltol=1e-6, order = 5)
-    #solve(prob, QuadGKJL())
-
+    
     # solve the quadrature problem
     soln = 
         Quadrature.solve(
             QuadratureProblem(
-                t -> call_tothaz(t, rowind, _totalhazard, _hazards; give_log = false),
+                t -> MultistateModels.call_tothaz(t, rowind, _totalhazard, _hazards; give_log = false),
                 lb, 
                 ub
             ), 
-            QuadGKJL();
-            reltol = reltol,
-            abstol = abstol)
+            QuadGKJL())
 
 end
-
 
 """
     # Arguments 

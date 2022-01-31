@@ -109,7 +109,7 @@ function th(t,p)
     sin.(t)
 end
 
-prob = QuadratureProblem(th, -10, 10; nout=1, reltol=1e-6, order = 5)
+prob = QuadratureProblem(th, 0, pi ; nout=1, reltol=1e-6, order = 5)
 @time solve(prob, QuadGKJL())
 
 function th10k()

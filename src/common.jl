@@ -86,8 +86,6 @@ struct _TotalHazardTransient <: _TotalHazard
 end
 
 
-
-
 """
     MultistateProcess(data::DataFrame, hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard}, tmat::Matrix{Int64})
 
