@@ -106,7 +106,7 @@ prob = QuadratureProblem(testhaz, 0, 1, [0.2, 0.5];  nout=1, batch = 0, N = 50)
 @time solve(prob, QuadGKJL())[1]
 
 function th(t,p)
-    sin.(t)
+    sin(t)
 end
 
 prob = QuadratureProblem(th, 0, pi ; nout=1, reltol=1e-6, order = 5)
@@ -119,4 +119,10 @@ function th10k()
 end
 @time th10k()
 
+# quadrature problem with additional function Arguments
 
+f(x,p) = sum(sin.(x .* p))
+g(x,p,a) = sum(f(x,p) + a)
+lb = ones(2)
+ub = 3ones(2)
+p = [1.5,2.0]
