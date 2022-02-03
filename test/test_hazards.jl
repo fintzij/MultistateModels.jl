@@ -56,7 +56,7 @@ end
     t = 1.0
     msm_expwei.hazards[4].parameters[1:4] = pars
 
-    # loop through each row of data embedded in the msm_expwei object, comparing truth to Multistatemodels.call_haz output
+    # loop through each row of data embedded in the msm_expwei object, comparing truth to MultistateModels.call_haz output
     for h in axes(msm_expwei.data, 1)
         log_scale = 
             pars[1] + pars[2]*dat_exact2.trt[h]
@@ -127,6 +127,11 @@ end
     msm_expwei.hazards[3].parameters[1:2] = [0.8, 1.2]
     msm_expwei.hazards[4].parameters[1:4] = [0.8, 0.25, 1.2, 0.5]
 
-    
+    MultistateModels.call_cumulhaz(
+        msm_expwei.totalhazards[1], 
+        msm_expwei.hazards, 
+        0.0,
+        1.1,
+        1)
     
 end
