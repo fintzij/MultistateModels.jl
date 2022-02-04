@@ -119,10 +119,17 @@ function th10k()
 end
 @time th10k()
 
-# quadrature problem with additional function Arguments
+# messing around with QuadGK
+d = 2.0
+p = pi
 
-f(x,p) = sum(sin.(x .* p))
-g(x,p,a) = sum(f(x,p) + a)
-lb = ones(2)
-ub = 3ones(2)
-p = [1.5,2.0]
+function g(p, lb, ub; d = d)
+
+    _d = d
+    _p = p
+    g2 = x -> d + p * sin(x)
+
+    guadgk(g2, lb ub)
+end
+
+@time quadgk(g, 0, 1.1)
