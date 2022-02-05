@@ -4,7 +4,7 @@ using Chain
 using DataFrames
 using Distributions
 using LinearAlgebra
-using Quadrature
+using QuadGK
 using StatsModels
 using StatsFuns
 

@@ -121,15 +121,24 @@ end
 
 # messing around with QuadGK
 d = 2.0
-p = pi
+p = 1.2
+lb = 0.0
+ub = 2.3
 
-function g(p, lb, ub; d = d)
+quadgk(x -> d + p * sin(x), lb, ub)
+
+function k(p::Float64, lb::Float64, ub::Float64; d::Float64 = d)
 
     _d = d
     _p = p
-    g2 = x -> d + p * sin(x)
 
-    guadgk(g2, lb ub)
+    solve(QuadratureProblem((x,_p) -> _d + _p * sin(x), lb, ub, _p), QuadGKJL())
 end
 
-@time quadgk(g, 0, 1.1)
+function g(p::Float64, lb::Float64, ub::Float64; d::Float64 = d)
+
+    g2 = x -> d + p * sin(x)
+    quadgk(x -> d + p * sin(x), lb, ub)[1]
+end
+
+@time g(1.2, 0.0, 2.3; d = 3.1)

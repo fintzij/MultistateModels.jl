@@ -3,17 +3,18 @@
 
 Return something.
 """
-function call_cumulhaz(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64; reltol = 1e-6, abstol = 1e-6, maxiters = 100)
+function call_cumulhaz(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
     
     # solve the quadrature problem
-    soln = 
-        Quadrature.solve(
-            QuadratureProblem(
-                t -> MultistateModels.call_tothaz(t, rowind, _totalhazard, _hazards; give_log = false),
-                ub
-            ), 
-            QuadGKJL())
-
+    quadgk(
+        t -> MultistateModels.call_tothaz(
+            t, 
+            rowind, 
+            _totalhazard,
+            _hazards;
+            give_log = false),
+        lb,
+        ub)[1]
 end
 
 """

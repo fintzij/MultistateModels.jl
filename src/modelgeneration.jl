@@ -259,10 +259,6 @@ function multistatemodel(hazards::Hazard...;data::DataFrame)
     # generate vector for total hazards 
     _totalhazards = build_totalhazards(_hazards, tmat)  
 
-    # collate model parameters for all cause-specific hazards and set views
-    
-    # generate vector for cumulative hazards
-
     # return the multistate model
     model = 
         MultistateModel(
