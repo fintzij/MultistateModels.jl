@@ -113,9 +113,9 @@ end
                 tot_haz = 0.0
             end            
 
-            @test MultistateModels.call_tothaz(1.0, h, msm_expwei.totalhazards[s], msm_expwei.hazards; give_log = false) ≈ tot_haz
+            @test MultistateModels.tothaz(1.0, h, msm_expwei.totalhazards[s], msm_expwei.hazards; give_log = false) ≈ tot_haz
             
-            @test MultistateModels.call_tothaz(1.0, h, msm_expwei.totalhazards[s], msm_expwei.hazards; give_log = true) ≈ log(tot_haz)
+            @test MultistateModels.tothaz(1.0, h, msm_expwei.totalhazards[s], msm_expwei.hazards; give_log = true) ≈ log(tot_haz)
         end
     end
 end
@@ -127,7 +127,7 @@ end
     msm_expwei.hazards[3].parameters[1:2] = [0.8, 1.2]
     msm_expwei.hazards[4].parameters[1:4] = [0.8, 0.25, 1.2, 0.5]
 
-    MultistateModels.call_cumulhaz(
+    MultistateModels.cumulhaz(
         msm_expwei.totalhazards[1], 
         msm_expwei.hazards, 
         0.0,

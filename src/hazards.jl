@@ -1,13 +1,34 @@
 """
-    call_cumulhaz()
+    survprob(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
 
-Return something.
+Compute the survival probability over the interval from `lb` to `ub` by integrating the total hazard via quadrature.
 """
-function call_cumulhaz(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
+
+function survprob(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
+
+    # solve the quadrature problem
+    exp(-quadgk(
+        t -> MultistateModels.tothaz(
+            t, 
+            rowind, 
+            _totalhazard,
+            _hazards;
+            give_log = false),
+        lb,
+        ub)[1])
+
+end
+
+"""
+    cumulhaz(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
+
+Compute the cumulative hazard over the interval from `lb` to `ub` by integrating the total hazard via quadrature.
+"""
+function cumulhaz(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
     
     # solve the quadrature problem
     quadgk(
-        t -> MultistateModels.call_tothaz(
+        t -> MultistateModels.tothaz(
             t, 
             rowind, 
             _totalhazard,
@@ -27,12 +48,12 @@ end
 
 Return the total hazard for an absorbing state, which is always zero.
 """
-function call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = false)
+function tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = false)
     give_log ? -Inf : 0
 end
 
 """
-    call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+    tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
 
 Return the log-total hazard out of a transient state. 
 
@@ -43,7 +64,7 @@ Return the log-total hazard out of a transient state.
 - `_hazards::_Hazard`: vector of cause-specific hazards
 - `give_log::Bool`: should the log total hazard be returned (default)
 """
-function call_tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+function tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
 
     # log total hazard
     log_tot_haz = 
