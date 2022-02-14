@@ -142,3 +142,7 @@ function g(p::Float64, lb::Float64, ub::Float64; d::Float64 = d)
 end
 
 @time g(1.2, 0.0, 2.3; d = 3.1)
+
+include("src/MultistateModels.jl")
+include("src/common.jl")
+include("hazards.jl")

@@ -12,3 +12,4 @@ include("test/setup_3state_weiph.jl")
     include("test/test_modelgeneration.jl")
     include("test/test_hazards.jl")
 end
+

@@ -259,10 +259,16 @@ function multistatemodel(hazards::Hazard...;data::DataFrame)
     # generate vector for total hazards 
     _totalhazards = build_totalhazards(_hazards, tmat)  
 
+    # initialize vector of model parameters and set views in hazards
+    # vcat([_hazards[i].parameters for i in eachindex(_hazards)]...)
+    # parameters = get_hazpars(_hazards)
+    # set_hazpar_views!(_hazards, parameters)
+
     # return the multistate model
     model = 
         MultistateModel(
             data,
+            parameters,
             _hazards,
             _totalhazards,
             tmat

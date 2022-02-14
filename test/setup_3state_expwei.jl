@@ -3,6 +3,9 @@ using Chain
 using DataFrames
 using MultistateModels
 
+# Stan will initialize parameters by sampling from N(0,1) unless given explicit parameters
+# This isn't crazy because e.g. brms will center covariates first
+
 h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2);
 h13 = Hazard(@formula(0 ~ 1 + trt*age), "exp", 1, 3);
 h23 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 3);
