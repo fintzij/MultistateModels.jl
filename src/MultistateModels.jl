@@ -12,7 +12,8 @@ using StatsFuns
 export
     @formula,
     Hazard,
-    multistatemodel
+    multistatemodel,
+    set_parameters!
 
 # typedefs
 include("common.jl")

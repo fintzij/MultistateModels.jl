@@ -1,68 +1,35 @@
-##########################
-### TODO: (2022-Feb-15) Revisit when we do censoring/measurement error
-##########################
 """
-    collate_parameters(hazards::Vector{_Hazard})
+    set_parameters!(model::MultistateModel, values::Vector{Float64})
 
-Collate model parameters into a single vector.
+Set model parameters given a vector of values. Assigns values to `model.parameters`, which are then propagated to subarrays in cause-specific hazards.
 """
-
-function collate_parameters(hazards::Vector{_Hazard})
+function set_parameters!(model::MultistateModel, values::Vector{Float64})
     
-    vcat([hazards[i].parameters for i in eachindex(hazards)]...)
+    # check that we have the right number of parameters
+    if(length(model.parameters) != length(values))
+        error("Values and model parameters are not of the same length.")
+    end
 
+    copyto!(model.parameters, values)
 end
 
 """
-    set_parameter_views(parameters::Vector{Float64},hazards::Vector{_Hazard})
+    set_parameters!(model::MultistateModel, Tuple{Vararg{Vector{Float64}}})
 
-Set parameters in hazards objects to be views of a vector that collates all model parameters. This way we only need to modify the collated vector to update parameters.
+Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assigns values to `model.hazards[i].parameters`, where `i` indexes the cause-specific hazards in the order they appear in the model object. Parameters for cause-specific hazards are automatically propagated to `model.parameters`.
 """
+function set_parameters!(model::MultistateModel, values::Tuple{Vararg{Vector{Float64}}})
+    # check that there is a vector of parameters for each cause-specific hazard
+    if(length(model.hazards) != length(values))
+        error("Number of supplied parameter vectors not equal to number of cause-specific hazards.")
+    end
 
-function set_parameter_views!(parameters::Vector{Float64}, hazards::Vector{_Hazard})
+    for i in eachindex(values)
+        # check that we have the right number of parameters
+        if(length(model.hazards[i].parameters) != length(values[i]))
+            error("Values and parameters for cause-specific hazard $i are not of the same length.")
+        end
 
-    start = 1
-
-    for h in eachindex(hazards)
-
-        npars = length(hazards[h].parameters)
-
-        hazards[h].parameters = 
-            view(parameters, start:(start + npars - 1))
-
-        start += npars
+        copyto!(model.hazards[i].parameters, values[i])
     end
 end
-
-
-### for example
-# foo = [2]
-
-# # this does not modify
-# function dub(a::Vector{Integer})
-#     a *= 2
-# end
-# dub(foo)
-# foo 
-
-# # this does
-# function double(a::AbstractArray{<:Number})
-#     for i = firstindex(a):lastindex(a)
-#         a[i] *= 2
-#     end
-# end
-# double(foo)
-# foo
-
-# is this a problem
-# function double2(a::Array)
-#     for i in eachindex(a)
-#         a[i] *= 2
-#     end
-# end
-
-# b = collect(1:10)
-# double(b) # this works
-# b
-# double(b[1:3]) # this doesn't
-# b

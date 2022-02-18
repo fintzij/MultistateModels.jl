@@ -7,6 +7,27 @@
 
     copyto!(msm_expwei.parameters, vals1)
 A
-    @test msm_expwei.hazards[1].parameters .== msm_expwei.parameters[1] 
-    @test all(msm_expwei.hazards[2].parameters .== [1.1, 1.2, 1.3, 1.4])
+    @test msm_expwei.hazards[1].parameters == msm_expwei.parameters[1] 
+    @test all(msm_expwei.hazards[2].parameters .== msm_expwei.parameters[2:5])
+end
+
+# Test parameter setting function
+
+@testset "test_set_parameters!" begin
+
+    vals = randn(length(msm_expwei.parameters))
+
+    set_parameters!(msm_expwei, vals)
+
+    @test msm_expwei.hazards[1].parameters .== vals[1]
+    @test all(msm_expwei.hazards[2].parameters .== vals[2:5])
+    @test all(msm_expwei.parameters .== vals)
+
+    val_tuple = (randn(1), randn(4), randn(2), randn(4))
+    set_parameters!(msm_expwei, val_tuple)
+
+    @test msm_expwei.hazards[1].parameters == val_tuple[1]
+    @test all(msm_expwei.hazards[2].parameters .== val_tuple[2])
+    @test all(msm_expwei.hazards[3].parameters .== val_tuple[3])
+    @test all(msm_expwei.hazards[4].parameters .== val_tuple[4])
 end
