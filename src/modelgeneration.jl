@@ -67,6 +67,12 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
     # initialize the arrays of hazards
     _hazards = Vector{_Hazard}(undef, length(hazards))
 
+    # initialize vector of parameters
+    parameters = Vector{Float64}(undef, 0)
+    
+    # counter for tracking indices of views
+    hazpars_start = 0
+
     # assign a hazard function
     for h in eachindex(hazards) 
 
@@ -92,6 +98,11 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
 
             # vector for parameters
             hazpars = zeros(Float64, npars)
+
+            # append to model parameters
+            append!(parameters, hazpars)
+
+            # get names
             parnames = hazname*"_".*coefnames(hazschema)[2]
 
             # generate hazard struct
@@ -100,14 +111,16 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _Exponential(
                         Symbol(hazname),
                         hazdat,
-                        hazpars,
+                        # hazpars,
+                        view(parameters, hazpars_start .+ eachindex(hazpars)),
                         [Symbol.(parnames)]) # make sure this is a vector
             else
                 haz_struct = 
                     _ExponentialReg(
                         Symbol(hazname),
                         hazdat,
-                        hazpars,
+                        # hazpars,
+                        view(parameters, hazpars_start .+ eachindex(hazpars)),
                         Symbol.(parnames))
             end
 
@@ -121,6 +134,9 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
 
                 # vector for parameters
                 hazpars = zeros(Float64, npars * 2)
+
+                # append to model parameters
+                append!(parameters, hazpars)
                 
                 # parameter names
                 parnames = vec(hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2])
@@ -130,13 +146,17 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _Weibull(
                         Symbol(hazname),
                         hazdat,
-                        hazpars,
+                        # hazpars,
+                        view(parameters, hazpars_start .+ eachindex(hazpars)),
                         Symbol.(parnames))
                         
             elseif hazards[h].family == "weiPH"
 
                 # vector for parameters
                 hazpars = zeros(Float64, 1 + npars)
+
+                # append to model parameters
+                append!(parameters, hazpars)
                 
                 # parameter names
                 parnames = 
@@ -150,13 +170,17 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _WeibullPH(
                         Symbol(hazname),
                         hazdat[:,Not(1)],
-                        hazpars,
+                        # hazpars,
+                        view(parameters, hazpars_start .+ eachindex(hazpars)),
                         Symbol.(parnames))
 
             else
 
                 # vector for parameters
                 hazpars = zeros(Float64, npars * 2)
+
+                # append to model parameters
+                append!(parameters, hazpars)
                 
                 # parameter names
                 parnames = vec(hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2])
@@ -166,7 +190,8 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _WeibullReg(
                         Symbol(hazname),
                         hazdat,
-                        hazpars,
+                        # hazpars,
+                        view(parameters, hazpars_start .+ eachindex(hazpars)),
                         Symbol.(parnames),
                         UnitRange(1, npars),
                         UnitRange(1 + npars, 2 * npars))
@@ -179,9 +204,12 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
 
         # note: want a symbol that names the hazard + vector of symbols for parameters
         _hazards[h] = haz_struct
+
+        # increment parameter starting index
+        hazpars_start += npars
     end
 
-    return _hazards
+    return _hazards, parameters
 end
 
 ### Total hazards
@@ -254,15 +282,15 @@ function multistatemodel(hazards::Hazard...;data::DataFrame)
 
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
-    _hazards = build_hazards(hazards...; data = data)
+    _hazards, parameters = build_hazards(hazards...; data = data)
 
     # generate vector for total hazards 
     _totalhazards = build_totalhazards(_hazards, tmat)  
 
     # initialize vector of model parameters and set views in hazards
-    # vcat([_hazards[i].parameters for i in eachindex(_hazards)]...)
-    # parameters = get_hazpars(_hazards)
-    # set_hazpar_views!(_hazards, parameters)
+    ### update this when we deal with data sampling dists/censoring
+    # parameters = collate_parameters(_hazards)
+    # set_parameter_views!(parameters, _hazards)
 
     # return the multistate model
     model = 

@@ -17,6 +17,9 @@ export
 # typedefs
 include("common.jl")
 
+# helpers
+include("helpers.jl")
+
 # hazard related functions
 include("hazards.jl")
 
