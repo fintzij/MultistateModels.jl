@@ -7,6 +7,8 @@
 # 5. state initializers? maybe we should insist on the initial state at t0 being known for now? how would it change the structure of the code if we allowed the initial state to be random?
 # 6. gamma and gg and semipar
 # 7. Function to set model parameters
+#  Specialized total hazard, cumulative hazard, and survival functions where analytic forms are available.
+#  Initializers for model parameters in hazard function declaration and via named tuples for partial specification.
 
 # For simulating data
 # ??? I guess we need to parse the user-supplied dataset for observation schema. This will be clearer after we simulate sample paths since it's a matter of caching the state at observation times/paths over observation intervals and recording states

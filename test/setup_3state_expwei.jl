@@ -41,3 +41,4 @@ dat_interval =
 
 # create multistate model object
 msm_expwei = multistatemodel(h12, h23, h13, h21; data = dat_exact2)
+msm_expwei2 = multistatemodel(h12, h23, h13, h21; data = dat_interval)
