@@ -102,4 +102,5 @@ Base.@kwdef mutable struct MultistateModel
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
+    subjectindices::Vector{Vector{Int64}}
 end

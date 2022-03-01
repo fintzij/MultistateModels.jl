@@ -33,3 +33,26 @@ function set_parameters!(model::MultistateModel, values::Tuple{Vararg{Vector{Flo
         copyto!(model.hazards[i].parameters, values[i])
     end
 end
+
+"""
+    get_subjinds(data::DataFrame)
+
+Return a vector with the row indices for each subject in the dataset.
+"""
+function get_subjinds(data::DataFrame)
+
+    # number of subjects
+    ids = unique(data.id)
+    nsubj = length(ids)
+
+    # initialize vector of indices
+    subjinds = Vector{Vector{Int64}}(undef, nsubj)
+
+    # get indices for each subject
+    for i in eachindex(ids)
+        subjinds[i] = findall(x -> x == ids[i], data.id)
+    end
+
+    # return indices
+    return subjinds
+end

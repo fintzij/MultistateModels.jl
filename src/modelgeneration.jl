@@ -270,6 +270,9 @@ function multistatemodel(hazards::Hazard...;data::DataFrame)
     # function to check data formatting
     # checkdat()
 
+    # get indices for each subject in the dataset
+    subjinds = get_subjinds(data)
+
     # enumerate the hazards and reorder 
     hazinfo = enumerate_hazards(hazards...)
 
@@ -299,7 +302,8 @@ function multistatemodel(hazards::Hazard...;data::DataFrame)
             parameters,
             _hazards,
             _totalhazards,
-            tmat
+            tmat,
+            subjinds
         )
 
     return model
