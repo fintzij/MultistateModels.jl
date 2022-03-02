@@ -31,3 +31,14 @@ end
     @test all(msm_expwei.hazards[3].parameters .== val_tuple[3])
     @test all(msm_expwei.hazards[4].parameters .== val_tuple[4])
 end
+
+# Test function for converting vector of subject IDs to vector of vector of indices 
+
+@testset "test_get_subjinds" begin
+    
+    sidv = [1, 2, 2, 3, 3, 3, 42, 42]
+    sidvv = [[1], [2, 3], [4, 5, 6], [7, 8]]
+
+    @test get_subjinds(DataFrame(id = sidv)) .== sidvv
+
+end

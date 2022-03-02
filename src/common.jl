@@ -104,3 +104,14 @@ Base.@kwdef mutable struct MultistateModel
     tmat::Matrix{Int64}
     subjectindices::Vector{Vector{Int64}}
 end
+
+"""
+    SamplePath(times::Vector{Float64}, states::Vector{Int64})
+
+Struct for storing a sample path, consists of jump times and a state sequence.
+"""
+struct SamplePath
+    times::Vector{Float64}
+    states::Vector{Int64}
+end
+

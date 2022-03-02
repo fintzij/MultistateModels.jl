@@ -16,9 +16,15 @@ Simulate `n` datasets or collections of sample paths from a multistate model. If
 """
 function simulate(model::MultistateModel; n = 1, data = true, paths = false, ...)
 
-    # indices for each subject
-    # subjinds = 
+    # number of subjects
+    nsubj = length(model.subjectindices)
 
+    # initialize container if data is to be returned...
+
+    # loop 1:nsim
+        # loop 1:nsubj
+        # end
+    # end
 end
 
 """
