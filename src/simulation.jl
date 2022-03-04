@@ -10,32 +10,57 @@ Simulate `n` datasets or collections of sample paths from a multistate model. If
 
 # Arguments
 - `model::MultistateModel`: object created by multistatemodel()
-- `n`: number of sample paths to simulate
+- `nsim`: number of sample paths to simulate
 - `data`: boolean; if true then return discretely observed sample paths
 - `paths`: boolean; if false then continuous-time sample paths not returned
 """
-function simulate(model::MultistateModel; n = 1, data = true, paths = false, ...)
+function simulate(model::MultistateModel; nsim = 1, data = true, paths = false, ...)
+
+    # throw an error if neither paths nor data are asked for
+    if(paths == false & data == false)
+        error("Why are you calling `simulate` if you don't want sample paths or data? Stop wasting my time.")
+    end
 
     # number of subjects
     nsubj = length(model.subjectindices)
 
-    # initialize container if data is to be returned...
+    # initialize array for simulated paths 
+    if paths == true
+        samplepaths = Array{SamplePath}(undef, nsubj, nsim)
+    end
 
-    # loop 1:nsim
-        # loop 1:nsubj
-        # end
-    # end
+    # initialize container for simulated data
+    # if data == true
+
+    # end 
+
+    for i in Base.OneTo(nsim)
+        for j in Base.OneTo(nsubj)
+            
+            # simulate a path for subject j
+            samplepath = simulate_path(model, j)
+
+            # save path if requested
+            if path == true
+                samplepaths[j, i] = samplepath
+            end
+
+            # simulate data
+            if data == true
+                # simulate data
+                # sampledata = simulate_data(samplepath)
+
+                # save data
+            end
+        end
+    end
+
+    # return paths and data
+    if paths == false & data == true
+    elseif paths == true & data == true
+    elseif paths == true & data == false
+    end
 end
-
-"""
-    simulate_paths(model::MultistateModel)
-
-Simulates one sample path per subject.
-
-# Arguments
-- `model::MultistateModel`: object created by multistatemodel()
-"""
-
 
 """
     simulate_path()
