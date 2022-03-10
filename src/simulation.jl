@@ -38,7 +38,7 @@ function simulate(model::MultistateModel; nsim = 1, data = true, paths = false, 
         for j in Base.OneTo(nsubj)
             
             # simulate a path for subject j
-            samplepath = simulate_path(model, j)
+            # samplepath = simulate_path(model, j)
 
             # save path if requested
             if path == true
@@ -68,9 +68,49 @@ end
 Simulate a single sample path.
 
 # Arguments 
-- starting state
-- transition matrix
-- set of hazards    
+- model: multistate model object
+- subj: subject index
 """
+function simulate_path(model::MultistateModel, subj::Int64)
+
+    # subset data for subject and exctract important bits
+    subj_inds = model.subjectindices[j]
+    subj_dat = view(model.data, subj_inds, :)
+
+    # current index
+    ind = 1
+
+    # current state
+    scur = subj_dat.statefrom[ind]
+
+    # tcur, tmax, and sojourn
+    tcur    = subj_dat.tstart[ind]
+    tstop   = subj_dat.tstop[ind]
+    tmax    = subj_dat.tstop[end]
+    sojourn = 0.0
+
+    # initialize sample path
+    times = [tcur]
+    states = [scur]
+
+    # flag for whether to stop simulation
+    # obviously don't simulate if the initial state is absorbing
+    keep_going = isa(model.totalhazards[scur], _TotalHazardTransient)
+
+    # simulate path
+    while keep_going
+
+        # simulate next event time
+        
+        tnext = 
+            optimize(
+                t -> survprob(model.totalhazards[scur],
+                model.hazards, tcur))
+
+    end
+
+    return SamplePath(times, states)
+end
+
 
 

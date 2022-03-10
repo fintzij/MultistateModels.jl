@@ -269,6 +269,8 @@ function multistatemodel(hazards::Hazard...;data::DataFrame)
 
     # function to check data formatting
     # checkdat()
+    # to-check:
+    # 1) tstop > tstart for all rows
 
     # get indices for each subject in the dataset
     subjinds = get_subjinds(data)

@@ -4,6 +4,7 @@ using Chain
 using DataFrames
 using Distributions
 using LinearAlgebra
+using Optim
 using QuadGK
 using StatsModels
 using StatsFuns
