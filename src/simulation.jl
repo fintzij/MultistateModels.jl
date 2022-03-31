@@ -74,7 +74,7 @@ Simulate a single sample path.
 function simulate_path(model::MultistateModel, subj::Int64)
 
     # subset data for subject and exctract important bits
-    subj_inds = model.subjectindices[j]
+    subj_inds = model.subjectindices[subj]
     subj_dat = view(model.data, subj_inds, :)
 
     # current index
@@ -89,6 +89,9 @@ function simulate_path(model::MultistateModel, subj::Int64)
     tmax    = subj_dat.tstop[end]
     sojourn = 0.0
 
+    # initialize cumulative incidence
+    cuminc = 0.0
+
     # initialize sample path
     times = [tcur]
     states = [scur]
@@ -100,8 +103,11 @@ function simulate_path(model::MultistateModel, subj::Int64)
     # simulate path
     while keep_going
 
-        # simulate next event time
+        # sample event probability
+        u = rand(1)
         
+        # calculate event probability over the interval
+
         tnext = 
             optimize(
                 t -> survprob(model.totalhazards[scur],
