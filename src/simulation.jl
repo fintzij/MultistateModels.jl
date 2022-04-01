@@ -78,19 +78,23 @@ function simulate_path(model::MultistateModel, subj::Int64)
     subj_dat = view(model.data, subj_inds, :)
 
     # current index
-    ind = 1
+    row = 1 # row in subject's data that is incremented
+    ind = subj_inds[row] # index in complete dataset
 
     # current state
-    scur = subj_dat.statefrom[ind]
+    scur = subj_dat.statefrom[1]
 
     # tcur, tmax, and sojourn
-    tcur    = subj_dat.tstart[ind]
-    tstop   = subj_dat.tstop[ind]
-    tmax    = subj_dat.tstop[end]
     sojourn = 0.0
+    tcur    = subj_dat.tstart[1]
+    tstop   = subj_dat.tstop[1]
+    tmax    = subj_dat.tstop[end]
 
     # initialize cumulative incidence
     cuminc = 0.0
+
+    # vector for next state transition probabilities
+    ns_probs = zeros(size(model.tmat,2))
 
     # initialize sample path
     times = [tcur]
@@ -106,12 +110,41 @@ function simulate_path(model::MultistateModel, subj::Int64)
         # sample event probability
         u = rand(1)
         
-        # calculate event probability over the interval
+        # calculate event probability over the next interval
+        interval_prob = 
+            1 - survprob(model.totalhazards[scur], model.hazards, tcur, tstop, ind)
 
-        tnext = 
-            optimize(
-                t -> survprob(model.totalhazards[scur],
-                model.hazards, tcur))
+        # check if event happened in the interval
+        if(u < cuminc + interval_prob && u >= cuminc) 
+
+            # find the event time in the interval
+            sojourn +=
+                optimize(
+                    t -> (logit(cuminc + (1 - survprob(model.totalhazards[scur], model.hazards, tcur, t, ind))) - logit(u)), 
+                    cuminc, 
+                    cuminc + interval_prob)
+
+            # update the current time
+            tcur += sojourn
+
+            # calculate next state transition probabilities 
+            next_state_probs!(ns_probs, scur, ind, model)
+
+            # sample the next state
+            scur = rand(Multinomial(ns_probs))
+
+            # cache the jump time and state
+            push!(times, tcur)
+            push!(states, scur)
+
+            # reset cumulative incidence and sojourn
+
+            # 
+
+            # check if you keep going
+
+        else
+        end
 
     end
 
@@ -119,4 +152,46 @@ function simulate_path(model::MultistateModel, subj::Int64)
 end
 
 
+"""
+    next_state_probs!(ns_probs, scur, ind, model)
+
+Update ns_probs with vector probabilities of transitioning to each state based on hazards from current state. ns_probs will then get fed into a multinomial sampler.
+
+# Arguments 
+- ns_probs: Vector of probabilities corresponding to each state, modified in place
+- t: time at which hazards should be calculated
+- scur: current state
+- ind: index at complete dataset
+- model: MultistateModel object
+"""
+function next_state_probs!(ns_probs, t, scur, ind, model)
+
+    # set ns_probs to zero for impossible transitions
+    ns_probs[findall(model.tmat[scur,:] .== 0)] .= 0
+
+    # calculate log hazards for possible transitions
+    ns_probs[model.totalhazards[scur].components] = 
+        map(x -> call_haz(t, ind, x), model.hazards[model.totalhazards[scur].components])
+
+    # normalize ns_probs
+    ns_probs[model.totalhazards[scur].components] = 
+        softmax(ns_probs[model.totalhazards[scur].components])
+end
+
+function next_state_probs(t, scur, ind, model)
+
+    # initialize vector of next state transition probabilities
+    ns_probs = zeros(size(model.tmat, 2))
+    
+    # calculate log hazards for possible transitions
+    ns_probs[model.totalhazards[scur].components] = 
+        map(x -> call_haz(t, ind, x), model.hazards[model.totalhazards[scur].components])
+
+    # return the next state transition probabilities
+    ns_probs[model.totalhazards[scur].components] = 
+        softmax(ns_probs[model.totalhazards[scur].components])
+
+    # return the next state probabilities
+    return ns_probs
+end
 

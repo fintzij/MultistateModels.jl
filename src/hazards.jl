@@ -1,5 +1,6 @@
 """
-    survprob(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
+    
+    prob(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
 
 Compute the survival probability over the interval from `lb` to `ub` by integrating the total hazard via quadrature.
 """
