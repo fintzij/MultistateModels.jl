@@ -69,7 +69,7 @@ function tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, 
 
     # log total hazard
     log_tot_haz = 
-        StatsFuns.logsumexp(
+        logsumexp(
             map(x -> call_haz(t, rowind, x), _hazards[_totalhazard.components]))
     
     # return the log, or not
