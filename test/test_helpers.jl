@@ -6,9 +6,11 @@
     vals1 = randn(length(msm_expwei.parameters))
 
     copyto!(msm_expwei.parameters, vals1)
-A
-    @test msm_expwei.hazards[1].parameters == msm_expwei.parameters[1] 
+
+    @test all(msm_expwei.hazards[1].parameters .== msm_expwei.parameters[1]) 
     @test all(msm_expwei.hazards[2].parameters .== msm_expwei.parameters[2:5])
+    @test all(msm_expwei.hazards[3].parameters .== msm_expwei.parameters[6:7])
+    @test all(msm_expwei.hazards[4].parameters .== msm_expwei.parameters[8:11])
 end
 
 # Test parameter setting function
@@ -17,16 +19,27 @@ end
 
     vals = randn(length(msm_expwei.parameters))
 
+    # vector
     set_parameters!(msm_expwei, vals)
 
-    @test msm_expwei.hazards[1].parameters .== vals[1]
+    @test msm_expwei.hazards[1].parameters[1] .== vals[1]
     @test all(msm_expwei.hazards[2].parameters .== vals[2:5])
     @test all(msm_expwei.parameters .== vals)
 
+    # unnamed tuple
     val_tuple = (randn(1), randn(4), randn(2), randn(4))
     set_parameters!(msm_expwei, val_tuple)
 
-    @test msm_expwei.hazards[1].parameters == val_tuple[1]
+    @test msm_expwei.hazards[1].parameters[1] == val_tuple[1][1]
+    @test all(msm_expwei.hazards[2].parameters .== val_tuple[2])
+    @test all(msm_expwei.hazards[3].parameters .== val_tuple[3])
+    @test all(msm_expwei.hazards[4].parameters .== val_tuple[4])
+
+    # named tuple
+    val_tuple = (h12 = randn(1), h13 = randn(4), h21 = randn(2), h23 = randn(4))
+    set_parameters!(msm_expwei, val_tuple)
+
+    @test msm_expwei.hazards[1].parameters[1] == val_tuple[1][1]
     @test all(msm_expwei.hazards[2].parameters .== val_tuple[2])
     @test all(msm_expwei.hazards[3].parameters .== val_tuple[3])
     @test all(msm_expwei.hazards[4].parameters .== val_tuple[4])
@@ -39,6 +52,6 @@ end
     sidv = [1, 2, 2, 3, 3, 3, 42, 42]
     sidvv = [[1], [2, 3], [4, 5, 6], [7, 8]]
 
-    @test get_subjinds(DataFrame(id = sidv)) .== sidvv
+    @test MultistateModels.get_subjinds(DataFrame(id = sidv)) == sidvv
 
 end

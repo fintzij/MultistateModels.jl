@@ -3,7 +3,7 @@
 
 Set model parameters given a vector of values. Assigns `newvalues`` to `model.parameters`, which are then propagated to subarrays in cause-specific hazards.
 """
-function set_parameters!(model::MultistateModel, newvalues::Vector{Float64})
+function set_parameters!(model::MultistateModel, newvalues::Vector)
     
     # check that we have the right number of parameters
     if(length(model.parameters) != length(newvalues))
@@ -14,11 +14,11 @@ function set_parameters!(model::MultistateModel, newvalues::Vector{Float64})
 end
 
 """
-    set_parameters!(model::MultistateModel, newvalues::Tuple{Vararg{Vector{Float64}}})
+    set_parameters!(model::MultistateModel, newvalues::Tuple)
 
 Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assigns new values to `model.hazards[i].parameters`, where `i` indexes the cause-specific hazards in the order they appear in the model object. Parameters for cause-specific hazards are automatically propagated to `model.parameters`.
 """
-function set_parameters!(model::MultistateModel, newvalues::Tuple{Vararg{Vector{Float64}}})
+function set_parameters!(model::MultistateModel, newvalues::Tuple)
     # check that there is a vector of parameters for each cause-specific hazard
     if(length(model.hazards) != length(newvalues))
         error("Number of supplied parameter vectors not equal to number of cause-specific hazards.")
@@ -35,23 +35,23 @@ function set_parameters!(model::MultistateModel, newvalues::Tuple{Vararg{Vector{
 end
 
 """
-    set_parameters!(model::MultistateModels.MultistateModel, newvalues::NamedTuple{<:Any, <:Tuple{Vararg{Vector{Float64}}}})
+    set_parameters!(model::MultistateModel, newvalues::NamedTuple)
 
 Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  Parameters for cause-specific hazards are automatically propagated to `model.parameters`.
 """
-function set_parameters!(model::MultistateModels.MultistateModel, newvalues::NamedTuple{<:Any, <:Tuple{Vararg{Vector{Float64}}}})
+function set_parameters!(model::MultistateModel, newvalues::NamedTuple)
     
     # get keys for the new values
     value_keys = keys(newvalues)
 
-    for i in value_keys
+    for i in eachindex(value_keys)
 
         # check length of supplied parameters
-        if length(newvalues[i]) != length(model.hazards[model.hazkeys[i]].parameters)
-            error("The new parameter values for $i are not the expected length.")
+        if length(newvalues[value_keys[i]]) != length(model.hazards[model.hazkeys[value_keys[i]]].parameters)
+            error("The new parameter values for $value_keys[i] are not the expected length.")
         end
 
-        copyto!(model.hazards[i].parameters, newvalues[i])
+        copyto!(model.hazards[i].parameters, newvalues[value_keys[i]])
     end
 end
 

@@ -87,14 +87,14 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
 
         # generate the model matrix
         hazschema = 
-            StatsModels.apply_schema(
+            apply_schema(
                 hazards[h].hazard, 
                  StatsModels.schema(
                      hazards[h].hazard, 
                      data))
 
         # grab the design matrix 
-        hazdat = StatsModels.modelcols(hazschema, data)[2]
+        hazdat = modelcols(hazschema, data)[2]
 
         # now we get the functions and other objects for the mutable struct
         if hazards[h].family == "exp"
@@ -171,7 +171,6 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                         hazname * "_shape",
                         hazname*"_".*coefnames(hazschema)[2][Not(1)])
                         
-
                 haz_struct = 
                     _WeibullPH(
                         Symbol(hazname),
@@ -212,7 +211,7 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
         _hazards[h] = haz_struct
 
         # increment parameter starting index
-        hazpars_start += npars
+        hazpars_start += length(hazpars)
     end
 
     return _hazards, parameters, hazkeys

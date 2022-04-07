@@ -8,8 +8,8 @@ using MultistateModels
 
 h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2);
 h13 = Hazard(@formula(0 ~ 1 + trt*age), "exp", 1, 3);
-h23 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 3);
 h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1)
+h23 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 3);
 
 dat_exact = 
     DataFrame(id = collect(1:3),
@@ -46,4 +46,3 @@ msm_expwei2 = multistatemodel(h12, h23, h13, h21; data = dat_interval)
 # set model parameters
 
 # simulate a sample path
-# path = MultistateModels.simulate_path(msm_expwei, 1)

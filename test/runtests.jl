@@ -11,6 +11,5 @@ include("test/setup_3state_weiph.jl")
 @testset "runtests" begin
     include("test/test_modelgeneration.jl")
     include("test/test_hazards.jl")
-    # include("test/test_helpers.jl")
+    include("test/test_helpers.jl")
 end
-
