@@ -4,7 +4,7 @@
 # simulate: wrapper around sim_paths and maybe other stuff to simulate new data, also incorporates censoring, etc.
 
 """
-    simulate(model::MultistateModel; n = 1, data = true, paths = false, ...)
+    simulate(model::MultistateModel; n = 1, data = true, paths = false)
 
 Simulate `n` datasets or collections of sample paths from a multistate model. If `data = true` (the default) discretely observed sample paths are returned, possibly subject to measurement error. If `paths = false` (the default), continuous-time sample paths are not returned.
 
@@ -14,7 +14,7 @@ Simulate `n` datasets or collections of sample paths from a multistate model. If
 - `data`: boolean; if true then return discretely observed sample paths
 - `paths`: boolean; if false then continuous-time sample paths not returned
 """
-function simulate(model::MultistateModel; nsim = 1, data = true, paths = false, ...)
+function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
 
     # throw an error if neither paths nor data are asked for
     if(paths == false & data == false)
@@ -95,7 +95,7 @@ function simulate_path(model::MultistateModel, subj::Int64)
     ns_probs = zeros(size(model.tmat,2))
 
     # initialize sample path
-    times = [tcur]
+    times  = [tcur]
     states = [scur]
 
     # flag for whether to stop simulation
@@ -104,7 +104,7 @@ function simulate_path(model::MultistateModel, subj::Int64)
     
     # sample the cumulative incidence if transient
     if keep_going
-        u = rand(1)
+        u = rand(1)[1]
     end
 
     # simulate path
@@ -138,7 +138,7 @@ function simulate_path(model::MultistateModel, subj::Int64)
 
             # draw new cumulative incidence and reset cuming
             if keep_going
-                u = rand(1) # sample cumulative incidence
+                u = rand(1)[1] # sample cumulative incidence
                 cuminc = 0.0 # reset cuminc
             end
 
@@ -166,6 +166,7 @@ function simulate_path(model::MultistateModel, subj::Int64)
                 # push the state and time at the right endpoint
                 push!(times, tcur)
                 push!(states, scur)     
+            end
         end
     end
 

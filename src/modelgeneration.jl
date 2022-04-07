@@ -69,6 +69,9 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
 
     # initialize vector of parameters
     parameters = Vector{Float64}(undef, 0)
+
+    # initialize a dictionary for indexing into the vector of hazards
+    hazkeys = Dict{Symbol, Int64}()
     
     # counter for tracking indices of views
     hazpars_start = 0
@@ -78,6 +81,9 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
 
         # name for the hazard
         hazname = "h"*string(hazards[h].statefrom)*string(hazards[h].stateto)
+
+        # save index in the dictionary
+        merge!(hazkeys, Dict(Symbol(hazname) => h))
 
         # generate the model matrix
         hazschema = 
@@ -209,7 +215,7 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
         hazpars_start += npars
     end
 
-    return _hazards, parameters
+    return _hazards, parameters, hazkeys
 end
 
 ### Total hazards
@@ -267,11 +273,6 @@ Constructs a multistate model from cause specific hazards. Parses the supplied h
 """
 function multistatemodel(hazards::Hazard...;data::DataFrame)
 
-    # function to check data formatting
-    # checkdat()
-    # to-check:
-    # 1) tstop > tstart for all rows
-
     # get indices for each subject in the dataset
     subjinds = get_subjinds(data)
 
@@ -285,9 +286,12 @@ function multistatemodel(hazards::Hazard...;data::DataFrame)
     # compile matrix enumerating instantaneous state transitions
     tmat = create_tmat(hazinfo)
 
+    # function to check data formatting
+    check_data!(data, tmat)
+
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
-    _hazards, parameters = build_hazards(hazards...; data = data)
+    _hazards, parameters, hazkeys = build_hazards(hazards...; data = data)
 
     # generate vector for total hazards 
     _totalhazards = build_totalhazards(_hazards, tmat)  
@@ -305,6 +309,7 @@ function multistatemodel(hazards::Hazard...;data::DataFrame)
             _hazards,
             _totalhazards,
             tmat,
+            hazkeys,
             subjinds
         )
 

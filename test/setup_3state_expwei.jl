@@ -42,3 +42,8 @@ dat_interval =
 # create multistate model object
 msm_expwei = multistatemodel(h12, h23, h13, h21; data = dat_exact2)
 msm_expwei2 = multistatemodel(h12, h23, h13, h21; data = dat_interval)
+
+# set model parameters
+
+# simulate a sample path
+# path = MultistateModels.simulate_path(msm_expwei, 1)

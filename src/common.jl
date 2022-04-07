@@ -21,7 +21,6 @@ Exponential cause-specific hazard.
 Base.@kwdef mutable struct _Exponential <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    # parameters::Vector{Float64} 
     parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
 end
@@ -32,7 +31,6 @@ Exponential cause-specific hazard with covariate adjustment. Rate is a log-linea
 Base.@kwdef mutable struct _ExponentialReg <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    # parameters::Vector{Float64} 
     parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
 end
@@ -43,7 +41,6 @@ Weibull cause-specific hazard.
 Base.@kwdef mutable struct _Weibull <: _Hazard
     hazname::Symbol
     data::Array{Float64} # just an intercept
-    # parameters::Vector{Float64}
     parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
 end
@@ -54,7 +51,6 @@ Weibull cause-specific hazard with covariate adjustment. Scale and shape are log
 Base.@kwdef mutable struct _WeibullReg <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    # parameters::Vector{Float64}
     parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
     scaleinds::UnitRange{Int64}
@@ -67,7 +63,6 @@ Weibull cause-specific proportional hazard. The baseline hazard is Weibull and c
 Base.@kwdef mutable struct _WeibullPH <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    # parameters::Vector{Float64}
     parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
 end
@@ -102,6 +97,7 @@ Base.@kwdef mutable struct MultistateModel
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
+    hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
 end
 

@@ -28,4 +28,7 @@ include("hazards.jl")
 # model generation
 include("modelgeneration.jl")
 
+# simulation
+include("simulation.jl")
+
 end
