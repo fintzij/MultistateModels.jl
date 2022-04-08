@@ -118,16 +118,22 @@ function simulate_path(model::MultistateModel, subj::Int64)
         if u < cuminc + interval_incid && u >= cuminc 
 
             # update the current time
-            tcur = optimize(
-                t -> (logit(cuminc + (1 - survprob(model.totalhazards[scur], model.hazards, tcur, t, ind))) - logit(u)), 
+            nexttime = optimize(
+                t -> (logit(cuminc + (1 - MultistateModels.survprob(model.totalhazards[scur], model.hazards, tcur, t, ind))) - logit(u))^2, 
                 tcur, tstop)
 
+            if Optim.converged(nexttime)
+                tcur = nexttime.minimizer
+            else
+                error("Failed to converge in $(Optim.iterations(nexttime)) iterations")
+            end            
+
             # calculate next state transition probabilities 
-            next_state_probs!(ns_probs, scur, ind, model)
+            next_state_probs!(ns_probs, tcur, scur, ind, model)
 
             # sample the next state
-            scur = rand(Multinomial(ns_probs))
-
+            scur = rand(Categorical(ns_probs))
+            
             # cache the jump time and state
             push!(times, tcur)
             push!(states, scur)
@@ -191,12 +197,15 @@ function next_state_probs!(ns_probs, t, scur, ind, model)
     # set ns_probs to zero for impossible transitions
     ns_probs[findall(model.tmat[scur,:] .== 0.0)] .= 0.0
 
+    # indices for possible destination states
+    trans_inds = findall(model.tmat[scur,:] .!= 0.0)
+        
     # calculate log hazards for possible transitions
-    ns_probs[model.totalhazards[scur].components] = 
+    ns_probs[trans_inds] = 
         map(x -> call_haz(t, ind, x), model.hazards[model.totalhazards[scur].components])
 
     # normalize ns_probs
-    ns_probs[model.totalhazards[scur].components] = 
+    ns_probs[trans_inds] = 
         softmax(ns_probs[model.totalhazards[scur].components])
 end
 
@@ -204,13 +213,16 @@ function next_state_probs(t, scur, ind, model)
 
     # initialize vector of next state transition probabilities
     ns_probs = zeros(size(model.tmat, 2))
+
+    # indices for possible destination states
+    trans_inds = findall(model.tmat[scur,:] .!= 0.0)
     
     # calculate log hazards for possible transitions
-    ns_probs[model.totalhazards[scur].components] = 
+    ns_probs[trans_inds] = 
         map(x -> call_haz(t, ind, x), model.hazards[model.totalhazards[scur].components])
 
     # return the next state transition probabilities
-    ns_probs[model.totalhazards[scur].components] = 
+    ns_probs[trans_inds] = 
         softmax(ns_probs[model.totalhazards[scur].components])
 
     # return the next state probabilities

@@ -6,6 +6,15 @@
 # 2. function to validate data
 # 3. validate MultistateModel object    
 
+# test that we are generating correct cumulative incidence using survprob
+@testset "survprob" begin
+    # what is the cumulative incidence from time 0 to 2 of exponential with mean time to event of 5
+    # should be around 0.32967995
+    interval_incid = 
+                   1 - MultistateModels.survprob(msm.totalhazards[1], msm.hazards, 0.0, 2.0, 1)
+    @test cdf(Exponential(5), 2) ≈ interval_incid
+end
+
 # tests for individual hazards
 @testset "test_hazards_exp" begin
     
