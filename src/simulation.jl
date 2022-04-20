@@ -41,7 +41,7 @@ function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
             samplepath = simulate_path(model, j)
 
             # save path if requested
-            if path == true
+            if paths == true
                 samplepaths[j, i] = samplepath
             end
 
@@ -56,9 +56,12 @@ function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
     end
 
     # return paths and data
-    if paths == false & data == true
-    elseif paths == true & data == true
-    elseif paths == true & data == false
+    if paths == false && data == true
+
+    elseif paths == true && data == true
+        
+    elseif paths == true && data == false
+        return samplepaths
     end
 end
 

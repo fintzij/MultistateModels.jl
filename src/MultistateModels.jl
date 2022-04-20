@@ -14,7 +14,8 @@ export
     @formula,
     Hazard,
     multistatemodel,
-    set_parameters!
+    set_parameters!,
+    simulate
 
 # typedefs
 include("common.jl")
