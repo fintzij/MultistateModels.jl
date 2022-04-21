@@ -29,6 +29,9 @@ include("hazards.jl")
 # model generation
 include("modelgeneration.jl")
 
+# path functions
+include("pathfunctions.jl")
+
 # simulation
 include("simulation.jl")
 

@@ -76,7 +76,7 @@ Simulate a single sample path.
 """
 function simulate_path(model::MultistateModel, subj::Int64)
 
-    # subset data for subject and exctract important bits
+    # subset data for subject and extract important bits
     subj_inds = model.subjectindices[subj]
     subj_dat = view(model.data, subj_inds, :)
 

@@ -24,7 +24,7 @@ dat_exact2 =
               tstart = [0, 0, 0],
               tstop = [10, 10, 10],
               statefrom = [1, 2, 1],
-              stateto = [3, 3, 3],
+              stateto = [3, 3, 1],
               obstype = zeros(3),
               trt = [0, 1, 0],
               age = [23, 32, 50])
@@ -44,5 +44,6 @@ msm_expwei = multistatemodel(h12, h23, h13, h21; data = dat_exact2)
 msm_expwei2 = multistatemodel(h12, h23, h13, h21; data = dat_interval)
 
 # set model parameters
+
 
 # simulate a sample path

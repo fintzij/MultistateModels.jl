@@ -22,6 +22,4 @@ msm = multistatemodel(h12; data = dat)
 
 # set model parameters
 # want mean time to event of 5, so log(1/5) = log(0.2). Hazard ratio of 1.3, so log(1.3)
-set_parameters!(
-    msm, 
-    (h12 = [log(0.2), log(2)],))
+set_parameters!(msm, (h12 = [log(0.2), log(2)],))
