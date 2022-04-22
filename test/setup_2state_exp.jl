@@ -9,13 +9,13 @@ using MultistateModels
 h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
 
 dat = 
-    DataFrame(id = collect(1:2),
-              tstart = [0, 0],
-              tstop = [100, 100],
-              statefrom = [1, 1],
-              stateto = [2, 2],
-              obstype = zeros(2),
-              trt = [0, 1])
+    DataFrame(id = [1,1,2,2],
+              tstart = [0, 10, 0, 10],
+              tstop = [10, 100, 10, 100],
+              statefrom = [1, 1, 1, 1],
+              stateto = [2, 2, 2, 2],
+              obstype = zeros(4),
+              trt = [0, 0, 1, 1])
 
 # create multistate model object
 msm = multistatemodel(h12; data = dat)

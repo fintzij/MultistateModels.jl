@@ -5,7 +5,7 @@ using Plots
 include("test/setup_2state_exp.jl")
 
 # simulate a single path
-MultistateModels.simulate_path(msm, 1)
+samplepath = MultistateModels.simulate_path(msm, 1)
 
 # simulate a collection of sample paths
 paths = simulate(msm; nsim = 10000, paths = true, data = false)
