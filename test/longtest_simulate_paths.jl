@@ -4,6 +4,10 @@ using Plots
 
 include("test/setup_2state_exp.jl")
 
+using MultistateModels: next_state_probs!, survprob, _TotalHazardTransient
+
+model = msm; subj = 1
+
 # simulate a single path
 samplepath = MultistateModels.simulate_path(msm, 1)
 

@@ -115,14 +115,14 @@ function simulate_path(model::MultistateModel, subj::Int64)
         
         # calculate event probability over the next interval
         interval_incid = 
-            1 - survprob(model.totalhazards[scur], model.hazards, tcur, tstop, ind) - cuminc
+            (1 - cuminc) * (1 - survprob(model.totalhazards[scur], model.hazards, tcur, tstop, ind))
 
         # check if event happened in the interval
-        if (u < cuminc + interval_incid) && (u >= cuminc)
+        if u < (cuminc + interval_incid) && u >= cuminc
 
             # update the current time
             nexttime = optimize(
-                t -> (log(cuminc + (1 - survprob(model.totalhazards[scur], model.hazards, tcur, t, ind))) - log(u))^2, tcur, tstop)
+                t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(model.totalhazards[scur], model.hazards, tcur, t, ind))) - log(u))^2), tcur, tstop)
 
             if Optim.converged(nexttime)
                 tcur = nexttime.minimizer
@@ -150,7 +150,7 @@ function simulate_path(model::MultistateModel, subj::Int64)
                 cuminc = 0.0 # reset cuminc
             end
 
-        elseif u >= cuminc + interval_incid # no transition in interval
+        elseif u >= (cuminc + interval_incid) # no transition in interval
 
             # if you keep going do some bookkeeping
             if row != size(subj_dat, 1)  # no censoring
