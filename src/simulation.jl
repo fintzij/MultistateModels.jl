@@ -91,7 +91,9 @@ function simulate_path(model::MultistateModel, subj::Int64)
     tcur    = subj_dat.tstart[1]
     tstop   = subj_dat.tstop[1]
 
-    # initialize cumulative incidence - clock resets each transition
+    # initialize time in state and cumulative incidence 
+    # clock resets after each transition
+    timeinstate = 0.0
     cuminc = 0.0
 
     # vector for next state transition probabilities
@@ -115,39 +117,40 @@ function simulate_path(model::MultistateModel, subj::Int64)
         
         # calculate event probability over the next interval
         interval_incid = 
-            (1 - cuminc) * (1 - survprob(model.totalhazards[scur], model.hazards, tcur, tstop, ind))
+            (1 - cuminc) * (1 - survprob(model.totalhazards[scur], model.hazards, timeinstate, timeinstate + tstop - tcur, ind))
 
         # check if event happened in the interval
         if u < (cuminc + interval_incid) && u >= cuminc
 
             # update the current time
-            nexttime = optimize(
-                t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(model.totalhazards[scur], model.hazards, tcur, t, ind))) - log(u))^2), tcur, tstop)
+            timeincrement = optimize(
+                t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(model.totalhazards[scur], model.hazards, timeinstate, timeinstate + t, ind))) - log(u))^2), 0.0, tstop - tcur)
 
-            if Optim.converged(nexttime)
-                tcur = nexttime.minimizer
+            if Optim.converged(timeincrement)
+                timeinstate += timeincrement.minimizer
             else
                 error("Failed to converge in $(Optim.iterations(nexttime)) iterations")
             end            
 
             # calculate next state transition probabilities 
-            next_state_probs!(ns_probs, tcur, scur, ind, model)
+            next_state_probs!(ns_probs, timeinstate, scur, ind, model)
 
             # sample the next state
             scur = rand(Categorical(ns_probs))
             
-            # cache the jump time and state
+            # increment time in state and cache the jump time and state
+            tcur = times[end] + timeinstate
             push!(times, tcur)
             push!(states, scur)
                 
             # check if the next state is transient
-            keep_going = 
-                isa(model.totalhazards[scur], _TotalHazardTransient) 
+            keep_going = isa(model.totalhazards[scur], _TotalHazardTransient) 
 
-            # draw new cumulative incidence and reset cuminc
+            # draw new cumulative incidence, reset cuminc and time in state
             if keep_going
-                u = rand(1)[1] # sample cumulative incidence
-                cuminc = 0.0 # reset cuminc
+                u           = rand(1)[1] # sample cumulative incidence
+                cuminc      = 0.0 # reset cuminc
+                timeinstate = 0.0 # reset time in state
             end
 
         elseif u >= (cuminc + interval_incid) # no transition in interval
@@ -155,14 +158,17 @@ function simulate_path(model::MultistateModel, subj::Int64)
             # if you keep going do some bookkeeping
             if row != size(subj_dat, 1)  # no censoring
 
+                # increment the time in state
+                timeinstate += tstop - tcur
+
+                # increment cumulative inicidence
+                cuminc += interval_incid
+
                 # increment the row indices and interval endpoints
                 row  += 1
                 ind  += 1
                 tcur  = subj_dat.tstart[row]
                 tstop = subj_dat.tstop[row]
-
-                # increment cumulative inicidence
-                cuminc += interval_incid
 
             else # censoring, return current state and tmax
                 # stop sampling
