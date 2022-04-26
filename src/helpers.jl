@@ -94,9 +94,11 @@ function check_data!(data::DataFrame, tmat::Matrix)
     data.id        = convert(Vector{Int64},   data.id)
     data.tstart    = convert(Vector{Float64}, data.tstart)
     data.tstop     = convert(Vector{Float64}, data.tstop)
-    data.statefrom = convert(Vector{Int64},   data.statefrom)
-    data.stateto   = convert(Vector{Int64},   data.stateto)
     data.obstype   = convert(Vector{Int64},   data.obstype)
+    data.statefrom = 
+        convert(Vector{Union{Missing,Int64}}, data.statefrom)
+    data.stateto   = 
+        convert(Vector{Union{Missing, Int64}}, data.stateto)
 
     # warn about individuals starting in absorbing states
     # check if there are any absorbing states

@@ -16,9 +16,9 @@ hazards = (h12, h23, h13)
 
 
 # obstype: observation scheme
-# 0: exactly observed data => tstart,tstop are jump times in a sample path
-# 1: interval censored panel data => state known at tstart,tstop, but not path in between
-# 2: interval censored, measurement error about states at tstart, tstop => standard HMM
+# 0: censored data => no state observed
+# 1: exactly observed data => tstart,tstop are jump times in a sample path
+# 2: interval censored panel data => state known at tstart,tstop, but not path in between
 # 3: interval censored, measurement error about path between tstart, tstop (e.g., actt worst state) => e.g., know the worst state between tstart, tstop but not the state at the endpoints
 
 # with the following, we always know where covariates start
