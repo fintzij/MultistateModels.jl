@@ -13,12 +13,19 @@ Simulate `n` datasets or collections of sample paths from a multistate model. If
 - `nsim`: number of sample paths to simulate
 - `data`: boolean; if true then return discretely observed sample paths
 - `paths`: boolean; if false then continuous-time sample paths not returned
+- 'data_format': 'minimal', 'normal' (default), 'maximal'. If minimal, an array of vectors with the states at observation times is returned. If 
+'normal', a vector of matrices is returned, with each matrix giving a discretely observed sample path in start-stop format. If 'maximal', the covariate data is appended as well.
 """
-function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
+function simulate(model::MultistateModel; nsim = 1, data = true, paths = false, data_format = "normal")
 
     # throw an error if neither paths nor data are asked for
-    if(paths == false & data == false)
+    if paths == false & data == false
         error("Why are you calling `simulate` if you don't want sample paths or data? Stop wasting my time.")
+    end
+
+    # throw an error if data format is not an admissible option
+    if !any(data_format .== ["minimal", "normal", "maximal"])
+        error("Inadmissible data format requested. Choose one of \"minimal\", \"normal\", or \"maximal\"")
     end
 
     # number of subjects
@@ -30,9 +37,15 @@ function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
     end
 
     # initialize container for simulated data
-    # if data == true
-
-    # end 
+    if data == true
+        if data_format == "minimal"
+            datasets = Array{Vector}(undef, nsubj, nsim)
+        elseif data_format == "normal"
+            datasets = [model.data[:,1:6] for s in Base.OneTo(nsim)]
+        else 
+            datasets = [model.data for s in Base.OneTo(nsim)]
+        end
+    end 
 
     for i in Base.OneTo(nsim)
         for j in Base.OneTo(nsubj)
@@ -45,21 +58,24 @@ function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
                 samplepaths[j, i] = samplepath
             end
 
-            # simulate data
+            # observe path
             if data == true
-                # simulate data
-                # sampledata = simulate_data(samplepath)
-
-                # save data
+                if data_format == "minimal"
+                    datasets[j,i] = 
+                        observe_minimal_path(samplepath, model, j)
+                else 
+                    datasets[i][model.subjectindices[j], [:statefrom, :stateto]] = 
+                        observe_path(samplepath, model, j)
+                end
             end
         end
     end
 
     # return paths and data
     if paths == false && data == true
-
+        return datasets
     elseif paths == true && data == true
-        
+        return datasets, samplepaths
     elseif paths == true && data == false
         return samplepaths
     end

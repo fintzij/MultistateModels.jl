@@ -148,4 +148,3 @@ include("src/common.jl")
 include("hazards.jl")
 
 #### setting model parameters
-

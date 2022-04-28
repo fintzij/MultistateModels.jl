@@ -12,7 +12,7 @@ model = msm; subj = 1
 samplepath = MultistateModels.simulate_path(msm, 1)
 
 # simulate a collection of sample paths
-paths = simulate(msm; nsim = 10000, paths = true, data = false)
+paths = simulate(msm; nsim = 100, paths = true, data = true)
 
 # person 1 has an exponential hazard with rate 0.2
 # person 2 has an exponential hazard with rate 0.4
