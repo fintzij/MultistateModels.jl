@@ -92,9 +92,9 @@ Simulate a single sample path.
 """
 function simulate_path(model::MultistateModel, subj::Int64)
 
-    # subset data for subject and extract important bits
+    # subject data
     subj_inds = model.subjectindices[subj]
-    subj_dat = view(model.data, subj_inds, :)
+    subj_dat  = view(model.data, subj_inds, :)
 
     # current index
     row = 1 # row in subject's data that is incremented
@@ -200,7 +200,7 @@ function simulate_path(model::MultistateModel, subj::Int64)
         end
     end
 
-    return SamplePath(times, states)
+    return SamplePath(subj, times, states)
 end
 
 

@@ -102,11 +102,12 @@ Base.@kwdef mutable struct MultistateModel
 end
 
 """
-    SamplePath(times::Vector{Float64}, states::Vector{Int64})
+    SamplePath(subjID::Int64, times::Vector{Float64}, states::Vector{Int64})
 
-Struct for storing a sample path, consists of jump times and a state sequence.
+Struct for storing a sample path, consists of subject identifier, jump times, state sequence.
 """
 struct SamplePath
+    subj::Int64
     times::Vector{Float64}
     states::Vector{Int64}
 end
