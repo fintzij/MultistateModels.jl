@@ -138,4 +138,6 @@ function check_data!(data::DataFrame, tmat::Matrix)
     end
 
     # check that obstype is one of the allowed censoring schemes
+
+    # check that there are no rows for a subject after they hit an absorbing state
 end

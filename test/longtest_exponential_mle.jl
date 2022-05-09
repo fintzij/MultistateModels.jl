@@ -5,7 +5,7 @@ using Plots
 include("test/setup_2state_exp_trans.jl")
 
 # simulate a single path
-samplepath = MultistateModels.simulate_path(msm, 1)
+path = simulate(msm; data = false, paths = true)
 
 # simulate a collection of sample paths
 paths = simulate(msm; nsim = 100, paths = true, data = true)
@@ -44,3 +44,4 @@ plot!(h2,collect(0:50),
 title!(h2, "Simulated vs. analytic event times, treatment group");
 
 plot(h1, h2, layout = (2,1))
+

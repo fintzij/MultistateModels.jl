@@ -48,7 +48,7 @@ end
 - `give_log::Bool`: should the log total hazard be returned (default)
 
 Return the total hazard for an absorbing state, which is always zero.
-"""
+""" 
 function tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = false)
     give_log ? -Inf : 0
 end

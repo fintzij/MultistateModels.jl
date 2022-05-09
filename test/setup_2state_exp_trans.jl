@@ -1,6 +1,7 @@
 # set up a MultistateModel object
 using Chain
 using DataFrames
+using Distributions
 using MultistateModels
 
 # Stan will initialize parameters by sampling from N(0,1) unless given explicit parameters
@@ -12,7 +13,7 @@ h21 = Hazard(@formula(0 ~ 1 + trt), "exp", 2, 1)
 dat = 
     DataFrame(id = [1,1,1,2,2,2],
               tstart = [0, 10, 20, 0, 10, 20],
-              tstop = [10, 20, 100, 10, 20, 100],
+              tstop = [10, 20, 30, 10, 20, 30],
               statefrom = [1, 1, 1, 1, 1, 1],
               stateto = [2, 2, 1, 2, 1, 2],
               obstype = [1, 1, 1, 1, 1, 1],
@@ -26,4 +27,16 @@ msm = multistatemodel(h12, h21; data = dat)
 set_parameters!(
     msm, 
     (h12 = [log(0.2), log(2)],
-     h21 = [log(0.1), log(0.5)]))
+     h21 = [log(0.0002), log(2)]))
+
+path = simulate(msm; paths = true, data = false)
+
+# log-likelihood
+ll1 = MultistateModels.loglik(path[1], msm)
+ll2 = MultistateModels.loglik(path[2], msm)
+
+gaps = path[1].times[Not(1)] - path[1].times[Not(end)]
+
+ll1_manual =
+    logpdf(Exponential(5), gaps[1]) + 
+    logpdf(Exponential(1/0.0002), gaps[2])

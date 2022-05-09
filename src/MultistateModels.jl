@@ -26,6 +26,9 @@ include("helpers.jl")
 # hazard related functions
 include("hazards.jl")
 
+# likelihood functions
+include("likelihoods.jl")
+
 # model generation
 include("modelgeneration.jl")
 
