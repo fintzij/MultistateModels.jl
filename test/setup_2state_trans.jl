@@ -8,7 +8,7 @@ using MultistateModels
 # This isn't crazy because e.g. brms will center covariates first
 
 h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
-h21 = Hazard(@formula(0 ~ 1 + trt), "exp", 2, 1)
+h21 = Hazard(@formula(0 ~ 1 + trt), "weiPH", 2, 1)
 
 dat = 
     DataFrame(id = [1,1,1,2,2,2],
@@ -17,26 +17,31 @@ dat =
               statefrom = [1, 1, 1, 1, 1, 1],
               stateto = [2, 2, 1, 2, 1, 2],
               obstype = [1, 1, 1, 1, 1, 1],
-              trt = [0, 0, 0, 1, 1, 1])
+              trt = [0, 1, 0, 1, 0, 1])
 
 # create multistate model object
-msm = multistatemodel(h12, h21; data = dat)
+msm_2state_trans = multistatemodel(h12, h21; data = dat)
 
 # set model parameters
 # want mean time to event of 5, so log(1/5) = log(0.2). Hazard ratio of 1.3, so log(1.3)
 set_parameters!(
-    msm, 
-    (h12 = [log(0.2), log(2)],
-     h21 = [log(0.0002), log(2)]))
+    msm_2state_trans, 
+    (h12 = [log(0.1), log(2)],
+     h21 = [log(0.1), log(1), log(2)]))
 
-path = simulate(msm; paths = true, data = false)
+# sample paths
+path1 = 
+    MultistateModels.SamplePath(
+        1,
+        [0.0, 8.2, 13.2, 30.0],
+        [1, 2, 1, 1])
 
-# log-likelihood
-ll1 = MultistateModels.loglik(path[1], msm)
-ll2 = MultistateModels.loglik(path[2], msm)
+path2 = 
+    MultistateModels.SamplePath(
+        2,
+        [0.0, 1.7, 27.2, 28.5, 29.3], 
+        [1, 2, 1, 2, 1])
 
-gaps = path[1].times[Not(1)] - path[1].times[Not(end)]
-
-ll1_manual =
-    logpdf(Exponential(5), gaps[1]) + 
-    logpdf(Exponential(1/0.0002), gaps[2])
+# # log-likelihood
+# ll1 = MultistateModels.loglik(path[1], msm)
+# ll2 = MultistateModels.loglik(path[2], msm)
