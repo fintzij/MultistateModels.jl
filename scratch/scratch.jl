@@ -147,4 +147,14 @@ include("src/MultistateModels.jl")
 include("src/common.jl")
 include("hazards.jl")
 
-#### setting model parameters
+
+
+
+
+
+
+
+
+
+
+    

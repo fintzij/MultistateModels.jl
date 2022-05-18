@@ -6,6 +6,7 @@ using Distributions
 using LinearAlgebra
 using Optim
 using QuadGK
+using Quadrature
 using StatsModels
 using StatsFuns
 

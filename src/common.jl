@@ -112,3 +112,23 @@ struct SamplePath
     states::Vector{Int64}
 end
 
+# """
+#     Overloading QuadratureProblem to allow for mutable problems.
+# """
+# Base.@kwdef mutable struct QuadratureProblem{isinplace,P,F,L,U,K} <: SciMLBase.AbstractQuadratureProblem{isinplace}
+#     f::F
+#     lb::L
+#     ub::U
+#     nout::Int
+#     p::P
+#     batch::Int
+#     kwargs::K
+#     SciMLBase.@add_kwonly function QuadratureProblem{iip}(f,lb,ub,p=NullParameters();
+#                                                 nout=1,
+#                                                 batch = 0, kwargs...) where iip
+#         new{iip,typeof(p),typeof(f),typeof(lb),
+#             typeof(ub),typeof(kwargs)}(f,lb,ub,nout,p,batch,kwargs)
+#     end
+# end
+
+# QuadratureProblem(f,lb,ub,args...;kwargs...) = QuadratureProblem{isinplace(f, 3)}(f,lb,ub,args...;kwargs...)
