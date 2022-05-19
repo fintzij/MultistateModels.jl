@@ -9,16 +9,31 @@ using Distributions
 # just testing out autodiff
 x = rand(Exponential(5), 100000)
 
+exph(x,p) = p
+function dexph(dx,x,p) 
+    dx .= p
+end
 
-exph2(x) = 42
-qp = QuadratureProblem(exph)
+qp = QuadratureProblem(exph, 1.0, 2.2, 10.0)
+qp2 = QuadratureProblem{true}(dexph, 1.0, 2.2, 10.0)
+solve(qp, HCubatureJL())
+solve(qp2, HCubatureJL())
 
 @time begin
-    for k in 1:100000
-        exph(x,p) = p
-        qp = QuadratureProblem(exph, 1.0, 2.3, 10.0)
-        solve(qp, QuadGKJL())
-        # quadgk(exph2, 1.0, 2.3)
+    for k in 1:1000000
+        # remake has minimal overhead
+        # solve(qp, QuadGKJL())
+        # solve(remake(qp, lb = 1.0, ub = 2.2), QuadGKJL())
+
+        # Making a new QuadratureProblem each time is slowwww
+        # qp = QuadratureProblem(exph, 1.0, 2.2, 10.0)
+        # solve(qp, QuadGKJL())
+
+        # HCubatureJL also slow, even in-place
+        # solve(remake(qp2, lb = 1.0, ub = 2.2), HCubatureJL())
+
+        # HCubatureJL non-in-place is faster than in-place
+        # solve(remake(qp, lb = 1.0, ub = 2.2), HCubatureJL())
     end
 end
 
