@@ -1,3 +1,8 @@
+"""
+    loglik(path::SamplePath, model::MultistateModel) 
+
+Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
+"""
 function loglik(path::SamplePath, model::MultistateModel)
 
     # initialize log likelihood
@@ -84,3 +89,5 @@ function loglik(path::SamplePath, model::MultistateModel)
 
     return ll
 end
+
+

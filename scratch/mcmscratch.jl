@@ -48,3 +48,9 @@ for k in Base.OneTo(iters)
 end
 
 histogram(samples; n = 50, normalize=true)
+
+
+#### SLICE SAMPLING
+μ = 0.0; σ = 1.0
+iters = 10000
+
