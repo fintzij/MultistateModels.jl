@@ -91,3 +91,14 @@ function loglik(path::SamplePath, model::MultistateModel)
 end
 
 
+"""
+    loglik(samplepaths::Array{SamplePath}, model::MultistateModel) 
+
+Return sum of log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain.
+"""
+
+function loglik(samplepaths::Array{SamplePath}, model::MultistateModel)
+
+    # send each element of samplepaths to loglik(path::SamplePath, model::MultistateModel) and sum up results
+    return mapreduce(x -> loglik(x, model), +, samplepaths)
+end

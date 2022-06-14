@@ -96,11 +96,38 @@ function observe_minimal_path(samplepath::SamplePath, model::MultistateModel, su
     return stateseq
 end
 
+# some function to curate a discretely observed sample path to add back other data.
+# function curate_path(observedpath, model, subj)
+# end
 """
     curate_path()
 
 
 """
-# some function to curate a discretely observed sample path to add back other data.
-# function curate_path(observedpath, model, subj)
-# end
+
+"""
+    extract_paths(model::MultistateModel)
+
+Extract sample paths from a multistate model's data field and return an array of SamplePath objcets.
+"""
+function extract_paths(model)
+
+    # get IDs
+    nsubj = length(model.subjectindices)
+
+    # initialize array of sample paths
+    samplepaths = Vector{SamplePath}(undef, nsubj)
+
+    # grab the sample paths
+    for i in eachindex(model.subjectindices)
+        
+        # grab the path
+        samplepaths[i] = 
+            SamplePath(
+                ids[i],
+                [data[model.subjectindices[i], :tstart]; data[model.subjectindices[i][end], :tstop]],
+                [data[model.subjectindices[i], :statefrom]; data[model.subjectindices[i][end], :stateto]])
+    end
+
+    return samplepaths
+end
