@@ -25,16 +25,37 @@ function fit_exact(model::MultistateModel)
     samplepaths = extract_paths(model)
 
     # the anonymous functino in optimize() will set parameter values, then evaluate log likelihood of each path and sum up results using loglik(samplepaths::Array{SamplePath}, model::MultistateModel) 
-    function sum_ll(param, samplepaths, model)
-        set_parameters!(model, param)
-        loglik(samplepaths, model)
+    function sum_ll(param; samplepaths = samplepaths, model = model)
+        set_parameters!(model, param[eachindex(param)])
+        -loglik(samplepaths, model)
     end
 
-    optimize(x -> sum_ll(x, samplepaths, model), model.parameters)
+    sum_ll_ad = TwiceDifferentiable(sum_ll, model.parameters; autodiff = :forward)
 
-    optimize(
-        function(x) 
-            set_parameters!(model, x)
-            loglik(samplepaths, model)
-        end, model.parameters)
+    optimize(sum_ll_ad, model.parameters, Newton())
+
+    sum_ll_ad = OnceDifferentiable(sum_ll, model.parameters; autodiff = :forward)
+
+    optimize(sum_ll_ad, model.parameters, BFGS())
+
+    
+    optimize(function(x) 
+                set_parameters!(model, x)
+                -loglik(samplepaths, model)
+            end, model.parameters)
+
 end
+
+function testfun(p)
+    ((p[1] - 1.0))^2
+end
+td = TwiceDifferentiable(testfun, [1.0]; autodiff = :forward)
+Optim.minimizer(optimize(td, [1.0], BFGS()))
+
+
+function f(x)
+    return (1.0 - x[1])^2
+end
+initial_x = zeros(1)
+td = TwiceDifferentiable(f, initial_x; autodiff = :forward)
+Optim.minimizer(optimize(td, initial_x, Newton()))

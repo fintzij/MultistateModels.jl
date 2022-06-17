@@ -28,4 +28,4 @@ set_parameters!(
     (h12 = [log(0.2)],
      h21 = [log(0.5)]))
 
-paths = simulate(msm_2state_trans; paths = true, data = true)
+paths = simulate(msm_2state_trans; paths = true, data = true);
