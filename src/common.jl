@@ -21,7 +21,6 @@ Exponential cause-specific hazard.
 Base.@kwdef mutable struct _Exponential <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
 end
 
@@ -31,7 +30,6 @@ Exponential cause-specific hazard with covariate adjustment. Rate is a log-linea
 Base.@kwdef mutable struct _ExponentialReg <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
 end
 
@@ -41,7 +39,6 @@ Weibull cause-specific hazard.
 Base.@kwdef mutable struct _Weibull <: _Hazard
     hazname::Symbol
     data::Array{Float64} # just an intercept
-    parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
 end
 
@@ -51,7 +48,6 @@ Weibull cause-specific hazard with covariate adjustment. Scale and shape are log
 Base.@kwdef mutable struct _WeibullReg <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
     scaleinds::UnitRange{Int64}
     shapeinds::UnitRange{Int64}
@@ -63,7 +59,6 @@ Weibull cause-specific proportional hazard. The baseline hazard is Weibull and c
 Base.@kwdef mutable struct _WeibullPH <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
 end
 
@@ -91,9 +86,9 @@ end
 
 Mutable struct that fully specifies a multistate process for simulation or inference. 
 """
-Base.@kwdef mutable struct MultistateModel 
+Base.@kwdef struct MultistateModel 
     data::DataFrame
-    parameters::Vector{Float64}
+    parameters::Vector{Vector{Float64}} # only for transportability
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -111,24 +106,3 @@ struct SamplePath
     times::Vector{Float64}
     states::Vector{Int64}
 end
-
-# """
-#     Overloading QuadratureProblem to allow for mutable problems.
-# """
-# Base.@kwdef mutable struct QuadratureProblem{isinplace,P,F,L,U,K} <: SciMLBase.AbstractQuadratureProblem{isinplace}
-#     f::F
-#     lb::L
-#     ub::U
-#     nout::Int
-#     p::P
-#     batch::Int
-#     kwargs::K
-#     SciMLBase.@add_kwonly function QuadratureProblem{iip}(f,lb,ub,p=NullParameters();
-#                                                 nout=1,
-#                                                 batch = 0, kwargs...) where iip
-#         new{iip,typeof(p),typeof(f),typeof(lb),
-#             typeof(ub),typeof(kwargs)}(f,lb,ub,nout,p,batch,kwargs)
-#     end
-# end
-
-# QuadratureProblem(f,lb,ub,args...;kwargs...) = QuadratureProblem{isinplace(f, 3)}(f,lb,ub,args...;kwargs...)

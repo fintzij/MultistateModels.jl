@@ -68,7 +68,7 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
     _hazards = Vector{_Hazard}(undef, length(hazards))
 
     # initialize vector of parameters
-    parameters = Vector{Float64}(undef, 0)
+    parameters = Vector{Vector{Float64}}(undef, 0)
 
     # initialize a dictionary for indexing into the vector of hazards
     hazkeys = Dict{Symbol, Int64}()
@@ -106,7 +106,7 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
             hazpars = zeros(Float64, npars)
 
             # append to model parameters
-            append!(parameters, hazpars)
+            push!(parameters, hazpars)
 
             # get names
             parnames = hazname*"_".*coefnames(hazschema)[2]
@@ -117,16 +117,12 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _Exponential(
                         Symbol(hazname),
                         hazdat,
-                        # hazpars,
-                        view(parameters, hazpars_start .+ eachindex(hazpars)),
                         [Symbol.(parnames)]) # make sure this is a vector
             else
                 haz_struct = 
                     _ExponentialReg(
                         Symbol(hazname),
                         hazdat,
-                        # hazpars,
-                        view(parameters, hazpars_start .+ eachindex(hazpars)),
                         Symbol.(parnames))
             end
 
@@ -152,8 +148,6 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _Weibull(
                         Symbol(hazname),
                         hazdat,
-                        # hazpars,
-                        view(parameters, hazpars_start .+ eachindex(hazpars)),
                         Symbol.(parnames))
                         
             elseif hazards[h].family == "weiPH"
@@ -175,8 +169,6 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _WeibullPH(
                         Symbol(hazname),
                         hazdat[:,Not(1)],
-                        # hazpars,
-                        view(parameters, hazpars_start .+ eachindex(hazpars)),
                         Symbol.(parnames))
 
             else
@@ -195,8 +187,6 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _WeibullReg(
                         Symbol(hazname),
                         hazdat,
-                        # hazpars,
-                        view(parameters, hazpars_start .+ eachindex(hazpars)),
                         Symbol.(parnames),
                         UnitRange(1, npars),
                         UnitRange(1 + npars, 2 * npars))
@@ -237,9 +227,7 @@ function build_totalhazards(_hazards, tmat)
                 _TotalHazardAbsorbing()
         else
             _totalhazards[h] = 
-                _TotalHazardTransient(
-tmat[h, findall(tmat[h,:] .!= 0)]
-                )
+                _TotalHazardTransient(tmat[h, findall(tmat[h,:] .!= 0)])
         end
     end
 
@@ -270,7 +258,7 @@ end
 
 Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference.
 """
-function multistatemodel(hazards::Hazard...;data::DataFrame)
+function multistatemodel(hazards::Hazard...; data::DataFrame)
 
     # get indices for each subject in the dataset
     subjinds = get_subjinds(data)

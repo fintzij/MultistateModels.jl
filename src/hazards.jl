@@ -10,7 +10,7 @@ function survprob(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}
     # solve the quadrature problem
     exp(-quadgk(
         t -> MultistateModels.tothaz(
-            t, 
+            t,
             rowind, 
             _totalhazard,
             _hazards;

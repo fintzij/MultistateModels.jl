@@ -46,16 +46,4 @@ function fit_exact(model::MultistateModel)
 
 end
 
-function testfun(p)
-    ((p[1] - 1.0))^2
-end
-td = TwiceDifferentiable(testfun, [1.0]; autodiff = :forward)
-Optim.minimizer(optimize(td, [1.0], BFGS()))
 
-
-function f(x)
-    return (1.0 - x[1])^2
-end
-initial_x = zeros(1)
-td = TwiceDifferentiable(f, initial_x; autodiff = :forward)
-Optim.minimizer(optimize(td, initial_x, Newton()))
