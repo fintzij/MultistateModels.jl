@@ -178,7 +178,7 @@ p = 1.0; lp = 0.0
 
 # loghaz(t,lp) = lp[1] # or log(total hazard)
 loghaz(t, lp) = lp[1]
-haz(t, lp) = exp(lp[1])
+haz(t, lp; data = [1.0,]) = data[1] * exp(lp[1])
 cumulhaz = IntegralProblem(haz, 0.0, 1.0, lp)
 
 # this solves the integral from 0 to 1 of h(t) = exp(lp[1])
@@ -189,6 +189,12 @@ solve(remake(cumulhaz, ub = 2.1, p = 1.2), QuadGKJL())
 # how do we pass data with closures?
 function loghaz_outer(t, lp, data)
     (t, lp) -> loghaz_inner(t, lp, data)
+end
+
+data = [2.0,]
+function survprob_outer(t, lp, data, i) 
+    cumulhaz = IntegralProblem(haz, 0.0, 1.0, lp)
+    solve(cumulhaz, QuadGKJL())
 end
 
 function loghaz_inner(t, lp, data, i)
@@ -214,7 +220,7 @@ function loglik(p, model)
     return(-1.0 * ll)
 end
 
-model = (X = XX,)
+model = (X = XX, )
 
 # now find p using Optimization.jl
 optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
@@ -228,3 +234,37 @@ solve(IntegralProblem(haz, 0, 10), QuadGKJL(), reltol=1e-3, abstol=1e-3)
 
 # Jon thinks that loghaz can be anything as long as loglik has a strict signature and the integrand in the integrand of the cumulative hazard has a strict signature. 
 loghaz(p[MSM.tmat[X.samplepaths[k].statefrom, X.samplepaths[k].stateto]], X.samplepaths[k].tstart, X.samplepaths[k].tstop, otherargs...)
+
+
+# this solves the problem of passing data but not the creation of a new integral problem in each call
+function g(lb, ub, p0, d) 
+    solve(IntegralProblem(
+        (x,p) -> x .* p .* d,
+        lb,
+        ub,
+        p0), QuadGKJL())
+end
+
+@time begin
+    for k in 1:1e6
+        g(1.0, 3.2, 10.0, 2.1)
+    end
+end
+
+### This works but it's sketchy
+D = [1.0,]
+d = view(D, 1)
+ip3 = IntegralProblem((x,p) -> x * p * d[1], 0.0, 1.0, p)
+solve(ip3, QuadGKJL())
+
+function h(p, lb, ub, d)
+    D[1] = d
+    remake(ip3, lb = lb, ub = ub, p = p)
+    solve(ip3, QuadGKJL())
+end
+
+@time begin
+    for k in 1:1e6
+        h(10.0, 1.0, 3.2, 2.1)
+    end
+end
