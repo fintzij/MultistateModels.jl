@@ -245,16 +245,31 @@ function g(lb, ub, p0, d)
         p0), QuadGKJL())
 end
 
+function g2(lb::Float64, ub::Float64, p::Float64, d::Float64) 
+    lb0::Float64 = lb
+    ub0::Float64 = ub
+    p0::Float64 = p
+    d0::Float64 = d
+    solve(IntegralProblem(
+        (x,p) -> x .* p .* d0,
+        lb0,
+        ub0,
+        p0), QuadGKJL())
+end
+
 @time begin
     for k in 1:1e6
-        g(1.0, 3.2, 10.0, 2.1)
+        g2(1.0, 3.2, 10.0, 2.1)
     end
 end
+
+
 
 ### This works but it's sketchy
 D = [1.0,]
 d = view(D, 1)
-ip3 = IntegralProblem((x,p) -> x * p * d[1], 0.0, 1.0, p)
+i = 1
+ip3 = IntegralProblem((x,p) -> x * p * data[i,], 0.0, 1.0, p)
 solve(ip3, QuadGKJL())
 
 function h(p, lb, ub, d)
@@ -268,3 +283,10 @@ end
         h(10.0, 1.0, 3.2, 2.1)
     end
 end
+
+#### To-do
+# Refactor model
+# - parameters live separately within optimization/simulation, returned with model fit or used as initial values
+# - closed form hazards, cumulative hazards, etc.
+# - refactor survival and cumulative hazards
+# what should 
