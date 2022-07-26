@@ -81,17 +81,18 @@ end
 
 Return the exponential cause-specific hazards.
 """
-function call_haz(t::Float64, rowind::Int64, _hazard::_Exponential; give_log = true)
+# RESUME HERE - This is the signature we want
+function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Exponential; give_log = true)
     log_haz = _hazard.parameters[1]
     give_log ? log_haz : exp(log_haz)
 end
 
 """
-    call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialReg; give_log = true)
+    call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialPH; give_log = true)
 
 Return the exponential cause-specific hazards with covariate adjustment.
 """
-function call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialReg; give_log = true)
+function call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialPH; give_log = true)
     log_haz = dot(_hazard.parameters, _hazard.data[rowind,:])
     give_log ? log_haz : exp(log_haz)
 end
@@ -110,24 +111,6 @@ function call_haz(t::Float64, rowind::Int64, _hazard::_Weibull; give_log = true)
     # compute hazard - do we need a special case for t=0?
     log_haz = 
         log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t) 
-
-    give_log ? log_haz : exp(log_haz)
-end
-
-"""
-    call_haz(t::Float64, rowind::Int64, _hazard::_WeibullReg; give_log = true)
-
-Return the Weibull cause-specific hazards with covariate adjustment.
-"""
-function call_haz(t::Float64, rowind::Int64, _hazard::_WeibullReg; give_log = true)
-
-    # scale and shape
-    log_scale = dot(_hazard.parameters[_hazard.scaleinds], _hazard.data[rowind,:])
-    log_shape = dot(_hazard.parameters[_hazard.shapeinds], _hazard.data[rowind,:])
-
-    # compute hazard - do we need a special case for t = 0?
-    log_haz = 
-        log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
 
     give_log ? log_haz : exp(log_haz)
 end

@@ -1,24 +1,30 @@
 """
     Hazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
 
-Composite type for a cause-specific hazard function. Documentation to follow. 
+Specify a cause-specific hazard function. 
+
+# Arguments
+- 'hazard': regression formula for the (log) hazard, parsed using StatsModels.jl.
+- 'family': parameterization for the baseline hazard, one of "exp" for exponential, "wei" for Weibull, "gom" for Gompertz (not yet implemented),  "ms" for M-spline (on the baseline hazard, not yet implemented), or "bs" for B-spline (on the log baseline hazard, not yet implemented). 
+- 'statefrom': state number for the origin state.
+- 'stateto': state number for the destination state.
 """
 struct Hazard
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
-    family::String     # one of "exp", "wei", "weiPH", gg", or "sp"
+    family::String     # one of "exp", "wei", "gom", "ms", or "bs"
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
 end
 
 """
-Abstract struct for internal _Hazard types
+Abstract struct for internal _Hazard types.
 """
 abstract type _Hazard end
 
 """
 Exponential cause-specific hazard.
 """
-Base.@kwdef mutable struct _Exponential <: _Hazard
+Base.@kwdef struct _Exponential <: _Hazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
@@ -27,7 +33,7 @@ end
 """
 Exponential cause-specific hazard with covariate adjustment. Rate is a log-linear function of covariates.
 """
-Base.@kwdef mutable struct _ExponentialReg <: _Hazard
+Base.@kwdef struct _ExponentialPH <: _Hazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
@@ -36,27 +42,17 @@ end
 """
 Weibull cause-specific hazard.
 """
-Base.@kwdef mutable struct _Weibull <: _Hazard
+Base.@kwdef struct _Weibull <: _Hazard
     hazname::Symbol
     data::Array{Float64} # just an intercept
     parnames::Vector{Symbol}
 end
 
-"""
-Weibull cause-specific hazard with covariate adjustment. Scale and shape are log-linear functions of covariates.
-"""
-Base.@kwdef mutable struct _WeibullReg <: _Hazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    scaleinds::UnitRange{Int64}
-    shapeinds::UnitRange{Int64}
-end
 
 """
 Weibull cause-specific proportional hazard. The baseline hazard is Weibull and covariates have a multiplicative effect vis-a-vis the baseline hazard.
 """
-Base.@kwdef mutable struct _WeibullPH <: _Hazard
+Base.@kwdef struct _WeibullPH <: _Hazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
@@ -86,7 +82,7 @@ end
 
 Mutable struct that fully specifies a multistate process for simulation or inference. 
 """
-Base.@kwdef struct MultistateModel 
+Base.@kwdef mutable struct MultistateModel 
     data::DataFrame
     parameters::Vector{Vector{Float64}} # only for transportability
     hazards::Vector{_Hazard}

@@ -39,8 +39,8 @@ dat_interval =
               trt = [0, 0, 1, 1, 0, 0],
               age = [23, 23, 32, 32, 50, 50])
 
-# hazards = (h12, h23, h13)
-# dat = dat_exact2
+hazards = (h12, h23, h13)
+data = dat_exact2
 
 # create multistate model object
 msm_expwei = multistatemodel(h12, h23, h13, h21; data = dat_exact2)

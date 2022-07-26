@@ -120,13 +120,13 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                         [Symbol.(parnames)]) # make sure this is a vector
             else
                 haz_struct = 
-                    _ExponentialReg(
+                    _ExponentialPH(
                         Symbol(hazname),
                         hazdat,
                         Symbol.(parnames))
             end
 
-        elseif hazards[h].family == "wei" || hazards[h].family == "weiPH"
+        elseif hazards[h].family == "wei" 
 
             # number of parameters
             npars = size(hazdat, 2)
@@ -150,13 +150,13 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                         hazdat,
                         Symbol.(parnames))
                         
-            elseif hazards[h].family == "weiPH"
+            else
 
                 # vector for parameters
                 hazpars = zeros(Float64, 1 + npars)
 
                 # append to model parameters
-                append!(parameters, hazpars)
+                push!(parameters, hazpars)
                 
                 # parameter names
                 parnames = 
@@ -170,29 +170,9 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                         Symbol(hazname),
                         hazdat[:,Not(1)],
                         Symbol.(parnames))
-
-            else
-
-                # vector for parameters
-                hazpars = zeros(Float64, npars * 2)
-
-                # append to model parameters
-                append!(parameters, hazpars)
-                
-                # parameter names
-                parnames = vec(hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2])
-
-                # generate struct
-                haz_struct = 
-                    _WeibullReg(
-                        Symbol(hazname),
-                        hazdat,
-                        Symbol.(parnames),
-                        UnitRange(1, npars),
-                        UnitRange(1 + npars, 2 * npars))
             end
 
-        elseif hazards[h].family == "gam"
+        elseif hazards[h].family == "gom"
         elseif hazards[h].family == "gg"
         else # semi-parametric family
         end

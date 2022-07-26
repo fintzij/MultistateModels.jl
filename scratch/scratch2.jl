@@ -274,9 +274,54 @@ remake(ip2, p=4.4)
 
 # trying out the autodiff example here
 function testf(p)
-    p0.pars = p
+    p0.pars = [p[1],]
     h(p0, 0.0, 1.0)[1]
 end
+
+
+## Jason's scratch stuff for making ForwardDiff work
+XX = rand(Exponential(1), 10000)
+p = [1.0]; lp = [0.0]
+
+# loghaz(t,lp) = lp[1] # or log(total hazard)
+loghaz(t, lp) = lp[1]
+haz(t, lp) = exp(lp[1])
+cumulhaz = IntegralProblem(haz, 0.0, 1.0, lp)
+
+# x would be the endpoints of the time interval
+# p is anything? or a vector?
+function logsurv(parameters, model, rowind) # model object contains data
+    -solve(remake(cumulhaz, ub = model.X[rowind], p = parameters[1]), QuadGKJL())[1]
+end
+
+# logsurv(x,lp) = -1.0 * x * exp(lp[1]) 
+
+# this works, need to modify this so that p are parameters and X is a model object
+function loglik(p, model)
+    ll = 0.0
+    for k in eachindex(model.X)
+        ll += loghaz(model.X[k], p[1]) + logsurv(p[1], model, k)
+    end
+    return(-1.0 * ll)
+end
+
+model = (X = XX,)
+
+# now find p using Optimization.jl
+optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+prob = OptimizationProblem(optf, [0.1,], model)
+sol = solve(prob, BFGS())
+
+
+function fd(q)
+    loglik(q, model)
+end
+
+ForwardDiff.gradient(fd, [0.0])
+
+
+
+
 
 #### To-do
 # Refactor model
