@@ -245,43 +245,37 @@ function g(lb, ub, p0, d)
         p0), QuadGKJL())
 end
 
-function g2(lb::Float64, ub::Float64, p::Float64, d::Float64) 
-    lb0::Float64 = lb
-    ub0::Float64 = ub
-    p0::Float64 = p
-    d0::Float64 = d
-    solve(IntegralProblem(
-        (x,p) -> x .* p .* d0,
-        lb0,
-        ub0,
-        p0), QuadGKJL())
+
+### This works 
+mutable struct intargs
+    pars::Vector{Float64}
+    data::Vector{Float64}
 end
 
+p0 = intargs([1.0,], [2.2,])
+p1 = intargs([2.2,], [5.3,])
+ip = IntegralProblem((x,p) -> x * p.pars[1] * p.data[1], 0.0, 1.0, p0)
+solve(ip, QuadGKJL())
+
+# the signature for this should be consistent
+function h(p2, lb, ub)
+    solve(remake(ip, lb = lb, ub = ub, p = p2), QuadGKJL())
+end
+
+p2 = (pars = [2.2], data = [3.3])
 @time begin
     for k in 1:1e6
-        g2(1.0, 3.2, 10.0, 2.1)
+        h(p1, 1.0, 3.4)
     end
 end
 
+ip2 = IntegralProblem((x,p) -> x * p, 1.0, 2.2, 3.3)
+remake(ip2, p=4.4)
 
-
-### This works but it's sketchy
-D = [1.0,]
-d = view(D, 1)
-i = 1
-ip3 = IntegralProblem((x,p) -> x * p * data[i,], 0.0, 1.0, p)
-solve(ip3, QuadGKJL())
-
-function h(p, lb, ub, d)
-    D[1] = d
-    remake(ip3, lb = lb, ub = ub, p = p)
-    solve(ip3, QuadGKJL())
-end
-
-@time begin
-    for k in 1:1e6
-        h(10.0, 1.0, 3.2, 2.1)
-    end
+# trying out the autodiff example here
+function testf(p)
+    p0.pars = p
+    h(p0, 0.0, 1.0)[1]
 end
 
 #### To-do
