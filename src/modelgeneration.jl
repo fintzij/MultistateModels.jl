@@ -72,9 +72,6 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
 
     # initialize a dictionary for indexing into the vector of hazards
     hazkeys = Dict{Symbol, Int64}()
-    
-    # counter for tracking indices of views
-    hazpars_start = 0
 
     # assign a hazard function
     for h in eachindex(hazards) 
@@ -131,17 +128,17 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
             # number of parameters
             npars = size(hazdat, 2)
 
+            # vector for parameters
+            hazpars = zeros(Float64, 1 + npars)
+
+            # append to model parameters
+            push!(parameters, hazpars)
+
             # generate hazard struct
             if npars == 1
-
-                # vector for parameters
-                hazpars = zeros(Float64, npars * 2)
-
-                # append to model parameters
-                append!(parameters, hazpars)
                 
                 # parameter names
-                parnames = vec(hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2])
+                parnames = vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2])
 
                 # create struct
                 haz_struct = 
@@ -151,18 +148,12 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                         Symbol.(parnames))
                         
             else
-
-                # vector for parameters
-                hazpars = zeros(Float64, 1 + npars)
-
-                # append to model parameters
-                push!(parameters, hazpars)
                 
                 # parameter names
                 parnames = 
                     vcat(
-                        hazname * "_scale",
                         hazname * "_shape",
+                        hazname * "_scale",
                         hazname*"_".*coefnames(hazschema)[2][Not(1)])
                         
                 haz_struct = 
@@ -179,9 +170,6 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
 
         # note: want a symbol that names the hazard + vector of symbols for parameters
         _hazards[h] = haz_struct
-
-        # increment parameter starting index
-        hazpars_start += length(hazpars)
     end
 
     return _hazards, parameters, hazkeys

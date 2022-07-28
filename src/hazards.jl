@@ -83,53 +83,50 @@ Return the exponential cause-specific hazards.
 """
 # RESUME HERE - This is the signature we want
 function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Exponential; give_log = true)
-    log_haz = _hazard.parameters[1]
-    give_log ? log_haz : exp(log_haz)
+    give_log ? parameters[1] : exp(parameters[1])
 end
 
 """
-    call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialPH; give_log = true)
+    call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_ExponentialPH; give_log = true)
 
 Return the exponential cause-specific hazards with covariate adjustment.
 """
-function call_haz(t::Float64, rowind::Int64, _hazard::_ExponentialPH; give_log = true)
-    log_haz = dot(_hazard.parameters, _hazard.data[rowind,:])
+function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_ExponentialPH; give_log = true)
+    log_haz = dot(parameters, _hazard.data[rowind,:])
     give_log ? log_haz : exp(log_haz)
 end
 
 """
-    call_haz(t::Float64, rowind::Int64, _hazard::_Weibull; give_log = true)
+    call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Weibull; give_log = true)
 
-Return the Weibull cause-specific hazards.
+Return the Weibull cause-specific hazards. No covariate adjustement, parameterized as in Section 2.2.2 of Kalbfleisch and Prentice.
 """
-function call_haz(t::Float64, rowind::Int64, _hazard::_Weibull; give_log = true)
+function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Weibull; give_log = true)
 
     # scale and shape
-    log_scale = _hazard.parameters[1]
-    log_shape = _hazard.parameters[2]
+    log_shape = parameters[1]
+    log_scale = parameters[2]
 
     # compute hazard - do we need a special case for t=0?
     log_haz = 
-        log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t) 
+        exp(log_shape) * log_scale + log_shape + expm1(log_shape) * log(t)
 
     give_log ? log_haz : exp(log_haz)
 end
 
 """
-    call_haz(t::Float64, rowind::Int64, _hazard::_WeibullPH; give_log = true)
+    call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_WeibullPH; give_log = true)
 
-Return the Weibull cause-specific proportional hazards.
+Return the Weibull cause-specific proportional hazards. Weibull proportional hazards model parameterized like in Section 2.3.1 of Kalbfleisch and Prentice.
 """
-function call_haz(t::Float64, rowind::Int64, _hazard::_WeibullPH; give_log = true)
+function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_WeibullPH; give_log = true)
 
     # scale and shape
-    log_scale = _hazard.parameters[1]
-    log_shape = _hazard.parameters[2]
-    log_PH = dot(_hazard.parameters[3:end], _hazard.data[rowind,:])
+    log_shape = parameters[1]
 
     # compute hazard - do we need a special case for t = 0?
     log_haz = 
-        log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t) + log_PH
+        log_shape + expm1(log_shape) * log(t) + dot(parameters[2:end], _hazard.data[rowind,:])
 
     give_log ? log_haz : exp(log_haz)
 end
