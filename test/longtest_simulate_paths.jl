@@ -20,7 +20,6 @@ mean(etimes1) # there's still a bug
 mean(etimes2)
 
 # plot histogram of event times
-
 h1 = histogram(etimes1, 
           normalize = true,
           label = "Simulated",

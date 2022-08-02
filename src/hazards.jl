@@ -81,7 +81,6 @@ end
 
 Return the exponential cause-specific hazards.
 """
-# RESUME HERE - This is the signature we want
 function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Exponential; give_log = true)
     give_log ? parameters[1] : exp(parameters[1])
 end
@@ -128,7 +127,7 @@ function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazar
 
     # compute hazard - do we need a special case for t=0?
     log_haz = 
-        exp(log_shape) * log_scale + log_shape + expm1(log_shape) * log(t)
+        log_shape + expm1(log_shape) * log(t) + exp(log_shape) * log_scale 
 
     give_log ? log_haz : exp(log_haz)
 end
@@ -146,7 +145,7 @@ function call_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Float64}, ro
 
     # cumulative hazard
     log_cumul_haz = 
-        shape * log_scale + log(ub ^ shape - lb ^ shape)
+        log(ub ^ shape - lb ^ shape) + shape * log_scale
 
     give_log ? log_cumul_haz : exp(log_cumul_haz)
 end
@@ -161,7 +160,7 @@ function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazar
     # scale and shape
     log_shape = parameters[1]
 
-    # compute hazard - do we need a special case for t = 0?
+    # compute hazard
     log_haz = 
         log_shape + expm1(log_shape) * log(t) + dot(parameters[2:end], _hazard.data[rowind,:])
 
@@ -180,7 +179,7 @@ function call_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Float64}, ro
 
     # cumulative hazard
     log_cumul_haz = 
-        dot(parameters[2:end], _hazard.data[rowind,:]) + log(ub ^ shape - lb ^ shape)
+        log(ub ^ shape - lb ^ shape) + dot(parameters[2:end], _hazard.data[rowind,:])
 
     give_log ? log_cumul_haz : exp(log_cumul_haz)
 end

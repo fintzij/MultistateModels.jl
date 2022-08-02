@@ -139,29 +139,22 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                 
                 # parameter names
                 parnames = vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2])
-
-                # create struct
-                haz_struct = 
-                    _Weibull(
-                        Symbol(hazname),
-                        hazdat,
-                        Symbol.(parnames))
                         
             else
                 
                 # parameter names
                 parnames = 
                     vcat(
-                        hazname * "_shape",
-                        hazname * "_scale",
+                        hazname * "_shape_(Intercept)",
+                        hazname * "_scale_(Intercept)",
                         hazname*"_".*coefnames(hazschema)[2][Not(1)])
-                        
-                haz_struct = 
+            end
+
+            haz_struct = 
                     _WeibullPH(
                         Symbol(hazname),
-                        hazdat[:,Not(1)],
+                        hazdat,
                         Symbol.(parnames))
-            end
 
         elseif hazards[h].family == "gom"
         elseif hazards[h].family == "gg"
