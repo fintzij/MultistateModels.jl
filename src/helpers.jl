@@ -1,13 +1,19 @@
 """
     set_parameters!(model::MultistateModel, newvalues::Vector{Float64})
 
-Set model parameters given a vector of values. Assigns `newvalues`` to `model.parameters`, which are then propagated to subarrays in cause-specific hazards.
+Set model parameters given a vector of values. Copies `newvalues`` to `model.parameters`.
 """
-function set_parameters!(model::MultistateModel, newvalues::Vector)
+function set_parameters!(model::MultistateModel, newvalues::Vector{Vector{Float64}})
     
     # check that we have the right number of parameters
     if(length(model.parameters) != length(newvalues))
         error("New values and model parameters are not of the same length.")
+    end
+
+    for i in eachindex(model.parameters)
+        if(length(model.parameters[i]) != length(newvalues[i]))
+            error("New values for hazard $i and model parameters for that hazard are not of the same length.")
+        end
     end
 
     copyto!(model.parameters, newvalues)
@@ -16,28 +22,28 @@ end
 """
     set_parameters!(model::MultistateModel, newvalues::Tuple)
 
-Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assigns new values to `model.hazards[i].parameters`, where `i` indexes the cause-specific hazards in the order they appear in the model object. Parameters for cause-specific hazards are automatically propagated to `model.parameters`.
+Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assigns new values to `model.parameters[i]`, where `i` indexes the cause-specific hazards in the order they appear in the model object.
 """
 function set_parameters!(model::MultistateModel, newvalues::Tuple)
     # check that there is a vector of parameters for each cause-specific hazard
-    if(length(model.hazards) != length(newvalues))
+    if(length(model.parameters) != length(newvalues))
         error("Number of supplied parameter vectors not equal to number of cause-specific hazards.")
     end
 
     for i in eachindex(newvalues)
         # check that we have the right number of parameters
-        if(length(model.hazards[i].parameters) != length(newvalues[i]))
+        if(length(model.parameters[i]) != length(newvalues[i]))
             error("New values and parameters for cause-specific hazard $i are not of the same length.")
         end
 
-        copyto!(model.hazards[i].parameters, newvalues[i])
+        copyto!(model.parameters[i], newvalues[i])                   
     end
 end
 
 """
     set_parameters!(model::MultistateModel, newvalues::NamedTuple)
 
-Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  Parameters for cause-specific hazards are automatically propagated to `model.parameters`.
+Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  
 """
 function set_parameters!(model::MultistateModel, newvalues::NamedTuple)
     
@@ -47,11 +53,12 @@ function set_parameters!(model::MultistateModel, newvalues::NamedTuple)
     for i in eachindex(value_keys)
 
         # check length of supplied parameters
-        if length(newvalues[value_keys[i]]) != length(model.hazards[model.hazkeys[value_keys[i]]].parameters)
+        if length(newvalues[value_keys[i]]) != 
+                length(model.parameters[model.hazkeys[value_keys[i]]])
             error("The new parameter values for $value_keys[i] are not the expected length.")
         end
 
-        copyto!(model.hazards[i].parameters, newvalues[value_keys[i]])
+        copyto!(model.parameters[i], newvalues[value_keys[i]])
     end
 end
 
