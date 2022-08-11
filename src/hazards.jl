@@ -1,79 +1,77 @@
 """
-    
-    prob(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
+    survprob(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
 
-Compute the survival probability over the interval from `lb` to `ub` by integrating the total hazard via quadrature.
-"""
-
-function survprob(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
-
-    # solve the quadrature problem
-    exp(-quadgk(
-        t -> MultistateModels.tothaz(
-            t,
-            rowind, 
-            _totalhazard,
-            _hazards;
-            give_log = false),
-        lb,
-        ub)[1])
-
-end
-
-"""
-    cumulhaz(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
-
-Compute the cumulative hazard over the interval from `lb` to `ub` by integrating the total hazard via quadrature.
-"""
-function cumulhaz(_totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}, lb::Float64, ub::Float64, rowind::Int64)
-    
-    # solve the quadrature problem
-    quadgk(
-        t -> MultistateModels.tothaz(
-            t, 
-            rowind, 
-            _totalhazard,
-            _hazards;
-            give_log = false),
-        lb,
-        ub)[1]
-end
-
-"""
-    # Arguments 
-- `t::Float64`: current time
-- `rowind::Int64`: row index in data
-- `_totalhazard::_TotalHazardAbsorbing`: total hazard from an absorbing state, empty but indicates the type for dispatch
-- `_hazards::_Hazard`: vector of cause-specific hazards
-- `give_log::Bool`: should the log total hazard be returned (default)
-
-Return the total hazard for an absorbing state, which is always zero.
-""" 
-function tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = false)
-    give_log ? -Inf : 0
-end
-
-"""
-    tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
-
-Return the log-total hazard out of a transient state. 
+Return the survival probability over the interval [lb, ub]. 
 
 # Arguments 
-- `t::Float64`: current time
+- `lb::Float64`: start time
+- `ub::Float64`: end time
+- `parameters::Vector{Vector{Float64}}`: model parameters, a vector of vectors
 - `rowind::Int64`: row index in data
 - `_totalhazard::_TotalHazardTransient`: total hazard from transient state, contains indices for hazards that contribute to the total hazard
 - `_hazards::_Hazard`: vector of cause-specific hazards
 - `give_log::Bool`: should the log total hazard be returned (default)
 """
-function tothaz(t::Float64, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+function survprob(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard})
 
-    # log total hazard
+    # log total cumulative hazard
+    exp(-total_cumulhaz(lb, ub, parameters, rowind, _totalhazard, _hazards; give_log = false))
+end
+
+"""
+    total_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+
+Return the log-total cumulative hazard out of a transient state over the interval [lb, ub]. 
+
+# Arguments 
+- `lb::Float64`: start time
+- `ub::Float64`: end time
+- `parameters::Vector{Vector{Float64}}`: model parameters, a vector of vectors
+- `rowind::Int64`: row index in data
+- `_totalhazard::_TotalHazardTransient`: total hazard from transient state, contains indices for hazards that contribute to the total hazard
+- `_hazards::_Hazard`: vector of cause-specific hazards
+- `give_log::Bool`: should the log total hazard be returned (default)
+"""
+function total_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+
+    # log total cumulative hazard
     log_tot_haz = 
         logsumexp(
-            map(x -> call_haz(t, rowind, x), _hazards[_totalhazard.components]))
+            map(x -> 
+                call_cumulhaz(
+                    lb,
+                    ub, 
+                    parameters[x],
+                    rowind, 
+                    _hazards[x];
+                    give_log = true
+                ), _totalhazard.components
+            )
+        )
     
     # return the log, or not
     give_log ? log_tot_haz : exp(log_tot_haz)
+end
+
+"""
+    total_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true)
+
+Return zero log-total cumulative hazard over the interval [lb, ub] as the current state is absorbing. 
+
+# Arguments 
+- `lb::Float64`: start time
+- `ub::Float64`: end time
+- `parameters::Vector{Vector{Float64}}`: model parameters, a vector of vectors
+- `rowind::Int64`: row index in data
+- `_totalhazard::_TotalHazardAbsorbing`: absorbing state.
+- `_hazards::_Hazard`: vector of cause-specific hazards
+- `give_log::Bool`: should the log total hazard be returned (default)
+"""
+function total_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true)
+
+    # return 0 cumulative hazard
+    give_log ? -Inf : 0
+
 end
 
 """

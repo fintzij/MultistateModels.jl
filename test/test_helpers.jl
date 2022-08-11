@@ -14,7 +14,6 @@
 end
 
 # Test parameter setting function
-
 @testset "test_set_parameters!" begin
 
     vals = randn(length(msm_expwei.parameters))

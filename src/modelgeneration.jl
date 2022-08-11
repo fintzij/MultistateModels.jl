@@ -250,16 +250,14 @@ function multistatemodel(hazards::Hazard...; data::DataFrame)
     # set_parameter_views!(parameters, _hazards)
 
     # return the multistate model
-    model = 
-        MultistateModel(
-            data,
-            parameters,
-            _hazards,
-            _totalhazards,
-            tmat,
-            hazkeys,
-            subjinds
-        )
+    model = MultistateModel(
+        data,
+        parameters,
+        _hazards,
+        _totalhazards,
+        tmat,
+        hazkeys,
+        subjinds)
 
     return model
 end
