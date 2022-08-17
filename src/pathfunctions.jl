@@ -110,7 +110,7 @@ end
 
 Extract sample paths from a multistate model's data field and return an array of SamplePath objcets.
 """
-function extract_paths(model)
+function extract_paths(model::MultistateModel)
 
     # get IDs
     nsubj = length(model.subjectindices)

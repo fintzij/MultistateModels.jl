@@ -1,38 +1,38 @@
 """
-    survprob(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+    survprob(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard})
 
 Return the survival probability over the interval [lb, ub]. 
 
 # Arguments 
-- `lb::Float64`: start time
-- `ub::Float64`: end time
-- `parameters::Vector{Vector{Float64}}`: model parameters, a vector of vectors
-- `rowind::Int64`: row index in data
+- `lb`: start time
+- `ub`: end time
+- `parameters`: model parameters, a vector of vectors
+- `rowind`: row index in data
 - `_totalhazard::_TotalHazardTransient`: total hazard from transient state, contains indices for hazards that contribute to the total hazard
 - `_hazards::_Hazard`: vector of cause-specific hazards
 - `give_log::Bool`: should the log total hazard be returned (default)
 """
-function survprob(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard})
+function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard})
 
     # log total cumulative hazard
     exp(-total_cumulhaz(lb, ub, parameters, rowind, _totalhazard, _hazards; give_log = false))
 end
 
 """
-    total_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
 
 Return the log-total cumulative hazard out of a transient state over the interval [lb, ub]. 
 
 # Arguments 
-- `lb::Float64`: start time
-- `ub::Float64`: end time
-- `parameters::Vector{Vector{Float64}}`: model parameters, a vector of vectors
-- `rowind::Int64`: row index in data
+- `lb`: start time
+- `ub`: end time
+- `parameters`: model parameters, a vector of vectors
+- `rowind`: row index in data
 - `_totalhazard::_TotalHazardTransient`: total hazard from transient state, contains indices for hazards that contribute to the total hazard
 - `_hazards::_Hazard`: vector of cause-specific hazards
 - `give_log::Bool`: should the log total hazard be returned (default)
 """
-function total_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
 
     # log total cumulative hazard
     log_tot_haz = 
@@ -54,20 +54,20 @@ function total_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Vector{Floa
 end
 
 """
-    total_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true)
+    total_cumulhaz(lb, ub, parameters, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true)
 
 Return zero log-total cumulative hazard over the interval [lb, ub] as the current state is absorbing. 
 
 # Arguments 
-- `lb::Float64`: start time
-- `ub::Float64`: end time
-- `parameters::Vector{Vector{Float64}}`: model parameters, a vector of vectors
-- `rowind::Int64`: row index in data
+- `lb`: start time
+- `ub`: end time
+- `parameters`: model parameters, a vector of vectors
+- `rowind`: row index in data
 - `_totalhazard::_TotalHazardAbsorbing`: absorbing state.
 - `_hazards::_Hazard`: vector of cause-specific hazards
 - `give_log::Bool`: should the log total hazard be returned (default)
 """
-function total_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true)
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true)
 
     # return 0 cumulative hazard
     give_log ? -Inf : 0
@@ -75,49 +75,49 @@ function total_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Vector{Floa
 end
 
 """
-    call_haz(t::Float64, rowind::Int64, _hazard::_Exponential; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_Exponential; give_log = true)
 
 Return the exponential cause-specific hazards.
 """
-function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Exponential; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_Exponential; give_log = true)
     give_log ? parameters[1] : exp(parameters[1])
 end
 
 """
-    call_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Exponential; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Exponential; give_log = true)
 
 Cumulative hazard for the exponential hazards over the interval [lb, ub]. 
 """
-function call_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Exponential; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Exponential; give_log = true)
     give_log ? parameters[1] + log(ub - lb) : exp(parameters[1] + log(ub - lb))
 end
 
 """
-    call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_ExponentialPH; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
 
 Return the exponential cause-specific hazards with covariate adjustment.
 """
-function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_ExponentialPH; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
     log_haz = dot(parameters, _hazard.data[rowind,:])
     give_log ? log_haz : exp(log_haz)
 end
 
 """
-    call_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_ExponentialPH; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
 
 Cumulative hazard for exponential proportional hazards over the interval [lb, ub].
 """
-function call_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_ExponentialPH; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
     log_haz = dot(parameters, _hazard.data[rowind,:])
     give_log ? log_haz + log(ub - lb) : exp(log_haz + log(ub - lb))
 end
 
 """
-    call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Weibull; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
 
 Return the Weibull cause-specific hazards. No covariate adjustement, parameterized as in Section 2.2.2 of Kalbfleisch and Prentice.
 """
-function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Weibull; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
 
     # scale and shape
     log_shape = parameters[1]
@@ -131,11 +131,11 @@ function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazar
 end
 
 """
-    call_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Weibull; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true)
 
 Cumulative hazard for Weibulll hazards over the interval [lb, ub].
 """
-function call_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_Weibull; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true)
 
     # scale and shape
     shape = exp(parameters[1])
@@ -149,11 +149,11 @@ function call_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Float64}, ro
 end
 
 """
-    call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_WeibullPH; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true)
 
 Return the Weibull cause-specific proportional hazards. Weibull proportional hazards model parameterized like in Section 2.3.1 of Kalbfleisch and Prentice.
 """
-function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_WeibullPH; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true)
 
     # scale and shape
     log_shape = parameters[1]
@@ -166,11 +166,11 @@ function call_haz(t::Float64, parameters::Vector{Float64}, rowind::Int64, _hazar
 end
 
 """
-    call_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_WeibullPH; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log = true)
 
 Cumulative hazard for Weibulll proportional hazards over the interval [lb, ub].
 """
-function call_cumulhaz(lb::Float64, ub::Float64, parameters::Vector{Float64}, rowind::Int64, _hazard::_WeibullPH; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log = true)
 
     # scale and shape
     shape = exp(parameters[1])

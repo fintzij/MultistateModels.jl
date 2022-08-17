@@ -11,27 +11,28 @@
     # what is the cumulative incidence from time 0 to 2 of exponential with mean time to event of 5
     # should be around 0.32967995
     interval_incid = 
-        1 - MultistateModels.survprob(msm_expwei.totalhazards[1], msm.hazards, 0.0, 2.0, 1)
+        1 - MultistateModels.survprob(0.0, 2.0, msm_expwei.parameters, 1, msm_expwei.totalhazards[1], msm_expwei.hazards)
         
-    @test cdf(Exponential(5), 2) ≈ interval_incid
+    # note that Distributions.jl uses the mean parameterization
+    # i.e., 1/rate. 
+    @test cdf(Exponential(0.5), 2) ≈ interval_incid
 end
 
 # tests for individual hazards
 @testset "test_hazards_exp" begin
     
-    # set parameters, no covariate adjustment
-    msm_expwei.hazards[1].parameters[1] = 0.8
+    # create a parameters object
+    msm_expwei.parameters[1] = [0.8,]
+    msm_expwei.parameters[2] = [0.0, 0.6, -0.4, 0.15]
 
-    @test MultistateModels.call_haz(0.0, 0, msm_expwei.hazards[1]; give_log = true) == 0.8
+    # exponential hazards, no covariate adjustment
+    @test isa(msm_expwei.hazards[1], MultistateModels._Exponential)
+    @test MultistateModels.call_haz(0.0, msm_expwei.parameters[1], 1, msm_expwei.hazards[1]; give_log = true) == 0.8
+    @test MultistateModels.call_haz(0.0, msm_expwei.parameters[1], 1, msm_expwei.hazards[1]; give_log = false) == exp(0.8)
 
-    @test MultistateModels.call_haz(0.0, 0, msm_expwei.hazards[1]; give_log = false) == exp(0.8)
-
-    # set parameters, exponential with covariate adjustment
-    pars = [0.0, 0.6, -0.4, 0.15]
-    
-    msm_expwei.hazards[2].parameters[1:4] = pars
 
     # correct hazard value on log scale, for each row of data
+    pars = msm_expwei.parameters[2]
     truevals = 
         [dat_exact2.trt[1] * pars[2] + dat_exact2.age[1] * pars[3] + 
         dat_exact2.trt[1] * dat_exact2.age[1] * pars[4],
@@ -48,7 +49,6 @@ end
         @test MultistateModels.call_haz(0.0, h, msm_expwei.hazards[2]; give_log = false) == exp(truevals[h])
     end
 end
-
 
 @testset "test_hazards_weibull" begin
 

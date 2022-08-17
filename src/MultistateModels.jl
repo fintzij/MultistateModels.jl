@@ -4,10 +4,10 @@ using Chain
 using DataFrames
 using Distributions
 using LinearAlgebra
-using Optim
-using QuadGK
-using Integrals
-using Optimization
+using Optim # for simulation
+using Optimization # for fitting
+using QuadGK # going to change this eventually
+using Integrals # replaces QuadGK
 using StatsModels
 using StatsFuns
 
