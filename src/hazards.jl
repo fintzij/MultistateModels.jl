@@ -181,3 +181,69 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log
 
     give_log ? log_cumul_haz : exp(log_cumul_haz)
 end
+
+"""
+    next_state_probs!(ns_probs, scur, ind, model)
+
+Update ns_probs with probabilities of transitioning to each state based on hazards from current state. 
+
+# Arguments 
+- ns_probs: vector of probabilities corresponding to each state, modified in place
+- t: time at which hazards should be calculated
+- scur: current state
+- ind: index at complete dataset
+- parameters: vector of vectors of model parameters
+- hazards: vector of cause-specific hazards
+- totalhazards: vector of total hazards
+- tmat: transition matrix
+"""
+function next_state_probs!(ns_probs, t, scur, ind, parameters, hazards, totalhazards, tmat)
+
+    # set ns_probs to zero for impossible transitions
+    ns_probs[findall(tmat[scur,:] .== 0.0)] .= 0.0
+
+    # indices for possible destination states
+    trans_inds = findall(tmat[scur,:] .!= 0.0)
+        
+    # calculate log hazards for possible transitions
+    ns_probs[trans_inds] = 
+        map(x -> call_haz(t, parameters[x], ind, hazards[x]), totalhazards[scur].components)
+
+    # normalize ns_probs
+    ns_probs[trans_inds] = 
+        softmax(ns_probs[totalhazards[scur].components])
+end
+
+"""
+    next_state_probs!(ns_probs, scur, ind, model)
+
+Return a vector ns_probs with probabilities of transitioning to each state based on hazards from current state. 
+
+# Arguments 
+- t: time at which hazards should be calculated
+- scur: current state
+- ind: index at complete dataset
+- parameters: vector of vectors of model parameters
+- hazards: vector of cause-specific hazards
+- totalhazards: vector of total hazards
+- tmat: transition matrix
+"""
+function next_state_probs(t, scur, ind, parameters, hazards, totalhazards, tmat)
+
+    # initialize vector of next state transition probabilities
+    ns_probs = zeros(size(model.tmat, 2))
+
+    # indices for possible destination states
+    trans_inds = findall(tmat[scur,:] .!= 0.0)
+        
+    # calculate log hazards for possible transitions
+    ns_probs[trans_inds] = 
+        map(x -> call_haz(t, parameters[x], ind, hazards[x]), totalhazards[scur].components)
+
+    # normalize ns_probs
+    ns_probs[trans_inds] = 
+        softmax(ns_probs[totalhazards[scur].components])
+
+    # return the next state probabilities
+    return ns_probs
+end

@@ -25,7 +25,7 @@ function simulate(model::MultistateModel; nsim = 1, data = true, paths = false, 
 
     # throw an error if data format is not an admissible option
     if !any(data_format .== ["minimal", "normal", "maximal"])
-        error("Inadmissible data format requested. Choose one of \"minimal\", \"normal\", or \"maximal\"")
+        error("Choose one of the following data formats: \"minimal\", \"normal\", or \"maximal\"")
     end
 
     # number of subjects
@@ -132,14 +132,13 @@ function simulate_path(model::MultistateModel, subj::Int64)
     while keep_going
         
         # calculate event probability over the next interval
-        interval_incid = 
-            (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + tstop - tcur, model.parameters, ind, model.totalhazards[scur], model.hazards))
+        interval_incid = (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + tstop - tcur, model.parameters, ind, model.totalhazards[scur], model.hazards))
 
         # check if event happened in the interval
         if u < (cuminc + interval_incid) && u >= cuminc
 
             # update the current time
-            optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t, model.parameters, ind, model.totalhazards[scur], model.hazards))) - log(u))^2), 0.0, log(tstop - tcur), [(tstop - tcur) / 2,], Fminbox(BFGS()); autodiff = :forward)
+            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards))) - log(u))^2), 0.0, tstop - tcur)
 
             if Optim.converged(timeincrement)
                 timeinstate += timeincrement.minimizer
@@ -148,7 +147,7 @@ function simulate_path(model::MultistateModel, subj::Int64)
             end            
 
             # calculate next state transition probabilities 
-            next_state_probs!(ns_probs, timeinstate, scur, ind, model)
+            next_state_probs!(ns_probs, timeinstate, scur, ind, model.parameters, model.hazards, model.totalhazards, model.tmat)
 
             # sample the next state
             scur = rand(Categorical(ns_probs))
@@ -200,55 +199,5 @@ function simulate_path(model::MultistateModel, subj::Int64)
     end
 
     return SamplePath(subj, times, states)
-end
-
-
-"""
-    next_state_probs!(ns_probs, scur, ind, model)
-
-Update ns_probs with vector probabilities of transitioning to each state based on hazards from current state. ns_probs will then get fed into a multinomial sampler.
-
-# Arguments 
-- ns_probs: Vector of probabilities corresponding to each state, modified in place
-- t: time at which hazards should be calculated
-- scur: current state
-- ind: index at complete dataset
-- model: MultistateModel object
-"""
-function next_state_probs!(ns_probs, t, scur, ind, model)
-
-    # set ns_probs to zero for impossible transitions
-    ns_probs[findall(model.tmat[scur,:] .== 0.0)] .= 0.0
-
-    # indices for possible destination states
-    trans_inds = findall(model.tmat[scur,:] .!= 0.0)
-        
-    # calculate log hazards for possible transitions
-    ns_probs[trans_inds] = 
-        map(x -> call_haz(t, ind, x), model.hazards[model.totalhazards[scur].components])
-
-    # normalize ns_probs
-    ns_probs[trans_inds] = 
-        softmax(ns_probs[model.totalhazards[scur].components])
-end
-
-function next_state_probs(t, scur, ind, model)
-
-    # initialize vector of next state transition probabilities
-    ns_probs = zeros(size(model.tmat, 2))
-
-    # indices for possible destination states
-    trans_inds = findall(model.tmat[scur,:] .!= 0.0)
-    
-    # calculate log hazards for possible transitions
-    ns_probs[trans_inds] = 
-        map(x -> call_haz(t, ind, x), model.hazards[model.totalhazards[scur].components])
-
-    # return the next state transition probabilities
-    ns_probs[trans_inds] = 
-        softmax(ns_probs[model.totalhazards[scur].components])
-
-    # return the next state probabilities
-    return ns_probs
 end
 
