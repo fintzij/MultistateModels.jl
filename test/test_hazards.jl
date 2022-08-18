@@ -43,22 +43,22 @@ end
     
     # loop through each row of data embedded in the msm_expwei object
     for h in axes(msm_expwei.data, 1)
-        @test MultistateModels.call_haz(0.0, h, msm_expwei.hazards[2]; give_log = true) == 
+        @test MultistateModels.call_haz(0.0,  msm_expwei.parameters[2], h, msm_expwei.hazards[2]; give_log = true) == 
             truevals[h]
 
-        @test MultistateModels.call_haz(0.0, h, msm_expwei.hazards[2]; give_log = false) == exp(truevals[h])
+        @test MultistateModels.call_haz(0.0, msm_expwei.parameters[2], h, msm_expwei.hazards[2]; give_log = false) == exp(truevals[h])
     end
 end
 
 @testset "test_hazards_weibull" begin
 
-    # set parameters, log(scale, shape), no covariate adjustment
-    msm_expwei.hazards[3].parameters[1:2] = [0.2, -0.25]
+    # set parameters, log(shape, scale), no covariate adjustment
+    msm_expwei.parameters[3] = [-0.25, 0.2]
 
     # h(t) = shape * scale^shape * t^(shape-1)
-    @test MultistateModels.call_haz(1.0, 0, msm_expwei.hazards[3]; give_log = true) == -0.25 + exp(-0.25) * 0.2
+    @test MultistateModels.call_haz(1.0, msm_expwei.parameters[3], 1, msm_expwei.hazards[3]; give_log = true) == -0.25 + exp(-0.25) * 0.2
 
-    @test MultistateModels.call_haz(1.0, 0, msm_expwei.hazards[3]; give_log = false) == exp(-0.25 + exp(-0.25) * 0.2)
+    @test MultistateModels.call_haz(1.0, msm_expwei.paramters[3], 0, msm_expwei.hazards[3]; give_log = false) == exp(-0.25 + exp(-0.25) * 0.2)
 
     # set parameters, log(scale_intercept, scale_trt, shape_intercept, shape_trt) weibull with covariate adjustment
     # also set time at which to check hazard for correctness
