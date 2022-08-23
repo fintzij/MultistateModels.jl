@@ -56,9 +56,9 @@ end
     msm_expwei.parameters[3] = [-0.25, 0.2]
 
     # h(t) = shape * scale^shape * t^(shape-1)
-    @test MultistateModels.call_haz(1.0, msm_expwei.parameters[3], 1, msm_expwei.hazards[3]; give_log = true) == -0.25 + exp(-0.25) * 0.2
+    @test MultistateModels.call_haz(1.0, msm_expwei.parameters[3], 1, msm_expwei.hazards[3]; give_log = true) == exp(-0.25) * 0.2 - 0.25
 
-    @test MultistateModels.call_haz(1.0, msm_expwei.paramters[3], 0, msm_expwei.hazards[3]; give_log = false) == exp(-0.25 + exp(-0.25) * 0.2)
+    @test MultistateModels.call_haz(1.0, msm_expwei.parameters[3], 1, msm_expwei.hazards[3]; give_log = false) == exp(-0.25 + exp(-0.25) * 0.2)
 
     # set parameters, log(scale_intercept, scale_trt, shape_intercept, shape_trt) weibull with covariate adjustment
     # also set time at which to check hazard for correctness
@@ -81,13 +81,13 @@ end
     end
     
     ### now test weibull proportional hazards
-    pars = [0.2, -0.25, log(1.5)]
+    pars = [-0.25, 0.2, log(1.5)]
     msm_weiph.hazards[2].parameters[1:3] = pars
 
     # baseline hazard
     t = 1.0
-    log_scale = pars[1]
-    log_shape = pars[2]
+    log_shape = pars[1]
+    log_scale = pars[2]
     log_blh = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
 
     for h in axes(msm_weiph.data, 1)

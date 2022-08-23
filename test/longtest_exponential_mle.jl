@@ -8,7 +8,7 @@ include("test/setup_2state_exp_trans.jl")
 path = simulate(msm; data = false, paths = true)
 
 # simulate a collection of sample paths
-paths = simulate(msm; nsim = 100, paths = true, data = true)
+paths = simulate(msm; nsim = 10000, paths = true, data = false)
 
 # person 1 has an exponential hazard with rate 0.2
 # person 2 has an exponential hazard with rate 0.4
