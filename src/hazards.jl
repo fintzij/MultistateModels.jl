@@ -123,7 +123,7 @@ function call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
     log_shape = parameters[1]
     log_scale = parameters[2]
 
-    # compute hazard - do we need a special case for t=0?
+    # compute hazard 
     log_haz = 
         log_shape + expm1(log_shape) * log(t) + exp(log_shape) * log_scale 
 
