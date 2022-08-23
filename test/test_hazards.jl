@@ -64,7 +64,7 @@ end
     # also set time at which to check hazard for correctness
     pars = [0.2, 0.25, -0.3, 0.25]
     t = 1.0
-    msm_expwei.hazards[4].parameters[1:4] = pars
+    msm_expwei.parameters[4] = pars
 
     # loop through each row of data embedded in the msm_expwei object, comparing truth to MultistateModels.call_haz output
     for h in axes(msm_expwei.data, 1)
