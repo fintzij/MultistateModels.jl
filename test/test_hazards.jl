@@ -81,13 +81,13 @@ end
     end
     
     ### now test weibull proportional hazards
-    pars = [0.2, -0.25, log(1.5)]
+    pars = [-0.25, 0.2, log(1.5)]
     msm_weiph.hazards[2].parameters[1:3] = pars
 
     # baseline hazard
     t = 1.0
-    log_scale = pars[1]
-    log_shape = pars[2]
+    log_shape = pars[1]
+    log_scale = pars[2]
     log_blh = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
 
     for h in axes(msm_weiph.data, 1)

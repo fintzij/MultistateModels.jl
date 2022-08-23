@@ -151,7 +151,7 @@ end
 """
     call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true)
 
-Return the Weibull cause-specific proportional hazards. Weibull proportional hazards model parameterized like in Section 2.3.1 of Kalbfleisch and Prentice.
+Return the Weibull cause-specific proportional hazards. Weibull proportional hazards model parameterized like in the `rstanarm` package in R.
 """
 function call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true)
 
