@@ -3,8 +3,8 @@ using Chain
 using DataFrames
 using MultistateModels
 
-h12_ph = Hazard(@formula(0 ~ 1), "weiPH", 1, 2);
-h21_ph = Hazard(@formula(0 ~ 1 + trt), "weiPH", 2, 1);
+h12_ph = Hazard(@formula(0 ~ 1), "wei", 1, 2);
+h21_ph = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 1);
 
 dat = 
     DataFrame(id = collect(1:3),

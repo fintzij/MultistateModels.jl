@@ -32,6 +32,8 @@ hazards = (h12, h23, h13)
 # for interval censored panel data (case 1)
 # simulation + inference: :tstart and :tstop are times at which the process is observed
 
+### NOTE 8/25/2022 - discuss different observation schemes and how simulated data should be returned. the current configuration doesn't seem to actually work because, e.g., exactly observed sample paths are returned as interval censored at times given by the original dataset that provides simulation context.
+
 dat_exact = 
     DataFrame(id = collect(1:3),
               tstart = [0, 0, 0],

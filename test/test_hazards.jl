@@ -60,7 +60,7 @@ end
 
     @test MultistateModels.call_haz(1.0, msm_expwei.parameters[3], 1, msm_expwei.hazards[3]; give_log = false) == exp(-0.25 + exp(-0.25) * 0.2)
 
-    # set parameters, log(scale_intercept, scale_trt, shape_intercept, shape_trt) weibull with covariate adjustment
+    # set parameters, log(shape_intercept, scale_intercept, scale_trt) weibull PH with covariate adjustment
     # also set time at which to check hazard for correctness
     pars = [0.2, 0.25, -0.3]
     t = 1.0
@@ -68,39 +68,23 @@ end
 
     # loop through each row of data embedded in the msm_expwei object, comparing truth to MultistateModels.call_haz output
     for h in axes(msm_expwei.data, 1)
-        log_scale = 
-            pars[2] + pars[3]*dat_exact2.trt[h]
-        log_shape = 
-            pars[1] + pars[3]*dat_exact2.trt[h]
-            
-        true_val = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
-        
+                    
+        true_val = pars[1] + expm1(pars[1]) * log(t) + dot(msm_expwei.hazards[4].data[h,:], pars[2:3])
+                
         @test MultistateModels.call_haz(1.0, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=true) == true_val
 
         @test MultistateModels.call_haz(1.0, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=false) == exp(true_val)
     end
-    
-    ### now test weibull proportional hazards
-    pars = [-0.25, 0.2, log(1.5)]
-    msm_weiph.hazards[2] = pars
-
-    # baseline hazard
-    t = 1.0
-    log_shape = pars[1]
-    log_scale = pars[2]
-    log_blh = log_shape + exp(log_shape) * log_scale + expm1(log_shape) * log(t)
-
-    for h in axes(msm_weiph.data, 1)
-
-        true_val = log_blh + pars[3] * msm_weiph.data.trt[h]
-
-        @test MultistateModels.call_haz(1.0, h, msm_weiph.hazards[2]; give_log=true) == true_val
-
-        @test MultistateModels.call_haz(1.0, h, msm_weiph.hazards[2]; give_log=false) == exp(true_val)
-    end
 end
 
-@testset "test_totalhazards" begin
+@testset "test_cumulativehazards" begin
+    
+    # homework for eric
+
+end
+
+@testset "test_totalcumulativehazards" begin
+
 
     # set parameters
     msm_expwei.hazards[1].parameters[1] = 0.8

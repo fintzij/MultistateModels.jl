@@ -2,7 +2,7 @@ using MultistateModels
 using Distributions
 using Plots
 
-include("test/setup_2state_exp_trans.jl")
+include("test/setup_2statetrans_dat.jl")
 
 # simulate a single path
 path = simulate(msm; data = false, paths = true)

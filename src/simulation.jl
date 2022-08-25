@@ -58,7 +58,7 @@ function simulate(model::MultistateModel; nsim = 1, data = true, paths = false, 
                 samplepaths[j, i] = samplepath
             end
 
-            # observe path
+            # observe path - RESUME HERE, need to think about how data should be returned for different observation schemes
             if data == true
                 if data_format == "minimal"
                     datasets[j,i] = 

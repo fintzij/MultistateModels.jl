@@ -24,6 +24,9 @@ function fit_exact(model::MultistateModel)
     # initialize array of sample paths
     samplepaths = extract_paths(model)
 
+    # extract and initialize model parameters
+    parameters = copy(model.parameters)
+
     # the anonymous functino in optimize() will set parameter values, then evaluate log likelihood of each path and sum up results using loglik(samplepaths::Array{SamplePath}, model::MultistateModel) 
     function sum_ll(param; samplepaths = samplepaths, model = model)
         set_parameters!(model, param[eachindex(param)])

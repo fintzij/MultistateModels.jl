@@ -28,4 +28,7 @@ set_parameters!(
     (h12 = [log(0.2)],
      h21 = [log(0.5)]))
 
-paths = simulate(msm_2state_trans; paths = true, data = true);
+simdat, paths = simulate(msm_2state_trans; paths = true, data = true);
+
+# create multistate model object with the simulated data
+model = multistatemodel(h12, h21; data = simdat[1])
