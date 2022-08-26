@@ -71,16 +71,37 @@ end
                     
         true_val = pars[1] + expm1(pars[1]) * log(t) + dot(msm_expwei.hazards[4].data[h,:], pars[2:3])
                 
-        @test MultistateModels.call_haz(1.0, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=true) == true_val
+        @test MultistateModels.call_haz(t, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=true) == true_val
 
-        @test MultistateModels.call_haz(1.0, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=false) == exp(true_val)
+        @test MultistateModels.call_haz(t, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=false) == exp(true_val)
     end
 end
 
 @testset "test_cumulativehazards" begin
     
-    # homework for eric
+    # set parameters, lb (start time), and ub (end time)
+    msm_expwei.parameters[1] = [0.8,]
+    msm_expwei.parameters[2] = [0.0, 0.6, -0.4, 0.15]
+    lb = 0
+    ub = 5
 
+    # cumulative hazard for exponential cause specific hazards, no covariate adjustment
+    @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[1], 1, msm_expwei.hazards[1], give_log = true) == 0.8 + log(ub-lb)
+
+    # cumulative hazard for exponential proportional hazards over [lb, ub], with covariate adjustment
+    pars =  msm_expwei.parameters[2] 
+    log_haz = 
+        [pars[2]*dat_exact2.trt[1] + pars[3]*dat_exact2.age[1] + pars[4]*dat_exact2.trt[1]*dat_exact2.age[1],
+        pars[2]*dat_exact2.trt[2] + pars[3]*dat_exact2.age[2] + pars[4]*dat_exact2.trt[2]*dat_exact2.age[2],
+        pars[2]*dat_exact2.trt[1] + pars[3]*dat_exact2.age[3] + pars[4]*dat_exact2.trt[3]*dat_exact2.age[3]]
+    
+    truevals = log_haz .+ log(ub-lb)
+
+    for h in axes(msm_expwei.data, 1)
+        @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[2], h, msm_expwei.hazards[2], give_log = true) == truevals[h]
+
+        @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[2], h, msm_expwei.hazards[2], give_log = false) == exp(truevals[h])
+    end
 end
 
 @testset "test_totalcumulativehazards" begin
