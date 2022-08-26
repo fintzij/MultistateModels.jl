@@ -77,7 +77,7 @@ end
     end
 end
 
-@testset "test_cumulativehazards" begin
+@testset "test_cumulativehazards_exp" begin
     
     # set parameters, lb (start time), and ub (end time)
     msm_expwei.parameters[1] = [0.8,]
@@ -102,6 +102,24 @@ end
 
         @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[2], h, msm_expwei.hazards[2], give_log = false) == exp(truevals[h])
     end
+end
+
+@testset "test_cumulativehazards_weibull" begin
+
+    # set parameters, lb (start time), and ub (end time)
+    msm_expwei.parameters[3] = [-0.25, 0.2]
+    msm_expwei.parameters[4] = [0.2, 0.25, -0.3]
+    lb = 0
+    ub = 5
+
+    # cumulative hazard for weibullcause specific hazards, no covariate adjustment
+    @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], 1, msm_expwei.hazards[3], give_log = true) == log(ub^exp(-0.25)-lb^exp(-0.25)) + exp(-0.25)*0.2
+
+    @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], 1, msm_expwei.hazards[3], give_log = false) == exp(log(ub^exp(-0.25)-lb^exp(-0.25)) + exp(-0.25)*0.2)
+
+    # cumulative hazard for exponential proportional hazards over [lb, ub], with covariate adjustment
+    pars =  msm_expwei.parameters[4] 
+
 end
 
 @testset "test_totalcumulativehazards" begin
