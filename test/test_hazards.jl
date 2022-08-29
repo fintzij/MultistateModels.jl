@@ -33,7 +33,7 @@ end
 
     # correct hazard value on log scale, for each row of data
     pars = msm_expwei.parameters[2]
-    truevals = 
+    trueval = 
         [dat_exact2.trt[1] * pars[2] + dat_exact2.age[1] * pars[3] + 
         dat_exact2.trt[1] * dat_exact2.age[1] * pars[4],
         dat_exact2.trt[2] * pars[2] + dat_exact2.age[2] * pars[3] + 
@@ -43,10 +43,9 @@ end
     
     # loop through each row of data embedded in the msm_expwei object
     for h in axes(msm_expwei.data, 1)
-        @test MultistateModels.call_haz(0.0,  msm_expwei.parameters[2], h, msm_expwei.hazards[2]; give_log = true) == 
-            truevals[h]
+        @test MultistateModels.call_haz(0.0,  msm_expwei.parameters[2], h, msm_expwei.hazards[2]; give_log = true) == trueval[h]
 
-        @test MultistateModels.call_haz(0.0, msm_expwei.parameters[2], h, msm_expwei.hazards[2]; give_log = false) == exp(truevals[h])
+        @test MultistateModels.call_haz(0.0, msm_expwei.parameters[2], h, msm_expwei.hazards[2]; give_log = false) == exp(trueval[h])
     end
 end
 
@@ -69,11 +68,11 @@ end
     # loop through each row of data embedded in the msm_expwei object, comparing truth to MultistateModels.call_haz output
     for h in axes(msm_expwei.data, 1)
                     
-        true_val = pars[1] + expm1(pars[1]) * log(t) + dot(msm_expwei.hazards[4].data[h,:], pars[2:3])
+        trueval = pars[1] + expm1(pars[1]) * log(t) + dot(msm_expwei.hazards[4].data[h,:], pars[2:3])
                 
-        @test MultistateModels.call_haz(t, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=true) == true_val
+        @test MultistateModels.call_haz(t, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=true) == trueval
 
-        @test MultistateModels.call_haz(t, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=false) == exp(true_val)
+        @test MultistateModels.call_haz(t, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=false) == exp(trueval)
     end
 end
 
@@ -95,18 +94,18 @@ end
         pars[2]*dat_exact2.trt[2] + pars[3]*dat_exact2.age[2] + pars[4]*dat_exact2.trt[2]*dat_exact2.age[2],
         pars[2]*dat_exact2.trt[1] + pars[3]*dat_exact2.age[3] + pars[4]*dat_exact2.trt[3]*dat_exact2.age[3]]
     
-    truevals = log_haz .+ log(ub-lb)
+    trueval = log_haz .+ log(ub-lb)
 
     for h in axes(msm_expwei.data, 1)
-        @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[2], h, msm_expwei.hazards[2], give_log = true) == truevals[h]
+        @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[2], h, msm_expwei.hazards[2], give_log = true) == trueval[h]
 
-        @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[2], h, msm_expwei.hazards[2], give_log = false) == exp(truevals[h])
+        @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[2], h, msm_expwei.hazards[2], give_log = false) == exp(trueval[h])
     end
 end
 
 @testset "test_cumulativehazards_weibull" begin
 
-    # set parameters, lb (start time), and ub (end time)
+    # set up log parameters, lower bound, and upper bound
     msm_expwei.parameters[3] = [-0.25, 0.2]
     msm_expwei.parameters[4] = [0.2, 0.25, -0.3]
     lb = 0
@@ -117,8 +116,18 @@ end
 
     @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], 1, msm_expwei.hazards[3], give_log = false) == exp(log(ub^exp(-0.25)-lb^exp(-0.25)) + exp(-0.25)*0.2)
 
-    # cumulative hazard for exponential proportional hazards over [lb, ub], with covariate adjustment
+    # cumulative hazard for weibull proportional hazards over [lb, ub], with covariate adjustment
     pars =  msm_expwei.parameters[4] 
+    
+    # loop through each row of data embedded in the msm_expwei object, comparing truth to MultistateModels.call_cumulhaz output
+    for h in axes(msm_expwei.data, 1)
+                    
+        trueval = log(ub^exp(pars[1]) - lb^exp(pars[1])) + dot(msm_expwei.hazards[4].data[h,:], pars[2:3])
+                    
+        @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=true) == trueval
+    
+        @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log=false) == exp(trueval)
+    end
 
 end
 
