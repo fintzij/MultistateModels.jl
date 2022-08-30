@@ -4,9 +4,6 @@ using DataFrames
 using Distributions
 using MultistateModels
 
-# Stan will initialize parameters by sampling from N(0,1) unless given explicit parameters
-# This isn't crazy because e.g. brms will center covariates first
-
 h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
 h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1)
 
@@ -17,6 +14,10 @@ dat =
               statefrom = fill(1, 100),
               stateto = fill(2, 100),
               obstype = fill(1, 100))
+
+append!(dat, DataFrame(id=1,tstart=10.0,tstop=20.0,statefrom=2,stateto=1,obstype=2))
+append!(dat, DataFrame(id=1,tstart=20.0,tstop=30.0,statefrom=2,stateto=1,obstype=1))
+sort!(dat, [:id,])
 
 # create multistate model object
 msm_2state_trans = multistatemodel(h12, h21; data = dat)
@@ -30,5 +31,5 @@ set_parameters!(
 
 simdat, paths = simulate(msm_2state_trans; paths = true, data = true);
 
-# create multistate model object with the simulated data
-model = multistatemodel(h12, h21; data = simdat[1])
+# create multistate model object with the simulated datael(h12, h21; data = simdat[1])
+model = multistatemod
