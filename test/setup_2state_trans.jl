@@ -16,7 +16,7 @@ dat =
               tstop = [10, 20, 30, 10, 20, 30],
               statefrom = [1, 1, 1, 1, 1, 1],
               stateto = [2, 2, 1, 2, 1, 2],
-              obstype = [1, 1, 1, 1, 1, 1],
+              obstype = [1, 2, 3, 1, 0, 2],
               trt = [0, 1, 0, 1, 0, 1])
 
 # create multistate model object

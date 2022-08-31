@@ -6,6 +6,7 @@ Fit a model.
 function fit(model::MultistateModel; alg = "ml")
     
     # if sample paths are fully observed, maximize the likelihood directly
+    # Note: not doing obstype 0 for a while
     if all(model.data.obstype .== 1)
         fitted = fit_exact(model)
     end
