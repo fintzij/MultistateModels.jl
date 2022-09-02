@@ -12,10 +12,13 @@ Return the survival probability over the interval [lb, ub].
 - `_hazards::_Hazard`: vector of cause-specific hazards
 - `give_log::Bool`: should the log total hazard be returned (default)
 """
-function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard})
+function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
 
     # log total cumulative hazard
-    exp(-total_cumulhaz(lb, ub, parameters, rowind, _totalhazard, _hazards; give_log = false))
+    log_survprob = -total_cumulhaz(lb, ub, parameters, rowind, _totalhazard, _hazards; give_log = false)
+
+    # return survival probability or not
+    give_log ? log_survprob : exp(log_survprob)
 end
 
 """

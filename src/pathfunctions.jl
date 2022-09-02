@@ -122,3 +122,30 @@ function observe_path(samplepath::SamplePath, model::MultistateModel, subj::Int6
     return obsdat
 end
 
+
+"""
+    extract_paths(model::MultistateModel)
+
+Extract sample paths from a multistate model's data field and return an array of SamplePath objcets.
+"""
+function extract_paths(model::MultistateModel)
+
+    # get IDs
+    nsubj = length(model.subjectindices)
+
+    # initialize array of sample paths
+    samplepaths = Vector{SamplePath}(undef, nsubj)
+
+    # grab the sample paths
+    for i in eachindex(model.subjectindices)
+        
+        # grab the path
+        samplepaths[i] = 
+            SamplePath(
+                i,
+                [model.data[model.subjectindices[i], :tstart]; model.data[model.subjectindices[i][end], :tstop]],
+                [model.data[model.subjectindices[i], :statefrom]; model.data[model.subjectindices[i][end], :stateto]])
+    end
+
+    return samplepaths
+end

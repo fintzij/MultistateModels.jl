@@ -28,19 +28,9 @@ function fit_exact(model::MultistateModel)
     # extract and initialize model parameters
     parameters = copy(model.parameters)
 
-    # the anonymous functino in optimize() will set parameter values, then evaluate log likelihood of each path and sum up results using loglik(samplepaths::Array{SamplePath}, model::MultistateModel) 
-    function sum_ll(param; samplepaths = samplepaths, model = model)
-        set_parameters!(model, param[eachindex(param)])
-        -loglik(samplepaths, model)
-    end
-
-    sum_ll_ad = TwiceDifferentiable(sum_ll, model.parameters; autodiff = :forward)
-
-    optimize(sum_ll_ad, model.parameters, Newton())
-
-    sum_ll_ad = OnceDifferentiable(sum_ll, model.parameters; autodiff = :forward)
-
-    optimize(sum_ll_ad, model.parameters, BFGS())
+    # optimize
+    prob = OptimizationProblem(MultistateModels.loglik, parameters, MultistateModels.ExactData(samplepaths, model))
+    solve(prob, NelderMead())
 
     
     optimize(function(x) 
@@ -49,5 +39,3 @@ function fit_exact(model::MultistateModel)
             end, model.parameters)
 
 end
-
-

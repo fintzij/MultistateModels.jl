@@ -329,3 +329,16 @@ ForwardDiff.gradient(fd, [0.0])
 # - closed form hazards, cumulative hazards, etc.
 # - refactor survival and cumulative hazards
 # what should 
+
+# MWE for optimization with vector of vectors for parameters
+import Base.zero
+
+using Optimization
+rosenbrock(x,p) =  (p[1] - x[1][1])^2 + p[2] * (x[2][1] - x[1][1]^2)^2
+x0 = [[0.0,], [0.0,]]
+p  = [1.0,100.0]
+
+prob = OptimizationProblem(rosenbrock,x0,p)
+
+using OptimizationOptimJL
+sol = solve(prob,NelderMead())

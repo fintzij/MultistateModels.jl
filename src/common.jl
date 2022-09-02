@@ -102,3 +102,13 @@ struct SamplePath
     times::Vector{Float64}
     states::Vector{Int64}
 end
+
+"""
+    ExactData(samplepaths::Array{SamplePath}, model::MultistateModel)
+
+Struct containing exactly observed sample paths and a model object, used in fitting a multistate model given completely observed data.
+"""
+struct ExactData
+    samplepaths::Array{SamplePath}
+    model::MultistateModel
+end

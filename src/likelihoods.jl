@@ -51,14 +51,14 @@ function loglik(parameters, path::SamplePath, model::MultistateModel)
             if tstop <= time_R
                 # event happens in (time_L, time_R]
                 # accumulate log(Pr(T ≥ timeinstate | T ≥ timespent))
-                log_surv_prob -= cumulhaz(model.totalhazards[scur], model.hazards, timespent, timeinstate, comp_dat_ind)
+                log_surv_prob += survprob(timespent, timeinstate, parameters, comp_dat_ind, model.totalhazards[scur], model.hazards; give_log = true)
 
                 # increment log likelihood
                 ll += log_surv_prob
 
                 # if event happened, accrue hazard
                 if snext != scur
-                    ll += call_haz(timeinstate, comp_dat_ind, model.hazards[model.tmat[scur, snext]])
+                    ll += call_haz(timeinstate, parameters[model.tmat[scur, snext]], comp_dat_ind, model.hazards[model.tmat[scur, snext]]; give_log = true)
                 end
 
                 # break out of the while loop
@@ -68,8 +68,8 @@ function loglik(parameters, path::SamplePath, model::MultistateModel)
                 # event doesn't hapen in (time_L, time_R]
                 # accumulate log-survival
                 # accumulate log(Pr(T ≥ time_R | T ≥ timespent))
-                log_surv_prob -= cumulhaz(model.totalhazards[scur], model.hazards, timespent, timespent + time_R - tcur, comp_dat_ind)
-
+                log_surv_prob += survprob(timespent, timespent + time_R - tcur, parameters, comp_dat_ind, model.totalhazards[scur], model.hazards; give_log = true)
+                
                 # increment timespent
                 timespent += time_R - tcur
 
@@ -100,5 +100,19 @@ Return sum of log likelihoods for all sample paths. Use mapreduce() to call logl
 function loglik(parameters, samplepaths::Array{SamplePath}, model::MultistateModel)
 
     # send each element of samplepaths to loglik(path::SamplePath, model::MultistateModel) and sum up results
-    return mapreduce(x -> loglik(x, model), +, samplepaths)
+    return mapreduce(x -> loglik(parameters, x, model), +, samplepaths)
+end
+
+"""
+    loglik(parameters, exactdata::ExactData; neg = true) 
+
+Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. 
+"""
+
+function loglik(parameters, exactdata::ExactData; neg = true)
+
+    # send each element of samplepaths to loglik
+    ll = mapreduce(x -> loglik(parameters, x, exactdata.model), +, exactdata.samplepaths)
+
+    neg ? -ll : ll
 end
