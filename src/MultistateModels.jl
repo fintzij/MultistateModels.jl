@@ -1,11 +1,13 @@
 module MultistateModels
 
+using ArraysOfArrays
 using Chain
 using DataFrames
 using Distributions
 using LinearAlgebra
 using Optim # for simulation
 using Optimization # for fitting
+using OptimizationOptimJL # also for fitting
 using QuadGK # going to change this eventually
 using Integrals # replaces QuadGK
 using StatsModels

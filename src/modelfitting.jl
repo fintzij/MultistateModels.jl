@@ -26,7 +26,8 @@ function fit_exact(model::MultistateModel)
     samplepaths = extract_paths(model)
 
     # extract and initialize model parameters
-    parameters = copy(model.parameters)
+    # I think everything works if we use this view of the parameters object
+    parameters = flatview(model.parameters)
 
     # optimize
     prob = OptimizationProblem(MultistateModels.loglik, parameters, MultistateModels.ExactData(samplepaths, model))

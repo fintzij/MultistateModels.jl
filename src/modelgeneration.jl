@@ -68,7 +68,7 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
     _hazards = Vector{_Hazard}(undef, length(hazards))
 
     # initialize vector of parameters
-    parameters = Vector{Vector{Float64}}(undef, 0)
+    parameters = VectorOfVectors{Float64}()
 
     # initialize a dictionary for indexing into the vector of hazards
     hazkeys = Dict{Symbol, Int64}()
