@@ -53,7 +53,9 @@ function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
     end
 
     # vertically concatenate datasets
-    dat = mapslices(x -> reduce(vcat, x), datasets, dims = [1,])
+    if data == true
+        dat = mapslices(x -> reduce(vcat, x), datasets, dims = [1,])
+    end
 
     # return paths and data
     if paths == false && data == true
