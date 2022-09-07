@@ -133,47 +133,35 @@ end
 
 @testset "test_totalcumulativehazards" begin
 
+    # set parameters, lower bound, and upper bound
+    msm_expwei.parameters[1] = [0.8,]
+    msm_expwei.parameters[2] = [0.8, 0.6, -0.4, 0.15]
+    msm_expwei.parameters[3] = [0.8, 1.2]
+    msm_expwei.parameters[4] = [0.8, 0.25, 1.2]
 
-    # set parameters
-    msm_expwei.hazards[1].parameters[1] = 0.8
-    msm_expwei.hazards[2].parameters[1:4] = [0.8, 0.6, -0.4, 0.15]
-    msm_expwei.hazards[3].parameters[1:2] = [0.8, 1.2]
-    msm_expwei.hazards[4].parameters[1:4] = [0.8, 0.25, 1.2, 0.5]
+    lb=0
+    ub=5
 
-    # test total hazard for each origin state    
+    # test total cumulative hazard for each origin state    
     for h in axes(msm_expwei.data, 1) 
         for s in axes(msm_expwei.tmat, 1) 
 
             if s == 1
-                tot_haz = 
-                    MultistateModels.call_haz(1.0, h, msm_expwei.hazards[1]; give_log = false) + MultistateModels.call_haz(1.0, h, msm_expwei.hazards[2]; give_log = false)
+                total_cumulhaz = 
+                    MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[1], h, msm_expwei.hazards[1]; give_log = false) +
+                     MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[2], h, msm_expwei.hazards[2]; give_log = false)
                 
             elseif s == 2
-                tot_haz = 
-                    MultistateModels.call_haz(1.0, h, msm_expwei.hazards[3]; give_log = false) + MultistateModels.call_haz(1.0, h, msm_expwei.hazards[4]; give_log = false)
+                total_cumulhaz = 
+                    MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], h, msm_expwei.hazards[3]; give_log = false) +
+                     MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[4], h, msm_expwei.hazards[4]; give_log = false)
             else
-                tot_haz = 0.0
+                total_cumulhaz = 0.0
             end            
 
-            @test MultistateModels.tothaz(1.0, h, msm_expwei.totalhazards[s], msm_expwei.hazards; give_log = false) ≈ tot_haz
+            @test MultistateModels.total_cumulhaz(lb, ub, msm_expwei.parameters, h, msm_expwei.totalhazards[s], msm_expwei.hazards; give_log = false) ≈ total_cumulhaz
             
-            @test MultistateModels.tothaz(1.0, h, msm_expwei.totalhazards[s], msm_expwei.hazards; give_log = true) ≈ log(tot_haz)
+            @test MultistateModels.total_cumulhaz(lb, ub, msm_expwei.parameters, h, msm_expwei.totalhazards[s], msm_expwei.hazards; give_log = true) ≈ log(total_cumulhaz)
         end
     end
-end
-
-@testset "test_cumulativehazards" begin
-
-    msm_expwei.hazards[1].parameters[1] = 0.8
-    msm_expwei.hazards[2].parameters[1:4] = [0.8, 0.6, -0.4, 0.15]
-    msm_expwei.hazards[3].parameters[1:2] = [0.8, 1.2]
-    msm_expwei.hazards[4].parameters[1:4] = [0.8, 0.25, 1.2, 0.5]
-
-    MultistateModels.cumulhaz(
-        msm_expwei.totalhazards[1], 
-        msm_expwei.hazards, 
-        0.0,
-        1.1,
-        1)
-    
 end
