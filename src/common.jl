@@ -84,7 +84,7 @@ Mutable struct that fully specifies a multistate process for simulation or infer
 """
 Base.@kwdef mutable struct MultistateModel 
     data::DataFrame
-    parameters::Vector{Vector{Float64}} # only for transportability
+    parameters::VectorOfVectors # only for transportability
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}

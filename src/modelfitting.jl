@@ -31,12 +31,13 @@ function fit_exact(model::MultistateModel)
 
     # optimize
     prob = OptimizationProblem(MultistateModels.loglik, parameters, MultistateModels.ExactData(samplepaths, model))
-    solve(prob, NelderMead())
+    ests = solve(prob, NelderMead())
 
-    
-    optimize(function(x) 
-                set_parameters!(model, x)
-                -loglik(samplepaths, model)
-            end, model.parameters)
+    optf = OptimizationFunction(MultistateModels.loglik, Optimization.AutoForwardDiff())
+    prob = OptimizationProblem(optf, parameters, MultistateModels.ExactData(samplepaths, model))
+    sol = solve(prob,Newton())
+
+    opt = optimize(MultistateModels.loglik, parameters; autdiff = :forward)
+
 
 end

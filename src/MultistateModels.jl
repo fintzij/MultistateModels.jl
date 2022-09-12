@@ -7,7 +7,7 @@ using Distributions
 using LinearAlgebra
 using Optim # for simulation
 using Optimization # for fitting
-using OptimizationOptimJL # also for fitting
+using OptimizationOptimJL
 using QuadGK # going to change this eventually
 using Integrals # replaces QuadGK
 using StatsModels
