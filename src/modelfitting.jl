@@ -35,9 +35,11 @@ function fit_exact(model::MultistateModel)
 
     optf = OptimizationFunction(MultistateModels.loglik, Optimization.AutoForwardDiff())
     prob = OptimizationProblem(optf, parameters, MultistateModels.ExactData(samplepaths, model))
-    sol = solve(prob,Newton())
+    sol = solve(prob, BFGS())
 
-    opt = optimize(MultistateModels.loglik, parameters; autdiff = :forward)
+    # oh eff yes.
+    ll = pars -> MultistateModels.loglik(pars, MultistateModels.ExactData(samplepaths, model))
+    hess = inv(ForwardDiff.hessian(ll, sol.u))
 
 
 end
