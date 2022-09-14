@@ -16,9 +16,9 @@ dat =
               obstype = fill(1, 100))
 
 
-# append!(dat, DataFrame(id=1,tstart=10.0,tstop=20.0,statefrom=2,stateto=1,obstype=2))
-# append!(dat, DataFrame(id=1,tstart=20.0,tstop=30.0,statefrom=2,stateto=1,obstype=3))
-# sort!(dat, [:id,])
+append!(dat, DataFrame(id=1,tstart=10.0,tstop=20.0,statefrom=2,stateto=1,obstype=2))
+append!(dat, DataFrame(id=1,tstart=20.0,tstop=30.0,statefrom=2,stateto=1,obstype=3))
+sort!(dat, [:id,])
 
 # create multistate model object
 msm_2state_trans = multistatemodel(h12, h21; data = dat)

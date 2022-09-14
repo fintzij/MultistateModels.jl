@@ -30,16 +30,14 @@ function fit_exact(model::MultistateModel)
     parameters = flatview(model.parameters)
 
     # optimize
-    prob = OptimizationProblem(MultistateModels.loglik, parameters, MultistateModels.ExactData(samplepaths, model))
-    ests = solve(prob, NelderMead())
-
     optf = OptimizationFunction(MultistateModels.loglik, Optimization.AutoForwardDiff())
     prob = OptimizationProblem(optf, parameters, MultistateModels.ExactData(samplepaths, model))
-    sol = solve(prob, BFGS())
+    sol = solve(prob, Newton())
 
     # oh eff yes.
     ll = pars -> MultistateModels.loglik(pars, MultistateModels.ExactData(samplepaths, model))
     hess = inv(ForwardDiff.hessian(ll, sol.u))
 
-
+    # wrap results
+    
 end

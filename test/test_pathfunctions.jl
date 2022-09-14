@@ -7,17 +7,22 @@ include("setup_2state_trans.jl")
 
 samplepath = MultistateModels.simulate_path(model, 1)
 
-# Does it work when samplepath has no transitions between tstart (10.0) and tstop (20.0)?
+# Does it work when samplepath has no transitions between tstart (0.0) and tstop (10.0)?
 @testset "observe_path_no_transitions" begin
-    samplepath.times = [0.0, 5.5, 9.8, 21.4, 25.0, 27.8, 29.9, 31.2, 40]
-    samplepath.states = [1, 2, 1, 2, 2, 1, 1, 1, 2]
+    path = 
+        MultistateModels.SamplePath(
+            1, 
+            [0.0, 10.0], 
+            [1, 1])
+    
+    expected = ...
 
     # will need to make sure msm_2state_trans.data for subject 1 has a row with tstart=10.0 and tstop=20.0
     # pass the path, model, and subj to observe_path
     # and check that the output is what we expect
-    observed = MultistateModels.observe_path(samplepath, msm_2state_trans, 1)
+    observed = MultistateModels.observe_path(path, msm_2state_trans, 1)
 
-    @test 1+1 == 2
+    @test observed == expected
 end
 
 # Does it work when samplepath has transitions between tstart (10.0) and tstop (20.0), AND tstart is tied with a samplepath.times value?
