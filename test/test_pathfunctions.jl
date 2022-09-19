@@ -112,7 +112,23 @@ end
 end
 
 # Does it work when obstype changes from 3 to 1?
-@testset "observe_path_change_obs_type_3_to_1"
+@testset "observe_path_change_obs_type_3_to_1" begin
 
-# Change obstype from 3 to 1
-msm_2state_trans.data.obstype[msm_2state_trans.data.obstype.==3] .= 1
+    msm_2state_trans.data.obstype[msm_2state_trans.data.obstype.==3] .= 1
+
+    path = MultistateModels.SamplePath(
+        1, 
+        [0.0, 5.5, 9.8, 10.1, 11.7, 14.6, 20.4, 21.4, 25.0, 27.8, 29.9, 31.2, 40.0],
+        [1, 2, 1, 2, 1, 1, 1, 2, 2, 1, 1, 1, 2])
+
+    expected = DataFrame(id = fill(1, 10),
+                         tstart = [0, 5.5, 9.8, 10.0, 20.0, 20.4, 21.4, 25.0, 27.8, 29.9],
+                         tstop = [5.5, 9.8, 10.0, 20.0, 20.4, 21.4, 25.0, 27.8, 29.9, 30.0],
+                         statefrom = [1, 2, 1, 1, 1, 1, 2, 2, 1, 1],
+                         stateto = [2, 1, 1, 1, 1, 2, 2, 1, 1, 1],
+                         obstype = [1, 1, 1, 2, 1, 1, 1, 1, 1, 1])
+
+    observed = MultistateModels.observe_path(path, msm_2state_trans, 1)
+
+    @test observed == expected
+end
