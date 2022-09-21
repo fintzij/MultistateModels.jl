@@ -16,12 +16,19 @@ Q*S.vectors ≈ S.vectors*diagm(S.values)
 # what if we want to change the time interval? e.g., t2 - t1 = 5.4
 Sexp = S.vectors * diagm(exp.(S.values .* 5.4)) * inv(S.vectors)
 
-# try solving numerically
+# try solving numerically, time homogeneous case
 function update_func(du, u, p, t)
      # kolmogorov forward equation
-     du = u * p 
+     du = u * p
 end
 
+# try solving numerically - time inhomogeneous case
+# function update_func(du, u, p, t)
+#      # kolmogorov forward equation
+#      Q = make_Qmat(p,t) # because Q needs to be updated at each time step, potentially allocating and slow
+#      du = u * Q
+# end
+
 A = DiffEqArrayOperator(diagm(ones(3)), update_func = update_func)
-prob = ODEProblem(A, diagm(ones(3)), (10, 50.))
+prob = ODEProblem(A, diagm(ones(3)), (10, 50.), p)
 solve(prob)

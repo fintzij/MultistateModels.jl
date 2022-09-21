@@ -8,6 +8,7 @@ using LinearAlgebra
 using Optim # for simulation
 using Optimization # for fitting
 using OptimizationOptimJL
+using SciMLSensitivity
 using QuadGK # going to change this eventually
 using Integrals # replaces QuadGK
 using StatsModels
