@@ -47,5 +47,5 @@ end
 # this doesn't work
 p = [Q[1,2], Q[1,3], Q[2,1], Q[2,3]]
 A2 = DiffEqArrayOperator(zeros(3,3), update_func = update_func)
-prob2 = ODEProblem(A2, diagm(ones(3)), (0.0, 5.4), Q)
-solve(prob2, saveat = [collect(1:5); 5.4])
+prob2 = ODEProblem(A2, diagm(ones(3)), (0.0, 5.4), p)
+s2 = solve(prob2, saveat = [collect(1:5); 5.4])
