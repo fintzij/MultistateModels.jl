@@ -148,3 +148,4 @@ function check_data!(data::DataFrame, tmat::Matrix)
 
     # check that there are no rows for a subject after they hit an absorbing state
 end
+

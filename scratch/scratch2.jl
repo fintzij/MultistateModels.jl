@@ -44,7 +44,7 @@ function update_func(A,u,p,t)
      A[2,2] = -p[3] - p[4]
 end
 
-# this doesn't work
+# this works
 p = [Q[1,2], Q[1,3], Q[2,1], Q[2,3]]
 A2 = DiffEqArrayOperator(zeros(3,3), update_func = update_func)
 prob2 = ODEProblem(A2, diagm(ones(3)), (0.0, 5.4), p)

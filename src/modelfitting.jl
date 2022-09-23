@@ -46,14 +46,12 @@ end
 
 
 """
-    fit_interval(model::MultistateModel)
+    fit_markov_interval(model::MultistateModel)
 
-Fit a multistate model given all observed paths are interval censored (i.e. model.data.obstype .== 2) AND all hazards are exponential
+Fit a multistate markov model to interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential but possibly time-inhomogeneous).
 """
-function fit_interval(model::MultistateModel)
+function fit_markov_interval(model::MultistateModel)
 
-    # parse the data and hazards to generate the container of transition probability matrices
-    # for now, we don't have time-inhomogeneous smoothly varying baseline cause-specific hazards
-    # 
-
+    # identify unique covariate combinations and intervals
+    ucovars,ugaps,mapping = collapse_interval_dat(model.data)
 end
