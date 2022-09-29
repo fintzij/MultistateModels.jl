@@ -149,3 +149,59 @@ function extract_paths(model::MultistateModel)
 
     return samplepaths
 end
+
+"""
+    unique_interval_data(data::DataFrame; homogeneous)
+
+Find unique covariates and time intervals over which a multistate Markov process is piecewise homogeneous. 
+"""
+function unique_interval_data(data::DataFrame; homogeneous) 
+
+    # initialize mapping
+    mapping = zeros(Int64, nrow(data))
+
+    # check if the data contains covariates
+    if ncol(data) == 6
+        # no covariates
+        ucovars = nothing
+        
+        # if homogeneous mapping depends on gaps
+        if homogeneous
+            # get gap times
+            gaps = data.tstop - data.tstart
+
+            # unique gap times
+            uintervals = unique(gaps)
+
+            # match intervals to gap times
+            for i in eachindex(mapping)
+                mapping[i] = findfirst(uintervals .== gaps[i])
+            end
+       
+        else
+            # get intervals
+            intervals = data[:,[:tstart, :tstop]]
+
+            # get start and stop
+            uintervals = unique(intervals)
+
+            # match intervals to uniques
+            for i in eachindex(mapping)
+                mapping[i] = 
+                    findfirst(
+                        (uintervals[:,1] .== intervals[i,1]) .&
+                        (uintervals[:,2] .== intervals[i,2]))
+            end
+        end
+    else
+        if homogeneous
+            # get unique gaps
+            gaps_covars = 
+                DataFrame(
+                    gaps = data.tstop - data.tstart,
+                    covars = data[:,Not(1:6)])
+        else
+        end
+    end
+
+end
