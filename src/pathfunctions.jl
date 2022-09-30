@@ -157,8 +157,16 @@ Find unique covariates and time intervals over which a multistate Markov process
 """
 function unique_interval_data(data::DataFrame; timehomogeneous) 
 
+    # note - might be easier to identify unique covariates and intervals within unique covariates, construct mappings, and build transition probability matrices all in one go
+    # probably want TPMs as an array of nested arrays
+    # index should return the index for unique covariate comn and then the index for interval within unique covariate combn
+    # the reason is we'll be solving ODEs for all intervals
+
+
     # initialize mapping
-    mapping = zeros(Int64, nrow(data))
+    # maps each row in dataset to TPM
+    # first col is covar combn, second is interval
+    mapping = zeros(Int64, nrow(data), 2)
 
     # check if the data contains covariates
     if ncol(data) == 6
@@ -172,14 +180,14 @@ function unique_interval_data(data::DataFrame; timehomogeneous)
 
             # unique gap times
             index = 
-                DataFrame(tstart = zeros(length(uintervals)),
+                [DataFrame(tstart = zeros(length(uintervals)),
                           tstop  = uintervals,
-                          datind = 0)
+                          datind = 0),]
 
             # first instance of each gap time in the data
             for i in Base.OneTo(nrow(index))
                 index.datind[i] = 
-                    findfirst(intervals .== index.tstop[i])
+                    findfirst(intervals .== index[1].tstop[i])
             end
 
             # match intervals to gap times

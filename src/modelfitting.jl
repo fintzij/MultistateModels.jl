@@ -63,5 +63,5 @@ function fit_markov_interval(model::MultistateModel)
     # identify unique covariates/gaps/intervals (index)
     # mapping identifies which TPM applies to which row in the data
     index,mapping = 
-        unique_interval_data(model.data; timehomogeneous=true)
+        build_tpm_containers(model.data; timehomogeneous=true)
 end
