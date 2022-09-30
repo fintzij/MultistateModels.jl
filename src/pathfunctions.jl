@@ -155,52 +155,125 @@ end
 
 Find unique covariates and time intervals over which a multistate Markov process is piecewise homogeneous. 
 """
-function unique_interval_data(data::DataFrame; homogeneous) 
+function unique_interval_data(data::DataFrame; timehomogeneous) 
 
     # initialize mapping
     mapping = zeros(Int64, nrow(data))
 
     # check if the data contains covariates
     if ncol(data) == 6
-        # no covariates
-        ucovars = nothing
         
-        # if homogeneous mapping depends on gaps
-        if homogeneous
+        # if time homogeneous mapping depends on gaps
+        if timehomogeneous
+           
             # get gap times
-            gaps = data.tstop - data.tstart
+            intervals  = data.tstop - data.tstart
+            uintervals = unique(intervals)
 
             # unique gap times
-            uintervals = unique(gaps)
+            index = 
+                DataFrame(tstart = zeros(length(uintervals)),
+                          tstop  = uintervals,
+                          datind = 0)
+
+            # first instance of each gap time in the data
+            for i in Base.OneTo(nrow(index))
+                index.datind[i] = 
+                    findfirst(intervals .== index.tstop[i])
+            end
 
             # match intervals to gap times
             for i in eachindex(mapping)
-                mapping[i] = findfirst(uintervals .== gaps[i])
+                mapping[i] = findfirst(index.tstop .== intervals[i])
             end
        
         else
+
             # get intervals
             intervals = data[:,[:tstart, :tstop]]
 
-            # get start and stop
+            # get unique start and stop
             uintervals = unique(intervals)
+
+            # unique gap times
+            index = 
+                DataFrame(tstart = uintervals.tstart,
+                          tstop  = uintervals.tstop,
+                          datind = 0)
+
+            # first instance of each interval in the data
+            for i in Base.OneTo(nrow(index))
+                index.datind[i] = 
+                    findfirst((intervals.tstart .== index.tstart[i]) .&
+                              (intervals.tstop  .== index.tstop[i]))
+            end
 
             # match intervals to uniques
             for i in eachindex(mapping)
                 mapping[i] = 
                     findfirst(
-                        (uintervals[:,1] .== intervals[i,1]) .&
-                        (uintervals[:,2] .== intervals[i,2]))
+                        (index.tstart .== intervals.tstart[i]) .&
+                        (index.tstop  .== intervals.tstop[i]))
             end
         end
     else
-        if homogeneous
-            # get unique gaps
-            gaps_covars = 
-                DataFrame(
-                    gaps = data.tstop - data.tstart,
-                    covars = data[:,Not(1:6)])
+        # if time homogeneous mapping depends on gaps
+        if timehomogeneous
+           
+            # get gap times
+            intervals = select(data, [2;3;7:ncol(data)])
+            transform!(intervals, [:tstart, :tstop] => ((x,y) -> y - x) => :interval) 
+            select!(intervals, Not([:tstart, :tstop]))
+            select!(intervals, :interval, Not(:interval))
+                
+            # get unique intervals
+            uintervals = unique(intervals)
+
+            # unique gap times
+            index = 
+                DataFrame(tstart = zeros(length(uintervals)),
+                          tstop  = uintervals,
+                          datind = 0)
+
+            # first instance of each gap time in the data
+            for i in Base.OneTo(nrow(index))
+                index.datind[i] = 
+                    findfirst(intervals .== index.tstop[i])
+            end
+
+            # match intervals to gap times
+            for i in eachindex(mapping)
+                mapping[i] = findfirst(index.tstop .== intervals[i])
+            end
+       
         else
+
+            # get intervals
+            intervals = data[:,[:tstart, :tstop]]
+
+            # get unique start and stop
+            uintervals = unique(intervals)
+
+            # unique gap times
+            index = 
+                DataFrame(tstart = uintervals.tstart,
+                          tstop  = uintervals.tstop,
+                          datind = 0)
+
+            # first instance of each interval in the data
+            for i in Base.OneTo(nrow(index))
+                index.datind[i] = 
+                    findfirst((intervals.tstart .== index.tstart[i]) .&
+                              (intervals.tstop  .== index.tstop[i]))
+            end
+
+            # match intervals to uniques
+            for i in eachindex(mapping)
+                mapping[i] = 
+                    findfirst(
+                        (index.tstart .== intervals.tstart[i]) .&
+                        (index.tstop  .== intervals.tstop[i]))
+            end
         end
     end
 

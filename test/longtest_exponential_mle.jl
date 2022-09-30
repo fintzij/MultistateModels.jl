@@ -14,7 +14,6 @@ paths = simulate(msm; nsim = 10000, paths = true, data = false)
 # person 2 has an exponential hazard with rate 0.4
 etimes1 = map(x -> x.times[2], paths[1,:])
 etimes2 = map(x -> x.times[2], paths[2,:])
-mean(etimes1) # there's still a bug
 mean(etimes2)
 
 # plot histogram of event times

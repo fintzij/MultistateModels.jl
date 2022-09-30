@@ -7,10 +7,14 @@ function fit(model::MultistateModel; alg = "ml")
     
     # if sample paths are fully observed, maximize the likelihood directly
     if all(model.data.obstype .== 1)
+        
         fitted = fit_exact(model)
+
     elseif all(model.data.obstype .== 2) & 
+        # multistate Markov model or competing risks model
         all(isa.(model.hazards, MultistateModels._Exponential) .|| 
-            isa.(model.hazards, MultistateModels._ExponentialPH))
+            isa.(model.hazards, MultistateModels._ExponentialPH) || 
+            sum(mapslices(sum, model.tmat, dims = [2,]) .!= 0) == 1) 
         fitted = fit_homog_markov_interval(model)
     end
 
@@ -52,9 +56,12 @@ end
 
 Fit a multistate markov model to interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential but possibly time-inhomogeneous).
 """
-function fit_homog_markov_interval(model::MultistateModel)
+function fit_markov_interval(model::MultistateModel)
 
-    # identify unique covariate combinations and intervals
-    ucovars,uintervals,mapping = 
-        unique_interval_data(model.data; homogeneous=true)
+    # the process is time-homogeneous 
+
+    # identify unique covariates/gaps/intervals (index)
+    # mapping identifies which TPM applies to which row in the data
+    index,mapping = 
+        unique_interval_data(model.data; timehomogeneous=true)
 end

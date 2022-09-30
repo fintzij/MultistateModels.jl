@@ -1,18 +1,3 @@
-# Test that parameter views propagate to cause-specific hazards
-
-@testset "test_hazpar_views" begin
-    
-    # check that values set in the collated parameters vector propagate to cause-specific hazards
-    vals1 = randn(length(msm_expwei.parameters))
-
-    copyto!(msm_expwei.parameters, vals1)
-
-    @test all(msm_expwei.hazards[1].parameters .== msm_expwei.parameters[1]) 
-    @test all(msm_expwei.hazards[2].parameters .== msm_expwei.parameters[2:5])
-    @test all(msm_expwei.hazards[3].parameters .== msm_expwei.parameters[6:7])
-    @test all(msm_expwei.hazards[4].parameters .== msm_expwei.parameters[8:11])
-end
-
 # Test parameter setting function
 @testset "test_set_parameters!" begin
 
