@@ -50,18 +50,13 @@ function fit_exact(model::MultistateModel)
 end
 
 
-
 """
     fit_markov_interval(model::MultistateModel)
 
-Fit a multistate markov model to interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential but possibly time-inhomogeneous).
+Fit a multistate markov model to interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities).
 """
 function fit_markov_interval(model::MultistateModel)
-
-    # the process is time-homogeneous 
-
-    # identify unique covariates/gaps/intervals (index)
-    # mapping identifies which TPM applies to which row in the data
-    index,mapping = 
-        build_tpm_containers(model.data; timehomogeneous=true)
+    
+    # containers for TPMs
+    data_inds, tpm_map = build_tpm_containers(model.data)
 end
