@@ -151,79 +151,47 @@ function extract_paths(model::MultistateModel)
 end
 
 """
-    unique_interval_data(data::DataFrame; homogeneous)
+    build_tpm_containers(data::DataFrame)
 
-Find unique covariates and time intervals over which a multistate Markov process is piecewise homogeneous. 
+Construct containers for time intervals over which a multistate Markov process is piecewise homogeneous. 
 """
-function unique_interval_data(data::DataFrame; timehomogeneous) 
+function build_tpm_containers(data::DataFrame) 
 
-    # note - might be easier to identify unique covariates and intervals within unique covariates, construct mappings, and build transition probability matrices all in one go
-    # probably want TPMs as an array of nested arrays
-    # index should return the index for unique covariate comn and then the index for interval within unique covariate combn
-    # the reason is we'll be solving ODEs for all intervals
-
-
-    # initialize mapping
     # maps each row in dataset to TPM
     # first col is covar combn, second is interval
-    mapping = zeros(Int64, nrow(data), 2)
+    tpm_map = zeros(Int64, nrow(data), 2)
 
     # check if the data contains covariates
     if ncol(data) == 6
         
-        # if time homogeneous mapping depends on gaps
-        if timehomogeneous
-           
-            # get gap times
-            intervals  = data.tstop - data.tstart
-            uintervals = unique(intervals)
+        # get intervals
+        intervals = data[:,[:tstart, :tstop]]
 
-            # unique gap times
-            index = 
-                [DataFrame(tstart = zeros(length(uintervals)),
-                          tstop  = uintervals,
-                          datind = 0),]
+        # get unique start and stop
+        uintervals = unique(intervals) # this identifies the relevant TPM
+        utimes = sort(unique([uintervals.tstart; uintervals.tstop]))
 
-            # first instance of each gap time in the data
-            for i in Base.OneTo(nrow(index))
-                index.datind[i] = 
-                    findfirst(intervals .== index[1].tstop[i])
-            end
+        # for solving Kolmogorov equations - saveats
+        tpm_index = 
+            [DataFrame(tstart = utimes[Not(end)],
+                       tstop  = utimes[Not(begin)],
+                       datind = 0),]
 
-            # match intervals to gap times
-            for i in eachindex(mapping)
-                mapping[i] = findfirst(index.tstop .== intervals[i])
-            end
-       
-        else
-
-            # get intervals
-            intervals = data[:,[:tstart, :tstop]]
-
-            # get unique start and stop
-            uintervals = unique(intervals)
-
-            # unique gap times
-            index = 
-                DataFrame(tstart = uintervals.tstart,
-                          tstop  = uintervals.tstop,
-                          datind = 0)
-
-            # first instance of each interval in the data
-            for i in Base.OneTo(nrow(index))
-                index.datind[i] = 
-                    findfirst((intervals.tstart .== index.tstart[i]) .&
-                              (intervals.tstop  .== index.tstop[i]))
-            end
-
-            # match intervals to uniques
-            for i in eachindex(mapping)
-                mapping[i] = 
-                    findfirst(
-                        (index.tstart .== intervals.tstart[i]) .&
-                        (index.tstop  .== intervals.tstop[i]))
-            end
+        # first instance of each interval in the data
+        for i in Base.OneTo(nrow(tpm_index[1]))
+            tpm_index[1].datind[i] = 
+                findfirst((intervals.tstart .== tpm_index[1].tstart[i]))
         end
+
+        # match intervals to uniques
+        tpm_map[:,1] .= 0
+        for i in Base.OneTo(size(tpm_map, 1))
+            tpm_map[i,2] = 
+                findfirst(
+                    (uintervals.tstart .== intervals.tstart[i]) .&
+                    (uintervals.tstop  .== intervals.tstop[i]))
+        end
+        
     else
         # if time homogeneous mapping depends on gaps
         if timehomogeneous
