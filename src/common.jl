@@ -78,7 +78,7 @@ end
 
 
 """
-    MultistateProcess(data::DataFrame, hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard}, tmat::Matrix{Int64})
+    MultistateModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
 Mutable struct that fully specifies a multistate process for simulation or inference. 
 """
@@ -106,9 +106,20 @@ end
 """
     ExactData(samplepaths::Array{SamplePath}, model::MultistateModel)
 
-Struct containing exactly observed sample paths and a model object, used in fitting a multistate model given completely observed data.
+Struct containing exactly observed sample paths and a model object. Used in fitting a multistate model to completely observed data.
 """
 struct ExactData
-    samplepaths::Array{SamplePath}
+    paths::Array{SamplePath}
     model::MultistateModel
+end
+
+"""
+    PanelData()
+
+Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate model to panel data.
+"""
+struct PanelData
+    data::DataFrame
+    model::MultistateModel
+    books::tuple # tpm_index and tpm_map, from build_tpm_containers
 end

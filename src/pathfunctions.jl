@@ -153,104 +153,84 @@ end
 """
     build_tpm_containers(data::DataFrame)
 
-Construct containers for time intervals over which a multistate Markov process is piecewise homogeneous. 
+Construct containers for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. 
 """
-function build_tpm_containers(data::DataFrame) 
+function build_tpm_containers(data::DataFrame, tmat::Matrix{Int64}) 
 
     # maps each row in dataset to TPM
-    # first col is covar combn, second is interval
+    # first col is covar combn, second is tpm index
     tpm_map = zeros(Int64, nrow(data), 2)
 
     # check if the data contains covariates
-    if ncol(data) == 6
+    if ncol(data) == 6 # no covariates
         
         # get intervals
-        intervals = data[:,[:tstart, :tstop]]
+        gaps = data.tstop - data.tstart
 
         # get unique start and stop
-        uintervals = unique(intervals) # this identifies the relevant TPM
-        utimes = sort(unique([uintervals.tstart; uintervals.tstop]))
+        ugaps = sort(unique(gaps))
 
         # for solving Kolmogorov equations - saveats
         tpm_index = 
-            [DataFrame(tstart = utimes[Not(end)],
-                       tstop  = utimes[Not(begin)],
+            [DataFrame(tstart = 0,
+                       tstop  = ugaps,
                        datind = 0),]
 
         # first instance of each interval in the data
         for i in Base.OneTo(nrow(tpm_index[1]))
             tpm_index[1].datind[i] = 
-                findfirst((intervals.tstart .== tpm_index[1].tstart[i]))
+                findfirst(gaps .== tpm_index[1].tstop[i])
         end
 
-        # match intervals to uniques
-        tpm_map[:,1] .= 0
+        # match intervals to unique tpms
+        tpm_map[:,1] .= 1
         for i in Base.OneTo(size(tpm_map, 1))
-            tpm_map[i,2] = 
-                findfirst(
-                    (uintervals.tstart .== intervals.tstart[i]) .&
-                    (uintervals.tstop  .== intervals.tstop[i]))
-        end
-        
+            tpm_map[i,2] = findfirst(ugaps .== gaps[i])
+        end    
     else
-        # if time homogeneous mapping depends on gaps
-        if timehomogeneous
-           
-            # get gap times
-            intervals = select(data, [2;3;7:ncol(data)])
-            transform!(intervals, [:tstart, :tstop] => ((x,y) -> y - x) => :interval) 
-            select!(intervals, Not([:tstart, :tstop]))
-            select!(intervals, :interval, Not(:interval))
-                
-            # get unique intervals
-            uintervals = unique(intervals)
 
-            # unique gap times
-            index = 
-                DataFrame(tstart = zeros(length(uintervals)),
-                          tstop  = uintervals,
-                          datind = 0)
+        # get unique covariates
+        covars = data[:,Not(1:6)]
+        ucovars = unique(data[:,Not(1:6)])
 
-            # first instance of each gap time in the data
-            for i in Base.OneTo(nrow(index))
-                index.datind[i] = 
-                    findfirst(intervals .== index.tstop[i])
-            end
+        # get gap times
+        gaps = data.tstop - data.tstart
 
-            # match intervals to gap times
-            for i in eachindex(mapping)
-                mapping[i] = findfirst(index.tstop .== intervals[i])
-            end
-       
-        else
+        # initialize tpm_index
+        tpm_index = [DataFrame() for i in 1:nrow(ucovars)]
 
-            # get intervals
-            intervals = data[:,[:tstart, :tstop]]
+        # for each set of unique covariates find gaps
+        for k in Base.OneTo(nrow(ucovars))
 
-            # get unique start and stop
-            uintervals = unique(intervals)
+            # get indices for rows that have the covars
+            covinds = findall(map(x -> all(x == ucovars[k,:]), eachrow(covars)) .== 1)
 
-            # unique gap times
-            index = 
-                DataFrame(tstart = uintervals.tstart,
-                          tstop  = uintervals.tstop,
-                          datind = 0)
+            # find unique gaps 
+            ugaps = sort(unique(gaps[covinds]))
+
+            # fill in tpm_index
+            tpm_index[k] = DataFrame(tstart = 0, tstop = ugaps, datind = 0)
 
             # first instance of each interval in the data
-            for i in Base.OneTo(nrow(index))
-                index.datind[i] = 
-                    findfirst((intervals.tstart .== index.tstart[i]) .&
-                              (intervals.tstop  .== index.tstop[i]))
+            for i in Base.OneTo(nrow(tpm_index[k]))
+                tpm_index[k].datind[i] = 
+                    covinds[findfirst(gaps[covinds] .== tpm_index[1].tstop[i])]
             end
 
-            # match intervals to uniques
-            for i in eachindex(mapping)
-                mapping[i] = 
-                    findfirst(
-                        (index.tstart .== intervals.tstart[i]) .&
-                        (index.tstop  .== intervals.tstop[i]))
-            end
+            # fill out the tpm_map 
+            # match intervals to unique tpms
+            tpm_map[covinds, 1] .= k
+            for i in eachindex(covinds)
+                tpm_map[covinds[i],2] = findfirst(ugaps .== gaps[covinds[i]])
+            end  
         end
     end
 
+    # build the TPM container
+    nstates = size(tmat, 1)
+    nmats = map(x -> nrow(x), tpm_index) 
+    tpm_book = [[zeros(nstates, nstates) for j in 1:nmats[i]] for i in eachindex(tpm_index)]
+
+    # return objects
+    return tpm_index, tpm_map, tpm_book
 end

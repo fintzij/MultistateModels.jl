@@ -33,7 +33,6 @@ function fit_exact(model::MultistateModel)
     samplepaths = extract_paths(model)
 
     # extract and initialize model parameters
-    # I think everything works if we use this view of the parameters object
     parameters = flatview(model.parameters)
 
     # optimize
@@ -58,5 +57,8 @@ Fit a multistate markov model to interval censored data (i.e. model.data.obstype
 function fit_markov_interval(model::MultistateModel)
     
     # containers for TPMs
-    data_inds, tpm_map = build_tpm_containers(model.data)
+    books = build_tpm_containers(model.data, model.tmat)
+
+    # extract and initialize model parameters
+    parameters = flatview(model.parameters)
 end

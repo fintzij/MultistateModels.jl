@@ -90,18 +90,17 @@ function loglik(parameters, path::SamplePath, model::MultistateModel)
     return ll
 end
 
+# """
+#     loglik(parameters, samplepaths::Array{SamplePath}, model::MultistateModel) 
 
-"""
-    loglik(parameters, samplepaths::Array{SamplePath}, model::MultistateModel) 
+# Return sum of log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain.
+# """
 
-Return sum of log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain.
-"""
+# function loglik(parameters, paths::Array{SamplePath}, model::MultistateModel)
 
-function loglik(parameters, samplepaths::Array{SamplePath}, model::MultistateModel)
-
-    # send each element of samplepaths to loglik(path::SamplePath, model::MultistateModel) and sum up results
-    return mapreduce(x -> loglik(parameters, x, model), +, samplepaths)
-end
+#     # send each element of samplepaths to loglik(path::SamplePath, model::MultistateModel) and sum up results
+#     return mapreduce(x -> loglik(parameters, x, model), +, paths)
+# end
 
 """
     loglik(parameters, exactdata::ExactData; neg = true) 
@@ -113,6 +112,23 @@ function loglik(parameters, exactdata::ExactData; neg = true)
 
     # send each element of samplepaths to loglik
     ll = mapreduce(x -> loglik(parameters, x, exactdata.model), +, exactdata.samplepaths)
+
+    neg ? -ll : ll
+end
+
+"""
+    loglik(parameters, paneldata::PanelData; neg = true)
+
+Return sum of (negative) log likelihood for panel data. 
+"""
+function loglik(parameters, paneldata::PanelData; neg = true) 
+
+    # Solve Kolmogorov equations for TPMs
+    # some_function(parameters, etc.) - Resume here.
+
+    # ll = loglik(parameters, paneldata.data, paneldata.model, paneldata.books)
+    ll = mapreduce(x -> loglik(tpms, inds), +, paneldata.data; dims = )
+
 
     neg ? -ll : ll
 end
