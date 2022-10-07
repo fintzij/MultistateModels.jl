@@ -114,13 +114,17 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _Exponential(
                         Symbol(hazname),
                         hazdat,
-                        [Symbol.(parnames)]) # make sure this is a vector
+                        [Symbol.(parnames)],
+                        hazards[h].statefrom,
+                        hazards[h].stateto) # make sure this is a vector
             else
                 haz_struct = 
                     _ExponentialPH(
                         Symbol(hazname),
                         hazdat,
-                        Symbol.(parnames))
+                        Symbol.(parnames),
+                        hazards[h].statefrom,
+                        hazards[h].stateto)
             end
 
         elseif hazards[h].family == "wei" 
@@ -144,7 +148,9 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _Weibull(
                         Symbol(hazname),
                         hazdat, 
-                        Symbol.(parnames))
+                        Symbol.(parnames),
+                        hazards[h].statefrom,
+                        hazards[h].stateto)
                         
             else
                 
@@ -159,7 +165,9 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _WeibullPH(
                         Symbol(hazname),
                         hazdat,
-                        Symbol.(parnames))
+                        Symbol.(parnames),
+                        hazards[h].statefrom,
+                        hazards[h].stateto)
             end
 
         elseif hazards[h].family == "gom"

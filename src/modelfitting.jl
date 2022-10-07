@@ -36,8 +36,10 @@ function fit_exact(model::MultistateModel)
     parameters = flatview(model.parameters)
 
     # optimize
-    optf = OptimizationFunction(MultistateModels.loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, parameters, MultistateModels.ExactData(samplepaths, model))
+    optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+
+    prob = OptimizationProblem(optf, parameters, ExactData(samplepaths, model))
+    
     sol = solve(prob, Newton())
 
     # oh eff yes.
@@ -61,4 +63,10 @@ function fit_markov_interval(model::MultistateModel)
 
     # extract and initialize model parameters
     parameters = flatview(model.parameters)
+
+    # optimize the likelihood
+    optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+
+    prob = OptimizationProblem(optf, parameters, PanelData(model, books))
+
 end

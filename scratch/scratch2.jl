@@ -31,7 +31,7 @@ end
 
 A = DiffEqArrayOperator(Q)
 prob = ODEProblem(A, diagm(ones(3)), (0.0, 5.4), Q )
-s = solve(prob, saveat = [1.0, 2.0, 3.0, 4.0, 5.0, 5.4])
+s2 = solve(prob, saveat = [1.0, 2.0, 3.0, 4.0, 5.0, 5.4])
 
 
 # now try as a parameterized function
@@ -49,3 +49,13 @@ p = [Q[1,2], Q[1,3], Q[2,1], Q[2,3]]
 A2 = DiffEqArrayOperator(zeros(3,3), update_func = update_func)
 prob2 = ODEProblem(A2, diagm(ones(3)), (0.0, 5.4), p)
 s2 = solve(prob2, saveat = [collect(1:5); 5.4])
+
+
+### with ExponentialUtilities
+using ExponentialUtilities
+method = ExpMethodHigham2005()
+cache = ExponentialUtilities.alloc_mem(Q, method)
+exponential!(Q * 2.2, method, cache)
+
+s3 = map(t -> exponential!(Q * t, method, cache), [1.0, 2.0, 3.0, 4.0, 5.0, 5.4])
+s3 - s2.u

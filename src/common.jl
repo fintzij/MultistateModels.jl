@@ -28,6 +28,8 @@ Base.@kwdef struct _Exponential <: _Hazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
 end
 
 """
@@ -37,6 +39,8 @@ Base.@kwdef struct _ExponentialPH <: _Hazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
 end
 
 """
@@ -46,6 +50,8 @@ Base.@kwdef struct _Weibull <: _Hazard
     hazname::Symbol
     data::Array{Float64} # just an intercept
     parnames::Vector{Symbol}
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
 end
 
 
@@ -56,6 +62,8 @@ Base.@kwdef struct _WeibullPH <: _Hazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
 end
 
 """
@@ -114,12 +122,11 @@ struct ExactData
 end
 
 """
-    PanelData()
+    PanelData(model::MultistateModel, books::Tuple)
 
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate model to panel data.
 """
 struct PanelData
-    data::DataFrame
     model::MultistateModel
-    books::tuple # tpm_index and tpm_map, from build_tpm_containers
+    books::Tuple # tpm_index, tpm_map, and tpm_book, from build_tpm_containers
 end

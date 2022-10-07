@@ -250,3 +250,10 @@ function next_state_probs(t, scur, ind, parameters, hazards, totalhazards, tmat)
     # return the next state probabilities
     return ns_probs
 end
+
+"""
+    compute_hazards!(Q::matrix{Float64}, parameters, tpm_index::DataFrame, hazards::Vector{_Hazard})
+
+Fill in a matrix of transition intensities for a multistate Markov model.
+"""
+
