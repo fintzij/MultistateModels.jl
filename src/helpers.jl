@@ -149,3 +149,32 @@ function check_data!(data::DataFrame, tmat::Matrix)
     # check that there are no rows for a subject after they hit an absorbing state
 end
 
+"""
+    build_tpm_book(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
+
+Build container for holding transition probability matrices.
+"""
+function build_tpm_book(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
+
+    # build the TPM container
+    nstates = size(tmat, 1)
+    nmats   = map(x -> nrow(x), tpm_index) 
+    book    = [[zeros(nstates, nstates) for j in 1:nmats[i]] for i in eachindex(tpm_index)]
+
+    return book
+end
+
+"""
+    build_hazmat_book(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
+
+Build container for holding transition intensity matrices.
+"""
+function build_hazmat_book(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
+
+    # build the TPM container
+    nstates = size(tmat, 1)
+    nmats   = map(x -> nrow(x), tpm_index) 
+    book    = [zeros(nstates, nstates) for j in eachindex(tpm_index)]
+
+    return book
+end

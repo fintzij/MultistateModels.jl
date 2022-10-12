@@ -151,11 +151,11 @@ function extract_paths(model::MultistateModel)
 end
 
 """
-    build_tpm_containers(data::DataFrame)
+    build_tpm_mapping(data::DataFrame)
 
-Construct containers for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. 
+Construct bookkeeping objects for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. 
 """
-function build_tpm_containers(data::DataFrame, tmat::Matrix{Int64}) 
+function build_tpm_mapping(data::DataFrame, tmat::Matrix{Int64}) 
 
     # maps each row in dataset to TPM
     # first col is covar combn, second is tpm index
@@ -226,11 +226,6 @@ function build_tpm_containers(data::DataFrame, tmat::Matrix{Int64})
         end
     end
 
-    # build the TPM container
-    nstates = size(tmat, 1)
-    nmats = map(x -> nrow(x), tpm_index) 
-    tpm_book = [[zeros(nstates, nstates) for j in 1:nmats[i]] for i in eachindex(tpm_index)]
-
     # return objects
-    return tpm_index, tpm_map, tpm_book
+    return tpm_index, tpm_map
 end

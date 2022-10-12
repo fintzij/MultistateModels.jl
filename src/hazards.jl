@@ -251,9 +251,49 @@ function next_state_probs(t, scur, ind, parameters, hazards, totalhazards, tmat)
     return ns_probs
 end
 
+########################################################
+############# multistate markov process ################
+###### transition intensities and probabilities ########
+########################################################
+
 """
-    compute_hazards!(Q::matrix{Float64}, parameters, tpm_index::DataFrame, hazards::Vector{_Hazard})
+    compute_hazmat!(Q::Matrix{Float64}, parameters, hazards::Vector{_Hazard}, tpm_index::DataFrame, ind::Int64)
 
 Fill in a matrix of transition intensities for a multistate Markov model.
 """
+function compute_hazmat!(Q::Matrix{Float64}, parameters, hazards::Vector{_Hazard}, tpm_index::DataFrame)
 
+    # fill Q with zeros - Q gets reused
+    fill!(Q, 0.0)
+
+    # compute transition intensities
+    for h in eachindex(hazards) 
+        Q[hazards[h].statefrom, hazards[h].stateto] = 
+            call_haz(
+                tpm_index.tstart[1], 
+                parameters[h],
+                tpm_index.datind[1],
+                hazards[h]; 
+                give_log = false)
+    end
+
+    # set diagonal elements equal to the sum of off-diags
+    Q[diagind(Q)] = -sum(Q, dims = 2)
+end
+
+"""
+    compute_tmat!(parameters, tpm_index::DataFrame, hazards::Vector{_Hazard}, tmat::Matrix{Int64})
+
+Calculate transition probability matrices for a multistate Markov process. 
+"""
+function compute_tmat!(P::Vector{Matrix{Float64}}, Q::Matrix{Float64}, hazards::Vector{_Hazard}, tpm_index::DataFrame)
+
+    # Initialize DiffEqArrayOperator
+    Qop = DiffEqArrayOperator(Q)
+
+    # initialize ODE problem
+    prob = ODEProblem(Qop, diagm(ones(size(Q, 1))), [tpm_index.tstart[begin], tpm_index.tstop[end]], Q)
+
+    # solve for the TPMs
+    copyto!(P, solve(prob, saveat = tpm_index.tstop).u)
+end

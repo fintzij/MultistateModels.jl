@@ -128,5 +128,5 @@ Struct containing panel data, a model object, and bookkeeping objects. Used in f
 """
 struct PanelData
     model::MultistateModel
-    books::Tuple # tpm_index, tpm_map, and tpm_book, from build_tpm_containers
+    books::Tuple # tpm_index and tpm_map, from build_tpm_containers
 end

@@ -59,7 +59,7 @@ Fit a multistate markov model to interval censored data (i.e. model.data.obstype
 function fit_markov_interval(model::MultistateModel)
     
     # containers for TPMs
-    books = build_tpm_containers(model.data, model.tmat)
+    books = build_tpm_mapping(model.data, model.tmat)
 
     # extract and initialize model parameters
     parameters = flatview(model.parameters)

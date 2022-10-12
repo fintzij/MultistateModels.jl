@@ -95,18 +95,7 @@ function loglik(parameters, path::SamplePath, model::MultistateModel)
     return ll
 end
 
-"""
-    transitionprobs(parameters, tpm_index::DataFrame, hazards::Vector{_Hazard}, tmat::Matrix{Int64})
 
-Calculate transition probability matrices for a multistate Markov process. 
-"""
-function transitionprobs(parameters, tpm_index::DataFrame, hazards::Vector{_Hazard}, tmat::Matrix{Int64})
-
-    # initialize transition probability matrix
-    Q = zeros(Float64, size(tmat))
-    compute_hazards!(Q, parameters, tpm_index, hazards, tmat)
-
-end
 
 ########################################################
 ##################### Wrappers #########################
@@ -133,28 +122,37 @@ Return sum of (negative) log likelihood for panel data.
 """
 function loglik(parameters, paneldata::PanelData; neg = true) 
 
+    # build containers for transition intensity and prob mtcs
+    hazmat_book = build_hazmat_book(paneldata.model.tmat, paneldata.books[1])
+
+    tpm_book = build_tpm_book(paneldata.model.tmat, paneldata.books[1])
+
     # Solve Kolmogorov equations for TPMs
-    
+    for t in eachindex(paneldata.books[1])
 
-    # ll = loglik(parameters, paneldata.data, paneldata.model, paneldata.books)
-    # ll = mapreduce(x -> loglik(tpms, inds), +, paneldata.data; dims = )
+        # compute the transition intensity matrix
+        compute_hazmat!(
+            hazmat_book[t],
+            parameters,
+            paneldata.model.hazards,
+            paneldata.books[1][t])
 
+        # compute transition probability matrices
+        compute_tmat!(
+            tpm_book[t],
+            hazmat_book[t],
+            paneldata.model.hazards,
+            paneldata.books[1][t])
+    end
+
+    # accumulate the log likelihood
+    ll = 0.0
+    for i in Base.OneTo(nrow(paneldata.model.data))
+        ll += 
+            log(tpm_book[paneldata.books[2][i, 1]][paneldata.books[2][i, 2]][paneldata.model.data.statefrom[i],
+             paneldata.model.data.stateto[i]])
+    end
 
     neg ? -ll : ll
 end
 
-
-
-
-
-# """
-#     loglik(parameters, samplepaths::Array{SamplePath}, model::MultistateModel) 
-
-# Return sum of log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain.
-# """
-
-# function loglik(parameters, paths::Array{SamplePath}, model::MultistateModel)
-
-#     # send each element of samplepaths to loglik(path::SamplePath, model::MultistateModel) and sum up results
-#     return mapreduce(x -> loglik(parameters, x, model), +, paths)
-# end
