@@ -257,11 +257,11 @@ end
 ########################################################
 
 """
-    compute_hazmat!(Q::Matrix{Float64}, parameters, hazards::Vector{_Hazard}, tpm_index::DataFrame, ind::Int64)
+    compute_hazmat!(Q, parameters, hazards::Vector{_Hazard}, tpm_index::DataFrame, ind::Int64)
 
 Fill in a matrix of transition intensities for a multistate Markov model.
 """
-function compute_hazmat!(Q::Matrix{Float64}, parameters, hazards::Vector{_Hazard}, tpm_index::DataFrame)
+function compute_hazmat!(Q, parameters, hazards::Vector{_Hazard}, tpm_index::DataFrame)
 
     # fill Q with zeros - Q gets reused
     fill!(Q, 0.0)
@@ -282,11 +282,11 @@ function compute_hazmat!(Q::Matrix{Float64}, parameters, hazards::Vector{_Hazard
 end
 
 """
-    compute_tmat!(parameters, tpm_index::DataFrame, hazards::Vector{_Hazard}, tmat::Matrix{Int64})
+    compute_tmat!(P, Q, tpm_index::DataFrame, hazards::Vector{_Hazard}, tmat::Matrix{Int64})
 
 Calculate transition probability matrices for a multistate Markov process. 
 """
-function compute_tmat!(P::Vector{Matrix{Float64}}, Q::Matrix{Float64}, hazards::Vector{_Hazard}, tpm_index::DataFrame)
+function compute_tmat!(P, Q, hazards::Vector{_Hazard}, tpm_index::DataFrame)
 
     # Initialize DiffEqArrayOperator
     Qop = DiffEqArrayOperator(Q)

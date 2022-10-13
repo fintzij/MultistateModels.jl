@@ -110,7 +110,7 @@ Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() t
 function loglik(parameters, exactdata::ExactData; neg = true)
 
     # send each element of samplepaths to loglik
-    ll = mapreduce(x -> loglik(parameters, x, exactdata.model), +, exactdata.samplepaths)
+    ll = mapreduce(x -> loglik(parameters, x, exactdata.model), +, exactdata.paths)
 
     neg ? -ll : ll
 end
@@ -121,6 +121,9 @@ end
 Return sum of (negative) log likelihood for panel data. 
 """
 function loglik(parameters, paneldata::PanelData; neg = true) 
+
+    # nest the model parameters
+    pars = nest_parameters(paneldata.model.parameters, parameters)
 
     # build containers for transition intensity and prob mtcs
     hazmat_book = build_hazmat_book(paneldata.model.tmat, paneldata.books[1])
@@ -133,7 +136,7 @@ function loglik(parameters, paneldata::PanelData; neg = true)
         # compute the transition intensity matrix
         compute_hazmat!(
             hazmat_book[t],
-            parameters,
+            pars,
             paneldata.model.hazards,
             paneldata.books[1][t])
 
