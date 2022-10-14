@@ -14,7 +14,7 @@ dat =
               tstop = repeat([5.0,10.0], outer = 100),
               statefrom = fill(1, 200),
               stateto = fill(2, 200),
-              obstype = fill(1, 200),
+              obstype = fill(2, 200),
               trt = reduce(vcat, [sample([0,1], 2) for i in 1:100]))
 
 # want different gap times
@@ -42,3 +42,7 @@ simdat, paths = simulate(msm_2state_transadj; paths = true, data = true);
 msm_2state_transadj = multistatemodel(h12, h21; data = simdat[1])
 
 set_parameters!(msm_2state_transadj, (h12 = randn(2), h21 = randn(2)))
+
+model = msm_2state_transadj
+using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations
+using MultistateModels: build_tpm_mapping, loglik, PanelData

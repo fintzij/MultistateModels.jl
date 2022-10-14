@@ -3,6 +3,7 @@ module MultistateModels
 using ArraysOfArrays
 using Chain
 using DataFrames
+using DifferentialEquations
 using Distributions
 using ForwardDiff
 using LinearAlgebra

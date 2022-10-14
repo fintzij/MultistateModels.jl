@@ -64,7 +64,7 @@ function fit_markov_interval(model::MultistateModel)
 
     # optimize the likelihood
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, eltype(parameters).([1.0,1.0]), PanelData(model, books))
+    prob = OptimizationProblem(optf, parameters, PanelData(model, books))
     sol  = solve(prob, Newton())
 
 end

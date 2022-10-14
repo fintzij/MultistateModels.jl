@@ -289,8 +289,10 @@ function compute_tmat!(P, Q, hazards::Vector{_Hazard}, tpm_index::DataFrame)
     Qop = DiffEqArrayOperator(Q)
 
     # initialize ODE problem
-    prob = ODEProblem(Qop, diagm(ones(size(Q, 1))), [tpm_index.tstart[begin], tpm_index.tstop[end]], Q)
+    prob = ODEProblem(Qop, eltype(Q).(diagm(ones(size(Q, 1)))), [tpm_index.tstart[begin], tpm_index.tstop[end]], Q)
 
     # solve for the TPMs
-    copyto!(P, solve(prob, saveat = tpm_index.tstop).u)
+    copyto!(P, solve(prob, LinearExponential(), saveat = tpm_index.tstop).u)
 end
+
+# maybe need a new version of compute_tmat that computes the hazard matrix and transition probability matrix all in one go. One problem is that the hazard matrix seems to be initialized with zeros(), but then it isn't possible to assign dual numbers into this matrix. it isn't clear how to write this as a parameterized function that plays nice with call_haz...
