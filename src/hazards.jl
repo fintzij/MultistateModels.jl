@@ -263,9 +263,6 @@ Fill in a matrix of transition intensities for a multistate Markov model.
 """
 function compute_hazmat!(Q, parameters, hazards::Vector{_Hazard}, tpm_index::DataFrame)
 
-    # fill Q with zeros - Q gets reused
-    fill!(Q, 0.0)
-
     # compute transition intensities
     for h in eachindex(hazards) 
         Q[hazards[h].statefrom, hazards[h].stateto] = 

@@ -102,58 +102,60 @@ end
 ########################################################
 
 """
-    loglik(parameters, exactdata::ExactData; neg = true) 
+    loglik(parameters, data::ExactData; neg = true) 
 
 Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. 
 """
 
-function loglik(parameters, exactdata::ExactData; neg = true)
+function loglik(parameters, data::ExactData; neg = true)
+
+    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # send each element of samplepaths to loglik
-    ll = mapreduce(x -> loglik(parameters, x, exactdata.model), +, exactdata.paths)
+    ll = mapreduce(x -> loglik(pars, x, data.model), +, data.paths)
 
     neg ? -ll : ll
 end
 
 """
-    loglik(parameters, paneldata::PanelData; neg = true)
+    loglik(parameters, data::PanelData; neg = true)
 
 Return sum of (negative) log likelihood for panel data. 
 """
-function loglik(parameters, paneldata::PanelData; neg = true) 
+function loglik(parameters, data::PanelData; neg = true) 
 
     # nest the model parameters
-    pars = nest_parameters(paneldata.model.parameters, parameters)
+    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # build containers for transition intensity and prob mtcs
-    hazmat_book = build_hazmat_book(paneldata.model.tmat, paneldata.books[1])
+    hazmat_book = build_hazmat_book(data.model.tmat, data.books[1])
 
-    tpm_book = build_tpm_book(paneldata.model.tmat, paneldata.books[1])
+    tpm_book = build_tpm_book(data.model.tmat, data.books[1])
 
     # Solve Kolmogorov equations for TPMs
-    for t in eachindex(paneldata.books[1])
+    for t in eachindex(data.books[1])
 
         # compute the transition intensity matrix
         compute_hazmat!(
             hazmat_book[t],
             pars,
-            paneldata.model.hazards,
-            paneldata.books[1][t])
+            data.model.hazards,
+            data.books[1][t])
 
         # compute transition probability matrices
         compute_tmat!(
             tpm_book[t],
             hazmat_book[t],
-            paneldata.model.hazards,
-            paneldata.books[1][t])
+            data.model.hazards,
+            data.books[1][t])
     end
 
     # accumulate the log likelihood
     ll = 0.0
-    for i in Base.OneTo(nrow(paneldata.model.data))
+    for i in Base.OneTo(nrow(data.model.data))
         ll += 
-            log(tpm_book[paneldata.books[2][i, 1]][paneldata.books[2][i, 2]][paneldata.model.data.statefrom[i],
-             paneldata.model.data.stateto[i]])
+            log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i],
+             data.model.data.stateto[i]])
     end
 
     neg ? -ll : ll

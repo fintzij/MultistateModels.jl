@@ -4,13 +4,14 @@ using ArraysOfArrays
 using Chain
 using DataFrames
 using Distributions
+using ForwardDiff
 using LinearAlgebra
 using Optim # for simulation
 using Optimization # for fitting
 using OptimizationOptimJL
-using SciMLSensitivity
-using QuadGK # going to change this eventually
-using Integrals # replaces QuadGK
+# using SciMLSensitivity
+# using QuadGK # going to change this eventually
+# using Integrals # replaces QuadGK
 using StatsModels
 using StatsFuns
 
@@ -33,6 +34,9 @@ include("hazards.jl")
 
 # likelihood functions
 include("likelihoods.jl")
+
+# model fitting
+include("modelfitting.jl")
 
 # model generation
 include("modelgeneration.jl")

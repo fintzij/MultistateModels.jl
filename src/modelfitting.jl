@@ -42,10 +42,10 @@ function fit_exact(model::MultistateModel)
 
     # oh eff yes.
     ll = pars -> MultistateModels.loglik(pars, MultistateModels.ExactData(samplepaths, model))
-    hess = inv(ForwardDiff.hessian(ll, sol.u))
+    vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
-    
+    # return(pars, vcov, ll): 
 end
 
 
@@ -64,7 +64,7 @@ function fit_markov_interval(model::MultistateModel)
 
     # optimize the likelihood
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, parameters, PanelData(model, books))
+    prob = OptimizationProblem(optf, eltype(parameters).([1.0,1.0]), PanelData(model, books))
     sol  = solve(prob, Newton())
 
 end

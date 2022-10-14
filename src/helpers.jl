@@ -179,16 +179,16 @@ function build_hazmat_book(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
     return book
 end
 
-"""
-    nest_parameters(nested, flattened)
+# """
+#     nest_parameters(nested, flattened)
 
-Create a nested view into a vector of parameters. 
-"""
-function nest_parameters(nested, flattened)
+# Create a nested view into a vector of parameters. 
+# """
+# function nest_parameters(nested, flattened)
 
-    # generate grouping indices
-    inds = reduce(vcat, [i * ones(Int64, length(nested[i])) for i in eachindex(nested)])
+#     # generate grouping indices
+#     inds = reduce(vcat, [i * ones(Int64, length(nested[i])) for i in eachindex(nested)])
 
-    # return  grouped view
-    return consgroupedview(inds, flattened)
-end
+#     # return  grouped view
+#     return consgroupedview(inds, flattened)
+# end
