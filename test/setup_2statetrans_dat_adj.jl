@@ -44,5 +44,6 @@ msm_2state_transadj = multistatemodel(h12, h21; data = simdat[1])
 set_parameters!(msm_2state_transadj, (h12 = randn(2), h21 = randn(2)))
 
 model = msm_2state_transadj
-using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations
-using MultistateModels: build_tpm_mapping, loglik, PanelData
+using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, ExponentialUtilities
+using MultistateModels: build_tpm_mapping, loglik, PanelData, build_hazmat_book, build_tpm_book
+

@@ -3,13 +3,15 @@ module MultistateModels
 using ArraysOfArrays
 using Chain
 using DataFrames
-using DifferentialEquations
+# using DifferentialEquations
 using Distributions
+using ExponentialUtilities
 using ForwardDiff
 using LinearAlgebra
 using Optim # for simulation
 using Optimization # for fitting
 using OptimizationOptimJL
+# using PreallocationTools
 # using SciMLSensitivity
 # using QuadGK # going to change this eventually
 # using Integrals # replaces QuadGK

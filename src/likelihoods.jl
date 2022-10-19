@@ -128,9 +128,12 @@ function loglik(parameters, data::PanelData; neg = true)
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # build containers for transition intensity and prob mtcs
-    hazmat_book = build_hazmat_book(data.model.tmat, data.books[1])
+    hazmat_book = build_hazmat_book(eltype(parameters), data.model.tmat, data.books[1])
 
-    tpm_book = build_tpm_book(data.model.tmat, data.books[1])
+    tpm_book = build_tpm_book(eltype(parameters), data.model.tmat, data.books[1])
+
+    # allocate memory for matrix exponential
+    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
 
     # Solve Kolmogorov equations for TPMs
     for t in eachindex(data.books[1])
@@ -146,8 +149,8 @@ function loglik(parameters, data::PanelData; neg = true)
         compute_tmat!(
             tpm_book[t],
             hazmat_book[t],
-            data.model.hazards,
-            data.books[1][t])
+            data.books[1][t],
+            cache)
     end
 
     # accumulate the log likelihood

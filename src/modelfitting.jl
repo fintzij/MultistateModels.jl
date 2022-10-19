@@ -45,7 +45,7 @@ function fit_exact(model::MultistateModel)
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
-    # return(pars, vcov, ll): 
+    # return (pars, vcov, -sol.minimum): 
 end
 
 
@@ -56,7 +56,7 @@ Fit a multistate markov model to interval censored data (i.e. model.data.obstype
 """
 function fit_markov_interval(model::MultistateModel)
     
-    # containers for TPMs
+    # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data, model.tmat)
 
     # extract and initialize model parameters
@@ -67,4 +67,10 @@ function fit_markov_interval(model::MultistateModel)
     prob = OptimizationProblem(optf, parameters, PanelData(model, books))
     sol  = solve(prob, Newton())
 
+    # get the variance-covariance matrix
+    ll = pars -> MultistateModels.loglik(pars, MultistateModels.PanelData(model, books))
+    vcov = inv(ForwardDiff.hessian(ll, sol.u))
+
+    # wrap results
+    # return (pars, vcov, -sol.minimum): 
 end

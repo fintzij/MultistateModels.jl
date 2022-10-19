@@ -154,12 +154,12 @@ end
 
 Build container for holding transition probability matrices.
 """
-function build_tpm_book(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
+function build_tpm_book(T::DataType, tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
 
     # build the TPM container
     nstates = size(tmat, 1)
     nmats   = map(x -> nrow(x), tpm_index) 
-    book    = [[zeros(nstates, nstates) for j in 1:nmats[i]] for i in eachindex(tpm_index)]
+    book    = [[zeros(T, nstates, nstates) for j in 1:nmats[i]] for i in eachindex(tpm_index)]
 
     return book
 end
@@ -169,12 +169,12 @@ end
 
 Build container for holding transition intensity matrices.
 """
-function build_hazmat_book(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
-
+function build_hazmat_book(T::DataType, tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
+    # Making this "type aware" by using T::DataType so that autodiff worksA
     # build the TPM container
     nstates = size(tmat, 1)
     nmats   = map(x -> nrow(x), tpm_index) 
-    book    = [zeros(nstates, nstates) for j in eachindex(tpm_index)]
+    book    = [zeros(T, nstates, nstates) for j in eachindex(tpm_index)]
 
     return book
 end
