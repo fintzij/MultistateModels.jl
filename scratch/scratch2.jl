@@ -64,3 +64,11 @@ s3 - s2.u
 @time solve(prob, saveat = [collect(1:5); 5.4])
 @time solve(prob2, saveat = [collect(1:5); 5.4])
 @time map(t -> exponential!(copyto!(similar(Q), Q), ExpMethodGeneric()), [1.0, 2.0, 3.0, 4.0, 5.0, 5.4])
+
+## ECCTMC experiments
+multmat(X,Y) = return X * Y
+multmat(X) = return multmat(X,X)
+
+function pusharr!(A, d)
+     push!(A, rand(d,d))
+end

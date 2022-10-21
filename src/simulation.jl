@@ -99,11 +99,12 @@ function simulate_path(model::MultistateModel, subj::Int64)
     cuminc = 0.0
 
     # vector for next state transition probabilities
-    ns_probs = zeros(size(model.tmat,2))
+    nstates  = size(model.tmat, 2)
+    ns_probs = zeros(nstates)
 
     # initialize sample path
-    times  = [tcur]
-    states = [scur]
+    times  = [tcur]; sizehint!(times, nstates * 2)
+    states = [scur]; sizehint!(states, nstates * 2)
 
     # flag for whether to stop simulation
     # obviously don't simulate if the initial state is absorbing

@@ -13,9 +13,8 @@ function fit(model::MultistateModel; alg = "ml")
     elseif all(model.data.obstype .== 2) & 
         # multistate Markov model or competing risks model
         all(isa.(model.hazards, MultistateModels._Exponential) .|| 
-            isa.(model.hazards, MultistateModels._ExponentialPH) || 
-            sum(mapslices(sum, model.tmat, dims = [2,]) .!= 0) == 1) 
-        fitted = fit_homog_markov_interval(model)
+            isa.(model.hazards, MultistateModels._ExponentialPH))
+        fitted = fit_markov_interval(model)
     end
 
     # return fitted object
