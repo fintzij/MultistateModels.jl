@@ -179,16 +179,82 @@ function build_hazmat_book(T::DataType, tmat::Matrix{Int64}, tpm_index::Vector{D
     return book
 end
 
-# """
-#     nest_parameters(nested, flattened)
+"""
+    build_tpm_mapping(data::DataFrame)
 
-# Create a nested view into a vector of parameters. 
-# """
-# function nest_parameters(nested, flattened)
+Construct bookkeeping objects for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. 
+"""
+function build_tpm_mapping(data::DataFrame, tmat::Matrix{Int64}) 
 
-#     # generate grouping indices
-#     inds = reduce(vcat, [i * ones(Int64, length(nested[i])) for i in eachindex(nested)])
+    # maps each row in dataset to TPM
+    # first col is covar combn, second is tpm index
+    tpm_map = zeros(Int64, nrow(data), 2)
 
-#     # return  grouped view
-#     return consgroupedview(inds, flattened)
-# end
+    # check if the data contains covariates
+    if ncol(data) == 6 # no covariates
+        
+        # get intervals
+        gaps = data.tstop - data.tstart
+
+        # get unique start and stop
+        ugaps = sort(unique(gaps))
+
+        # for solving Kolmogorov equations - saveats
+        tpm_index = 
+            [DataFrame(tstart = 0,
+                       tstop  = ugaps,
+                       datind = 0),]
+
+        # first instance of each interval in the data
+        for i in Base.OneTo(nrow(tpm_index[1]))
+            tpm_index[1].datind[i] = 
+                findfirst(gaps .== tpm_index[1].tstop[i])
+        end
+
+        # match intervals to unique tpms
+        tpm_map[:,1] .= 1
+        for i in Base.OneTo(size(tpm_map, 1))
+            tpm_map[i,2] = findfirst(ugaps .== gaps[i])
+        end    
+    else
+
+        # get unique covariates
+        covars = data[:,Not(1:6)]
+        ucovars = unique(data[:,Not(1:6)])
+
+        # get gap times
+        gaps = data.tstop - data.tstart
+
+        # initialize tpm_index
+        tpm_index = [DataFrame() for i in 1:nrow(ucovars)]
+
+        # for each set of unique covariates find gaps
+        for k in Base.OneTo(nrow(ucovars))
+
+            # get indices for rows that have the covars
+            covinds = findall(map(x -> all(x == ucovars[k,:]), eachrow(covars)) .== 1)
+
+            # find unique gaps 
+            ugaps = sort(unique(gaps[covinds]))
+
+            # fill in tpm_index
+            tpm_index[k] = DataFrame(tstart = 0, tstop = ugaps, datind = 0)
+
+            # first instance of each interval in the data
+            for i in Base.OneTo(nrow(tpm_index[k]))
+                tpm_index[k].datind[i] = 
+                    covinds[findfirst(gaps[covinds] .== tpm_index[1].tstop[i])]
+            end
+
+            # fill out the tpm_map 
+            # match intervals to unique tpms
+            tpm_map[covinds, 1] .= k
+            for i in eachindex(covinds)
+                tpm_map[covinds[i],2] = findfirst(ugaps .== gaps[covinds[i]])
+            end  
+        end
+    end
+
+    # return objects
+    return tpm_index, tpm_map
+end

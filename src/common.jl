@@ -84,20 +84,42 @@ struct _TotalHazardTransient <: _TotalHazard
     components::Vector{Int64}
 end
 
+"""
+Abstract type for MultistateProcess.
+"""
+abstract type MultistateProcess end
+
 
 """
     MultistateModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
 Mutable struct that fully specifies a multistate process for simulation or inference. 
 """
-Base.@kwdef mutable struct MultistateModel 
+Base.@kwdef struct MultistateModel <: MultistateProcess
     data::DataFrame
-    parameters::VectorOfVectors # only for transportability
+    parameters::VectorOfVectors 
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
+end
+
+"""
+    MultistateModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+
+Mutable struct that fully specifies a fitted multistate model. 
+"""
+Base.@kwdef struct MultistateModelFitted <: MultistateProcess
+    data::DataFrame
+    parameters::VectorOfVectors 
+    hazards::Vector{_Hazard}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    loglik::Float64
+    vcov::Matrix{Float64}
 end
 
 """

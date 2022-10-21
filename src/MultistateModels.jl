@@ -44,6 +44,9 @@ include("modelgeneration.jl")
 # path functions
 include("pathfunctions.jl")
 
+# sampling functions
+include("sampling.jl")
+
 # simulation
 include("simulation.jl")
 

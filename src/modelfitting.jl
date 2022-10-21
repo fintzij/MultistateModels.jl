@@ -40,11 +40,20 @@ function fit_exact(model::MultistateModel)
     sol  = solve(prob, Newton())
 
     # oh eff yes.
-    ll = pars -> MultistateModels.loglik(pars, MultistateModels.ExactData(samplepaths, model))
+    ll = pars -> loglik(pars, ExactData(samplepaths, model))
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
-    # return (pars, vcov, -sol.minimum): 
+    return MultistateModelFitted(
+        model.data,
+        VectorOfVectors(sol.u, model.parameters.elem_ptr),
+        model.hazards,
+        model.totalhazards,
+        model.tmat,
+        model.hazkeys,
+        model.subjectindices,
+        -sol.minimum,
+        vcov)
 end
 
 
@@ -67,9 +76,18 @@ function fit_markov_interval(model::MultistateModel)
     sol  = solve(prob, Newton())
 
     # get the variance-covariance matrix
-    ll = pars -> MultistateModels.loglik(pars, MultistateModels.PanelData(model, books))
+    ll = pars -> loglik(pars, PanelData(model, books))
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
-    # return (pars, vcov, -sol.minimum): 
+    return MultistateModelFitted(
+        model.data,
+        VectorOfVectors(sol.u, model.parameters.elem_ptr),
+        model.hazards,
+        model.totalhazards,
+        model.tmat,
+        model.hazkeys,
+        model.subjectindices,
+        -sol.minimum,
+        vcov)
 end
