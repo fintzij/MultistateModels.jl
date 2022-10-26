@@ -15,6 +15,10 @@ function fit(model::MultistateModel; alg = "ml")
         all(isa.(model.hazards, MultistateModels._Exponential) .|| 
             isa.(model.hazards, MultistateModels._ExponentialPH))
         fitted = fit_markov_interval(model)
+    elseif all(model.data.obstype .== 2) & 
+        !all(isa.(model.hazards, MultistateModels._Exponential) .|| 
+             isa.(model.hazards, MultistateModels._ExponentialPH))
+        fitted = fit_semimarkov_interval(model)
     end
 
     # return fitted object
@@ -52,6 +56,7 @@ function fit_exact(model::MultistateModel)
         model.tmat,
         model.hazkeys,
         model.subjectindices,
+        model.markovsurrogate,
         -sol.minimum,
         vcov)
 end
@@ -88,6 +93,7 @@ function fit_markov_interval(model::MultistateModel)
         model.tmat,
         model.hazkeys,
         model.subjectindices,
+        model.markovsurrogate,
         -sol.minimum,
         vcov)
 end

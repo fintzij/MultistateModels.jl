@@ -6,7 +6,7 @@ using MultistateModels
 using StatsBase
 
 h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
-h21 = Hazard(@formula(0 ~ 1 + trt), "exp", 2, 1)
+h21 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 1)
 
 dat = 
     DataFrame(id = repeat(collect(1:100), inner = 2),

@@ -1,44 +1,65 @@
-using MultistateModels
-using DifferentialEquations
+using ModelingToolkit
+using Catalyst
 using Distributions
+using DataFrames
+using DifferentialEquations
+using JumpProcesses
 using Plots
-using Rcall
+using MultistateModels: sample_ecctmc 
 
+# helpers
+function census_path(times, timeseq, stateseq)
+      # get indices for states
+      indseq = map(x -> searchsortedlast(timeseq, x), times)
 
+      return map(x -> x[2] + 1, stateseq[indseq])
+end
 
-# simulate a collection of sample paths
-paths = simulate(msm; nsim = Int(1e4), paths = true, data = false)
+# for simulating ecctmc
+function sim_path(times)
+      # simulate jump chain and expand
+      jumpchain = MultistateModels.sample_ecctmc(P,Q,1,2,0.0,5.0)
+      timeseq = [0.0;jumpchain[1];5.0]
+      stateseq = [1;jumpchain[2];2]
 
-# person 1 has an exponential hazard with rate 0.2
-# person 2 has an exponential hazard with rate 0.4
-etimes1 = map(x -> x.times[2], paths[1,:])
-etimes2 = map(x -> x.times[2], paths[2,:])
-mean(etimes1) 
-mean(etimes2)
+      # get indices for states
+      indseq = map(x -> searchsortedlast(timeseq, x), times)
 
-# plot histogram of event times
-h1 = histogram(etimes1, 
-          normalize = true,
-          label = "Simulated",
-          bins = 0:50);
-plot!(h1, collect(0:50),
-      pdf.(Exponential(1/0.2), collect(0:50)),
-      lw = 3,
-      colour = :blue,
-      label = "Analytic",
-      layout = (2,1));
-title!(h1, "Simulated vs. analytic event times, control group");
+      return stateseq[indseq]
+end
 
-h2 = histogram(etimes2, 
-          normalize = true,
-          label = "Simulated",
-          bins = 0:50,
-          colour = :orange);
-plot!(h2,collect(0:50),
-      pdf.(Exponential(1/0.4), collect(0:50)),
-      lw = 3,
-      colour = :orange,
-      label = "Analytic");
-title!(h2, "Simulated vs. analytic event times, treatment group");
+# Using the SciML ecosystem - rejection sampling
+# simulate from a MJP using DifferentialEquations.jl
+twostaterecur = @reaction_network begin
+    β, S --> D
+    μ, D --> S
+end β μ
 
-plot(h1, h2, layout = (2,1))
+nsim = 100000
+p = (0.4, 0.6)
+u0 = [1, 0]
+tspan = (0.0, 5.0)
+times = collect(0.0:0.1:5.0)
+prob = DiscreteProblem(twostaterecur, u0, tspan, p)
+jump_prob = JumpProblem(twostaterecur, prob, Direct())
+sol = [solve(jump_prob, SSAStepper()) for t in 1:(3 * nsim)]
+
+endpoints = map(x -> x.u[end][end], sol)
+whichkeep = findall(endpoints .== 1)
+keepers = sol[whichkeep]
+
+sciml_paths = reduce(hcat, map(y -> census_path(times, y.t, y.u), keepers))[:,1:nsim]
+
+# using MultistateModels
+Q = [-p[1] p[1]; p[2] -p[2]]
+P = exp(Q * 5.0)
+
+ecctmc_paths = reduce(hcat,[sim_path(times) for t in 1:nsim])
+
+# summarize results
+sciml_props = mean(sciml_paths .== 2, dims = 2)
+ecctmc_props = mean(ecctmc_paths .== 2, dims = 2)
+
+plot(times, sciml_props, label = "SciML via rejection sampling")
+plot!(times, ecctmc_props, label = "MultistateModels via uniformization")
+title!("Proportion in state 2 given X(\$t_0\$ = 1) and X(\$t_1\$=2)\n Huzzah!")

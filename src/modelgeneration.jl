@@ -54,7 +54,7 @@ end
 # mutable structs
 
 """
-    build_hazards(hazards:Hazard...; data:DataFrame)
+    build_hazards(hazards:Hazard...; data:DataFrame, surrogate = false)
 
 Return internal array of internal _Hazard subtypes called _hazards.
 
@@ -62,7 +62,7 @@ Accept iterable collection of `Hazard` objects, plus data.
 
 _hazards[1] corresponds to the first allowable transition enumerated in a transition matrix (in row major order), _hazards[2] to the second and so on... So _hazards will have length equal to number of allowable transitions.
 """
-function build_hazards(hazards::Hazard...; data::DataFrame)
+function build_hazards(hazards::Hazard...; data::DataFrame, surrogate = false)
     
     # initialize the arrays of hazards
     _hazards = Vector{_Hazard}(undef, length(hazards))
@@ -93,8 +93,11 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
         # grab the design matrix 
         hazdat = modelcols(hazschema, data)[2]
 
+        # get the family
+        family = surrogate ? hazards[h].family : "exp"
+
         # now we get the functions and other objects for the mutable struct
-        if hazards[h].family == "exp"
+        if family == "exp"
 
             # number of parameters
             npars = size(hazdat)[2]
@@ -127,7 +130,7 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                         hazards[h].stateto)
             end
 
-        elseif hazards[h].family == "wei" 
+        elseif family == "wei" 
 
             # number of parameters
             npars = size(hazdat, 2)
@@ -170,8 +173,8 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                         hazards[h].stateto)
             end
 
-        elseif hazards[h].family == "gom"
-        elseif hazards[h].family == "gg"
+        elseif family == "gom"
+        elseif family == "gg"
         else # semi-parametric family
         end
 
@@ -253,10 +256,13 @@ function multistatemodel(hazards::Hazard...; data::DataFrame)
 
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
-    _hazards, parameters, hazkeys = build_hazards(hazards...; data = data)
+    _hazards, parameters, hazkeys = build_hazards(hazards...; data = data, surrogate = false)
 
     # generate vector for total hazards 
     _totalhazards = build_totalhazards(_hazards, tmat)  
+
+    # build exponential surrogate hazards
+    surrogate = build_hazards(hazards...; data = data, surrogate = true)
 
     # return the multistate model
     model = MultistateModel(
@@ -266,7 +272,8 @@ function multistatemodel(hazards::Hazard...; data::DataFrame)
         _totalhazards,
         tmat,
         hazkeys,
-        subjinds)
+        subjinds,
+        surrogate)
 
     return model
 end

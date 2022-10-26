@@ -55,16 +55,10 @@ function observe_path(samplepath::SamplePath, model::MultistateModel, subj::Int6
             obsdat.tstop[obsdat_inds[end]] = subj_dat.tstop[r]
             obsdat.tstop[obsdat_inds[Not(end)]] = samplepath.times[jump_inds]
             
-            # obsdat.tstart[obsdat_inds[1]] = subj_dat.tstart[r]
-            # obsdat.tstart[obsdat_inds[Not(1)]] = samplepath.times[jump_inds]
-
             # get the state
             obsdat.stateto[obsdat_inds[end]] = samplepath.states[right_ind]
             obsdat.stateto[obsdat_inds[Not(end)]] = samplepath.states[jump_inds]
-            
-            # obsdat.statefrom[obsdat_inds[1]] = samplepath.states[left_ind]
-            # obsdat.statefrom[obsdat_inds[Not(1)]] = samplepath.states[jump_inds]
-        
+                    
             # populate the obstype column
             obsdat.obstype[obsdat_inds] .= subj_dat.obstype[r]
 
