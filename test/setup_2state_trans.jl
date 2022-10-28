@@ -8,7 +8,7 @@ using MultistateModels
 # This isn't crazy because e.g. brms will center covariates first
 
 h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
-h21 = Hazard(@formula(0 ~ 1 + trt), "weiPH", 2, 1)
+h21 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 1)
 
 dat = 
     DataFrame(id = [1,1,1,2,2,2],
@@ -16,7 +16,7 @@ dat =
               tstop = [10, 20, 30, 10, 20, 30],
               statefrom = [1, 1, 1, 1, 1, 1],
               stateto = [2, 2, 1, 2, 1, 2],
-              obstype = [1, 1, 1, 1, 1, 1],
+              obstype = [1, 2, 3, 1, 0, 2],
               trt = [0, 1, 0, 1, 0, 1])
 
 # create multistate model object

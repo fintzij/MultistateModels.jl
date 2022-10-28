@@ -14,4 +14,6 @@
     @test sort(msm_expwei.tmat[[2,4,7,8]]) == collect(1:4)
     @test all(msm_expwei.tmat[Not([2,4,7,8])] .== 0)
 
+    # need a test for subject indices
+
 end

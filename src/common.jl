@@ -1,70 +1,69 @@
 """
     Hazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
 
-Composite type for a cause-specific hazard function. Documentation to follow. 
+Specify a cause-specific hazard function. 
+
+# Arguments
+- 'hazard': regression formula for the (log) hazard, parsed using StatsModels.jl.
+- 'family': parameterization for the baseline hazard, one of "exp" for exponential, "wei" for Weibull, "gom" for Gompertz (not yet implemented),  "ms" for M-spline (on the baseline hazard, not yet implemented), or "bs" for B-spline (on the log baseline hazard, not yet implemented). 
+- 'statefrom': state number for the origin state.
+- 'stateto': state number for the destination state.
 """
 struct Hazard
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
-    family::String     # one of "exp", "wei", "weiPH", gg", or "sp"
+    family::String     # one of "exp", "wei", "gom", "ms", or "bs"
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
 end
 
 """
-Abstract struct for internal _Hazard types
+Abstract struct for internal _Hazard types.
 """
 abstract type _Hazard end
 
 """
 Exponential cause-specific hazard.
 """
-Base.@kwdef mutable struct _Exponential <: _Hazard
+Base.@kwdef struct _Exponential <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
 end
 
 """
 Exponential cause-specific hazard with covariate adjustment. Rate is a log-linear function of covariates.
 """
-Base.@kwdef mutable struct _ExponentialReg <: _Hazard
+Base.@kwdef struct _ExponentialPH <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
 end
 
 """
 Weibull cause-specific hazard.
 """
-Base.@kwdef mutable struct _Weibull <: _Hazard
+Base.@kwdef struct _Weibull <: _Hazard
     hazname::Symbol
     data::Array{Float64} # just an intercept
-    parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
 end
 
-"""
-Weibull cause-specific hazard with covariate adjustment. Scale and shape are log-linear functions of covariates.
-"""
-Base.@kwdef mutable struct _WeibullReg <: _Hazard
-    hazname::Symbol
-    data::Array{Float64}
-    parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
-    parnames::Vector{Symbol}
-    scaleinds::UnitRange{Int64}
-    shapeinds::UnitRange{Int64}
-end
 
 """
 Weibull cause-specific proportional hazard. The baseline hazard is Weibull and covariates have a multiplicative effect vis-a-vis the baseline hazard.
 """
-Base.@kwdef mutable struct _WeibullPH <: _Hazard
+Base.@kwdef struct _WeibullPH <: _Hazard
     hazname::Symbol
     data::Array{Float64}
-    parameters::SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int64}}, true}
     parnames::Vector{Symbol}
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
 end
 
 """
@@ -85,20 +84,44 @@ struct _TotalHazardTransient <: _TotalHazard
     components::Vector{Int64}
 end
 
+"""
+Abstract type for MultistateProcess.
+"""
+abstract type MultistateProcess end
+
 
 """
-    MultistateProcess(data::DataFrame, hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard}, tmat::Matrix{Int64})
+    MultistateModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
 Mutable struct that fully specifies a multistate process for simulation or inference. 
 """
-Base.@kwdef mutable struct MultistateModel 
+Base.@kwdef struct MultistateModel <: MultistateProcess
     data::DataFrame
-    parameters::Vector{Float64}
+    parameters::VectorOfVectors 
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
+    markovsurrogate::Tuple
+end
+
+"""
+    MultistateModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+
+Mutable struct that fully specifies a fitted multistate model. 
+"""
+Base.@kwdef struct MultistateModelFitted <: MultistateProcess
+    data::DataFrame
+    parameters::VectorOfVectors 
+    hazards::Vector{_Hazard}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    markovsurrogate::Tuple
+    loglik::Float64
+    vcov::Matrix{Float64}
 end
 
 """
@@ -112,23 +135,22 @@ struct SamplePath
     states::Vector{Int64}
 end
 
-# """
-#     Overloading QuadratureProblem to allow for mutable problems.
-# """
-# Base.@kwdef mutable struct QuadratureProblem{isinplace,P,F,L,U,K} <: SciMLBase.AbstractQuadratureProblem{isinplace}
-#     f::F
-#     lb::L
-#     ub::U
-#     nout::Int
-#     p::P
-#     batch::Int
-#     kwargs::K
-#     SciMLBase.@add_kwonly function QuadratureProblem{iip}(f,lb,ub,p=NullParameters();
-#                                                 nout=1,
-#                                                 batch = 0, kwargs...) where iip
-#         new{iip,typeof(p),typeof(f),typeof(lb),
-#             typeof(ub),typeof(kwargs)}(f,lb,ub,nout,p,batch,kwargs)
-#     end
-# end
+"""
+    ExactData(samplepaths::Array{SamplePath}, model::MultistateModel)
 
-# QuadratureProblem(f,lb,ub,args...;kwargs...) = QuadratureProblem{isinplace(f, 3)}(f,lb,ub,args...;kwargs...)
+Struct containing exactly observed sample paths and a model object. Used in fitting a multistate model to completely observed data.
+"""
+struct ExactData
+    paths::Array{SamplePath}
+    model::MultistateModel
+end
+
+"""
+    PanelData(model::MultistateModel, books::Tuple)
+
+Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate model to panel data.
+"""
+struct PanelData
+    model::MultistateModel
+    books::Tuple # tpm_index and tpm_map, from build_tpm_containers
+end

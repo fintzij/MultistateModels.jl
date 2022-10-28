@@ -2,19 +2,18 @@ using MultistateModels
 using Distributions
 using Plots
 
-include("test/setup_2state_exp_trans.jl")
+include("test/setup_2statetrans_dat.jl")
 
 # simulate a single path
 path = simulate(msm; data = false, paths = true)
 
 # simulate a collection of sample paths
-paths = simulate(msm; nsim = 100, paths = true, data = true)
+paths = simulate(msm; nsim = 10000, paths = true, data = false)
 
 # person 1 has an exponential hazard with rate 0.2
 # person 2 has an exponential hazard with rate 0.4
 etimes1 = map(x -> x.times[2], paths[1,:])
 etimes2 = map(x -> x.times[2], paths[2,:])
-mean(etimes1) # there's still a bug
 mean(etimes2)
 
 # plot histogram of event times

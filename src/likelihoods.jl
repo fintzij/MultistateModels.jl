@@ -1,9 +1,14 @@
+########################################################
+### Likelihod functions for sample paths, tpms, etc. ###
+########################################################
+
+### Exactly observed sample paths ----------------------
 """
     loglik(path::SamplePath, model::MultistateModel) 
 
 Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
 """
-function loglik(path::SamplePath, model::MultistateModel)
+function loglik(parameters, path::SamplePath, model::MultistateModel)
 
     # initialize log likelihood
     ll = 0.0
@@ -51,14 +56,14 @@ function loglik(path::SamplePath, model::MultistateModel)
             if tstop <= time_R
                 # event happens in (time_L, time_R]
                 # accumulate log(Pr(T ≥ timeinstate | T ≥ timespent))
-                log_surv_prob -= cumulhaz(model.totalhazards[scur], model.hazards, timespent, timeinstate, comp_dat_ind)
+                log_surv_prob += survprob(timespent, timeinstate, parameters, comp_dat_ind, model.totalhazards[scur], model.hazards; give_log = true)
 
                 # increment log likelihood
                 ll += log_surv_prob
 
                 # if event happened, accrue hazard
                 if snext != scur
-                    ll += call_haz(timeinstate, comp_dat_ind, model.hazards[model.tmat[scur, snext]])
+                    ll += call_haz(timeinstate, parameters[model.tmat[scur, snext]], comp_dat_ind, model.hazards[model.tmat[scur, snext]]; give_log = true)
                 end
 
                 # break out of the while loop
@@ -68,8 +73,8 @@ function loglik(path::SamplePath, model::MultistateModel)
                 # event doesn't hapen in (time_L, time_R]
                 # accumulate log-survival
                 # accumulate log(Pr(T ≥ time_R | T ≥ timespent))
-                log_surv_prob -= cumulhaz(model.totalhazards[scur], model.hazards, timespent, timespent + time_R - tcur, comp_dat_ind)
-
+                log_surv_prob += survprob(timespent, timespent + time_R - tcur, parameters, comp_dat_ind, model.totalhazards[scur], model.hazards; give_log = true)
+                
                 # increment timespent
                 timespent += time_R - tcur
 
@@ -91,14 +96,71 @@ function loglik(path::SamplePath, model::MultistateModel)
 end
 
 
+
+########################################################
+##################### Wrappers #########################
+########################################################
+
 """
-    loglik(samplepaths::Array{SamplePath}, model::MultistateModel) 
+    loglik(parameters, data::ExactData; neg = true) 
 
-Return sum of log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain.
+Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. 
 """
 
-function loglik(samplepaths::Array{SamplePath}, model::MultistateModel)
+function loglik(parameters, data::ExactData; neg = true)
 
-    # send each element of samplepaths to loglik(path::SamplePath, model::MultistateModel) and sum up results
-    return mapreduce(x -> loglik(x, model), +, samplepaths)
+    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+
+    # send each element of samplepaths to loglik
+    ll = mapreduce(x -> loglik(pars, x, data.model), +, data.paths)
+
+    neg ? -ll : ll
 end
+
+"""
+    loglik(parameters, data::PanelData; neg = true)
+
+Return sum of (negative) log likelihood for panel data. 
+"""
+function loglik(parameters, data::PanelData; neg = true) 
+
+    # nest the model parameters
+    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+
+    # build containers for transition intensity and prob mtcs
+    hazmat_book = build_hazmat_book(eltype(parameters), data.model.tmat, data.books[1])
+
+    tpm_book = build_tpm_book(eltype(parameters), data.model.tmat, data.books[1])
+
+    # allocate memory for matrix exponential
+    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
+
+    # Solve Kolmogorov equations for TPMs
+    for t in eachindex(data.books[1])
+
+        # compute the transition intensity matrix
+        compute_hazmat!(
+            hazmat_book[t],
+            pars,
+            data.model.hazards,
+            data.books[1][t])
+
+        # compute transition probability matrices
+        compute_tmat!(
+            tpm_book[t],
+            hazmat_book[t],
+            data.books[1][t],
+            cache)
+    end
+
+    # accumulate the log likelihood
+    ll = 0.0
+    for i in Base.OneTo(nrow(data.model.data))
+        ll += 
+            log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i],
+             data.model.data.stateto[i]])
+    end
+
+    neg ? -ll : ll
+end
+

@@ -1,13 +1,19 @@
 """
     set_parameters!(model::MultistateModel, newvalues::Vector{Float64})
 
-Set model parameters given a vector of values. Assigns `newvalues`` to `model.parameters`, which are then propagated to subarrays in cause-specific hazards.
+Set model parameters given a vector of values. Copies `newvalues`` to `model.parameters`.
 """
-function set_parameters!(model::MultistateModel, newvalues::Vector)
+function set_parameters!(model::MultistateModel, newvalues::Vector{Vector{Float64}})
     
     # check that we have the right number of parameters
     if(length(model.parameters) != length(newvalues))
         error("New values and model parameters are not of the same length.")
+    end
+
+    for i in eachindex(model.parameters)
+        if(length(model.parameters[i]) != length(newvalues[i]))
+            error("New values for hazard $i and model parameters for that hazard are not of the same length.")
+        end
     end
 
     copyto!(model.parameters, newvalues)
@@ -16,28 +22,28 @@ end
 """
     set_parameters!(model::MultistateModel, newvalues::Tuple)
 
-Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assigns new values to `model.hazards[i].parameters`, where `i` indexes the cause-specific hazards in the order they appear in the model object. Parameters for cause-specific hazards are automatically propagated to `model.parameters`.
+Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assigns new values to `model.parameters[i]`, where `i` indexes the cause-specific hazards in the order they appear in the model object.
 """
 function set_parameters!(model::MultistateModel, newvalues::Tuple)
     # check that there is a vector of parameters for each cause-specific hazard
-    if(length(model.hazards) != length(newvalues))
+    if(length(model.parameters) != length(newvalues))
         error("Number of supplied parameter vectors not equal to number of cause-specific hazards.")
     end
 
     for i in eachindex(newvalues)
         # check that we have the right number of parameters
-        if(length(model.hazards[i].parameters) != length(newvalues[i]))
+        if(length(model.parameters[i]) != length(newvalues[i]))
             error("New values and parameters for cause-specific hazard $i are not of the same length.")
         end
 
-        copyto!(model.hazards[i].parameters, newvalues[i])
+        copyto!(model.parameters[i], newvalues[i])                   
     end
 end
 
 """
     set_parameters!(model::MultistateModel, newvalues::NamedTuple)
 
-Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  Parameters for cause-specific hazards are automatically propagated to `model.parameters`.
+Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  
 """
 function set_parameters!(model::MultistateModel, newvalues::NamedTuple)
     
@@ -47,11 +53,12 @@ function set_parameters!(model::MultistateModel, newvalues::NamedTuple)
     for i in eachindex(value_keys)
 
         # check length of supplied parameters
-        if length(newvalues[value_keys[i]]) != length(model.hazards[model.hazkeys[value_keys[i]]].parameters)
+        if length(newvalues[value_keys[i]]) != 
+                length(model.parameters[model.hazkeys[value_keys[i]]])
             error("The new parameter values for $value_keys[i] are not the expected length.")
         end
 
-        copyto!(model.hazards[i].parameters, newvalues[value_keys[i]])
+        copyto!(model.parameters[i], newvalues[value_keys[i]])
     end
 end
 
@@ -140,4 +147,114 @@ function check_data!(data::DataFrame, tmat::Matrix)
     # check that obstype is one of the allowed censoring schemes
 
     # check that there are no rows for a subject after they hit an absorbing state
+end
+
+"""
+    build_tpm_book(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
+
+Build container for holding transition probability matrices.
+"""
+function build_tpm_book(T::DataType, tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
+
+    # build the TPM container
+    nstates = size(tmat, 1)
+    nmats   = map(x -> nrow(x), tpm_index) 
+    book    = [[zeros(T, nstates, nstates) for j in 1:nmats[i]] for i in eachindex(tpm_index)]
+
+    return book
+end
+
+"""
+    build_hazmat_book(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
+
+Build container for holding transition intensity matrices.
+"""
+function build_hazmat_book(T::DataType, tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
+    # Making this "type aware" by using T::DataType so that autodiff worksA
+    # build the TPM container
+    nstates = size(tmat, 1)
+    nmats   = map(x -> nrow(x), tpm_index) 
+    book    = [zeros(T, nstates, nstates) for j in eachindex(tpm_index)]
+
+    return book
+end
+
+"""
+    build_tpm_mapping(data::DataFrame)
+
+Construct bookkeeping objects for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. 
+"""
+function build_tpm_mapping(data::DataFrame, tmat::Matrix{Int64}) 
+
+    # maps each row in dataset to TPM
+    # first col is covar combn, second is tpm index
+    tpm_map = zeros(Int64, nrow(data), 2)
+
+    # check if the data contains covariates
+    if ncol(data) == 6 # no covariates
+        
+        # get intervals
+        gaps = data.tstop - data.tstart
+
+        # get unique start and stop
+        ugaps = sort(unique(gaps))
+
+        # for solving Kolmogorov equations - saveats
+        tpm_index = 
+            [DataFrame(tstart = 0,
+                       tstop  = ugaps,
+                       datind = 0),]
+
+        # first instance of each interval in the data
+        for i in Base.OneTo(nrow(tpm_index[1]))
+            tpm_index[1].datind[i] = 
+                findfirst(gaps .== tpm_index[1].tstop[i])
+        end
+
+        # match intervals to unique tpms
+        tpm_map[:,1] .= 1
+        for i in Base.OneTo(size(tpm_map, 1))
+            tpm_map[i,2] = findfirst(ugaps .== gaps[i])
+        end    
+    else
+
+        # get unique covariates
+        covars = data[:,Not(1:6)]
+        ucovars = unique(data[:,Not(1:6)])
+
+        # get gap times
+        gaps = data.tstop - data.tstart
+
+        # initialize tpm_index
+        tpm_index = [DataFrame() for i in 1:nrow(ucovars)]
+
+        # for each set of unique covariates find gaps
+        for k in Base.OneTo(nrow(ucovars))
+
+            # get indices for rows that have the covars
+            covinds = findall(map(x -> all(x == ucovars[k,:]), eachrow(covars)) .== 1)
+
+            # find unique gaps 
+            ugaps = sort(unique(gaps[covinds]))
+
+            # fill in tpm_index
+            tpm_index[k] = DataFrame(tstart = 0, tstop = ugaps, datind = 0)
+
+            # first instance of each interval in the data
+            for i in Base.OneTo(nrow(tpm_index[k]))
+                tpm_index[k].datind[i] = 
+                    covinds[findfirst(gaps[covinds] .== tpm_index[1].tstop[i])]
+            end
+
+            # fill out the tpm_map 
+            # match intervals to unique tpms
+            tpm_map[covinds, 1] .= k
+            for i in eachindex(covinds)
+                tpm_map[covinds[i],2] = findfirst(ugaps .== gaps[covinds[i]])
+            end  
+        end
+    end
+
+    # return objects
+    return tpm_index, tpm_map
 end

@@ -54,7 +54,7 @@ end
 # mutable structs
 
 """
-    build_hazards(hazards:Hazard...; data:DataFrame)
+    build_hazards(hazards:Hazard...; data:DataFrame, surrogate = false)
 
 Return internal array of internal _Hazard subtypes called _hazards.
 
@@ -62,19 +62,16 @@ Accept iterable collection of `Hazard` objects, plus data.
 
 _hazards[1] corresponds to the first allowable transition enumerated in a transition matrix (in row major order), _hazards[2] to the second and so on... So _hazards will have length equal to number of allowable transitions.
 """
-function build_hazards(hazards::Hazard...; data::DataFrame)
+function build_hazards(hazards::Hazard...; data::DataFrame, surrogate = false)
     
     # initialize the arrays of hazards
     _hazards = Vector{_Hazard}(undef, length(hazards))
 
     # initialize vector of parameters
-    parameters = Vector{Float64}(undef, 0)
+    parameters = VectorOfVectors{Float64}()
 
     # initialize a dictionary for indexing into the vector of hazards
     hazkeys = Dict{Symbol, Int64}()
-    
-    # counter for tracking indices of views
-    hazpars_start = 0
 
     # assign a hazard function
     for h in eachindex(hazards) 
@@ -96,8 +93,11 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
         # grab the design matrix 
         hazdat = modelcols(hazschema, data)[2]
 
+        # get the family
+        family = surrogate ? hazards[h].family : "exp"
+
         # now we get the functions and other objects for the mutable struct
-        if hazards[h].family == "exp"
+        if family == "exp"
 
             # number of parameters
             npars = size(hazdat)[2]
@@ -106,7 +106,7 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
             hazpars = zeros(Float64, npars)
 
             # append to model parameters
-            append!(parameters, hazpars)
+            push!(parameters, hazpars)
 
             # get names
             parnames = hazname*"_".*coefnames(hazschema)[2]
@@ -117,101 +117,69 @@ function build_hazards(hazards::Hazard...; data::DataFrame)
                     _Exponential(
                         Symbol(hazname),
                         hazdat,
-                        # hazpars,
-                        view(parameters, hazpars_start .+ eachindex(hazpars)),
-                        [Symbol.(parnames)]) # make sure this is a vector
+                        [Symbol.(parnames)],
+                        hazards[h].statefrom,
+                        hazards[h].stateto) # make sure this is a vector
             else
                 haz_struct = 
-                    _ExponentialReg(
+                    _ExponentialPH(
                         Symbol(hazname),
                         hazdat,
-                        # hazpars,
-                        view(parameters, hazpars_start .+ eachindex(hazpars)),
-                        Symbol.(parnames))
+                        Symbol.(parnames),
+                        hazards[h].statefrom,
+                        hazards[h].stateto)
             end
 
-        elseif hazards[h].family == "wei" || hazards[h].family == "weiPH"
+        elseif family == "wei" 
 
             # number of parameters
             npars = size(hazdat, 2)
 
+            # vector for parameters
+            hazpars = zeros(Float64, 1 + npars)
+
+            # append to model parameters
+            push!(parameters, hazpars)
+
             # generate hazard struct
             if npars == 1
-
-                # vector for parameters
-                hazpars = zeros(Float64, npars * 2)
-
-                # append to model parameters
-                append!(parameters, hazpars)
                 
                 # parameter names
-                parnames = vec(hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2])
+                parnames = vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2])
 
-                # create struct
                 haz_struct = 
                     _Weibull(
                         Symbol(hazname),
-                        hazdat,
-                        # hazpars,
-                        view(parameters, hazpars_start .+ eachindex(hazpars)),
-                        Symbol.(parnames))
+                        hazdat, 
+                        Symbol.(parnames),
+                        hazards[h].statefrom,
+                        hazards[h].stateto)
                         
-            elseif hazards[h].family == "weiPH"
-
-                # vector for parameters
-                hazpars = zeros(Float64, 1 + npars)
-
-                # append to model parameters
-                append!(parameters, hazpars)
+            else
                 
                 # parameter names
                 parnames = 
                     vcat(
-                        hazname * "_scale",
-                        hazname * "_shape",
+                        hazname * "_shape_(Intercept)",
+                        hazname * "_scale_(Intercept)",
                         hazname*"_".*coefnames(hazschema)[2][Not(1)])
-                        
+
                 haz_struct = 
                     _WeibullPH(
                         Symbol(hazname),
-                        hazdat[:,Not(1)],
-                        # hazpars,
-                        view(parameters, hazpars_start .+ eachindex(hazpars)),
-                        Symbol.(parnames))
-
-            else
-
-                # vector for parameters
-                hazpars = zeros(Float64, npars * 2)
-
-                # append to model parameters
-                append!(parameters, hazpars)
-                
-                # parameter names
-                parnames = vec(hazname*"_".*["scale" "shape"].*"_".*coefnames(hazschema)[2])
-
-                # generate struct
-                haz_struct = 
-                    _WeibullReg(
-                        Symbol(hazname),
                         hazdat,
-                        # hazpars,
-                        view(parameters, hazpars_start .+ eachindex(hazpars)),
                         Symbol.(parnames),
-                        UnitRange(1, npars),
-                        UnitRange(1 + npars, 2 * npars))
+                        hazards[h].statefrom,
+                        hazards[h].stateto)
             end
 
-        elseif hazards[h].family == "gam"
-        elseif hazards[h].family == "gg"
+        elseif family == "gom"
+        elseif family == "gg"
         else # semi-parametric family
         end
 
         # note: want a symbol that names the hazard + vector of symbols for parameters
         _hazards[h] = haz_struct
-
-        # increment parameter starting index
-        hazpars_start += length(hazpars)
     end
 
     return _hazards, parameters, hazkeys
@@ -237,9 +205,7 @@ function build_totalhazards(_hazards, tmat)
                 _TotalHazardAbsorbing()
         else
             _totalhazards[h] = 
-                _TotalHazardTransient(
-tmat[h, findall(tmat[h,:] .!= 0)]
-                )
+                _TotalHazardTransient(tmat[h, findall(tmat[h,:] .!= 0)])
         end
     end
 
@@ -270,7 +236,7 @@ end
 
 Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference.
 """
-function multistatemodel(hazards::Hazard...;data::DataFrame)
+function multistatemodel(hazards::Hazard...; data::DataFrame)
 
     # get indices for each subject in the dataset
     subjinds = get_subjinds(data)
@@ -290,27 +256,24 @@ function multistatemodel(hazards::Hazard...;data::DataFrame)
 
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
-    _hazards, parameters, hazkeys = build_hazards(hazards...; data = data)
+    _hazards, parameters, hazkeys = build_hazards(hazards...; data = data, surrogate = false)
 
     # generate vector for total hazards 
     _totalhazards = build_totalhazards(_hazards, tmat)  
 
-    # initialize vector of model parameters and set views in hazards
-    ### update this when we deal with data sampling dists/censoring
-    # parameters = collate_parameters(_hazards)
-    # set_parameter_views!(parameters, _hazards)
+    # build exponential surrogate hazards
+    surrogate = build_hazards(hazards...; data = data, surrogate = true)
 
     # return the multistate model
-    model = 
-        MultistateModel(
-            data,
-            parameters,
-            _hazards,
-            _totalhazards,
-            tmat,
-            hazkeys,
-            subjinds
-        )
+    model = MultistateModel(
+        data,
+        parameters,
+        _hazards,
+        _totalhazards,
+        tmat,
+        hazkeys,
+        subjinds,
+        surrogate)
 
     return model
 end
