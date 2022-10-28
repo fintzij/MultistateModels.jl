@@ -103,7 +103,7 @@ Base.@kwdef struct MultistateModel <: MultistateProcess
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    markovsurrogate::Tuple
+    markovsurrogate::Vector{_Hazard}
 end
 
 """
@@ -119,7 +119,7 @@ Base.@kwdef struct MultistateModelFitted <: MultistateProcess
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    markovsurrogate::Tuple
+    markovsurrogate::Vector{_Hazard}
     loglik::Float64
     vcov::Matrix{Float64}
 end
@@ -141,16 +141,26 @@ end
 Struct containing exactly observed sample paths and a model object. Used in fitting a multistate model to completely observed data.
 """
 struct ExactData
-    paths::Array{SamplePath}
     model::MultistateModel
+    paths::Array{SamplePath}
 end
 
 """
-    PanelData(model::MultistateModel, books::Tuple)
+    MPanelData(model::MultistateModel, books::Tuple)
 
-Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate model to panel data.
+Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate Markov model to panel data.
 """
-struct PanelData
+struct MPanelData
+    model::MultistateModel
+    books::Tuple # tpm_index and tpm_map, from build_tpm_containers
+end
+
+"""
+    SMPanelData(model::MultistateModel, books::Tuple)
+
+Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate semi-Markov model to panel data.
+"""
+struct SMPanelData
     model::MultistateModel
     books::Tuple # tpm_index and tpm_map, from build_tpm_containers
 end

@@ -35,6 +35,9 @@ include("hazards.jl")
 # likelihood functions
 include("likelihoods.jl")
 
+# miscellaneous functions
+include("miscellaneous.jl")
+
 # model fitting
 include("modelfitting.jl")
 

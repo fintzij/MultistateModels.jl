@@ -3,7 +3,7 @@
 
 Fit a model. 
 """ 
-function fit(model::MultistateModel; alg = "ml")
+function fit(model::MultistateModel; alg = "ml", nparticles = 100)
     
     # if sample paths are fully observed, maximize the likelihood directly
     if all(model.data.obstype .== 1)
@@ -18,7 +18,7 @@ function fit(model::MultistateModel; alg = "ml")
     elseif all(model.data.obstype .== 2) & 
         !all(isa.(model.hazards, MultistateModels._Exponential) .|| 
              isa.(model.hazards, MultistateModels._ExponentialPH))
-        fitted = fit_semimarkov_interval(model)
+        fitted = fit_semimarkov_interval(model; nparticles = nparticles)
     end
 
     # return fitted object
@@ -40,11 +40,11 @@ function fit_exact(model::MultistateModel)
 
     # optimize
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, parameters, ExactData(samplepaths, model))    
+    prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))    
     sol  = solve(prob, Newton())
 
     # oh eff yes.
-    ll = pars -> loglik(pars, ExactData(samplepaths, model))
+    ll = pars -> loglik(pars, ExactData(model, samplepaths))
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
@@ -77,11 +77,11 @@ function fit_markov_interval(model::MultistateModel)
 
     # optimize the likelihood
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, parameters, PanelData(model, books))
+    prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
     sol  = solve(prob, Newton())
 
     # get the variance-covariance matrix
-    ll = pars -> loglik(pars, PanelData(model, books))
+    ll = pars -> loglik(pars, MPanelData(model, books))
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
@@ -96,4 +96,19 @@ function fit_markov_interval(model::MultistateModel)
         model.markovsurrogate,
         -sol.minimum,
         vcov)
+end
+
+"""
+    fit_semimarkov_interval(model::MultistateModel; nparticles)
+
+Fit a semi-Markov model to panel data via Monte Carlo maximum marginal likelihood.
+"""
+function fit_semimarkov_interval(model::MultistateModel; nparticles)
+
+    # containers for bookkeeping TPMs
+    books = build_tpm_mapping(model.data, model.tmat)
+
+    # extract and initialize model parameters
+    parameters = flatview(model.parameters)
+
 end

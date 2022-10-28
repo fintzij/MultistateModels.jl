@@ -118,11 +118,11 @@ function loglik(parameters, data::ExactData; neg = true)
 end
 
 """
-    loglik(parameters, data::PanelData; neg = true)
+    loglik(parameters, data::MPanelData; neg = true)
 
 Return sum of (negative) log likelihood for panel data. 
 """
-function loglik(parameters, data::PanelData; neg = true) 
+function loglik(parameters, data::MPanelData; neg = true) 
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
