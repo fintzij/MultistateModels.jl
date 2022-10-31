@@ -20,3 +20,21 @@ function statetable(model::MultistateModel)
     # return the matrix of state transitions
     return transmat
 end
+
+""" 
+    qcrudeinit(transmat, tmat)
+
+Return a matrix with initial intensity values. 
+"""
+
+function qcrudeinit(transmat, tmat)
+    # set transmat entry equal to zero if it's not an allowable transition
+    transmat[tmat .==0] .= 0
+
+    # take row sum of new transmat and calculate the proportions for each row
+    row_sum = sum(transmat, dims=2)
+    q_crude_mat = transmat./row_sum
+
+    # return the matrix of initial intensity values
+    return q_crude_mat
+end
