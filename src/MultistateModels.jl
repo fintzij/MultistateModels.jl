@@ -19,6 +19,7 @@ using StatsFuns
 # Write your package code here.
 export
     @formula,
+    cumulative_incidence,
     Hazard,
     multistatemodel,
     set_parameters!,

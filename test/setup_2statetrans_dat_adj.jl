@@ -15,7 +15,7 @@ dat =
               statefrom = fill(1, 200),
               stateto = fill(2, 200),
               obstype = fill(2, 200),
-              trt = reduce(vcat, [sample([0,1,2], 2) for i in 1:100]),
+              trt = reduce(vcat, [sample([0,1], 2) for i in 1:100]),
               male = reduce(vcat, [repeat([sample(["m", "f"]),], 2) for i in 1:100]))
 
 # want different gap times
@@ -35,16 +35,19 @@ msm_2state_transadj = multistatemodel(h12, h21; data = dat)
 set_parameters!(
     msm_2state_transadj, 
     (h12 = [log(0.2), log(1.5)],
-     h21 = [log(0.2), log(2/3)]))
+     h21 = [log(0.2), 0.0, log(2/3)]))
 
 simdat, paths = simulate(msm_2state_transadj; paths = true, data = true);
 
 # create multistate model object with the simulated data
 msm_2state_transadj = multistatemodel(h12, h21; data = simdat[1])
 
-set_parameters!(msm_2state_transadj, (h12 = randn(2), h21 = randn(2)))
+set_parameters!(
+    msm_2state_transadj, 
+    (h12 = [log(0.2), log(1.5)],
+     h21 = [log(0.2), 0.0, log(2/3)]))
 
 model = msm_2state_transadj
 using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, ExponentialUtilities
-using MultistateModels: build_tpm_mapping, loglik, PanelData, build_hazmat_book, build_tpm_book
+using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book
 
