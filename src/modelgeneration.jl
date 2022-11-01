@@ -273,7 +273,7 @@ function multistatemodel(hazards::Hazard...; data::DataFrame)
         tmat,
         hazkeys,
         subjinds,
-        surrogate[1])
+        surrogate[1:2])
 
     return model
 end

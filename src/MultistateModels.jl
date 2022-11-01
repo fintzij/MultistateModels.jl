@@ -11,6 +11,7 @@ using LinearAlgebra
 using Optim # for simulation - keep
 using Optimization # for fitting - keep
 using OptimizationOptimJL
+using QuadGK
 using StatsBase
 using StatsModels
 using StatsFuns

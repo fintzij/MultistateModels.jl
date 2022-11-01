@@ -46,5 +46,12 @@ set_parameters!(msm_2state_transadj, (h12 = randn(2), h21 = randn(2)))
 
 model = msm_2state_transadj
 using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, ExponentialUtilities
-using MultistateModels: build_tpm_mapping, loglik, PanelData, build_hazmat_book, build_tpm_book
+using MultistateModels: build_tpm_mapping, loglik, MPanelData, build_hazmat_book, build_tpm_book, SMPanelData
+
+books = build_tpm_mapping(model.data, model.tmat)
+
+# extract and initialize model parameters
+parameters = flatview(model.parameters)
+
+
 

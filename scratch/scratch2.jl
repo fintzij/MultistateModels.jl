@@ -50,9 +50,7 @@ A2 = DiffEqArrayOperator(zeros(3,3), update_func = update_fun)
 prob2 = ODEProblem(A2, diagm(ones(3)), (0.0, 5.4), p)
 s2 = solve(prob2, saveat = [collect(1:5); 5.4])
 
-
-
-### with ExponentialUtilities - MUCH slower
+### with ExponentialUtilities 
 using ExponentialUtilities
 method = ExpMethodGeneric()
 cache = ExponentialUtilities.alloc_mem(Q, method)
@@ -65,4 +63,13 @@ s3 - s2.u
 @time solve(prob2, saveat = [collect(1:5); 5.4])
 @time map(t -> exponential!(copyto!(similar(Q), Q), ExpMethodGeneric()), [1.0, 2.0, 3.0, 4.0, 5.0, 5.4])
 
-## importance sampling
+### For solving for transition probabilities when approximating Markov models for semi-Markov models in proposals
+# here p wraps the parameters, hazards, and tpm_index
+function update_func!(Q, u, p, t)
+     for h in p.hazards
+          Q[p.hazards[h].statefrom, p.hazards[h].stateto] = 
+               call_haz(t, p.parameters[h], p.rowind, p.hazards[h]; give_log = false)
+     end
+
+     Q[diagind(Q)] = -sum(Q, dims = 2)
+end

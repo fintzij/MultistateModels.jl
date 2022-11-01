@@ -120,7 +120,7 @@ end
 """
     loglik(parameters, data::MPanelData; neg = true)
 
-Return sum of (negative) log likelihood for panel data. 
+Return sum of (negative) log likelihood for a Markov model fit to panel data. 
 """
 function loglik(parameters, data::MPanelData; neg = true) 
 
@@ -164,3 +164,17 @@ function loglik(parameters, data::MPanelData; neg = true)
     neg ? -ll : ll
 end
 
+"""
+    loglik(parameters, data::SMPanelData; neg = true)
+
+Return sum of (negative) log-likelihood for a semi-Markov model fit to panel data. 
+"""
+function loglik(parameters, data::SMPanelData; neg = true)
+
+    # nest the model parameters
+    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+
+    # find the surrogate parameters for path proposals that minimize the discrepancy between state occupancy probs
+    surrogate_pars = optimize_surrogate(pars, data.model)
+
+end

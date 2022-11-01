@@ -103,7 +103,7 @@ Base.@kwdef struct MultistateModel <: MultistateProcess
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    markovsurrogate::Vector{_Hazard}
+    markovsurrogate::Tuple
 end
 
 """
@@ -119,7 +119,7 @@ Base.@kwdef struct MultistateModelFitted <: MultistateProcess
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    markovsurrogate::Vector{_Hazard}
+    markovsurrogate::Tuple
     loglik::Float64
     vcov::Matrix{Float64}
 end
@@ -163,4 +163,5 @@ Struct containing panel data, a model object, and bookkeeping objects. Used in f
 struct SMPanelData
     model::MultistateModel
     books::Tuple # tpm_index and tpm_map, from build_tpm_containers
+    
 end

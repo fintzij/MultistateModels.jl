@@ -70,7 +70,7 @@ Fit a multistate markov model to interval censored data (i.e. model.data.obstype
 function fit_markov_interval(model::MultistateModel)
     
     # containers for bookkeeping TPMs
-    books = build_tpm_mapping(model.data, model.tmat)
+    books = build_tpm_mapping(model.data)
 
     # extract and initialize model parameters
     parameters = flatview(model.parameters)
@@ -106,7 +106,7 @@ Fit a semi-Markov model to panel data via Monte Carlo maximum marginal likelihoo
 function fit_semimarkov_interval(model::MultistateModel; nparticles)
 
     # containers for bookkeeping TPMs
-    books = build_tpm_mapping(model.data, model.tmat)
+    books = build_tpm_mapping(model.data)
 
     # extract and initialize model parameters
     parameters = flatview(model.parameters)

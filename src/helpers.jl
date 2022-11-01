@@ -195,7 +195,7 @@ end
 
 Construct bookkeeping objects for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. 
 """
-function build_tpm_mapping(data::DataFrame, tmat::Matrix{Int64}) 
+function build_tpm_mapping(data::DataFrame) 
 
     # maps each row in dataset to TPM
     # first col is covar combn, second is tpm index
@@ -227,8 +227,8 @@ function build_tpm_mapping(data::DataFrame, tmat::Matrix{Int64})
         for i in Base.OneTo(size(tpm_map, 1))
             tpm_map[i,2] = findfirst(ugaps .== gaps[i])
         end    
-    else
 
+    else
         # get unique covariates
         covars = data[:,Not(1:6)]
         ucovars = unique(data[:,Not(1:6)])
