@@ -94,7 +94,7 @@ function build_hazards(hazards::Hazard...; data::DataFrame, surrogate = false)
         hazdat = modelcols(hazschema, data)[2]
 
         # get the family
-        family = surrogate ? hazards[h].family : "exp"
+        family = surrogate ? "exp" : hazards[h].family 
 
         # now we get the functions and other objects for the mutable struct
         if family == "exp"

@@ -15,7 +15,7 @@ dat =
               statefrom = fill(1, 200),
               stateto = fill(2, 200),
               obstype = fill(2, 200),
-              trt = reduce(vcat, [sample([0,1], 2) for i in 1:100]),
+              trt = reduce(vcat, [sample([0,1,2], 2) for i in 1:100]),
               male = reduce(vcat, [repeat([sample(["m", "f"]),], 2) for i in 1:100]))
 
 # want different gap times
