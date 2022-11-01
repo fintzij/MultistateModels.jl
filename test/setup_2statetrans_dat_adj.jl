@@ -5,7 +5,7 @@ using Distributions
 using MultistateModels
 using StatsBase
 
-h12 = Hazard(@formula(0 ~ 1 + trt * male), "exp", 1, 2)
+h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
 h21 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 1)
 
 dat = 
@@ -16,7 +16,7 @@ dat =
               stateto = fill(2, 200),
               obstype = fill(2, 200),
               trt = reduce(vcat, [sample([0,1], 2) for i in 1:100]),
-              male = reduce(vcat, [sample([0,1], 1) * ones(2) for i in 1:100]))
+              male = reduce(vcat, [repeat([sample(["m", "f"]),], 2) for i in 1:100]))
 
 # want different gap times
 dat.tstop[1:2:199] = sample([4.0,5.0,6.0], 100)
@@ -46,12 +46,5 @@ set_parameters!(msm_2state_transadj, (h12 = randn(2), h21 = randn(2)))
 
 model = msm_2state_transadj
 using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, ExponentialUtilities
-using MultistateModels: build_tpm_mapping, loglik, MPanelData, build_hazmat_book, build_tpm_book, SMPanelData
-
-books = build_tpm_mapping(model.data, model.tmat)
-
-# extract and initialize model parameters
-parameters = flatview(model.parameters)
-
-
+using MultistateModels: build_tpm_mapping, loglik, PanelData, build_hazmat_book, build_tpm_book
 
