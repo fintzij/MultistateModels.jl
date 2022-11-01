@@ -5,7 +5,7 @@ using Distributions
 using MultistateModels
 using StatsBase
 
-h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
+h12 = Hazard(@formula(0 ~ 1 + trt * male), "exp", 1, 2)
 h21 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 1)
 
 dat = 
@@ -15,7 +15,8 @@ dat =
               statefrom = fill(1, 200),
               stateto = fill(2, 200),
               obstype = fill(2, 200),
-              trt = reduce(vcat, [sample([0,1], 2) for i in 1:100]))
+              trt = reduce(vcat, [sample([0,1], 2) for i in 1:100]),
+              male = reduce(vcat, [sample([0,1], 1) * ones(2) for i in 1:100]))
 
 # want different gap times
 dat.tstop[1:2:199] = sample([4.0,5.0,6.0], 100)

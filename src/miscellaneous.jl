@@ -25,16 +25,23 @@ end
     qcrudeinit(transmat, tmat)
 
 Return a matrix with initial intensity values. 
-"""
 
-function qcrudeinit(transmat, tmat)
+# Arguments
+- transmat: matrix of counts of state transitions
+- tmat: matrix with allowable transitions
+"""
+function crudeinit(transmat, tmat)
     # set transmat entry equal to zero if it's not an allowable transition
-    transmat[tmat .==0] .= 0
+    transmat[tmat .== 0] .= 0
 
     # take row sum of new transmat and calculate the proportions for each row
     row_sum = sum(transmat, dims=2)
-    q_crude_mat = transmat./row_sum
+    q_crude_mat = transmat ./ row_sum
+
+    # set diagonal equal to the negative of off diagonals 
+    q_crude_mat[diaginds(q_crude_mat)] = -row_sum
 
     # return the matrix of initial intensity values
     return q_crude_mat
 end
+

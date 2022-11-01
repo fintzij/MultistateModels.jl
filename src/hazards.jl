@@ -289,3 +289,54 @@ function compute_tmat!(P, Q, tpm_index::DataFrame, cache)
         copyto!(P[t], exponential!(Q * tpm_index.tstop[t], ExpMethodGeneric(), cache))
     end  
 end
+
+
+"""
+    cumulative_incidence(model::MultistateModel, parameters, hazards, subj, times)
+
+Compute the cumulative incidence for each possible transition as a function of time since state entry. Assumes the starts their observation period at risk and saves cumulative incidence at the supplied vector of times.
+"""
+# cumulative_incidence(model::MultistateModel, parameters, hazards, totalhazards, subj, times)
+
+#     # subject data
+#     subj_inds = model.subjectindices[subj]
+#     subj_dat  = view(model.data, subj_inds, :)
+
+#     # initialize cumulative incidence
+#     incidences = zeros(Float64, length(times), length(hazards))
+
+#     # indices for starting cumulative incidence increments
+#     cuminc_inds = map(x -> searchsortedlast(subj_dat.tstart, x), times)
+
+#     # cumulative incidence to start each interval
+#     cuminc_inits = zeros(Float64, nrow(subj_dat), length(hazards))
+    
+#     # compute the cumulative incidence for each transition type
+#     for h in eachindex(transients)
+
+#         # compute the cumulative incidence prior to the start of each interval
+#         if nrow(subj_data) > 1
+#             for r in 2:nrow(subj_dat)
+#                 cuminc_inits[r,h] = 
+#                     quadgk(t -> call_haz(t, parameters[h], subj_inds[r-1], totalhazards[h], hazards; give_log = false) * survprob(subj_dat.tstart[r-1], subj_dat.tstart[r-1] + t, parameters[h], subj_inds[r - 1], totalhazards[h], hazards; give_log = false), subj_dat.tstart[r-1], subj_dat.tstop[r-1])
+#             end
+#         end
+        
+#         # initialize row index
+#         row = 1
+#         ind = subj_inds[row]
+
+#         # set current state
+#         scur = hazards[h].statefrom
+
+#         # tcur and tstop
+#         tcur  = subj_dat.tstart[1]
+#         tstop = subj_dat.tstop[1]
+
+#         # initialize time in state and cumulative incidence
+#         timeinstate = 0.0
+#         cuminc = 0.0
+
+        
+#     end
+# end
