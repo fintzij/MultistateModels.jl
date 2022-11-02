@@ -292,7 +292,7 @@ end
 
 
 """
-    cumulative_incidence(model::MultistateModel, parameters, hazards, subj)
+    cumulative_incidence(model::MultistateModel, subj, time_since_entry)
 
 Compute the cumulative incidence for each possible transition as a function of time since state entry. Assumes the starts their observation period at risk and saves cumulative incidence at the supplied vector of times since state entry.
 """
@@ -313,6 +313,9 @@ function cumulative_incidence(model::MultistateModel, subj, time_since_entry)
     # identify transient states
     transients = findall(isa.(totalhazards, _TotalHazardTransient))
 
+    # identify which transient state to grab for each hazard (as transients[transinds[h]])
+    transinds  = reduce(vcat, [i * ones(Int64, length(totalhazards[transients[i]].components)) for i in eachindex(transients)])
+
     # initialize cumulative incidence
     n_intervals = length(subj_times) - 1
     incidences  = zeros(Float64, n_intervals, length(hazards))
@@ -322,21 +325,33 @@ function cumulative_incidence(model::MultistateModel, subj, time_since_entry)
     interval_inds = map(x -> searchsortedlast(subj_dat.tstart .- minimum(subj_dat.tstart), x), subj_times[Not(end)])
 
     # compute the survival probabilities to start each interval
-    for s in eachindex(transients)
-        sprob = 1.0
-        for i in 2:n_intervals
-            survprobs[i,s] = sprob * survprob(subj_times[i], subj_times[i+1], parameters, subj_inds[interval_inds[i]], totalhazards[s], hazards; give_log = false)
-            sprob = survprobs[i,s]
+    if n_intervals > 1
+        for s in eachindex(transients)
+            # initialize sprob and identify origin state
+            sprob = 1.0
+            statefrom = transients[s]
+
+            # compute survival probabilities
+            for i in 2:n_intervals
+                survprobs[i,s] = sprob * survprob(subj_times[i], subj_times[i+1], parameters, subj_inds[interval_inds[i]], totalhazards[statefrom], hazards; give_log = false)
+                sprob = survprobs[i,s]
+            end
         end
     end
     
     # compute the cumulative incidence for each transition type
     for h in eachindex(hazards)
-        # initialize time in state and cumulative incidence
+        # identify origin state
+        statefrom = transients[transinds[h]]
+
+        # compute incidences
         for r in 1:n_intervals
             incidences[r,h] = 
-                survprobs[r,h] * 
-                quadgk(t -> (call_haz(t, parameters[h], subj_inds[interval_inds[r]], hazards[h]; give_log = false) * survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[h], hazards; give_log = false)), subj_times[r], subj_times[r + 1])[1]
+                survprobs[r,transinds[h]] * 
+                quadgk(t -> (
+                        call_haz(t, parameters[h], subj_inds[interval_inds[r]], hazards[h]; give_log = false) * 
+                        survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[statefrom], hazards; give_log = false)), 
+                        subj_times[r], subj_times[r + 1])[1]
         end        
     end
 
@@ -344,3 +359,168 @@ function cumulative_incidence(model::MultistateModel, subj, time_since_entry)
     return cumsum(incidences; dims = 1)
 end
 
+"""
+    cuminc_discrepancy(model::MultistateModel, subj)
+
+Compute the cumulative incidence for each possible transition as a function of time since state entry. Assumes the starts their observation period at risk and saves cumulative incidence at the supplied vector of times since state entry.
+"""
+function cuminc_discrepancy(model::MultistateModel, subj)
+
+    # grab parameters, hazards and total hazards
+    parameters   = model.parameters
+    hazards      = model.hazards
+    totalhazards = model.totalhazards
+
+    # grab surrogate parameters, hazards and total hazards
+    surr_haz  = model.markovsurrogate[1]
+    surr_pars = model.markovsurrogate[2]
+
+    # subject data
+    subj_inds = model.subjectindices[subj]
+    subj_dat  = view(model.data, subj_inds, :)
+
+    # merge times with left endpoints of subject observation intervals
+    subj_times = 
+        sort([subj_dat.tstart; subj_dat.tstop[end];
+              2/3 .* subj_dat.tstart + 1/3 .* subj_dat.tstop;
+              1/3 .* subj_dat.tstart + 2/3 .* subj_dat.tstop]) .- subj_dat.tstart[1]
+    
+    # identify transient states
+    transients = findall(isa.(totalhazards, _TotalHazardTransient))
+
+    # identify the transient states for each hazard
+    transinds  = reduce(vcat, [i * ones(Int64, length(totalhazards[transients[i]].components)) for i in eachindex(transients)])
+
+    # initialize cumulative incidence
+    n_intervals      = length(subj_times) - 1
+    survprobs_target = ones(Float64, n_intervals, length(transients))
+    survprobs_surr   = ones(Float64, n_intervals, length(transients))
+    discrepancies    = zeros(Float64, length(hazards))
+
+    # indices for starting cumulative incidence increments
+    interval_inds = map(x -> searchsortedlast(subj_dat.tstart .- minimum(subj_dat.tstart), x), subj_times[Not(end)])
+
+    # compute the survival probabilities to start each interval
+    for s in eachindex(transients)
+        # initialize survival probabilities
+        sprob_target = 1.0
+        sprob_surr   = 1.0
+
+        # get the origin state
+        statefrom = transients[s]
+
+        # loop through intervals
+        for i in 2:n_intervals
+            # compute survival probability
+            survprobs_target[i,s] = 
+                sprob_target * survprob(subj_times[i], subj_times[i+1], parameters, subj_inds[interval_inds[i]], totalhazards[statefrom], hazards; give_log = false)
+
+            survprobs_surr[i,s] = 
+                sprob_surr * survprob(subj_times[i], subj_times[i+1], surr_pars, subj_inds[interval_inds[i]], totalhazards[statefrom], surr_haz; give_log = false)
+
+            # increment survival probability
+            sprob_target = survprobs_target[i,s]
+            sprob_surr   = survprobs_surr[i,s]
+        end
+    end
+    
+    # compute the discrepancy in cumulative incidence for each transition type
+    for h in eachindex(hazards)
+
+        # get the origin state
+        statefrom = transients[transinds[h]]
+
+        for r in 1:n_intervals
+            discrepancies[h] += 
+                (quadgk(t -> (
+                        survprobs_target[r, transinds[h]] *
+                        call_haz(t, parameters[h], subj_inds[interval_inds[r]], hazards[h]; give_log = false) * 
+                        survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[statefrom], hazards; give_log = false)), 
+                    subj_times[r], subj_times[r + 1])[1] - 
+                    quadgk(t -> (
+                        survprobs_surr[r, transinds[h]] *
+                        call_haz(t, surr_pars[h], subj_inds[interval_inds[r]], surr_haz[h]; give_log = false) * 
+                        survprob(subj_times[r], t, surr_pars, subj_inds[interval_inds[r]], totalhazards[statefrom], surr_haz; give_log = false)), 
+                    subj_times[r], subj_times[r + 1])[1])^2                        
+        end        
+    end
+
+    # return cumulative incidences
+    return discrepancies
+end
+
+"""
+    cuminc_discrepancy(model::MultistateModel, subj, statefrom)
+
+Compute the cumulative incidence for each possible transition as a function of time since state entry. Assumes the starts their observation period at risk and saves cumulative incidence at the supplied vector of times since state entry.
+"""
+function cuminc_discrepancy(model::MultistateModel, subj, statefrom)
+
+    # grab parameters, hazards and total hazards
+    parameters   = model.parameters
+    hazards      = model.hazards
+    totalhazards = model.totalhazards
+
+    # grab surrogate parameters, hazards and total hazards
+    surr_haz  = model.markovsurrogate[1]
+    surr_pars = model.markovsurrogate[2]
+
+    # subject data
+    subj_inds = model.subjectindices[subj]
+    subj_dat  = view(model.data, subj_inds, :)
+
+    # merge times with left endpoints of subject observation intervals
+    subj_times = 
+        sort([subj_dat.tstart; subj_dat.tstop[end];
+              2/3 .* subj_dat.tstart + 1/3 .* subj_dat.tstop;
+              1/3 .* subj_dat.tstart + 2/3 .* subj_dat.tstop]) .- subj_dat.tstart[1]
+
+    # initialize cumulative incidence
+    n_intervals      = length(subj_times) - 1
+    survprobs_target = ones(Float64, n_intervals)
+    survprobs_surr   = ones(Float64, n_intervals)
+    hazinds          = totalhazards[statefrom].components
+    discrepancies    = zeros(Float64, length(hazinds))
+
+    # indices for starting cumulative incidence increments
+    interval_inds = map(x -> searchsortedlast(subj_dat.tstart .- minimum(subj_dat.tstart), x), subj_times[Not(end)])
+
+    # compute the survival probabilities to start each interval
+    # initialize survival probabilities
+    sprob_target = 1.0
+    sprob_surr   = 1.0
+
+    # loop through intervals
+    for i in 2:n_intervals
+        # compute survival probability
+        survprobs_target[i] = 
+            sprob_target * survprob(subj_times[i], subj_times[i+1], parameters, subj_inds[interval_inds[i]], totalhazards[statefrom], hazards; give_log = false)
+
+        survprobs_surr[i] = 
+            sprob_surr * survprob(subj_times[i], subj_times[i+1], surr_pars, subj_inds[interval_inds[i]], totalhazards[statefrom], surr_haz; give_log = false)
+
+        # increment survival probability
+        sprob_target = survprobs_target[i]
+        sprob_surr   = survprobs_surr[i]
+    end
+    
+    # compute the discrepancy in cumulative incidence for each transition type
+    for h in eachindex(hazinds)
+        for r in 1:n_intervals
+            discrepancies[h] += 
+                (quadgk(t -> (
+                        survprobs_target[r] *
+                        call_haz(t, parameters[hazinds[h]], subj_inds[interval_inds[r]], hazards[hazinds[h]]; give_log = false) * 
+                        survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[statefrom], hazards; give_log = false)), 
+                    subj_times[r], subj_times[r + 1])[1] - 
+                    quadgk(t -> (
+                        survprobs_surr[r] *
+                        call_haz(t, surr_pars[hazinds[h]], subj_inds[interval_inds[r]], surr_haz[hazinds[h]]; give_log = false) * 
+                        survprob(subj_times[r], t, surr_pars, subj_inds[interval_inds[r]], totalhazards[statefrom], surr_haz; give_log = false)), 
+                    subj_times[r], subj_times[r + 1])[1])^2                        
+        end        
+    end
+
+    # return cumulative incidences
+    return discrepancies
+end
