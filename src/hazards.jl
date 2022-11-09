@@ -360,7 +360,7 @@ function cumulative_incidence(model::MultistateModel, subj, time_since_entry)
 end
 
 """
-    _cumulative_incidence(_model::MultistateModel, subj, time_since_entry, statefrom; surrogate = false)
+    _cumulative_incidence(_model::MultistateModel, subj, time_since_entry, statefrom)
 
 Compute the cumulative incidence for each possible transition originating in `statefrom` as a function of time since state entry. Assumes the subject starts their observation period at risk and saves cumulative incidence at the supplied vector of times since state entry. This function is used internally.
 """

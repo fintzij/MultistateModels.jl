@@ -12,13 +12,13 @@ function optimize_surrogate(model::MultistateModel)
     transinds  = reduce(vcat, [i * ones(Int64, length(model.totalhazards[transients[i]].components)) for i in eachindex(transients)])
 
     # identify unique subjects - defined by covariate histories and observation times
-    udat = unique(map(x -> view(model.data, x, Not(:id)), model.subjectindices), dims = 1)
     gdat = map(x -> view(model.data, x, Not(:id)), model.subjectindices)
+    udat = unique(gdat, dims = 1)
     uinds = indexin(udat, gdat) # for indexing into data
     ginds = indexin(gdat, udat) # for indexing into cumulative incidence curves 
 
     # calculate cumulative incidence for unique subjects
-    cumincs = map(y -> map(x -> cumulative_incidence(model, x, view(model.data.tstop, model.subjectindices[x]), y), uinds), transients)
+    cumincs = mapreduce(x -> cumulative_incidence(model, x, view(model.data.tstop, model.subjectindices[x])), vcat, uinds)
 
     # set up optimization problem
     for s in eachindex(transients)
@@ -28,19 +28,33 @@ function optimize_surrogate(model::MultistateModel)
         # flatten parameters
         surpars = flatview(model.markovsurrogate.parameters[model.totalhazards[statefrom].components])
 
-        # set up objective function
-        discrepancy(sp, target) = map(x -> cumulative_incidence(model, view(model.data.tstop, model.subjectindices[x]), statefrom), uinds)
+        # # set up objective function
+        control = SurrogateControl(model, statefrom, cumincs[:,model.totalhazards[statefrom].components], uinds, ginds)
+        # discrepancy(sp, target) = map(x -> cumulative_incidence(model, view(model.data.tstop, model.subjectindices[x]), statefrom), uinds)
 
     end
 
 end
 
-function discrepancy(parameters, control)
 
-    # nested view of surrogate parameters
-    pars = VectorOfVectors(parameters, control.model.markovsurrogate.elem_ptr)
+# e.g., parameters = flattened vector of params for h12, h13
+# but pars = parameters for h12, h13, h21, h23
+function discrepancy(parameters, control)
+    # parameters is only the parameters corresponding to the statefrom hazards (e.g. h_12 and h_13)
+
+    # get statefrom and hazards
+    statefrom = control.statefrom
+    hazfrom = control.model.totalhazards[statefrom].components
+
+    # get surrogate parameters
+    pars = control.model.markovsurrogate.parameters
+
+    # indices for indexing into pars
+    parinds = mapreduce(x -> pars.elem_ptr[x]:(pars.elem_ptr[x+1]-1), vcat, hazfrom)
+
+    # copy parameters
+    pars.data[parinds] = parameters
 
     # compute cumulative incidence
-    cuminc_surr = map(x -> cumulative_incidence(model, view(control.model.data.tstop, controlmodel.subjectindices[x], control.statefrom), control.uinds))
-
+    sum((log1p.(mapreduce(x -> _cumulative_incidence(control.model, pars, control.model.markovsurrogate.hazards, x, view(control.model.data.tstop, control.model.subjectindices[x]), statefrom), vcat, control.uinds)) - log1p.(control.targets)).^2)
 end

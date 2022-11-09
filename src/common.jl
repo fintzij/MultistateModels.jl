@@ -103,9 +103,9 @@ end
 Struct containing objects for computing the discrepancy of a Markov surrogate.
 """
 Base.@kwdef struct SurrogateControl
-    model::MultistateModel
+    model::MultistateProcess
     statefrom::Int64
-    targets::Vector{Vector{Matrix{Float64}}}
+    targets::Matrix{Float64}
     uinds::Vector{Union{Nothing, Int64}}
     ginds::Vector{Union{Nothing, Int64}}
 end
