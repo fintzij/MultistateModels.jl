@@ -22,7 +22,30 @@ function statetable(model::MultistateModel)
 end
 
 """ 
-    qcrudeinit(transmat, tmat)
+    statetable(model::MultistateModel, val, field)
+
+Return a table with observed transition counts based on filtered fields.
+
+# Arguments
+- transmat: matrix of counts of state transitions
+- tmat: matrix with allowable transitions
+- val: value of the field you want to subset (e.g. male == "m" where male is the field and val is "m")
+- field: variables to subset on 
+"""
+function statetable(model::MultistateModel, val, field)
+    # obtain data from multistatemodel object
+    data = model.data
+
+    # filter multistatemodel dataframe value according to the desired field and value
+    subset = data[data[:,Symbol(field)] .== val, :]
+    model.data = subset
+    
+    # apply the statetable summary on the subsetted data frame
+    transmat_subset = MultistateModel.statetable(model)
+end
+
+""" 
+    crudeinit(transmat, tmat)
 
 Return a matrix with initial intensity values. 
 
@@ -34,6 +57,12 @@ function crudeinit(transmat, tmat)
     # set transmat entry equal to zero if it's not an allowable transition
     transmat[tmat .== 0] .= 0
 
+    # obtain the minimum positive count of transmat and divide it by 2
+    half_min_count = minimum(transmat[transmat.>0])/2
+
+    # replace transmat entries that have allowable transitions (tmat>0) and are currently zero (transmat==0) with half_min_count
+    transmat
+
     # take row sum of new transmat and calculate the proportions for each row
     row_sum = sum(transmat, dims=2)
     q_crude_mat = transmat ./ row_sum
@@ -44,4 +73,6 @@ function crudeinit(transmat, tmat)
     # return the matrix of initial intensity values
     return q_crude_mat
 end
+
+
 
