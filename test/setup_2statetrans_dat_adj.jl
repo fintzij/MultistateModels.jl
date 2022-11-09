@@ -41,7 +41,6 @@ simdat, paths = simulate(msm_2state_transadj; paths = true, data = true);
 
 # create multistate model object with the simulated data
 msm_2state_transadj = multistatemodel(h12, h21; data = simdat[1])
-
 set_parameters!(
     msm_2state_transadj, 
     (h12 = [log(0.2), log(1.5)],
@@ -49,5 +48,5 @@ set_parameters!(
 
 model = msm_2state_transadj
 using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, ExponentialUtilities
-using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book
+using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book, _TotalHazardTransient
 

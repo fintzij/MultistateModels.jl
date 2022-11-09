@@ -85,9 +85,30 @@ struct _TotalHazardTransient <: _TotalHazard
 end
 
 """
-Abstract type for MultistateProcess.
+    Abstract type for MultistateProcess.
 """
 abstract type MultistateProcess end
+
+"""
+    MarkovSurrogate(hazards::Vector{_Hazard}, parameters::VectorOfVectors)
+"""
+Base.@kwdef struct MarkovSurrogate
+    hazards::Vector{_Hazard}
+    parameters::VectorOfVectors
+end
+
+"""
+    SurrogateControl(model::MultistateModel, statefrom, targets, uinds, ginds)
+
+Struct containing objects for computing the discrepancy of a Markov surrogate.
+"""
+Base.@kwdef struct SurrogateControl
+    model::MultistateModel
+    statefrom::Int64
+    targets::Vector{Vector{Matrix{Float64}}}
+    uinds::Vector{Union{Nothing, Int64}}
+    ginds::Vector{Union{Nothing, Int64}}
+end
 
 
 """
@@ -103,7 +124,7 @@ Base.@kwdef struct MultistateModel <: MultistateProcess
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    markovsurrogate::Tuple
+    markovsurrogate::MarkovSurrogate
 end
 
 """
@@ -119,7 +140,7 @@ Base.@kwdef struct MultistateModelFitted <: MultistateProcess
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    markovsurrogate::Tuple
+    markovsurrogate::MarkovSurrogate
     loglik::Float64
     vcov::Matrix{Float64}
 end
@@ -163,5 +184,5 @@ Struct containing panel data, a model object, and bookkeeping objects. Used in f
 struct SMPanelData
     model::MultistateModel
     books::Tuple # tpm_index and tpm_map, from build_tpm_containers
-    
 end
+

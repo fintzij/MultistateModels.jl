@@ -129,7 +129,6 @@ function loglik(parameters, data::MPanelData; neg = true)
 
     # build containers for transition intensity and prob mtcs
     hazmat_book = build_hazmat_book(eltype(parameters), data.model.tmat, data.books[1])
-
     tpm_book = build_tpm_book(eltype(parameters), data.model.tmat, data.books[1])
 
     # allocate memory for matrix exponential
