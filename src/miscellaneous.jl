@@ -22,26 +22,58 @@ function statetable(model::MultistateModel)
 end
 
 """ 
-    statetable(model::MultistateModel, val, field)
+    statetable(model::MultistateModel, fields::Symbol...)
 
 Return a table with observed transition counts based on filtered fields.
 
 # Arguments
-- transmat: matrix of counts of state transitions
-- tmat: matrix with allowable transitions
-- val: value of the field you want to subset (e.g. male == "m" where male is the field and val is "m")
-- field: variables to subset on 
+- model:MultistateModel object
+- field: different categorical variables to subset on (e.g. male, trt, etc.)
 """
-function statetable(model::MultistateModel, val, field)
+function statetable(model::MultistateModel, fields::Symbol...)
     # obtain data from multistatemodel object
     data = model.data
+    varargs = fields
 
-    # filter multistatemodel dataframe value according to the desired field and value
-    subset = data[data[:,Symbol(field)] .== val, :]
-    model.data = subset
-    
-    # apply the statetable summary on the subsetted data frame
-    transmat_subset = MultistateModel.statetable(model)
+    # create comprephension that obtains the unique values for each categorical variable
+    unique_vals = [unique(data[!, varargs[i]]) for i in 1:length(varargs)]
+
+    # initialize an empty dictionary (with column names) to hold all possible filtered data frames
+    data_subsets = Dict(k => DataFrame([name => [] for name in names(data)]) for k in 1:sum(length, unique_vals))
+
+    # nested loop to store the filtered data frames
+    for i in 1:length(unique_vals) # for each field 
+        for j in 1:length(unique_vals[i]) # for each unique value within that field
+            subset = data[data[:,varargs[i]] .== unique_vals[i][j],:] # filter the data for a specific unique value of that specific field 
+            print(subset) # for each iteration, how do I assign the subset to the empty dictionary above (data_subsets)?
+        end
+    end
+
+    # create new msm models for each one of the filtered data frames (how do I grab the h12 and h21 from the original msm object)
+
+    # apply state table summary counts to each of the filtered data frames 
+
+    # return dictionary with all state table summary counts
+    return(transmat)
+end
+
+"""
+    initialize_parameters(model::MultistateModel, fields::Symbol...)
+
+# Arguments
+- model: MultistateModel object
+- fields: different categorical variables to subset on (e.g. male, trt, etc.)
+"""
+
+function initialize_parameters(model::MultistateModel, fields::Symbol...)
+    # obtain data from multistatemodel object
+    data = model.hazards[1].data
+
+    # grab the model covariates which are categorical and use that to select categorical variables from the design matrix
+
+    # apply state table summary to achieve crude rate by dividing the two summary tables by each other (?)
+    trt_a ./ trt_b
+
 end
 
 """ 
