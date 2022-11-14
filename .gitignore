@@ -3,3 +3,5 @@
 *.jl.mem
 /Manifest.toml
 .vscode/settings.json
+branch_talk_11_22_2022/bt22.qmd
+.DS_Store
