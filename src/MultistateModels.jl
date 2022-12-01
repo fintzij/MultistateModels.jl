@@ -16,14 +16,19 @@ using StatsBase
 using StatsModels
 using StatsFuns
 
+# need to import fit to overload and reexport it
+import StatsBase.fit
+
 # Write your package code here.
 export
     @formula,
     cumulative_incidence,
+    fit,
     Hazard,
     multistatemodel,
     set_parameters!,
-    simulate
+    simulate,
+    statetable
 
 # typedefs
 include("common.jl")

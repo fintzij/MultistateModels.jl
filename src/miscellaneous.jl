@@ -1,9 +1,9 @@
 """ 
-    statetable(model::MultistateModel)
+    compute_statetable(dat, tmat)
 
-Return a table with observed transition counts. 
+Internal function to compute a table with observed transition counts. 
 """
-function statetable(dat, tmat)
+function compute_statetable(dat, tmat)
     
     # initialize matrix of zeros
     transmat = zeros(Int64, size(tmat))
@@ -25,71 +25,39 @@ function statetable(dat, tmat)
     return transmat
 end
 
-function statetable(dat, tmat, fields::Symbol...)
-    # apply groupby to get all different combinations of data frames
-    gdat = groupby(dat, fields)
+"""
+    statetable(model::MultistateModel, groups::Vararg{Symbol})
 
-    # gather all the sub-dataframes into a vector
-    subdataframes = map(_ -> DataFrame(), 1:gdat.ngroups)
-
-    for i in 1:ngroups
-        subdataframes[i] = gdat[i]
-    end
-
-    # apply statetable function to each sub-dataframe
-    transmats = map(x->statetable(x, tmat), subdataframes)
-
-    # grab labels of each grouped data frame
-    keys = eachindex(gdat)
-
-    # return a data structure that contains the transmats and the corresponding keys
-end
-
-""" 
-    statetable(model::MultistateModel, fields::Symbol...)
-
-Return a table with observed transition counts based on filtered fields.
+Generate a table with counts of observed transitions.
 
 # Arguments
-- model:MultistateModel object
-- field: different categorical variables to subset on (e.g. male, trt, etc.)
+
+- model: multistate model object.
+- groups: variables on which to stratify the tables of transition counts.
 """
-function statetable(model::MultistateModel, fields::Symbol...)
-    # obtain data from multistatemodel object
-    data = model.data
-    varargs = fields
+function statetable(model::MultistateModel, groups::Vararg{Symbol})
 
-    # create comprephension that obtains the unique values for each categorical variable
-    unique_vals = [unique(data[!, varargs[i]]) for i in 1:length(varargs)]
-
-    # initialize an empty dictionary (with column names) to hold all possible filtered data frames
-    data_subsets = Dict(k => DataFrame([name => [] for name in names(data)]) for k in 1:sum(length, unique_vals))
-
-    # nested loop to store the filtered data frames
-    for i in 1:length(unique_vals) # for each field 
-        for j in 1:length(unique_vals[i]) # for each unique value within that field
-            subset = data[data[:,varargs[i]] .== unique_vals[i][j],:] # filter the data for a specific unique value of that specific field 
-            print(subset) # for each iteration, how do I assign the subset to the empty dictionary above (data_subsets)?
-        end
+    # apply groupby to get all different combinations of data frames
+    if length(groups) == 0
+        stable, groupkeys = compute_statetable(model.data, model.tmat), "Overall"
+    else
+        gdat = groupby(model.data, collect(groups))
+        stable, groupkeys = map(x -> compute_statetable(gdat[x], model.tmat), collect(1:length(gdat))), collect(keys(gdat))
     end
-
-    # create new msm models for each one of the filtered data frames (how do I grab the h12 and h21 from the original msm object)
-
-    # apply state table summary counts to each of the filtered data frames 
-
-    # return dictionary with all state table summary counts
-    return(transmat)
+    
+    # return a data structure that contains the transmats and the corresponding keys
+    return (stable, groupkeys)
 end
 
 """
-    initialize_parameters(model::MultistateModel, fields::Symbol...)
+    initialize_parameters(model::MultistateModel, groups::Symbol...)
 
 # Arguments
 - model: MultistateModel object
-- fields: different categorical variables to subset on (e.g. male, trt, etc.)
+- groups: different categorical variables to subset on (e.g. male, trt, etc.)
 """
 
-function initialize_parameters(model::MultistateModel, fields::Symbol...)
+function initialize_parameters(model::MultistateModel, groups::Symbol...)
     # obtain data from multistatemodel object
     data = model.hazards[1].data
 
