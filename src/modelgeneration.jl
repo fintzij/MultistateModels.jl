@@ -238,6 +238,9 @@ Constructs a multistate model from cause specific hazards. Parses the supplied h
 """
 function multistatemodel(hazards::Hazard...; data::DataFrame)
 
+    # catch the model call
+    modelcall = (hazards = hazards..., data = data)
+
     # get indices for each subject in the dataset
     subjinds = get_subjinds(data)
 
@@ -273,7 +276,8 @@ function multistatemodel(hazards::Hazard...; data::DataFrame)
         tmat,
         hazkeys,
         subjinds,
-        MarkovSurrogate(surrogate[1], surrogate[2]))
+        MarkovSurrogate(surrogate[1], surrogate[2]),
+        modelcall = modelcall)
 
     return model
 end

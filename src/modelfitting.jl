@@ -57,6 +57,7 @@ function fit_exact(model::MultistateModel)
         model.hazkeys,
         model.subjectindices,
         model.markovsurrogate,
+        model.modelcall
         -sol.minimum,
         vcov)
 end
@@ -94,6 +95,7 @@ function fit_markov_interval(model::MultistateModel)
         model.hazkeys,
         model.subjectindices,
         model.markovsurrogate,
+        model.modelcall
         -sol.minimum,
         vcov)
 end
