@@ -3,22 +3,46 @@
 
 Return a table with observed transition counts. 
 """
-function statetable(model::MultistateModel)
+function statetable(dat, tmat)
     
     # initialize matrix of zeros
-    transmat = zeros(Int64, size(model.tmat))
+    transmat = zeros(Int64, size(tmat))
+
+    # grab subject indices
+    uinds = unique(dat.id)
+    subjectindices = map(x -> findall(dat.id .== x), uinds)
 
     # outer loop over subjects
-    for s in eachindex(model.subjectindices)
+    for s in eachindex(subjectindices)
         # inner loop over data for each subject
-        for r in eachindex(model.subjectindices[s])
-            transmat[model.data.statefrom[model.subjectindices[s][r]], 
-                     model.data.stateto[model.subjectindices[s][r]]] += 1
+        for r in eachindex(subjectindices[s])
+            transmat[dat.statefrom[subjectindices[s][r]], 
+                     dat.stateto[subjectindices[s][r]]] += 1
         end
     end
 
     # return the matrix of state transitions
     return transmat
+end
+
+function statetable(dat, tmat, fields::Symbol...)
+    # apply groupby to get all different combinations of data frames
+    gdat = groupby(dat, fields)
+
+    # gather all the sub-dataframes into a vector
+    subdataframes = map(_ -> DataFrame(), 1:gdat.ngroups)
+
+    for i in 1:ngroups
+        subdataframes[i] = gdat[i]
+    end
+
+    # apply statetable function to each sub-dataframe
+    transmats = map(x->statetable(x, tmat), subdataframes)
+
+    # grab labels of each grouped data frame
+    keys = eachindex(gdat)
+
+    # return a data structure that contains the transmats and the corresponding keys
 end
 
 """ 
