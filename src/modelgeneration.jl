@@ -277,7 +277,7 @@ function multistatemodel(hazards::Hazard...; data::DataFrame)
         hazkeys,
         subjinds,
         MarkovSurrogate(surrogate[1], surrogate[2]),
-        modelcall = modelcall)
+        modelcall)
 
     return model
 end

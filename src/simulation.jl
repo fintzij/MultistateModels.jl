@@ -68,7 +68,7 @@ function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
 end
 
 """
-    simulate_path()
+    simulate_path(model::MultistateModel, subj::Int64)
 
 Simulate a single sample path.
 
