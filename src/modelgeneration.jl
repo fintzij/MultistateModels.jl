@@ -239,7 +239,7 @@ Constructs a multistate model from cause specific hazards. Parses the supplied h
 function multistatemodel(hazards::Hazard...; data::DataFrame)
 
     # catch the model call
-    modelcall = (hazards = hazards..., data = data)
+    modelcall = (hazards = hazards, data = data)
 
     # get indices for each subject in the dataset
     subjinds = get_subjinds(data)

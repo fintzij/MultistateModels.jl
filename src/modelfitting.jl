@@ -51,15 +51,15 @@ function fit_exact(model::MultistateModel)
     return MultistateModelFitted(
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
+        -sol.minimum,
+        vcov,
         model.hazards,
         model.totalhazards,
         model.tmat,
         model.hazkeys,
         model.subjectindices,
         model.markovsurrogate,
-        model.modelcall
-        -sol.minimum,
-        vcov)
+        model.modelcall)
 end
 
 
@@ -89,15 +89,15 @@ function fit_markov_interval(model::MultistateModel)
     return MultistateModelFitted(
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
+        -sol.minimum,
+        vcov,
         model.hazards,
         model.totalhazards,
         model.tmat,
         model.hazkeys,
         model.subjectindices,
         model.markovsurrogate,
-        model.modelcall
-        -sol.minimum,
-        vcov)
+        model.modelcall)
 end
 
 """

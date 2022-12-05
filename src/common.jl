@@ -125,7 +125,7 @@ Base.@kwdef struct MultistateModel <: MultistateProcess
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     markovsurrogate::MarkovSurrogate
-    modelcall::Tuple
+    modelcall::NamedTuple
 end
 
 """
@@ -136,15 +136,15 @@ Mutable struct that fully specifies a fitted multistate model.
 Base.@kwdef struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
     parameters::VectorOfVectors 
+    loglik::Float64
+    vcov::Matrix{Float64}
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     markovsurrogate::MarkovSurrogate
-    modelcall::Tuple
-    loglik::Float64
-    vcov::Matrix{Float64}
+    modelcall::NamedTuple
 end
 
 """
