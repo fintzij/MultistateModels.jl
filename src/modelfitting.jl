@@ -103,12 +103,54 @@ end
 """
     fit_semimarkov_interval(model::MultistateModel; nparticles)
 
-Fit a semi-Markov model to panel data via Monte Carlo maximum marginal likelihood.
+Fit a semi-Markov model to panel data via Monte Carlo EM. 
+
+Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... + x_k, where x_i - 1 ~ Pois(subrate * k ^ subscale). The arguments subrate and subscale default to 1 and 0.5, respectively.
+
+# Arguments
+
+- model: multistate model object
+- nparticles: initial number of particles per participant for MCEM
+- subrate: Poisson rate for subsampling points
+- subscale: scaling of the thinning rate for subsampling points
+- maxiter: maximum number of MCEM iterations
+- trace: return traces of the log-likelihood and parameters for diagnostics
 """
-function fit_semimarkov_interval(model::MultistateModel; nparticles)
+function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, subrate = 1, subscale = 0.5, maxiter = 50, trace = true)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
+
+    # transition probability objects for markov surrogate
+    hazmat_book = build_hazmat_book(Float64, model.tmat, books[1])
+    tpm_book = build_tpm_book(Float64, model.tmat, books[1])
+
+    # allocate memory for matrix exponential
+    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
+
+    # Solve Kolmogorov equations for TPMs
+    for t in eachindex(books[1])
+
+        # compute the transition intensity matrix
+        compute_hazmat!(
+            hazmat_book[t],
+            model.markovsurrogate.parameters,
+            model.markovsurrogate.hazards,
+            books[1][t])
+
+        # compute transition probability matrices
+        compute_tmat!(
+            tpm_book[t],
+            hazmat_book[t],
+            books[1][t],
+            cache)
+    end
+
+    # initialize latent sample paths
+    samplepaths = Array{SamplePath}(undef, length(model.subjectindices), nparticles)
+
+    # draw sample paths
+    
 
     # extract and initialize model parameters
     parameters = flatview(model.parameters)

@@ -4,7 +4,7 @@
 
 ### Exactly observed sample paths ----------------------
 """
-    loglik(path::SamplePath, model::MultistateModel) 
+    loglik(parameters, path::SamplePath, model::MultistateModel) 
 
 Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
 """
@@ -174,6 +174,6 @@ function loglik(parameters, data::SMPanelData; neg = true)
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # find the surrogate parameters for path proposals that minimize the discrepancy between state occupancy probs
-    surrogate_pars = optimize_surrogate(pars, data.model)
+    # surrogate_pars = optimize_surrogate(pars, data.model)
 
 end
