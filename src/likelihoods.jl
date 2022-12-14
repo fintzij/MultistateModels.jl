@@ -4,11 +4,11 @@
 
 ### Exactly observed sample paths ----------------------
 """
-    loglik(parameters, path::SamplePath, model::MultistateModel) 
+    loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::MultistateModel) 
 
 Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
 """
-function loglik(parameters, path::SamplePath, model::MultistateModel)
+function loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::MultistateModel)
 
     # initialize log likelihood
     ll = 0.0
@@ -56,14 +56,14 @@ function loglik(parameters, path::SamplePath, model::MultistateModel)
             if tstop <= time_R
                 # event happens in (time_L, time_R]
                 # accumulate log(Pr(T ≥ timeinstate | T ≥ timespent))
-                log_surv_prob += survprob(timespent, timeinstate, parameters, comp_dat_ind, model.totalhazards[scur], model.hazards; give_log = true)
+                log_surv_prob += survprob(timespent, timeinstate, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true)
 
                 # increment log likelihood
                 ll += log_surv_prob
 
                 # if event happened, accrue hazard
                 if snext != scur
-                    ll += call_haz(timeinstate, parameters[model.tmat[scur, snext]], comp_dat_ind, model.hazards[model.tmat[scur, snext]]; give_log = true)
+                    ll += call_haz(timeinstate, parameters[model.tmat[scur, snext]], comp_dat_ind, hazards[model.tmat[scur, snext]]; give_log = true)
                 end
 
                 # break out of the while loop
@@ -73,7 +73,7 @@ function loglik(parameters, path::SamplePath, model::MultistateModel)
                 # event doesn't hapen in (time_L, time_R]
                 # accumulate log-survival
                 # accumulate log(Pr(T ≥ time_R | T ≥ timespent))
-                log_surv_prob += survprob(timespent, timespent + time_R - tcur, parameters, comp_dat_ind, model.totalhazards[scur], model.hazards; give_log = true)
+                log_surv_prob += survprob(timespent, timespent + time_R - tcur, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true)
                 
                 # increment timespent
                 timespent += time_R - tcur
@@ -95,8 +95,6 @@ function loglik(parameters, path::SamplePath, model::MultistateModel)
     return ll
 end
 
-
-
 ########################################################
 ##################### Wrappers #########################
 ########################################################
@@ -106,13 +104,12 @@ end
 
 Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. 
 """
-
 function loglik(parameters, data::ExactData; neg = true)
 
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # send each element of samplepaths to loglik
-    ll = mapreduce(x -> loglik(pars, x, data.model), +, data.paths)
+    ll = mapreduce(x -> loglik(pars, x, data.model.hazards, data.model), +, data.paths)
 
     neg ? -ll : ll
 end

@@ -118,6 +118,9 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 """
 function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, subrate = 1, subscale = 0.5, maxiter = 50, trace = true)
 
+    # number of subjects
+    nsubj = length(model.subjectindices)
+
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
 
@@ -147,10 +150,20 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, subrat
     end
 
     # initialize latent sample paths
-    samplepaths = Array{SamplePath}(undef, length(model.subjectindices), nparticles)
+    samplepaths = ElasticArray{SamplePath}(undef, nsubj, nparticles)
+
+    # initialize proposal log likelihoods
+    loglik_prop = ElasticArray{Float64}(undef, nsubj, nparticles)
 
     # draw sample paths
-    
+    Threads.@threads for i in 1:nsubj
+        for j in 1:nparticles
+            samplepaths[i,j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2])
+        end
+    end
+
+    # calculate likelihoods for importance sampling
+
 
     # extract and initialize model parameters
     parameters = flatview(model.parameters)

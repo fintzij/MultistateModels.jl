@@ -132,8 +132,11 @@ function sample_ecctmc!(jumptimes, stateseq, P, Q, a, b, t0, t1)
                 times  = rand(Uniform(t0, t1), 1)
                 states = [b,]
 
-                # return times and states
-                return times, states
+                # append times and states
+                append!(jumptimes, times)
+                append!(stateseq, states)
+
+                return 
             end
         else
             # calculate the number of jumps
@@ -171,6 +174,7 @@ function sample_ecctmc!(jumptimes, stateseq, P, Q, a, b, t0, t1)
             # return state sequence and times
             append!(jumptimes, times[jumpinds])
             append!(stateseq, states[jumpinds])
+
             return
         end
     end
@@ -194,12 +198,19 @@ function draw_samplepath(subj::Int64, model::MultistateModel, tpm_book, hazmat_b
 
     # loop through data and sample endpoint conditioned paths
     for i in eachindex(subj_inds)
-        sample_ecctmc!(times, states, tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]], hazmat_book[subj_tpm_map[i,1]], subj_dat.statefrom[i], subj_dat.stateto[i], subj_dat.tstart[i], subj_dat.tstop[i])
+        if subj_dat.obstype[i] == 2
+            sample_ecctmc!(times, states, tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]], hazmat_book[subj_tpm_map[i,1]], subj_dat.statefrom[i], subj_dat.stateto[i], subj_dat.tstart[i], subj_dat.tstop[i])
+        elseif subj_dat.obstype[i] == 1 
+            push!(times, subj_dat.tstop[i])
+            push!(times, subj_dat.stateto[i])
+        end
     end
 
     # append last state and time
-    push!(times, subj_dat.tstop[end])
-    push!(states, subj_dat.stateto[end])
+    if subj_dat.obstype[end] != 1
+        push!(times, subj_dat.tstop[end])
+        push!(states, subj_dat.stateto[end])
+    end
 
     return SamplePath(subj, times, states)
 end
