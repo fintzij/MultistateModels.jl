@@ -116,7 +116,7 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 - maxiter: maximum number of MCEM iterations
 - trace: return traces of the log-likelihood and parameters for diagnostics
 """
-function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, subrate = 1, subscale = 0.5, maxiter = 50, trace = true)
+function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, subrate = 1, subscale = 0.5, maxiter = 50)
 
     # number of subjects
     nsubj = length(model.subjectindices)
@@ -153,19 +153,27 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, subrat
     samplepaths = ElasticArray{SamplePath}(undef, nsubj, nparticles)
 
     # initialize proposal log likelihoods
+    loglik_target = ElasticArray{Float64}(undef, nsubj, nparticles)
     loglik_prop = ElasticArray{Float64}(undef, nsubj, nparticles)
 
     # draw sample paths
     Threads.@threads for i in 1:nsubj
         for j in 1:nparticles
             samplepaths[i,j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2])
+
+            loglik_prop[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model)
         end
     end
 
-    # calculate likelihoods for importance sampling
-
-
     # extract and initialize model parameters
     parameters = flatview(model.parameters)
+
+    # optimize the monte carlo marginal likelihood
+    optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+    prob = OptimizationProblem(optf, parameters, SMPanelData(modeo, samplepaths, loglik_target, loglik_prop))
+    sol = solve(prob, Newton())
+
+    # maximize the monte carlo marginal likelihood
+
 
 end

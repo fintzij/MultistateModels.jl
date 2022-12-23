@@ -163,14 +163,20 @@ end
 """
     loglik(parameters, data::SMPanelData; neg = true)
 
-Return sum of (negative) log-likelihood for a semi-Markov model fit to panel data. 
+Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data. 
 """
 function loglik(parameters, data::SMPanelData; neg = true)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
-    # find the surrogate parameters for path proposals that minimize the discrepancy between state occupancy probs
-    # surrogate_pars = optimize_surrogate(pars, data.model)
+    # compute the semi-markov log-likelihoods
+    Threads.@threads for i in 1:size(data.paths, 1)
+        for j in 1:size(data.paths, 2)
+            data.loglikSM[i,j] = 
+                loglik(parameters, data.paths[i,j], data.model.hazards, data.model)
+        end
+    end
 
+    # return the log-likelihood
 end

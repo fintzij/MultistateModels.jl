@@ -110,7 +110,6 @@ Base.@kwdef struct SurrogateControl
     ginds::Vector{Union{Nothing, Int64}}
 end
 
-
 """
     MultistateModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
@@ -185,6 +184,8 @@ Struct containing panel data, a model object, and bookkeeping objects. Used in f
 """
 struct SMPanelData
     model::MultistateModel
-    books::Tuple # tpm_index and tpm_map, from build_tpm_containers
+    paths::Array{SamplePath}
+    loglikSM::ElasticArray{Float64}
+    loglikProp::ElasticArray{Float64}
 end
 
