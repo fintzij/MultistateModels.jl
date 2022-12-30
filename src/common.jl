@@ -178,14 +178,13 @@ struct MPanelData
 end
 
 """
-    SMPanelData(model::MultistateModel, books::Tuple)
+    SMPanelData(model::MultistateModel, paths::Array{SamplePath}, weights::ElasticArray{Float64})
 
-Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate semi-Markov model to panel data.
+Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate semi-Markov model to panel data via MCEM.
 """
 struct SMPanelData
     model::MultistateModel
     paths::Array{SamplePath}
-    loglikSM::ElasticArray{Float64}
-    loglikProp::ElasticArray{Float64}
+    weights::ElasticArray{Float64}
 end
 

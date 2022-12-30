@@ -171,12 +171,11 @@ function loglik(parameters, data::SMPanelData; neg = true)
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # compute the semi-markov log-likelihoods
-    Threads.@threads for i in 1:size(data.paths, 1)
-        for j in 1:size(data.paths, 2)
-            data.loglikSM[i,j] = 
-                loglik(parameters, data.paths[i,j], data.model.hazards, data.model)
-        end
+    ll = 0.0
+    for i in eachindex(data.paths)
+        ll += loglik(pars, data.paths[i], data.model.hazards, data.model) * data.weights[i]
     end
 
     # return the log-likelihood
+    neg ? -ll : ll
 end

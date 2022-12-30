@@ -153,16 +153,23 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, subrat
     samplepaths = ElasticArray{SamplePath}(undef, nsubj, nparticles)
 
     # initialize proposal log likelihoods
-    loglik_target = ElasticArray{Float64}(undef, nsubj, nparticles)
-    loglik_prop = ElasticArray{Float64}(undef, nsubj, nparticles)
+    weights         = ElasticArray{Float64}(undef, nsubj, nparticles)
+    loglik_target   = ElasticArray{Float64}(undef, nsubj, nparticles)
+    loglik_surrog   = ElasticArray{Float64}(undef, nsubj, nparticles)
 
     # draw sample paths
     Threads.@threads for i in 1:nsubj
         for j in 1:nparticles
             samplepaths[i,j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2])
 
-            loglik_prop[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model)
+            loglik_surrog[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model)
+
+            loglik_target[i,j] = loglik(model.parameters, samplepaths[i,j], model.hazards, model)
+
+            weights[i,j] = exp(loglik_target[i,j] - loglik_surrog[i,j])
         end
+        
+        weights[i,:] = weights[i,:] / sum(weights[i,:])
     end
 
     # extract and initialize model parameters
@@ -170,10 +177,15 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, subrat
 
     # optimize the monte carlo marginal likelihood
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, parameters, SMPanelData(modeo, samplepaths, loglik_target, loglik_prop))
+    prob = OptimizationProblem(optf, parameters, SMPanelData(model, samplepaths, weights))
     sol = solve(prob, Newton())
 
-    # maximize the monte carlo marginal likelihood
+    # MC error estimation - RESUME HERE
+    ll = pars -> loglik(pars, SMPanelData(model, samplepaths, weights), neg = false)
 
+    expected_score = ForwardDiff.gradient(ll, sol.u)
+    expected_score2 = ForwardDiff.hessian(ll, sol.u)
+
+    score_se = sqrt.(-diag(expected_score2) .- expected_score)
 
 end
