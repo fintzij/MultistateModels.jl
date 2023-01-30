@@ -186,5 +186,6 @@ struct SMPanelData
     model::MultistateModel
     paths::Array{SamplePath}
     weights::ElasticArray{Float64}
+    totweights::ElasticArray{Float64}
 end
 

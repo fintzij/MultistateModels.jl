@@ -172,10 +172,31 @@ function loglik(parameters, data::SMPanelData; neg = true)
 
     # compute the semi-markov log-likelihoods
     ll = 0.0
-    for i in eachindex(data.paths)
-        ll += loglik(pars, data.paths[i], data.model.hazards, data.model) * data.weights[i]
+    for j in Base.OneTo(size(data.paths, 2))
+        for i in Base.OneTo(size(data.paths, 1))
+            ll += loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.weights[i,j] / data.totweights[i]
+        end
     end
 
     # return the log-likelihood
     neg ? -ll : ll
 end
+
+"""
+    loglik(parameters, data::SMPanelData; neg = true)
+
+Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data. 
+"""
+function loglik!(parameters, logliks::ElasticArray{Float64}, data::SMPanelData; neg = true)
+
+    # nest the model parameters
+    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+
+    # compute the semi-markov log-likelihoods
+    for j in Base.OneTo(size(data.paths, 2))
+        for i in Base.OneTo(size(data.paths, 1))
+            logliks[i,j] = loglik(pars, data.paths[i, j], data.model.hazards, data.model)
+        end
+    end
+end
+

@@ -111,12 +111,13 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 
 - model: multistate model object
 - nparticles: initial number of particles per participant for MCEM
-- subrate: Poisson rate for subsampling points
-- subscale: scaling of the thinning rate for subsampling points
 - maxiter: maximum number of MCEM iterations
-- trace: return traces of the log-likelihood and parameters for diagnostics
+- α: Standard normal quantile for asymptotic lower bound for ascent
+- β: Standard normal quantile for inflation in # particles
+- γ: Standard normal quantile for stopping
+- κ: Inflation factor for MCEM sample size, m_new = m_cur + m_cur/κ
 """
-function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, subrate = 1, subscale = 0.5, maxiter = 50)
+function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ)
 
     # number of subjects
     nsubj = length(model.subjectindices)
@@ -153,39 +154,74 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, subrat
     samplepaths = ElasticArray{SamplePath}(undef, nsubj, nparticles)
 
     # initialize proposal log likelihoods
-    weights         = ElasticArray{Float64}(undef, nsubj, nparticles)
-    loglik_target   = ElasticArray{Float64}(undef, nsubj, nparticles)
-    loglik_surrog   = ElasticArray{Float64}(undef, nsubj, nparticles)
+    weights            = ElasticArray{Float64}(undef, nsubj, nparticles)
+    loglik_surrog      = ElasticArray{Float64}(undef, nsubj, nparticles)
+    loglik_target_cur  = ElasticArray{Float64}(undef, nsubj, nparticles)
+    loglik_target_prop = ElasticArray{Float64}(undef, nsubj, nparticles)
 
     # draw sample paths
-    Threads.@threads for i in 1:nsubj
+    for i in 1:nsubj
         for j in 1:nparticles
             samplepaths[i,j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2])
 
             loglik_surrog[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model)
 
-            loglik_target[i,j] = loglik(model.parameters, samplepaths[i,j], model.hazards, model)
+            loglik_target_cur[i,j] = loglik(model.parameters, samplepaths[i,j], model.hazards, model)
 
-            weights[i,j] = exp(loglik_target[i,j] - loglik_surrog[i,j])
+            weights[i,j] = exp(loglik_target_cur[i,j] - loglik_surrog[i,j])
         end
-        
-        weights[i,:] = weights[i,:] / sum(weights[i,:])
     end
 
+    # normalizing constants for weights
+    totweights = sum(weights, dims = 2)
+
+    # get current estimate of the MCEM objective function
+    obj_cur = mcem_objective(loglik_target_cur, weights, totweights)
+
     # extract and initialize model parameters
-    parameters = flatview(model.parameters)
+    params_cur = flatview(model.parameters)
+
+    # initialize inference
+    mll = [obj_cur, ]
+    ests = ElasticArray{Float64}(undef, size(params_cur,1), 0)
+    append!(ests, params_cur)
 
     # optimize the monte carlo marginal likelihood
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, parameters, SMPanelData(model, samplepaths, weights))
-    sol = solve(prob, Newton())
+    prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, weights, totweights))
+    params_prop = solve(prob, Newton())
 
-    # MC error estimation - RESUME HERE
-    ll = pars -> loglik(pars, SMPanelData(model, samplepaths, weights), neg = false)
+    # recalculate the log likelihoods
+    loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, weights, totweights))
 
-    expected_score = ForwardDiff.gradient(ll, sol.u)
-    expected_score2 = ForwardDiff.hessian(ll, sol.u)
+    # recalculate the objective function
+    obj_prop = mcem_objective(loglik_target_prop, weights, totweights)
+    
+    # calculate the ASE for ΔQ
+    ase = mcem_ase(loglik_target_prop .- loglik_target_cur, weights, totweights)
 
-    score_se = sqrt.(-diag(expected_score2) .- expected_score)
+    # calculate the lower bound for ΔQ
+    ascent_lb = obj_prop - obj_cur - quantile(Normal(), α)[1] * ase
+    
+    # cache results or increase MCEM effort
+    if ascent_lb > 0
+
+        # save traces
+
+    else 
+    end
+
+    # pseudo-code
+    # input: z_α, z_β, z_γ, nparticles, K (MC sample size inflation)
+    # while keep_going
+    #     1. maximize Qtil from eq 5
+    #     2. Compute change in Qtil from eq 7
+    #     3. compute ASE from eq 14
+    #     4. 2 + 3 -> asymptotic lower bound, ALB, eq 12. 
+    #         4a. If ALB > 0, accept proposed maximizer 
+    #         4b. If ALB < 0, add Monte Carlo samples and return to step 1. 
+    #     5. Check stopping rule, eq 13. (depends on z_γ)
+    #     6. Check if additional samples are required in the next iteration, eq. 15 (depends on z_α and z_β)
+    # end
 
 end
