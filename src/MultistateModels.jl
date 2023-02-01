@@ -42,6 +42,9 @@ include("hazards.jl")
 # likelihood functions
 include("likelihoods.jl")
 
+# Monte Carlo EM functions
+include("mcem.jl")
+
 # miscellaneous functions
 include("miscellaneous.jl")
 

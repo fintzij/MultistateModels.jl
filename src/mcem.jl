@@ -1,9 +1,9 @@
 """
     mcem_objective(logliks, weights, totweights)
 
-Compute the objective function in MCEM.
+Compute the marginal log likelihood for MCEM.
 """
-function mcem_objective(logliks, weights, totweights) 
+function mcem_mll(logliks, weights, totweights) 
 
     obj = 0.0
     for j in 1:size(logliks, 2)
@@ -40,8 +40,7 @@ Asymptotic standard error of the change in the MCEM objective function.
 """
 function mcem_ase(delta_ll, weights, totweights)
 
-    sqrt.(sum(size(weights, 2) * map(i -> var_ris(delta_ll[i,:], weights[i,:], totweights[i]), collect(1:size(weights, 1)))))
+    sqrt.(sum(map(i -> var_ris(delta_ll[i,:], weights[i,:], totweights[i]), collect(1:size(weights, 1)))))
 
 end
-
 

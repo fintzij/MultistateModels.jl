@@ -100,6 +100,19 @@ function fit_markov_interval(model::MultistateModel)
         model.modelcall)
 end
 
+#  MCEM pseudo-code
+# input: z_α, z_β, z_γ, nparticles, K (MC sample size inflation)
+    # while keep_going
+    #     1. maximize Qtil from eq 5
+    #     2. Compute change in Qtil from eq 7
+    #     3. compute ASE from eq 14
+    #     4. 2 + 3 -> asymptotic lower bound, ALB, eq 12. 
+    #         4a. If ALB > 0, accept proposed maximizer 
+    #         4b. If ALB < 0, add Monte Carlo samples and return to step 1. 
+    #     5. Check stopping rule, eq 13. (depends on z_γ)
+    #     6. Check if additional samples are required in the next iteration, eq. 15 (depends on z_α and z_β)
+    # end
+
 """
     fit_semimarkov_interval(model::MultistateModel; nparticles)
 
@@ -117,7 +130,7 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 - γ: Standard normal quantile for stopping
 - κ: Inflation factor for MCEM sample size, m_new = m_cur + m_cur/κ
 """
-function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ)
+function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3)
 
     # number of subjects
     nsubj = length(model.subjectindices)
@@ -160,8 +173,8 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxite
     loglik_target_prop = ElasticArray{Float64}(undef, nsubj, nparticles)
 
     # draw sample paths
-    for i in 1:nsubj
-        for j in 1:nparticles
+    for j in 1:nparticles
+        for i in 1:nsubj
             samplepaths[i,j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2])
 
             loglik_surrog[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model)
@@ -175,53 +188,144 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxite
     # normalizing constants for weights
     totweights = sum(weights, dims = 2)
 
-    # get current estimate of the MCEM objective function
-    obj_cur = mcem_objective(loglik_target_cur, weights, totweights)
+    # get current estimate of marginal log likelihood
+    mll_cur = mcem_mll(loglik_target_cur, weights, totweights)
 
     # extract and initialize model parameters
     params_cur = flatview(model.parameters)
 
     # initialize inference
-    mll = [obj_cur, ]
+    mll = Vector{Float64}()
     ests = ElasticArray{Float64}(undef, size(params_cur,1), 0)
-    append!(ests, params_cur)
 
-    # optimize the monte carlo marginal likelihood
+    # optimization function + problem
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
     prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, weights, totweights))
-    params_prop = solve(prob, Newton())
 
-    # recalculate the log likelihoods
-    loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, weights, totweights))
+    # go on then
+    keep_going = true; iter = 0
+    while keep_going
 
-    # recalculate the objective function
-    obj_prop = mcem_objective(loglik_target_prop, weights, totweights)
-    
-    # calculate the ASE for ΔQ
-    ase = mcem_ase(loglik_target_prop .- loglik_target_cur, weights, totweights)
+        println(iter)
 
-    # calculate the lower bound for ΔQ
-    ascent_lb = obj_prop - obj_cur - quantile(Normal(), α)[1] * ase
-    
-    # cache results or increase MCEM effort
-    if ascent_lb > 0
+        # optimize the monte carlo marginal likelihood
+        params_prop = solve(remake(prob, p = SMPanelData(model, samplepaths, weights, totweights)), Newton())
 
-        # save traces
+        # recalculate the log likelihoods
+        loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, weights, totweights))
 
-    else 
+        # recalculate the marginal log likelihood
+        mll_prop = mcem_mll(loglik_target_prop, weights, totweights)
+
+        # change in mll
+        mll_change = mll_prop - mll_cur
+        
+        # calculate the ASE for ΔQ
+        ase = mcem_ase(loglik_target_prop .- loglik_target_cur, weights, totweights)
+
+         # calculate the lower bound for ΔQ
+        ascent_lb = mll_change - quantile(Normal(), α)[1] * ase
+        
+         # cache results or increase MCEM effort
+        if ascent_lb > 0
+
+            # increment the iteration
+            iter += 1
+
+            # check convergence
+            convergence = quantile(Normal(mll_change, ase), 1-γ) < tol
+
+            # set proposed values to current values
+            params_cur = params_prop
+            
+            # swap current and proposed log likelihoods
+            loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
+
+            # recalculate the importance weights
+            copyto!(weights, exp.(loglik_target_cur .- loglik_surrog))
+            copyto!(totweights, sum(weights; dims = 2))
+
+            # swap current value of the marginal log likelihood
+            mll_cur = mll_prop
+
+            # save marginal log likelihood and parameters
+            push!(mll, mll_cur)
+            append!(ests, params_cur)
+
+            # check whether to stop 
+            if convergence || (iter > maxiter)
+
+                keep_going = false
+                
+            else 
+                # check whether to sample more
+                nparticles = ceil(Int64, max(nparticles, ase^2 * sum(quantile(Normal(), [α, β]))^2 / mll_change^2))
+
+                # draw from surrogate if required
+                if nparticles > size(samplepaths, 2)
+
+                    # draw sample paths
+                    for j in (1 + size(samplepaths, 2)):nparticles
+                        
+                        # expand containers
+                        append!(samplepaths, ElasticVector{SamplePath}(undef, nsubj))
+                        append!(loglik_surrog, zeros(nsubj))
+                        append!(loglik_target_prop, zeros(nsubj))
+                        append!(loglik_target_cur, zeros(nsubj))
+                        append!(weights, zeros(nsubj))
+
+                        for i in 1:nsubj
+                            samplepaths[i,j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2])
+
+                            loglik_surrog[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model)
+
+                            loglik_target_cur[i,j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i,j], model.hazards, model)
+
+                            weights[i,j] = exp(loglik_target_cur[i,j] - loglik_surrog[i,j])
+                        end
+                    end
+
+                    # normalizing constants for weights
+                    copyto!(totweights, sum(weights; dims = 2))
+
+                    # recalculate the marginal log likelihood
+                    mll_cur = mcem_mll(loglik_target_cur, weights, totweights)
+                end
+            end
+        else 
+            # increase the Monte Carlo sample size
+            nparticles = ceil(Int64, nparticles + nparticles / κ)
+
+            # draw sample paths
+            for j in (1 + size(samplepaths, 2)):nparticles
+                        
+                # expand containers
+                append!(samplepaths, ElasticVector{SamplePath}(undef, nsubj))
+                append!(loglik_surrog, zeros(nsubj))
+                append!(loglik_target_prop, zeros(nsubj))
+                append!(loglik_target_cur, zeros(nsubj))
+                append!(weights, zeros(nsubj))
+
+                for i in 1:nsubj
+                    samplepaths[i,j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2])
+
+                    loglik_surrog[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model)
+
+                    loglik_target_cur[i,j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i,j], model.hazards, model)
+
+                    weights[i,j] = exp(loglik_target_cur[i,j] - loglik_surrog[i,j])
+                end
+            end
+
+            # normalizing constants for weights
+            copyto!(totweights, sum(weights; dims = 2))
+
+            # recalculate the marginal log likelihood
+            mll_cur = mcem_mll(loglik_target_cur, weights, totweights)
+        end
     end
 
-    # pseudo-code
-    # input: z_α, z_β, z_γ, nparticles, K (MC sample size inflation)
-    # while keep_going
-    #     1. maximize Qtil from eq 5
-    #     2. Compute change in Qtil from eq 7
-    #     3. compute ASE from eq 14
-    #     4. 2 + 3 -> asymptotic lower bound, ALB, eq 12. 
-    #         4a. If ALB > 0, accept proposed maximizer 
-    #         4b. If ALB < 0, add Monte Carlo samples and return to step 1. 
-    #     5. Check stopping rule, eq 13. (depends on z_γ)
-    #     6. Check if additional samples are required in the next iteration, eq. 15 (depends on z_α and z_β)
-    # end
+    # return results
 
+    
 end

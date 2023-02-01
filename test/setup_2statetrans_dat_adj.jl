@@ -52,7 +52,7 @@ msm_2state_transadj.markovsurrogate.parameters[2][1:2] =  [log(0.2), log(2/3)]
 
 model = msm_2state_transadj
 using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, ExponentialUtilities, ElasticArrays, ForwardDiff, LinearAlgebra
-using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book, _TotalHazardTransient, SamplePath, sample_ecctmc, compute_hazmat!, compute_tmat!, sample_ecctmc!, draw_samplepath, mcem_objective
+using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book, _TotalHazardTransient, SamplePath, sample_ecctmc, compute_hazmat!, compute_tmat!, sample_ecctmc!, draw_samplepath, mcem_mll, mcem_ase, loglik!
 
-nparticles = 10; subrate = 1; subscale = 0.5; maxiter = 50; trace = true
+nparticles = 10; maxiter = 100; tol = 1e-2; α = 0.1; β = 0.3; γ = 0.05; κ = 3
 

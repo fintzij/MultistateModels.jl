@@ -183,11 +183,11 @@ function loglik(parameters, data::SMPanelData; neg = true)
 end
 
 """
-    loglik(parameters, data::SMPanelData; neg = true)
+    loglik(parameters, data::SMPanelData)
 
 Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data. 
 """
-function loglik!(parameters, logliks::ElasticArray{Float64}, data::SMPanelData; neg = true)
+function loglik!(parameters, logliks::ElasticArray{Float64}, data::SMPanelData)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
