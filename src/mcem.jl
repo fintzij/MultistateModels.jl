@@ -40,7 +40,7 @@ Asymptotic standard error of the change in the MCEM objective function.
 """
 function mcem_ase(delta_ll, weights, totweights)
 
-    sqrt.(sum(map(i -> var_ris(delta_ll[i,:], weights[i,:], totweights[i]), collect(1:size(weights, 1)))))
+    sqrt.(sum(map(i -> var_ris(delta_ll[i,:], weights[i,:], totweights[i]), collect(1:length(totweights))))) 
 
 end
 

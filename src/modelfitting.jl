@@ -204,9 +204,10 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxite
 
     # go on then
     keep_going = true; iter = 0
+    convergence = false
     while keep_going
 
-        println(iter)
+        # println(iter)
 
         # optimize the monte carlo marginal likelihood
         params_prop = solve(remake(prob, p = SMPanelData(model, samplepaths, weights, totweights)), Newton())
@@ -222,9 +223,18 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxite
         
         # calculate the ASE for ΔQ
         ase = mcem_ase(loglik_target_prop .- loglik_target_cur, weights, totweights)
+        
+        # println(size(weights, 2))
+        # println(nparticles)
+        # println(ase)
 
          # calculate the lower bound for ΔQ
-        ascent_lb = mll_change - quantile(Normal(), α)[1] * ase
+        ascent_lb = quantile(Normal(mll_change, ase), α)
+
+        println(iter+1)
+        println(nparticles)
+        println(ase)
+        println(ascent_lb)
         
          # cache results or increase MCEM effort
         if ascent_lb > 0
@@ -242,8 +252,8 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxite
             loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
 
             # recalculate the importance weights
-            copyto!(weights, exp.(loglik_target_cur .- loglik_surrog))
-            copyto!(totweights, sum(weights; dims = 2))
+            weights = exp.(loglik_target_cur .- loglik_surrog)
+            totweights = sum(weights; dims = 2)
 
             # swap current value of the marginal log likelihood
             mll_cur = mll_prop
@@ -286,7 +296,7 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxite
                     end
 
                     # normalizing constants for weights
-                    copyto!(totweights, sum(weights; dims = 2))
+                    totweights = sum(weights; dims = 2)
 
                     # recalculate the marginal log likelihood
                     mll_cur = mcem_mll(loglik_target_cur, weights, totweights)
@@ -318,14 +328,17 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxite
             end
 
             # normalizing constants for weights
-            copyto!(totweights, sum(weights; dims = 2))
+            totweights = sum(weights; dims = 2)
 
             # recalculate the marginal log likelihood
             mll_cur = mcem_mll(loglik_target_cur, weights, totweights)
         end
     end
 
-    # return results
+    # complete data log-likelihood
+    ll = pars -> loglik(pars, SMPanelData(model, samplepaths, weights, totweights))
 
+    # return results
+    
     
 end
