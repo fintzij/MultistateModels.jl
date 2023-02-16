@@ -124,13 +124,14 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 
 - model: multistate model object
 - nparticles: initial number of particles per participant for MCEM
+- poolsize: multiple of nparticles for number of Markov surrogate paths to initialize
 - maxiter: maximum number of MCEM iterations
 - α: Standard normal quantile for asymptotic lower bound for ascent
 - β: Standard normal quantile for inflation in # particles
 - γ: Standard normal quantile for stopping
 - κ: Inflation factor for MCEM sample size, m_new = m_cur + m_cur/κ
 """
-function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3)
+function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3)
 
     # number of subjects
     nsubj = length(model.subjectindices)
@@ -210,7 +211,7 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxite
         # println(iter)
 
         # optimize the monte carlo marginal likelihood
-        params_prop = solve(remake(prob, p = SMPanelData(model, samplepaths, weights, totweights)), Newton())
+        params_prop = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, weights, totweights)), Newton())
 
         # recalculate the log likelihoods
         loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, weights, totweights))
@@ -223,10 +224,6 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, maxite
         
         # calculate the ASE for ΔQ
         ase = mcem_ase(loglik_target_prop .- loglik_target_cur, weights, totweights)
-        
-        # println(size(weights, 2))
-        # println(nparticles)
-        # println(ase)
 
          # calculate the lower bound for ΔQ
         ascent_lb = quantile(Normal(mll_change, ase), α)

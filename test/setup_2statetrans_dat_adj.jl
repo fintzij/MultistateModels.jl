@@ -5,10 +5,10 @@ using Distributions
 using MultistateModels
 using StatsBase
 
-h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
-h21 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 1)
+h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1)
 
-nsubj = Int64(200)
+nsubj = Int64(500)
 
 dat = 
     DataFrame(id = repeat(collect(1:nsubj), inner = 5),
@@ -36,8 +36,10 @@ msm_2state_transadj = multistatemodel(h12, h21; data = dat)
 # treatment speeds 1->2 and slows 2->1
 set_parameters!(
     msm_2state_transadj, 
-    (h12 = [log(0.2), log(1.5)],
-     h21 = [log(0.2), 0.0, log(2/3)]))
+    (h12 = [0.0, log(0.2)],
+     h21 = [0.0, log(0.2)]))
+    # (h12 = [log(0.2), log(1.5)],
+    #  h21 = [log(0.2), 0, log(2/3)]))
 
 simdat, paths = simulate(msm_2state_transadj; paths = true, data = true);
 
@@ -45,12 +47,15 @@ simdat, paths = simulate(msm_2state_transadj; paths = true, data = true);
 msm_2state_transadj = multistatemodel(h12, h21; data = simdat[1])
 set_parameters!(
     msm_2state_transadj, 
-    (h12 = [log(0.2), log(1.5)] .+ rand(Normal(), 2),
-     h21 = [log(0.2), 0.0, log(2/3)] .+ rand(Normal(), 3)))
+    (h12 = [0.0, log(0.2)] .+ rand(Normal(), 2)[1:2],
+     h21 = [0.0, log(0.2)] .+ rand(Normal(), 2)[1:2]))
 
-msm_2state_transadj.markovsurrogate.parameters[1][1:2] =  [log(0.2), log(1.5)]
+msm_2state_transadj.markovsurrogate.parameters[1][1:1] =  [log(0.2), ]
+# [log(0.2), log(1.5)]
 
-msm_2state_transadj.markovsurrogate.parameters[2][1:2] =  [log(0.2), log(2/3)]
+msm_2state_transadj.markovsurrogate.parameters[2][1:1] =  
+[log(0.2), ]
+# [log(0.2), log(2/3)]
 
 model = msm_2state_transadj
 using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, ExponentialUtilities, ElasticArrays, ForwardDiff, LinearAlgebra
