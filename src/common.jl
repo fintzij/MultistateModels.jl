@@ -158,7 +158,7 @@ struct SamplePath
 end
 
 """
-    ExactData(samplepaths::Array{SamplePath}, model::MultistateModel)
+    ExactData(model::MultistateModel, samplepaths::Array{SamplePath})
 
 Struct containing exactly observed sample paths and a model object. Used in fitting a multistate model to completely observed data.
 """

@@ -44,7 +44,7 @@ function fit_exact(model::MultistateModel)
     sol  = solve(prob, Newton())
 
     # oh eff yes.
-    ll = pars -> loglik(pars, ExactData(model, samplepaths))
+    ll = pars -> loglik(pars, ExactData(model, samplepaths);neg=false)
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
@@ -82,7 +82,7 @@ function fit_markov_interval(model::MultistateModel)
     sol  = solve(prob, Newton())
 
     # get the variance-covariance matrix
-    ll = pars -> loglik(pars, MPanelData(model, books))
+    ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
@@ -131,7 +131,7 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 - γ: Standard normal quantile for stopping
 - κ: Inflation factor for MCEM sample size, m_new = m_cur + m_cur/κ
 """
-function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3)
+function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3, verbose = false)
 
     # number of subjects
     nsubj = length(model.subjectindices)
@@ -202,7 +202,7 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, poolsi
     # optimization function + problem
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
     prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, weights, totweights))
-
+  
     # go on then
     keep_going = true; iter = 0
     convergence = false
@@ -228,11 +228,13 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, poolsi
          # calculate the lower bound for ΔQ
         ascent_lb = quantile(Normal(mll_change, ase), α)
 
-        println(iter+1)
-        println(nparticles)
-        println(ase)
-        println(ascent_lb)
-        
+        if verbose
+            println("Iteration: $(iter+1)")
+            println("Monte Carlo sample size: $nparticles")
+            println("MCEM Asymptotic SE: $ase")
+            println("Ascent lower bound: $ascent_lb")
+        end
+
          # cache results or increase MCEM effort
         if ascent_lb > 0
 
@@ -332,8 +334,47 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, poolsi
         end
     end
 
-    # complete data log-likelihood
-    ll = pars -> loglik(pars, SMPanelData(model, samplepaths, weights, totweights))
+    # compute complete data gradients and hessians
+    grads = Array{Float64}(undef, length(params_cur), nparticles)
+    hesns = Array{Float64}(undef, length(params_cur), length(params_cur), nparticles)
+    fisher = zeros(Float64, length(params_cur), length(params_cur))
+    fisher_i1 = similar(fisher)
+    fisher_i2 = similar(fisher)
+
+    # storage for objects
+    path = Array{SamplePath}(undef, 1)
+    diffres = DiffResults.HessianResult(params_cur)
+    ll = pars -> loglik(pars, ExactData(model, path); neg=false)
+
+    for i in 1:nsubj
+        fill!(fisher_i1, 0.0)
+        fill!(fisher_i2, 0.0)
+
+        # calculate gradient and hessian for paths
+        for j in 1:nparticles
+            path[1] = samplepaths[i,j]
+            diffres = ForwardDiff.hessian!(diffres, ll, params_cur)
+
+            # grab hessian and gradient
+            hesns[:,:,j] = DiffResults.hessian(diffres)
+            grads[:,j] = DiffResults.gradient(diffres)
+        end
+
+        # accumulate
+        for j in 1:nparticles
+            fisher_i1 .+= weights[i,j] * (-hesns[:,:,j] - grads[:,j] * transpose(grads[:,j]))
+        end
+        fisher_i1 ./= totweights[i]
+
+        for j in 1:nparticles
+            for k in 1:nparticles
+                fisher_i2 .+= weights[i,j] * weights[i,k] * grads[:,j] * transpose(grads[:,k])
+            end
+        end
+        fisher_i2 ./= totweights[i]^2
+
+        fisher += fisher_i1 + fisher_i2
+    end
 
     # return results
     
