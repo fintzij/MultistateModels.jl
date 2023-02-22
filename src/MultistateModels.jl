@@ -3,6 +3,7 @@ module MultistateModels
 using ArraysOfArrays
 using Chain
 using DataFrames
+using DiffResults
 using Distributions
 using ElasticArrays
 using ExponentialUtilities

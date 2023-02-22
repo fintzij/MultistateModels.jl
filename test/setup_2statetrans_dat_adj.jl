@@ -5,8 +5,8 @@ using Distributions
 using MultistateModels
 using StatsBase
 
-h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
-h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1)
+h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1)
 
 nsubj = Int64(200)
 
@@ -36,8 +36,10 @@ msm_2state_transadj = multistatemodel(h12, h21; data = dat)
 # treatment speeds 1->2 and slows 2->1
 set_parameters!(
     msm_2state_transadj, 
-    (h12 = [0.0, log(0.2)],
-     h21 = [0.0, log(0.2)]))
+    (h12 = [log(0.2),],
+     h21 = [log(0.2),]))
+    # (h12 = [0.0, log(0.2)],
+    #  h21 = [0.0, log(0.2)]))
     # (h12 = [0.0, log(0.2), log(1.5)],
     #  h21 = [0.0, log(0.2), log(2/3)]))
 
@@ -47,8 +49,10 @@ simdat, paths = simulate(msm_2state_transadj; paths = true, data = true);
 msm_2state_transadj = multistatemodel(h12, h21; data = simdat[1])
 set_parameters!(
     msm_2state_transadj, 
-    (h12 = [0.0, log(0.2)] .+ rand(Normal(), 2)[1:2],
-     h21 = [0.0, log(0.2)] .+ rand(Normal(), 2)[1:2]))
+    (h12 = [log(0.2)] .+ rand(Normal(), 1)[1],
+     h21 = [log(0.2)] .+ rand(Normal(), 1)[1]))
+    # (h12 = [0.0, log(0.2)] .+ rand(Normal(), 2)[1:2],
+    #  h21 = [0.0, log(0.2)] .+ rand(Normal(), 2)[1:2]))
     # (h12 = [0.0, log(0.2), log(1.5)] .+ rand(Normal(), 3)[1:3],
     #  h21 = [0.0, log(0.2), log(2/3)] .+ rand(Normal(), 3)[1:3]))
 
@@ -62,6 +66,6 @@ log(0.2)
 
 model = msm_2state_transadj
 using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, ExponentialUtilities, ElasticArrays, ForwardDiff, LinearAlgebra, OptimizationOptimisers, Zygote
-using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book, _TotalHazardTransient, SamplePath, sample_ecctmc, compute_hazmat!, compute_tmat!, sample_ecctmc!, draw_samplepath, mcem_mll, mcem_ase, loglik!
+using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book, _TotalHazardTransient, SamplePath, sample_ecctmc, compute_hazmat!, compute_tmat!, sample_ecctmc!, draw_samplepath, mcem_mll, mcem_ase, loglik!, ExactData
 
-nparticles = 10; maxiter = 100; tol = 1e-2; α = 0.1; β = 0.3; γ = 0.05; κ = 3
+nparticles = 10; maxiter = 100; tol = 1e-2; α = 0.1; β = 0.3; γ = 0.05; κ = 3; verbose = true

@@ -334,19 +334,21 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, poolsi
         end
     end
 
+    # initialize Fisher information matrix
+    fisher = zeros(Float64, length(params_cur), length(params_cur), nsubj)
+    
     # compute complete data gradients and hessians
-    grads = Array{Float64}(undef, length(params_cur), nparticles)
-    hesns = Array{Float64}(undef, length(params_cur), length(params_cur), nparticles)
-    fisher = zeros(Float64, length(params_cur), length(params_cur))
-    fisher_i1 = similar(fisher)
-    fisher_i2 = similar(fisher)
+    Threads.@threads for i in 1:nsubj
 
-    # storage for objects
-    path = Array{SamplePath}(undef, 1)
-    diffres = DiffResults.HessianResult(params_cur)
-    ll = pars -> loglik(pars, ExactData(model, path); neg=false)
+        path = Array{SamplePath}(undef, 1)
+        diffres = DiffResults.HessianResult(params_cur)
+        ll = pars -> loglik(pars, ExactData(model, path); neg=false)
 
-    for i in 1:nsubj
+        grads = Array{Float64}(undef, length(params_cur), nparticles)
+        hesns = Array{Float64}(undef, length(params_cur), length(params_cur), nparticles)
+        fisher_i1 = zeros(Float64, length(params_cur), length(params_cur))
+        fisher_i2 = similar(fisher_i1)
+
         fill!(fisher_i1, 0.0)
         fill!(fisher_i2, 0.0)
 
@@ -373,8 +375,11 @@ function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, poolsi
         end
         fisher_i2 ./= totweights[i]^2
 
-        fisher += fisher_i1 + fisher_i2
+        fisher[:,:,i] = fisher_i1 + fisher_i2
     end
+
+    # get the variance-covariance matrix
+    vcov = inv(reduce(+, fisher, dims = 3)[:,:,1])
 
     # return results
     
