@@ -6,3 +6,5 @@
 /branch_talk_11_22_2022/*
 .DS_Store
 *.pdf
+/.vscode/
+/.github/
