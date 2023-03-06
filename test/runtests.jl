@@ -1,4 +1,3 @@
-using Chain
 using MultistateModels
 using Random
 using Test

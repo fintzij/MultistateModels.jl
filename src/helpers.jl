@@ -69,7 +69,7 @@ function set_parameters!(model::MultistateModel, newvalues::NamedTuple)
             error("The new parameter values for $value_keys[i] are not the expected length.")
         end
 
-        copyto!(model.parameters[i], newvalues[value_keys[i]])
+        copyto!(model.parameters[model.hazkeys[value_keys[i]]], newvalues[value_keys[i]])
     end
 end
 

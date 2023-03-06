@@ -1,5 +1,5 @@
 """
-    survprob(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard})
+    survprob(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
 
 Return the survival probability over the interval [lb, ub]. 
 
@@ -118,7 +118,7 @@ end
 """
     call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
 
-Return the Weibull cause-specific hazards. No covariate adjustement, parameterized as in Section 2.2.2 of Kalbfleisch and Prentice.
+Return the Weibull cause-specific hazards. No covariate adjustement.
 """
 function call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
 
@@ -127,8 +127,8 @@ function call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
     log_scale = parameters[2]
 
     # compute hazard 
-    log_haz = 
-        log_shape + expm1(log_shape) * log(t) + exp(log_shape) * log_scale 
+    log_haz = log_scale + expm1(log_shape) * log(t) #rstanarm parameterization
+        # log_shape + expm1(log_shape) * log(t) + exp(log_shape) * log_scale # kalbfleisch and prentice parameterization
 
     give_log ? log_haz : exp(log_haz)
 end
@@ -145,8 +145,8 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log =
     log_scale = parameters[2]
 
     # cumulative hazard
-    log_cumul_haz = 
-        log(ub ^ shape - lb ^ shape) + shape * log_scale
+    log_cumul_haz = log(ub ^ shape - lb ^ shape) + log_scale # rstanarm parameterization
+        # log(ub ^ shape - lb ^ shape) + shape * log_scale # kalbfleisch and prentice
 
     give_log ? log_cumul_haz : exp(log_cumul_haz)
 end

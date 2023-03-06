@@ -10,8 +10,7 @@
 @testset "survprob" begin
     # what is the cumulative incidence from time 0 to 2 of exponential with mean time to event of 5
     # should be around 0.32967995
-    interval_incid = 
-        1 - MultistateModels.survprob(0.0, 2.0, msm_expwei.parameters, 1, msm_expwei.totalhazards[1], msm_expwei.hazards)
+    interval_incid = 1 - MultistateModels.survprob(0.0, 2.0, msm_expwei.parameters, 1, msm_expwei.totalhazards[1], msm_expwei.hazards; give_log = false)
         
     # note that Distributions.jl uses the mean parameterization
     # i.e., 1/rate. 
@@ -22,8 +21,7 @@ end
 @testset "test_hazards_exp" begin
     
     # create a parameters object
-    msm_expwei.parameters[1] = [0.8,]
-    msm_expwei.parameters[2] = [0.0, 0.6, -0.4, 0.15]
+    MultistateModels.set_parameters!(msm_expwei, (h12 = [0.8,], h13 = [0.0, 0.6, -0.4, 0.15]))
 
     # exponential hazards, no covariate adjustment
     @test isa(msm_expwei.hazards[1], MultistateModels._Exponential)
@@ -52,7 +50,7 @@ end
 @testset "test_hazards_weibull" begin
 
     # set parameters, log(shape, scale), no covariate adjustment
-    msm_expwei.parameters[3] = [-0.25, 0.2]
+    MultistateModels.set_parameters!(msm_expwei, (h21 = [-0.25, 0.2]))
 
     # h(t) = shape * scale^shape * t^(shape-1)
     @test MultistateModels.call_haz(1.0, msm_expwei.parameters[3], 1, msm_expwei.hazards[3]; give_log = true) == exp(-0.25) * 0.2 - 0.25
@@ -112,9 +110,9 @@ end
     ub = 5
 
     # cumulative hazard for weibullcause specific hazards, no covariate adjustment
-    @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], 1, msm_expwei.hazards[3], give_log = true) == log(ub^exp(-0.25)-lb^exp(-0.25)) + exp(-0.25)*0.2
+    @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], 1, msm_expwei.hazards[3], give_log = true) == log(ub^exp(-0.25)-lb^exp(-0.25)) + 0.2
 
-    @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], 1, msm_expwei.hazards[3], give_log = false) == exp(log(ub^exp(-0.25)-lb^exp(-0.25)) + exp(-0.25)*0.2)
+    @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], 1, msm_expwei.hazards[3], give_log = false) == exp(log(ub^exp(-0.25)-lb^exp(-0.25)) + 0.2)
 
     # cumulative hazard for weibull proportional hazards over [lb, ub], with covariate adjustment
     pars =  msm_expwei.parameters[4] 
