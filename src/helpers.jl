@@ -25,9 +25,8 @@ function set_parameters!(model::MultistateModel, newvalues::Vector{Vector{Float6
         if(length(model.parameters[i]) != length(newvalues[i]))
             error("New values for hazard $i and model parameters for that hazard are not of the same length.")
         end
+        copyto!(model.parameters[i], newvalues[i])
     end
-
-    copyto!(model.parameters, newvalues)
 end
 
 """

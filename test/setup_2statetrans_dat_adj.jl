@@ -1,5 +1,4 @@
 # set up a MultistateModel object
-using Chain
 using DataFrames
 using Distributions
 using MultistateModels

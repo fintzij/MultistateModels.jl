@@ -21,7 +21,7 @@ msm = msm_2state_trans
         logpdf(Exponential(5), path2.times[5] - path2.times[4])
         
     # test for equality vs. loglik function
-    @test MultistateModels.loglik(path1, msm) ≈ ll1
-    @test MultistateModels.loglik(path2, msm) ≈ ll2
+    @test MultistateModels.loglik(msm.parameters, path1, msm.hazards, msm) ≈ ll1
+    @test MultistateModels.loglik(msm.parameters, path2, msm.hazards, msm) ≈ ll2
 
 end
