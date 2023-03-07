@@ -127,7 +127,7 @@ function call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
     log_scale = parameters[2]
 
     # compute hazard 
-    log_haz = log_scale + expm1(log_shape) * log(t) #rstanarm parameterization
+    log_haz = log_scale + log_shape + expm1(log_shape) * log(t) 
         # log_shape + expm1(log_shape) * log(t) + exp(log_shape) * log_scale # kalbfleisch and prentice parameterization
 
     give_log ? log_haz : exp(log_haz)
@@ -145,8 +145,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log =
     log_scale = parameters[2]
 
     # cumulative hazard
-    log_cumul_haz = log(ub ^ shape - lb ^ shape) + log_scale # rstanarm parameterization
-        # log(ub ^ shape - lb ^ shape) + shape * log_scale # kalbfleisch and prentice
+    log_cumul_haz = log(ub ^ shape - lb ^ shape) + log_scale + parameters[1] 
 
     give_log ? log_cumul_haz : exp(log_cumul_haz)
 end
