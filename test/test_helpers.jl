@@ -2,28 +2,16 @@
 @testset "test_set_parameters!" begin
 
     # vector
-    vec_vals = randn(length(msm_expwei.parameters[1])+ 
-                     length(msm_expwei.parameters[2])+ 
-                     length(msm_expwei.parameters[3])+ 
-                     length(msm_expwei.parameters[4]))
+    vec_vals = [randn(length(msm_expwei.parameters[1])),
+                randn(length(msm_expwei.parameters[2])),
+                randn(length(msm_expwei.parameters[3])),
+                randn(length(msm_expwei.parameters[4]))]
     set_parameters!(msm_expwei, vec_vals)
 
     @test msm_expwei.parameters[1] == vec_vals[1]
-    @test all(msm_expwei.parameters[2] .== vec_vals[2:5])
-    @test all(msm_expwei.parameters[3] .== vec_vals[6:7])
-    @test all(msm_expwei.parameters[4] .== vec_vals[8:10])
-
-    # vector of vectors
-    vec_vec_vals = [randn(length(msm_expwei.parameters[1])),
-                    randn(length(msm_expwei.parameters[2])),
-                    randn(length(msm_expwei.parameters[3])),
-                    randn(length(msm_expwei.parameters[4]))]
-    set_parameters!(msm_expwei, vec_vec_vals)    
-    
-    @test msm_expwei.parameters[1] == vec_vec_vals[1]
-    @test all(msm_expwei.parameters[2] .== vec_vec_vals[2])
-    @test all(msm_expwei.parameters[3] .== vec_vec_vals[3])
-    @test all(msm_expwei.parameters[4] .== vec_vec_vals[4])
+    @test all(msm_expwei.parameters[2] .== vec_vals[2])
+    @test all(msm_expwei.parameters[3] .== vec_vals[3])
+    @test all(msm_expwei.parameters[4] .== vec_vals[4])
     
     # unnamed tuple
     unnamed_tuple = (randn(1), randn(4), randn(2), randn(3))

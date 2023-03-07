@@ -27,7 +27,7 @@ msm_2state_trans = multistatemodel(h12, h21; data = dat)
 set_parameters!(
     msm_2state_trans, 
     (h12 = [log(0.1), log(2)],
-     h21 = [log(0.1), log(1), log(2)]))
+     h21 = [log(1), log(0.1), log(2)]))
 
 # sample paths
 path1 = 
