@@ -136,7 +136,7 @@ end
 """
     call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true)
 
-Cumulative hazard for Weibulll hazards over the interval [lb, ub].
+Cumulative hazard for Weibull hazards over the interval [lb, ub].
 """
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true)
 
@@ -153,7 +153,7 @@ end
 """
     call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true)
 
-Return the Weibull cause-specific proportional hazards. Weibull proportional hazards model parameterized like in the `rstanarm` package in R.
+Return the Weibull cause-specific proportional hazards.
 """
 function call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true)
 
@@ -170,9 +170,73 @@ end
 """
     call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log = true)
 
-Cumulative hazard for Weibulll proportional hazards over the interval [lb, ub].
+Cumulative hazard for Weibull proportional hazards over the interval [lb, ub].
 """
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log = true)
+
+    # scale and shape
+    shape = exp(parameters[1])
+
+    # cumulative hazard
+    log_cumul_haz = 
+        log(ub ^ shape - lb ^ shape) + dot(parameters[2:end], _hazard.data[rowind,:])
+
+    give_log ? log_cumul_haz : exp(log_cumul_haz)
+end
+
+"""
+    call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true)
+
+Return the Gompertz cause-specific hazards. No covariate adjustement.
+"""
+function call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true)
+
+    # scale and shape
+    log_shape = parameters[1]
+    log_scale = parameters[2]
+
+    # compute hazard 
+    log_haz = log_scale + exp(log_shape) * t 
+
+    give_log ? log_haz : exp(log_haz)
+end
+
+"""
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log = true)
+
+Cumulative hazard for Gompertz hazards over the interval [lb, ub].
+"""
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log = true)
+
+    # scale and shape
+    shape = exp(parameters[1])
+    log_scale = parameters[2]
+
+    # cumulative hazard
+    log_cumul_haz = log(exp(ub * shape) - exp(lb * shape)) + log_scale - parameters[1] 
+
+    give_log ? log_cumul_haz : exp(log_cumul_haz)
+end
+
+"""
+    call_haz(t, parameters, rowind, _hazard::_GompertzPH; give_log = true)
+
+Return the Gompertz cause-specific proportional hazards.
+"""
+function call_haz(t, parameters, rowind, _hazard::_GompertzPH; give_log = true)
+
+    # compute hazard
+    log_haz = exp(parameters[1]) * t + dot(parameters[2:end], _hazard.data[rowind,:])
+
+    give_log ? log_haz : exp(log_haz)
+end
+
+"""
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_log = true)
+
+Cumulative hazard for Gompertz proportional hazards over the interval [lb, ub].
+"""
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_log = true)
 
     # scale and shape
     shape = exp(parameters[1])

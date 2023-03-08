@@ -56,9 +56,32 @@ end
 
 
 """
-Weibull cause-specific proportional hazard. The baseline hazard is Weibull and covariates have a multiplicative effect vis-a-vis the baseline hazard.
+Weibull cause-specific proportional hazard. The log baseline hazard is a linear function of log time and covariates have a multiplicative effect vis-a-vis the baseline hazard.
 """
 Base.@kwdef struct _WeibullPH <: _Hazard
+    hazname::Symbol
+    data::Array{Float64}
+    parnames::Vector{Symbol}
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
+end
+
+"""
+Gompertz cause-specific hazard.
+"""
+Base.@kwdef struct _Gompertz <: _Hazard
+    hazname::Symbol
+    data::Array{Float64} # just an intercept
+    parnames::Vector{Symbol}
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
+end
+
+
+"""
+Gompertz cause-specific proportional hazard. The log baseline hazard is a linear function of time and covariates have a multiplicative effect vis-a-vis the baseline hazard.
+"""
+Base.@kwdef struct _GompertzPH <: _Hazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}

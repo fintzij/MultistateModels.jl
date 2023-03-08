@@ -174,6 +174,47 @@ function build_hazards(hazards::Hazard...; data::DataFrame, surrogate = false)
             end
 
         elseif family == "gom"
+
+            # number of parameters
+            npars = size(hazdat, 2)
+
+            # vector for parameters
+            hazpars = zeros(Float64, 1 + npars)
+
+            # append to model parameters
+            push!(parameters, hazpars)
+
+            # generate hazard struct
+            if npars == 1
+                
+                # parameter names
+                parnames = vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2])
+
+                haz_struct = 
+                    _Gompertz(
+                        Symbol(hazname),
+                        hazdat, 
+                        Symbol.(parnames),
+                        hazards[h].statefrom,
+                        hazards[h].stateto)
+                        
+            else
+                
+                # parameter names
+                parnames = 
+                    vcat(
+                        hazname * "_shape_(Intercept)",
+                        hazname * "_scale_(Intercept)",
+                        hazname*"_".*coefnames(hazschema)[2][Not(1)])
+
+                haz_struct = 
+                    _GompertzPH(
+                        Symbol(hazname),
+                        hazdat,
+                        Symbol.(parnames),
+                        hazards[h].statefrom,
+                        hazards[h].stateto)
+            end
         elseif family == "gg"
         else # semi-parametric family
         end
