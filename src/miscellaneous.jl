@@ -50,6 +50,47 @@ end
 # if Gompertz with covariates
 
 #exp_rates = MultistateModels.calculate_crude(model)
+#map(x -> match_moment(x, exp_rates[x.statefrom, x.stateto]))
+
+"""
+
+Pass-through the crude exponential rate. Method for exponential hazard with no covariates.
+"""
+function match_moment(_hazard::_Exponential, crude_rate=0)
+    return [crude_rate]
+end
+
+
+"""
+
+Pass-through the crude exponential rate and zero out the coefficients for covariates. Method for exponential hazard with covariates.
+"""
+function match_moment(_hazard::_ExponentialPH, crude_rate=0)
+    return vcat(crude_rate, zeros(size(_hazard.data, 2) - 1))
+end
+
+
+"""
+
+Weibull without covariates
+"""
+function match_moment(_hazard::_Weibull, crude_rate=0)
+    # convert parameters to log scale first
+    # set shape parameter to 1 (i.e. 0 on log scale) so it's exponential
+    # pass through crude exponential rate
+    return [0, log(crude_rate)]
+end
+
+"""
+
+Weibull with covariates
+"""
+function match_moment(_hazard::_WeibullPH, crude_rate=0)
+    # convert parameters to log scale first
+    # set shape parameter to 1 (i.e. 0 on log scale) so it's exponential
+    # pass through crude exponential rate
+    return vcat([0, log(crude_rate)], zeros(size(_hazard.data, 2) - 1))
+end
 
 
 
