@@ -21,24 +21,23 @@ function calculate_crude(model::MultistateModel)
         # loop through all unique subjects
         
         # container for accumulating T_r
-        T_r_accumulator = 0
+        #T_r_accumulator = 0
         for r in eachrow(model.data[findall(model.data.id .== s), :])
             # loop through data rows for eachc subject
             
             # track how much time has been spent in state
-            T_r_accumulator += r.tstop - r.tstart
-            #T_r[r.statefrom] += r.tstop - r.tstart
+            #T_r_accumulator += r.tstop - r.tstart
+            T_r[r.statefrom] += r.tstop - r.tstart
             if(r.statefrom != r.stateto)
-                # if a state transition happens then increment time spent in state in T_r
-                # and increment transition by 1 in n_rs
-                # if no transition happens then accumulated state time is ignored
-                T_r[r.statefrom] += T_r_accumulator
-                T_r_accumulator = 0
+                # if a state transition happens then increment transition by 1 in n_rs
+            #    T_r[r.statefrom] += T_r_accumulator
+            #    T_r_accumulator = 0
                 n_rs[r.statefrom, r.stateto] += 1
             end
         end
     end
-    return n_rs ./ T_r
+    n_rs = max.(n_rs, 0.5)
+    return log.(n_rs) .- log.(T_r)
 end
 
 # take matrix of crude exponential rates
@@ -51,6 +50,16 @@ end
 
 #exp_rates = MultistateModels.calculate_crude(model)
 #map(x -> match_moment(x, exp_rates[x.statefrom, x.stateto]))
+
+
+output = similar(msm_2state_transadj.parameters)
+copyto!(output, map(x -> MultistateModels.match_moment(x, cmat[x.statefrom, x.stateto]), msm_2state_transadj.hazards))
+
+
+# COMPARE calculate_crude() to fit_exact()
+# SHOULD WE PASS PARAMETERS ON LOG SCALE OR NATIVE SCALE
+# MATCHING MOMENTS WITH GOMPERTZ
+# PREALLOCATE VECTOR OF VECTORS TO STORE PARAMETERS?
 
 """
 
@@ -92,6 +101,17 @@ function match_moment(_hazard::_WeibullPH, crude_rate=0)
     return vcat([0, log(crude_rate)], zeros(size(_hazard.data, 2) - 1))
 end
 
+
+"""
+
+Gompertz without covariates
+"""
+
+
+"""
+
+Gomperts with covariates
+"""
 
 
 """ 
