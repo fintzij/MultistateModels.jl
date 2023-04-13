@@ -12,31 +12,38 @@
 #T_r = zeros(size(m2.tmat)[1])
 #n_rs = zeros(size(m2.tmat))
 
+"""
+    calculate_crude(model::MultistateModel)
+
+Return a matrix with same dimensions as model.tmat, but row i column j entry is number of transitions from state i to state j divided by time spent in state i, then log transformed. In other words, a faster version of log exponential rates that fit_exact would return.
+
+Accept a MultistateModel object.
+"""
+
 function calculate_crude(model::MultistateModel)
-    usubj = unique(model.data.id)
+#    usubj = unique(model.data.id)
+    # vector of length equal to number of states to store time spent in state
     T_r = zeros(size(model.tmat)[1])
+
+    # matrix to store number of transitions from state r to state s, stored using same convention as model.tmat
     n_rs = zeros(size(model.tmat))
 
-    for s in usubj
-        # loop through all unique subjects
+    for rd in eachrow(model.data)
+        # loop through data rows
         
-        # container for accumulating T_r
-        #T_r_accumulator = 0
-        for r in eachrow(model.data[findall(model.data.id .== s), :])
-            # loop through data rows for eachc subject
-            
-            # track how much time has been spent in state
-            #T_r_accumulator += r.tstop - r.tstart
-            T_r[r.statefrom] += r.tstop - r.tstart
-            if(r.statefrom != r.stateto)
-                # if a state transition happens then increment transition by 1 in n_rs
-            #    T_r[r.statefrom] += T_r_accumulator
-            #    T_r_accumulator = 0
-                n_rs[r.statefrom, r.stateto] += 1
-            end
+        # track how much time has been spent in state
+        #T_r_accumulator += r.tstop - r.tstart
+        T_r[rd.statefrom] += rd.tstop - rd.tstart
+        if(rd.statefrom != rd.stateto)
+            # if a state transition happens then increment transition by 1 in n_rs
+            n_rs[rd.statefrom, rd.stateto] += 1
         end
     end
+
+    # crude fix to avoid taking the log of zero (for pairs of states with no transitions) by turning zeros to 0.5
     n_rs = max.(n_rs, 0.5)
+
+    # return log of the rate
     return log.(n_rs) .- log.(T_r)
 end
 
@@ -45,15 +52,15 @@ end
 # if exp with covariates plug in and center covariates
 # if weibull
 # if weibull with covariates
-# if Gompertz
+# if Gompertz - set shape to log(1) and scale to log(whatever exponential rate)
 # if Gompertz with covariates
 
 #exp_rates = MultistateModels.calculate_crude(model)
 #map(x -> match_moment(x, exp_rates[x.statefrom, x.stateto]))
 
 
-output = similar(msm_2state_transadj.parameters)
-copyto!(output, map(x -> MultistateModels.match_moment(x, cmat[x.statefrom, x.stateto]), msm_2state_transadj.hazards))
+#output = similar(msm_2state_transadj.parameters)
+#copyto!(output, map(x -> MultistateModels.match_moment(x, cmat[x.statefrom, x.stateto]), msm_2state_transadj.hazards))
 
 
 # COMPARE calculate_crude() to fit_exact()
@@ -65,8 +72,8 @@ copyto!(output, map(x -> MultistateModels.match_moment(x, cmat[x.statefrom, x.st
 
 Pass-through the crude exponential rate. Method for exponential hazard with no covariates.
 """
-function match_moment(_hazard::_Exponential, crude_rate=0)
-    return [crude_rate]
+function match_moment(_hazard::_Exponential, crude_log_rate=0)
+    return [crude_log_rate]
 end
 
 
@@ -74,8 +81,8 @@ end
 
 Pass-through the crude exponential rate and zero out the coefficients for covariates. Method for exponential hazard with covariates.
 """
-function match_moment(_hazard::_ExponentialPH, crude_rate=0)
-    return vcat(crude_rate, zeros(size(_hazard.data, 2) - 1))
+function match_moment(_hazard::_ExponentialPH, crude_log_rate=0)
+    return vcat(crude_log_rate, zeros(size(_hazard.data, 2) - 1))
 end
 
 
@@ -83,22 +90,21 @@ end
 
 Weibull without covariates
 """
-function match_moment(_hazard::_Weibull, crude_rate=0)
-    # convert parameters to log scale first
-    # set shape parameter to 1 (i.e. 0 on log scale) so it's exponential
-    # pass through crude exponential rate
-    return [0, log(crude_rate)]
+function match_moment(_hazard::_Weibull, crude_log_rate=0)
+    # set shape parameter to 0 (i.e. log(1)) so it's exponential
+    # pass through crude log exponential rate
+    return [0, crude_log_rate]
 end
 
 """
 
 Weibull with covariates
 """
-function match_moment(_hazard::_WeibullPH, crude_rate=0)
-    # convert parameters to log scale first
-    # set shape parameter to 1 (i.e. 0 on log scale) so it's exponential
+function match_moment(_hazard::_WeibullPH, crude_log_rate=0)
+    # set shape parameter to 0 (i.e. log(1)) so it's exponential
     # pass through crude exponential rate
-    return vcat([0, log(crude_rate)], zeros(size(_hazard.data, 2) - 1))
+    # set covariate coefficients to 0
+    return vcat([0, log(crude_log_rate)], zeros(size(_hazard.data, 2) - 1))
 end
 
 
@@ -106,12 +112,22 @@ end
 
 Gompertz without covariates
 """
-
+function match_moment(_hazard::_Gompertz)
+    # set shape to 0 (i.e. log(1)) 
+    # pass through crude exponential rate 
+    return [0, crude_log_rate]
+end
 
 """
 
-Gomperts with covariates
+Gompertz with covariates
 """
+function match_moment(_hazard::_GompertzPH)
+    # set shape to 0 (i.e. log(1)) 
+    # pass through crude exponential rate 
+    # set covariate coefficients to 0
+    return vcat([0, crude_log_rate], zeros(size(_hazard.data, 2) - 1))
+end
 
 
 """ 
