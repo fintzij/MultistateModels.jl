@@ -1,9 +1,39 @@
 """
+    Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing}, intercept::Bool = true, periodic::Bool = false)
+
+Specify a parametric or semi-parametric baseline cause-specific hazard function. 
+
+# Arguments
+- `hazard`: StatsModels.jl FormulaTerm for the log-hazard. Covariates have a multiplicative effect on the baseline cause specific hazard. Must be specified with "0 ~" on the left hand side. 
+- `family`: one of "exp", "wei", or "gom" for exponential, Weibull, or Gompertz cause-specific baseline hazard functions, or "ms" for a semi-parametric M-spline basis for the baseline hazard.
+- `statefrom`: integer specifying the origin state.
+- `stateto`: integer specifying the destination state.
+
+# Additional arguments for semiparametric M-Spline hazards. Spline bases are constructed via a call to the `splines2` package in R. See [the splines2 documentation](https://wwenjie.org/splines2/articles/splines2-intro#mSpline) for additional details. 
+- `df`: Degrees of freedom.
+- `degree`: Degree of the spline polynomial basis.
+- `knots`: Vector of knots.
+- `boundaryknots`: Length 2 vector of boundary knots.
+- `intercept`: Defaults to true for whether the spline should include an intercept.
+- `periodic`: Periodic spline basis, defaults to false.
+"""
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, intercept::Bool = true, periodic::Bool = false)
+    
+    if family != "ms"
+        h = ParametricHazard(hazard, family, statefrom, stateto)
+    else 
+        h = SplineHazard(hazard, family, statefrom, stateto, df, degree, knots, boundaryknots, intercept, periodic)
+    end
+
+    return h
+end
+
+"""
     enumerate_hazards(hazards::Hazard...)
 
 Generate a matrix whose columns record the origin state, destination state, and transition number for a collection of hazards. The hazards are reordered by origin state, then by destination state. `hazards::Hazard...` is an iterable collection of user-supplied `Hazard` objects.
 """
-function enumerate_hazards(hazards::Hazard...)
+function enumerate_hazards(hazards::HazardFunction...)
 
     n_haz = length(hazards)
 
@@ -62,7 +92,7 @@ Accept iterable collection of `Hazard` objects, plus data.
 
 _hazards[1] corresponds to the first allowable transition enumerated in a transition matrix (in row major order), _hazards[2] to the second and so on... So _hazards will have length equal to number of allowable transitions.
 """
-function build_hazards(hazards::Hazard...; data::DataFrame, surrogate = false)
+function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = false)
     
     # initialize the arrays of hazards
     _hazards = Vector{_Hazard}(undef, length(hazards))
@@ -215,8 +245,8 @@ function build_hazards(hazards::Hazard...; data::DataFrame, surrogate = false)
                         hazards[h].statefrom,
                         hazards[h].stateto)
             end
-        elseif family == "gg"
-        else # semi-parametric family
+        elseif family == "ms" # m-splines
+
         end
 
         # note: want a symbol that names the hazard + vector of symbols for parameters
@@ -253,31 +283,12 @@ function build_totalhazards(_hazards, tmat)
     return _totalhazards
 end
 
-### Cumulative hazards
 """
-    build_cumulativehazards(_totalhazard::_TotalHazard)
-
-"""
-function build_cumulativehazards(_totalhazards::_TotalHazard)
-
-    # initialize a vector of cumulative hazards
-    _cumulativehazards = Vector{_CumulativeHazard}(undef, length(_totalhazards))
-
-    for h in eachindex(_cumulativehazards)
-        if(isa(_totalhazards[h], _TotalHazardAbsorbing))
-        else
-
-        end
-    end
-    
-end
-
-"""
-    multistatemodel(hazards::Hazard...; data::DataFrame)
+    multistatemodel(hazards::HazardFunction...; data::DataFrame)
 
 Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference.
 """
-function multistatemodel(hazards::Hazard...; data::DataFrame)
+function multistatemodel(hazards::HazardFunction...; data::DataFrame)
 
     # catch the model call
     modelcall = (hazards = hazards, data = data)

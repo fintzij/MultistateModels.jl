@@ -1,19 +1,54 @@
 """
-    Hazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
+    Abstract type for hazard functions. Subtypes are ParametricHazard or SplineHazard.
+"""
+abstract type HazardFunction end
 
-Specify a cause-specific hazard function. 
+"""
+    ParametricHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
+
+Specify a cause-specific baseline hazard. 
 
 # Arguments
-- 'hazard': regression formula for the (log) hazard, parsed using StatsModels.jl.
-- 'family': parameterization for the baseline hazard, one of "exp" for exponential, "wei" for Weibull, "gom" for Gompertz (not yet implemented),  "ms" for M-spline (on the baseline hazard, not yet implemented), or "bs" for B-spline (on the log baseline hazard, not yet implemented). 
-- 'statefrom': state number for the origin state.
-- 'stateto': state number for the destination state.
+- `hazard`: regression formula for the (log) hazard, parsed using StatsModels.jl.
+- `family`: parameterization for the baseline hazard, one of "exp" for exponential, "wei" for Weibull, "gom" for Gompert. 
+- `statefrom`: state number for the origin state.
+- `stateto`: state number for the destination state.
 """
-struct Hazard
+struct ParametricHazard <: HazardFunction
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
-    family::String     # one of "exp", "wei", "gom", "ms", or "bs"
+    family::String     # one of "exp", "wei", "gom"
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
+end
+
+"""
+    SplineHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing}, degree::Int64, knots::Union{Vector{Float64},Nothing}, boundaryknots::Union{Vector{Float64},Nothing}, intercept::Bool, periodic::Bool)
+
+Specify a cause-specific baseline hazard. 
+
+# Arguments
+- `hazard`: regression formula for the (log) hazard, parsed using StatsModels.jl.
+- `family`: "ms" for M-spline for the baseline hazard.
+- `statefrom`: state number for the origin state.
+- `stateto`: state number for the destination state.
+- `df`: Degrees of freedom.
+- `degree`: Degree of the spline polynomial basis.
+- `knots`: Vector of knots.
+- `boundaryknots`: Length 2 vector of boundary knots.
+- `intercept`: Defaults to true for whether the spline should include an intercept.
+- `periodic`: Periodic spline basis, defaults to false.
+"""
+struct SplineHazard <: HazardFunction
+    hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
+    family::String     # "ms" for M-Splines
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
+    df::Union{Nothing,Int64}
+    degree::Int64
+    knots::Union{Nothing,Vector{Float64}}
+    boundaryknots::Union{Nothing,Vector{Float64}}
+    intercept::Bool
+    periodic::Bool
 end
 
 """
@@ -87,6 +122,25 @@ Base.@kwdef struct _GompertzPH <: _Hazard
     parnames::Vector{Symbol}
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
+end
+
+"""
+M-Spline cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions. 
+"""
+Base.@kwdef struct _MSpline <: _Hazard
+    hazname::Symbol
+    data::Array{Float64}
+    parnames::Vector{Symbol}
+    statefrom::Int64
+    stateto::Int64
+    times::Vector{Float64}
+    msbasis::Array{Float64}
+    isbasis::Array{Float64}
+    degree::Int64
+    knots::Vector{Float64}
+    boundaryknots::Vector{Float64}
+    periodic::Bool
+    intercept::Bool
 end
 
 """

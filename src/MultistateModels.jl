@@ -16,6 +16,7 @@ using QuadGK
 using StatsBase
 using StatsModels
 using StatsFuns
+using Splines2
 
 # need to import fit to overload and reexport it
 import StatsBase.fit
@@ -63,5 +64,8 @@ include("sampling.jl")
 
 # simulation
 include("simulation.jl")
+
+# smooths
+include("smooths.jl")
 
 end

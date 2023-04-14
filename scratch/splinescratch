@@ -1,0 +1,71 @@
+using Splines2
+using StatsModels
+using Plots
+using DataFrames
+using RCall
+using LinearAlgebra
+
+# simulate data
+x = collect(range(0.0, length=101, stop=2.0*pi));
+x2 = rand(5)
+y = exp.(sin.(x)+randn(length(x))) 
+
+# knots = collect(0.0:6.0)
+msp = Splines2.ms(x, order = 4, intercept = true)
+isp = Splines2.is(x, order = 4, intercept = true)
+
+Base.@kwdef struct testobj2
+    var1::Float64
+end
+
+t = testobj2(2.2)
+t.var1[1] = 3.2
+
+# using Rcall
+@rlibrary splines2
+@rput x
+
+# looks the same as MC's
+R"msr = splines2::mSpline(x, order = 4, intercept = TRUE)"
+mr = rcopy(Array{Float64}, R"msr")
+
+@rput x2
+mr2 = convert(Array{Float64}, R"predict(msr, x2)")
+
+# ispline is not the same as MC's
+ir = convert(Array{Float64}, R"splines2::iSpline(x, order = 4, intercept = TRUE)")
+
+### struct?
+Base.@kwdef struct ParametricHazard
+    hazard::StatsModels.FormulaTerm
+    family::String
+    statefrom::Int64
+    stateto::Int64
+end
+
+Base.@kwdef struct SplineHazard
+    hazard::StatsModels.FormulaTerm
+    family::String
+    statefrom::Int64
+    stateto::Int64
+    df::Union
+    degree::Int64
+    intercept::Bool
+    knots::Vector{Float64} 
+    boundaryknots::Vector{Float64}
+end
+
+Hazard = function(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df = nothing, degree = 3, ...)
+if family != "ms"
+    ParametricHazard()
+else
+end
+end
+
+# notes
+# probably best to hand off splines to splines2 in R
+# shouldn't be a problem for autodiff 
+# see rstanarm for parameterization
+# modifications needed for optional arguments to hazard functions
+# need additional spline related basis objects, maybe bookkeeping
+# should be able to extend @formula to use splines2+RCall as shown in MC's splines2 repo
