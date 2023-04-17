@@ -128,7 +128,6 @@ function call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
 
     # compute hazard 
     log_haz = log_scale + log_shape + expm1(log_shape) * log(t) 
-        # log_shape + expm1(log_shape) * log(t) + exp(log_shape) * log_scale # kalbfleisch and prentice parameterization
 
     give_log ? log_haz : exp(log_haz)
 end
@@ -271,13 +270,9 @@ function next_state_probs!(ns_probs, t, scur, ind, parameters, hazards, totalhaz
     # indices for possible destination states
     trans_inds = findall(tmat[scur,:] .!= 0.0)
         
-    # calculate log hazards for possible transitions
+    # calculate log hazards for possible transitions + normalize
     ns_probs[trans_inds] = 
-        map(x -> call_haz(t, parameters[x], ind, hazards[x]), totalhazards[scur].components)
-
-    # normalize ns_probs
-    ns_probs[trans_inds] = 
-        softmax(ns_probs[totalhazards[scur].components])
+        softmax(map(x -> call_haz(t, parameters[x], ind, hazards[x]), totalhazards[scur].components))
 end
 
 """
