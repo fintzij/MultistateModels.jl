@@ -249,6 +249,69 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_lo
 end
 
 """
+    call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
+
+Return the spline cause-specific hazards when the spline basis is precomputed at time t.
+"""
+function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
+
+    # get the index
+    ind = searchsortedfirst(_hazard.times, t)
+
+    # compute the log hazard
+    loghaz = log(softmax(parameters[1:size(_hazard.hazbasis, 1)]) * _hazard.hazbasis[:,ind]) + _hazard.data[rowind, :] * parameters[Not(1:size(_hazard.hazbasis, 1))]
+
+    # return the log hazard
+    give_log ? loghaz : exp(loghaz)
+end
+
+"""
+    call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true, newt = true)
+
+Return the spline cause-specific hazards at a new time t.
+"""
+function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true, newt = true)
+
+    # compute the log hazard
+    loghaz = log(rcopy(R"predict($(_hazard.hazobj), $t)") * softmax(parameters[1:size(_hazard.hazbasis, 1)])) + _hazard.data[rowind, :] * parameters[Not(1:size(_hazard.hazbasis, 1))]
+
+    # return the log hazard
+    give_log ? loghaz : exp(loghaz)
+end
+
+"""
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true)
+
+Return the spline cause-specific cumulative hazards over the interval [lb,ub] when the spline basis is precomputed.
+"""
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true)
+
+    # get the index
+    lbind = searchsortedfirst(_hazard.times, lb)
+    ubind = searchsortedfirst(_hazard.times, ub)
+
+    # compute the log hazard
+    logchaz = log(softmax(parameters[1:size(_hazard.chazbasis, 1)]) * (_hazard.chazbasis[:,ubind] - _hazard.chazbasis[:,lbind])) + _hazard.data[rowind, :] * parameters[Not(1:size(_hazard.chazbasis, 1))]
+
+    # return the log hazard
+    give_log ? logchaz : exp(logchaz)
+end
+
+"""
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true, newt)
+
+Return the spline cause-specific cumulative hazards over the interval [lb,ub] at new times.
+"""
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true, newt = true)
+
+    # compute the log hazard
+    logchaz = log(rcopy(R"diff(predict($(_hazard.chazobj), c($lb,$ub)))") * softmax(parameters[1:size(_hazard.chazbasis, 1)])) + _hazard.data[rowind, :] * parameters[Not(1:size(_hazard.chazbasis, 1))]
+
+    # return the log hazard
+    give_log ? logchaz : exp(logchaz)
+end
+
+"""
     next_state_probs!(ns_probs, scur, ind, model)
 
 Update ns_probs with probabilities of transitioning to each state based on hazards from current state. 

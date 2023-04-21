@@ -251,11 +251,6 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             # grab hazard object from splines2
             (;hazard, cumulative_hazard) = spline_hazards(hazards[h], data)
 
-            # drop the intercept from the rhs of the regression
-            if isa(terms(hazschema.rhs)[1], InterceptTerm)
-                hazdat = hazdat[:,Not(1)]
-            end
-
             # number of parameters
             npars = size(hazard)[2] + size(hazdat, 2)
 
@@ -265,48 +260,25 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             # append to model parameters
             push!(parameters, hazpars)
 
-            if size(hazdat, 2) == 0
+            # parameter names
+            parnames = 
+                vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[2]))),
+                        hazname*"_".*coefnames(hazschema)[2])
 
-                # parameter names
-                parnames = vec(hazname*"_".*"coef".*"_".*string.(collect(1:npars)))
-
-                # hazard struct
-                haz_struct = 
-                    _Spline(
-                        Symbol(hazname),
-                        hazdat, 
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        ElasticVector{Float64}(undef, 0),
-                        ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
-                        ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
-                        hazard, 
-                        cumulative_hazard,
-                        rcopy(R"attributes($hazard)"))
-
-            else
-
-                # parameter names
-                parnames = 
-                    vcat(vec(hazname*"_".*"coef".*"_".*string.(collect(1:size(hazard)[2]))),
-                         hazname*"_".*coefnames(hazschema)[2][Not(1)])
-
-                # hazard struct
-                haz_struct = 
-                    _Spline(
-                        Symbol(hazname),
-                        hazdat, 
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        ElasticVector{Float64}(undef, 0),
-                        ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
-                        ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
-                        hazard, 
-                        cumulative_hazard,
-                        rcopy(R"attributes($hazard)"))
-            end
+            # hazard struct
+            haz_struct = 
+            _Spline(
+                Symbol(hazname),
+                hazdat, 
+                Symbol.(parnames),
+                hazards[h].statefrom,
+                hazards[h].stateto,
+                ElasticVector{Float64}(undef, 0),
+                ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
+                ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
+                hazard, 
+                cumulative_hazard,
+                rcopy(R"attributes($hazard)"))
         end
 
         # note: want a symbol that names the hazard + vector of symbols for parameters

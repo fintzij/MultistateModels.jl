@@ -127,7 +127,7 @@ Base.@kwdef struct _GompertzPH <: _Hazard
 end
 
 """
-Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. 
+Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect vis-a-vis the baseline hazard.
 """
 Base.@kwdef struct _Spline <: _Hazard
     hazname::Symbol
@@ -143,22 +143,22 @@ Base.@kwdef struct _Spline <: _Hazard
     attr::OrderedDict{Symbol, Any}
 end
 
-"""
-Spline for cause-specific proportional hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect vis-a-vis the baseline hazard.
-"""
-Base.@kwdef struct _SplinePH <: _Hazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64
-    times::Vector{Float64}
-    hazbasis::ElasticArray{Float64}
-    chazbasis::ElasticArray{Float64}
-    hazobj::RObject{RealSxp}
-    chazobj::RObject{RealSxp}
-    attr::OrderedDict{Symbol, Any}
-end
+# """
+# Spline for cause-specific proportional hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect vis-a-vis the baseline hazard.
+# """
+# Base.@kwdef struct _SplinePH <: _Hazard
+#     hazname::Symbol
+#     data::Array{Float64}
+#     parnames::Vector{Symbol}
+#     statefrom::Int64
+#     stateto::Int64
+#     times::Vector{Float64}
+#     hazbasis::ElasticArray{Float64}
+#     chazbasis::ElasticArray{Float64}
+#     hazobj::RObject{RealSxp}
+#     chazobj::RObject{RealSxp}
+#     attr::OrderedDict{Symbol, Any}
+# end
 
 """
 Abstract type for total hazards.

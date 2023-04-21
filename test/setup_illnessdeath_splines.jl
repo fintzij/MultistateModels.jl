@@ -40,7 +40,7 @@ h13 = Hazard(@formula(0 ~ 1), "ms", 1, 3; degree = 1, df = 4) # healthy -> dead
 h23 = Hazard(@formula(0 ~ 1), "ms", 2, 3; degree = 0, df = 4) # ill -> dead
 
 hazards = (h12, h13, h21, h23); data = simdat[1]
-model = multistatemodel(h12, h13, h21, h23; data = dat)
+model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
 
 using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, StatsModels, ExponentialUtilities, ElasticArrays, ForwardDiff, LinearAlgebra, OptimizationOptimisers, RCall
 using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book, _TotalHazardTransient, SamplePath, sample_ecctmc, compute_hazmat!, compute_tmat!, sample_ecctmc!, draw_samplepath, mcem_mll, mcem_ase, loglik!, ExactData, get_subjinds, enumerate_hazards, create_tmat, check_data!, _Hazard, SplineHazard, build_hazards
