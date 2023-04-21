@@ -37,6 +37,7 @@ Specify a cause-specific baseline hazard.
 - `boundaryknots`: Length 2 vector of boundary knots.
 - `intercept`: Defaults to true for whether the spline should include an intercept.
 - `periodic`: Periodic spline basis, defaults to false.
+- `monotonic`: Assume that baseline hazard is monotonic, defaults to false. If true, use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
 """
 struct SplineHazard <: HazardFunction
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
@@ -49,6 +50,7 @@ struct SplineHazard <: HazardFunction
     boundaryknots::Union{Nothing,Vector{Float64}}
     intercept::Bool
     periodic::Bool
+    monotonic::Bool
 end
 
 """
@@ -125,22 +127,37 @@ Base.@kwdef struct _GompertzPH <: _Hazard
 end
 
 """
-M-Spline cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions. 
+Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. 
 """
-Base.@kwdef struct _MSpline <: _Hazard
+Base.@kwdef struct _Spline <: _Hazard
+    hazname::Symbol
+    data::Array{Float64}
+    parnames::Vector{Symbol}
+    statefrom::Int64
+    stateto::Int64
+    times::ElasticVector{Float64}
+    hazbasis::ElasticArray{Float64}
+    chazbasis::ElasticArray{Float64}
+    hazobj::RObject{RealSxp}
+    chazobj::RObject{RealSxp}
+    attr::OrderedDict{Symbol, Any}
+end
+
+"""
+Spline for cause-specific proportional hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect vis-a-vis the baseline hazard.
+"""
+Base.@kwdef struct _SplinePH <: _Hazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
     statefrom::Int64
     stateto::Int64
     times::Vector{Float64}
-    msbasis::Array{Float64}
-    isbasis::Array{Float64}
-    degree::Int64
-    knots::Vector{Float64}
-    boundaryknots::Vector{Float64}
-    periodic::Bool
-    intercept::Bool
+    hazbasis::ElasticArray{Float64}
+    chazbasis::ElasticArray{Float64}
+    hazobj::RObject{RealSxp}
+    chazobj::RObject{RealSxp}
+    attr::OrderedDict{Symbol, Any}
 end
 
 """

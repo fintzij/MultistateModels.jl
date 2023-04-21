@@ -1,66 +1,37 @@
-using Splines2
 using StatsModels
 using Plots
 using DataFrames
 using RCall
 using LinearAlgebra
+using ArraysOfArrays
+using ElasticArrays
 
 # simulate data
-x = collect(range(0.0, length=101, stop=2.0*pi));
-x2 = rand(5)
+x = collect(range(0.0, length=10001, stop=2.0*pi));
+x2 = collect(0.0:0.001:2.0*pi)
 y = exp.(sin.(x)+randn(length(x))) 
 
-# knots = collect(0.0:6.0)
-msp = Splines2.ms(x, order = 4, intercept = true)
-isp = Splines2.is(x, order = 4, intercept = true)
+# using Rcall - oh shit.
+using RCall
+@rimport splines2 as rsplines2
+@rimport stats as rstats
 
-Base.@kwdef struct testobj2
-    var1::Float64
+# two ways to do this - could import splines2
+@benchmark begin
+s = rsplines2.mSpline(x, df = 6)
+convert(Array{Float64}, rstats.predict(s, var"newx"=x2))
 end
 
-t = testobj2(2.2)
-t.var1[1] = 3.2
+# or do it all in R and copy back only when needed. seems faster
+@benchmark begin
+    R"r = splines2::mSpline($x, df = 6)"
+    convert(Array{Float64}, R"predict(msr, $x2)")
+end 
 
-# using Rcall
-@rlibrary splines2
-@rput x
+rs = convert(ElasticArray, rcopy(R"t(splines2::mSpline($x, degree = 4, intercept = TRUE))"))
+push!(rs, rand(5))
 
-# looks the same as MC's
-R"msr = splines2::mSpline(x, order = 4, intercept = TRUE)"
-mr = rcopy(Array{Float64}, R"msr")
 
-@rput x2
-mr2 = convert(Array{Float64}, R"predict(msr, x2)")
-
-# ispline is not the same as MC's
-ir = convert(Array{Float64}, R"splines2::iSpline(x, order = 4, intercept = TRUE)")
-
-### struct?
-Base.@kwdef struct ParametricHazard
-    hazard::StatsModels.FormulaTerm
-    family::String
-    statefrom::Int64
-    stateto::Int64
-end
-
-Base.@kwdef struct SplineHazard
-    hazard::StatsModels.FormulaTerm
-    family::String
-    statefrom::Int64
-    stateto::Int64
-    df::Union
-    degree::Int64
-    intercept::Bool
-    knots::Vector{Float64} 
-    boundaryknots::Vector{Float64}
-end
-
-Hazard = function(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df = nothing, degree = 3, ...)
-if family != "ms"
-    ParametricHazard()
-else
-end
-end
 
 # notes
 # probably best to hand off splines to splines2 in R

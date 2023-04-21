@@ -9,17 +9,24 @@ using ElasticArrays
 using ExponentialUtilities
 using ForwardDiff
 using LinearAlgebra
+using OrderedCollections
 using Optim # for simulation - keep
 using Optimization # for fitting - keep
 using OptimizationOptimJL
 using QuadGK
+using RCall
 using StatsBase
 using StatsModels
 using StatsFuns
-using Splines2
 
 # need to import fit to overload and reexport it
 import StatsBase.fit
+
+# initialize R session for splines
+function __init__()
+    @eval RCall.@rlibrary splines2
+    nothing
+end
 
 # Write your package code here.
 export
@@ -30,7 +37,8 @@ export
     multistatemodel,
     set_parameters!,
     simulate,
-    statetable
+    statetable,
+    __init__
 
 # typedefs
 include("common.jl")

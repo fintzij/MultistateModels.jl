@@ -16,13 +16,14 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 - `boundaryknots`: Length 2 vector of boundary knots.
 - `intercept`: Defaults to true for whether the spline should include an intercept.
 - `periodic`: Periodic spline basis, defaults to false.
+- `monotonic`: Assume that baseline hazard is monotonic, defaults to false. If true, use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, intercept::Bool = true, periodic::Bool = false)
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, intercept::Bool = true, periodic::Bool = false, monotonic::Bool = false)
     
     if family != "ms"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
-        h = SplineHazard(hazard, family, statefrom, stateto, df, degree, knots, boundaryknots, intercept, periodic)
+        h = SplineHazard(hazard, family, statefrom, stateto, df, degree, knots, boundaryknots, intercept, periodic, monotonic)
     end
 
     return h
@@ -247,6 +248,65 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             end
         elseif family == "ms" # m-splines
 
+            # grab hazard object from splines2
+            (;hazard, cumulative_hazard) = spline_hazards(hazards[h], data)
+
+            # drop the intercept from the rhs of the regression
+            if isa(terms(hazschema.rhs)[1], InterceptTerm)
+                hazdat = hazdat[:,Not(1)]
+            end
+
+            # number of parameters
+            npars = size(hazard)[2] + size(hazdat, 2)
+
+            # vector for parameters
+            hazpars = zeros(Float64, npars)
+
+            # append to model parameters
+            push!(parameters, hazpars)
+
+            if size(hazdat, 2) == 0
+
+                # parameter names
+                parnames = vec(hazname*"_".*"coef".*"_".*string.(collect(1:npars)))
+
+                # hazard struct
+                haz_struct = 
+                    _Spline(
+                        Symbol(hazname),
+                        hazdat, 
+                        Symbol.(parnames),
+                        hazards[h].statefrom,
+                        hazards[h].stateto,
+                        ElasticVector{Float64}(undef, 0),
+                        ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
+                        ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
+                        hazard, 
+                        cumulative_hazard,
+                        rcopy(R"attributes($hazard)"))
+
+            else
+
+                # parameter names
+                parnames = 
+                    vcat(vec(hazname*"_".*"coef".*"_".*string.(collect(1:size(hazard)[2]))),
+                         hazname*"_".*coefnames(hazschema)[2][Not(1)])
+
+                # hazard struct
+                haz_struct = 
+                    _Spline(
+                        Symbol(hazname),
+                        hazdat, 
+                        Symbol.(parnames),
+                        hazards[h].statefrom,
+                        hazards[h].stateto,
+                        ElasticVector{Float64}(undef, 0),
+                        ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
+                        ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
+                        hazard, 
+                        cumulative_hazard,
+                        rcopy(R"attributes($hazard)"))
+            end
         end
 
         # note: want a symbol that names the hazard + vector of symbols for parameters
