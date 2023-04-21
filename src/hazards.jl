@@ -11,11 +11,12 @@ Return the survival probability over the interval [lb, ub].
 - `_totalhazard::_TotalHazardTransient`: total hazard from transient state, contains indices for hazards that contribute to the total hazard
 - `_hazards::_Hazard`: vector of cause-specific hazards
 - `give_log::Bool`: should the log total hazard be returned (default)
+- `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true, newtime = true)
 
     # log total cumulative hazard
-    log_survprob = -total_cumulhaz(lb, ub, parameters, rowind, _totalhazard, _hazards; give_log = false)
+    log_survprob = -total_cumulhaz(lb, ub, parameters, rowind, _totalhazard, _hazards; give_log = false, newtime = newtime)
 
     # return survival probability or not
     give_log ? log_survprob : exp(log_survprob)
@@ -34,8 +35,9 @@ Return the log-total cumulative hazard out of a transient state over the interva
 - `_totalhazard::_TotalHazardTransient`: total hazard from transient state, contains indices for hazards that contribute to the total hazard
 - `_hazards::_Hazard`: vector of cause-specific hazards
 - `give_log::Bool`: should the log total hazard be returned (default)
+- `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true, newtime = true)
 
     # log total cumulative hazard
     log_tot_haz = 
@@ -47,7 +49,8 @@ function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTr
                     parameters[x],
                     rowind, 
                     _hazards[x];
-                    give_log = true
+                    give_log = true,
+                    newtime = newtime
                 ), _totalhazard.components
             )
         )
@@ -69,8 +72,9 @@ Return zero log-total cumulative hazard over the interval [lb, ub] as the curren
 - `_totalhazard::_TotalHazardAbsorbing`: absorbing state.
 - `_hazards::_Hazard`: vector of cause-specific hazards
 - `give_log::Bool`: should the log total hazard be returned (default)
+- `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true)
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true, newtime = true)
 
     # return 0 cumulative hazard
     give_log ? -Inf : 0
@@ -78,49 +82,49 @@ function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAb
 end
 
 """
-    call_haz(t, parameters, rowind, _hazard::_Exponential; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_Exponential; give_log = true, newtime = true)
 
 Return the exponential cause-specific hazards.
 """
-function call_haz(t, parameters, rowind, _hazard::_Exponential; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_Exponential; give_log = true, newtime = true)
     give_log ? parameters[1] : exp(parameters[1])
 end
 
 """
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Exponential; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Exponential; give_log = true, newtime = true)
 
 Cumulative hazard for the exponential hazards over the interval [lb, ub]. 
 """
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Exponential; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Exponential; give_log = true, newtime = true)
     give_log ? parameters[1] + log(ub - lb) : exp(parameters[1] + log(ub - lb))
 end
 
 """
-    call_haz(t, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_ExponentialPH; give_log = true, newtime = true)
 
 Return the exponential cause-specific hazards with covariate adjustment.
 """
-function call_haz(t, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_ExponentialPH; give_log = true, newtime = true)
     log_haz = dot(parameters, _hazard.data[rowind,:])
     give_log ? log_haz : exp(log_haz)
 end
 
 """
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ExponentialPH; give_log = true, newtime = true)
 
 Cumulative hazard for exponential proportional hazards over the interval [lb, ub].
 """
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ExponentialPH; give_log = true, newtime = true)
     log_haz = dot(parameters, _hazard.data[rowind,:])
     give_log ? log_haz + log(ub - lb) : exp(log_haz + log(ub - lb))
 end
 
 """
-    call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true, newtime = true)
 
 Return the Weibull cause-specific hazards. No covariate adjustement.
 """
-function call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true, newtime = true)
 
     # scale and shape
     log_shape = parameters[1]
@@ -134,11 +138,11 @@ function call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
 end
 
 """
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true, newtime = true)
 
 Cumulative hazard for Weibull hazards over the interval [lb, ub].
 """
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true, newtime = true)
 
     # scale and shape
     shape = exp(parameters[1])
@@ -151,11 +155,11 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log =
 end
 
 """
-    call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true, newtime = true)
 
 Return the Weibull cause-specific proportional hazards.
 """
-function call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true, newtime = true)
 
     # scale and shape
     log_shape = parameters[1]
@@ -168,11 +172,11 @@ function call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true)
 end
 
 """
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log = true, newtime = true)
 
 Cumulative hazard for Weibull proportional hazards over the interval [lb, ub].
 """
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log = true, newtime = true)
 
     # scale and shape
     shape = exp(parameters[1])
@@ -185,11 +189,11 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log
 end
 
 """
-    call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true, newtime = true)
 
 Return the Gompertz cause-specific hazards. No covariate adjustement.
 """
-function call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true, newtime = true)
 
     # scale and shape
     log_shape = parameters[1]
@@ -202,11 +206,11 @@ function call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true)
 end
 
 """
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log = true, newtime = true)
 
 Cumulative hazard for Gompertz hazards over the interval [lb, ub].
 """
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log = true, newtime = true)
 
     # scale and shape
     shape = exp(parameters[1])
@@ -219,11 +223,11 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log 
 end
 
 """
-    call_haz(t, parameters, rowind, _hazard::_GompertzPH; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_GompertzPH; give_log = true, newtime = true)
 
 Return the Gompertz cause-specific proportional hazards.
 """
-function call_haz(t, parameters, rowind, _hazard::_GompertzPH; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_GompertzPH; give_log = true, newtime = true)
 
     # compute hazard
     log_haz = exp(parameters[1]) * t + dot(parameters[2:end], _hazard.data[rowind,:])
@@ -232,11 +236,11 @@ function call_haz(t, parameters, rowind, _hazard::_GompertzPH; give_log = true)
 end
 
 """
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_log = true, newtime = true)
 
 Cumulative hazard for Gompertz proportional hazards over the interval [lb, ub].
 """
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_log = true, newtime = true)
 
     # scale and shape
     shape = exp(parameters[1])
@@ -249,63 +253,47 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_lo
 end
 
 """
-    call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true, newtime = true)
 
-Return the spline cause-specific hazards when the spline basis is precomputed at time t.
+Return the spline cause-specific hazards.
 """
-function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true, newtime = true)
 
-    # get the index
-    ind = searchsortedfirst(_hazard.times, t)
+    if newtime
+        # compute the log hazard at the new time t
+        loghaz = log(dot(rcopy(R"predict($(_hazard.hazobj), $t)"), softmax(parameters[1:size(_hazard.hazbasis, 1)]))) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.hazbasis, 1))])
 
-    # compute the log hazard
-    loghaz = log(softmax(parameters[1:size(_hazard.hazbasis, 1)]) * _hazard.hazbasis[:,ind]) + _hazard.data[rowind, :] * parameters[Not(1:size(_hazard.hazbasis, 1))]
+    else
+        # get the index
+        ind = searchsortedfirst(_hazard.times, t)
+
+        # compute the log hazard
+        loghaz = log(dot(softmax(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.hazbasis, 1))])
+    end
 
     # return the log hazard
     give_log ? loghaz : exp(loghaz)
 end
 
 """
-    call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true, newt = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true, newtime = true)
 
-Return the spline cause-specific hazards at a new time t.
+Return the spline cause-specific cumulative hazards over the interval [lb,ub].
 """
-function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true, newt = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true, newtime = true)
 
-    # compute the log hazard
-    loghaz = log(rcopy(R"predict($(_hazard.hazobj), $t)") * softmax(parameters[1:size(_hazard.hazbasis, 1)])) + _hazard.data[rowind, :] * parameters[Not(1:size(_hazard.hazbasis, 1))]
+    if newtime
+        # compute the log hazard
+        logchaz = log(dot(rcopy(R"diff(predict($(_hazard.chazobj), c($lb,$ub)))"),softmax(parameters[1:size(_hazard.chazbasis, 1)]))) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
 
-    # return the log hazard
-    give_log ? loghaz : exp(loghaz)
-end
+    else
+        # get the index
+        lbind = searchsortedfirst(_hazard.times, lb)
+        ubind = searchsortedfirst(_hazard.times, ub)
 
-"""
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true)
-
-Return the spline cause-specific cumulative hazards over the interval [lb,ub] when the spline basis is precomputed.
-"""
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true)
-
-    # get the index
-    lbind = searchsortedfirst(_hazard.times, lb)
-    ubind = searchsortedfirst(_hazard.times, ub)
-
-    # compute the log hazard
-    logchaz = log(softmax(parameters[1:size(_hazard.chazbasis, 1)]) * (_hazard.chazbasis[:,ubind] - _hazard.chazbasis[:,lbind])) + _hazard.data[rowind, :] * parameters[Not(1:size(_hazard.chazbasis, 1))]
-
-    # return the log hazard
-    give_log ? logchaz : exp(logchaz)
-end
-
-"""
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true, newt)
-
-Return the spline cause-specific cumulative hazards over the interval [lb,ub] at new times.
-"""
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true, newt = true)
-
-    # compute the log hazard
-    logchaz = log(rcopy(R"diff(predict($(_hazard.chazobj), c($lb,$ub)))") * softmax(parameters[1:size(_hazard.chazbasis, 1)])) + _hazard.data[rowind, :] * parameters[Not(1:size(_hazard.chazbasis, 1))]
+        # compute the log hazard
+        logchaz = log(dot(softmax(parameters[1:size(_hazard.chazbasis, 1)]), (_hazard.chazbasis[:,ubind] - _hazard.chazbasis[:,lbind]))) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
+    end
 
     # return the log hazard
     give_log ? logchaz : exp(logchaz)
@@ -325,8 +313,9 @@ Update ns_probs with probabilities of transitioning to each state based on hazar
 - hazards: vector of cause-specific hazards
 - totalhazards: vector of total hazards
 - tmat: transition matrix
+- newtime: are the probabilities computed at a new time t, defaults to true. 
 """
-function next_state_probs!(ns_probs, t, scur, ind, parameters, hazards, totalhazards, tmat)
+function next_state_probs!(ns_probs, t, scur, ind, parameters, hazards, totalhazards, tmat; newtime = true)
 
     # set ns_probs to zero for impossible transitions
     ns_probs[findall(tmat[scur,:] .== 0.0)] .= 0.0
@@ -336,7 +325,7 @@ function next_state_probs!(ns_probs, t, scur, ind, parameters, hazards, totalhaz
         
     # calculate log hazards for possible transitions + normalize
     ns_probs[trans_inds] = 
-        softmax(map(x -> call_haz(t, parameters[x], ind, hazards[x]), totalhazards[scur].components))
+        softmax(map(x -> call_haz(t, parameters[x], ind, hazards[x]; newtime = newtime), totalhazards[scur].components))
 end
 
 """
@@ -352,8 +341,9 @@ Return a vector ns_probs with probabilities of transitioning to each state based
 - hazards: vector of cause-specific hazards
 - totalhazards: vector of total hazards
 - tmat: transition matrix
+- newtime: are the probabilities computed at a new time t, defaults to true. 
 """
-function next_state_probs(t, scur, ind, parameters, hazards, totalhazards, tmat)
+function next_state_probs(t, scur, ind, parameters, hazards, totalhazards, tmat; newtime = true)
 
     # initialize vector of next state transition probabilities
     ns_probs = zeros(size(model.tmat, 2))
@@ -363,7 +353,7 @@ function next_state_probs(t, scur, ind, parameters, hazards, totalhazards, tmat)
         
     # calculate log hazards for possible transitions
     ns_probs[trans_inds] = 
-        map(x -> call_haz(t, parameters[x], ind, hazards[x]), totalhazards[scur].components)
+        map(x -> call_haz(t, parameters[x], ind, hazards[x]; newtime = newtime), totalhazards[scur].components)
 
     # normalize ns_probs
     ns_probs[trans_inds] = 
@@ -455,7 +445,7 @@ function cumulative_incidence(model::MultistateModel, subj, time_since_entry)
 
             # compute survival probabilities
             for i in 2:n_intervals
-                survprobs[i,s] = sprob * survprob(subj_times[i-1], subj_times[i], parameters, subj_inds[interval_inds[i-1]], totalhazards[statefrom], hazards; give_log = false)
+                survprobs[i,s] = sprob * survprob(subj_times[i-1], subj_times[i], parameters, subj_inds[interval_inds[i-1]], totalhazards[statefrom], hazards; give_log = false, newtime = true)
                 sprob = survprobs[i,s]
             end
         end
@@ -472,7 +462,7 @@ function cumulative_incidence(model::MultistateModel, subj, time_since_entry)
                 survprobs[r,transinds[h]] * 
                 quadgk(t -> (
                         call_haz(t, parameters[h], subj_inds[interval_inds[r]], hazards[h]; give_log = false) * 
-                        survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[statefrom], hazards; give_log = false)), 
+                        survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[statefrom], hazards; give_log = false, newtime = true)), 
                         subj_times[r], subj_times[r + 1])[1]
         end        
     end
@@ -520,7 +510,7 @@ function _cumulative_incidence(model::MultistateModel, parameters, hazards::Vect
 
         # compute survival probabilities
         for i in 2:n_intervals
-            survprobs[i] = sprob * survprob(subj_times[i-1], subj_times[i], parameters, subj_inds[interval_inds[i-1]], totalhazards[statefrom], hazards; give_log = false)
+            survprobs[i] = sprob * survprob(subj_times[i-1], subj_times[i], parameters, subj_inds[interval_inds[i-1]], totalhazards[statefrom], hazards; give_log = false, newtime = true)
             sprob = survprobs[i]
         end
     end
@@ -532,7 +522,7 @@ function _cumulative_incidence(model::MultistateModel, parameters, hazards::Vect
                 survprobs[r] * 
                 quadgk(t -> (
                         call_haz(t, parameters[hazinds[h]], subj_inds[interval_inds[r]], hazards[hazinds[h]]; give_log = false) * 
-                        survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[statefrom], hazards; give_log = false)), 
+                        survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[statefrom], hazards; give_log = false, newtime = true)), 
                         subj_times[r], subj_times[r + 1])[1]
         end        
     end
