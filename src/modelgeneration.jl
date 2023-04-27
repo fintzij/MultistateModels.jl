@@ -5,11 +5,11 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 
 # Arguments
 - `hazard`: StatsModels.jl FormulaTerm for the log-hazard. Covariates have a multiplicative effect on the baseline cause specific hazard. Must be specified with "0 ~" on the left hand side. 
-- `family`: one of "exp", "wei", or "gom" for exponential, Weibull, or Gompertz cause-specific baseline hazard functions, or "ms" for a semi-parametric M-spline basis for the baseline hazard.
+- `family`: one of "exp", "wei", or "gom" for exponential, Weibull, or Gompertz cause-specific baseline hazard functions, or "sp" for a semi-parametric spline basis for the baseline hazard (defaults to M-splines).
 - `statefrom`: integer specifying the origin state.
 - `stateto`: integer specifying the destination state.
 
-# Additional arguments for semiparametric M-Spline hazards. Spline bases are constructed via a call to the `splines2` package in R. See [the splines2 documentation](https://wwenjie.org/splines2/articles/splines2-intro#mSpline) for additional details. 
+# Additional arguments for semiparametric baseline hazards. An M-spline is used if the hazard is not assumed to be monotonic, otherwise an I-spline. Spline bases are constructed via a call to the `splines2` package in R. See [the splines2 documentation](https://wwenjie.org/splines2/articles/splines2-intro#mSpline) for additional details. 
 - `df`: Degrees of freedom.
 - `degree`: Degree of the spline polynomial basis.
 - `knots`: Vector of knots.
@@ -20,7 +20,7 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 """
 function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, intercept::Bool = true, periodic::Bool = false, monotonic::Bool = false)
     
-    if family != "ms"
+    if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
         h = SplineHazard(hazard, family, statefrom, stateto, df, degree, knots, boundaryknots, intercept, periodic, monotonic)
@@ -103,6 +103,11 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
 
     # initialize a dictionary for indexing into the vector of hazards
     hazkeys = Dict{Symbol, Int64}()
+
+    if any(isa.(hazards, SplineHazard))
+        samplepath_sojourns = extract_paths(data; self_transitions = false)
+        samplepaths_full = extract_paths(data; self_transitions = true)
+    end
 
     # assign a hazard function
     for h in eachindex(hazards) 
@@ -246,10 +251,10 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                         hazards[h].statefrom,
                         hazards[h].stateto)
             end
-        elseif family == "ms" # m-splines
+        elseif family == "sp" # m-splines
 
             # grab hazard object from splines2
-            (;hazard, cumulative_hazard) = spline_hazards(hazards[h], data)
+        (;hazard, cumulative_hazard, times) = spline_hazards(hazards[h], data, samplepath_sojourns)
 
             # number of parameters
             npars = size(hazard)[2] + size(hazdat, 2)
@@ -273,12 +278,17 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                 Symbol.(parnames),
                 hazards[h].statefrom,
                 hazards[h].stateto,
-                ElasticVector{Float64}(undef, 0),
-                ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
-                ElasticMatrix{Float64}(undef, size(hazard)[2], 0),
+                Vector{Float64}(times),
+                ElasticMatrix{Float64}(rcopy(hazard)),
+                ElasticMatrix{Float64}(rcopy(cumulative_hazard)),
                 hazard, 
                 cumulative_hazard,
                 rcopy(R"attributes($hazard)"))
+
+            # add additional gap times
+            if samplepath_sojourns != samplepaths_full
+                compute_spline_basis!(haz_struct, data, samplepaths_full)
+            end
         end
 
         # note: want a symbol that names the hazard + vector of symbols for parameters

@@ -4,6 +4,21 @@
 abstract type HazardFunction end
 
 """
+Abstract struct for internal _Hazard types.
+"""
+abstract type _Hazard end
+
+"""
+Abstract type for total hazards.
+"""
+abstract type _TotalHazard end
+
+"""
+    Abstract type for MultistateProcess.
+"""
+abstract type MultistateProcess end
+
+"""
     ParametricHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
 
 Specify a cause-specific baseline hazard. 
@@ -52,11 +67,6 @@ struct SplineHazard <: HazardFunction
     periodic::Bool
     monotonic::Bool
 end
-
-"""
-Abstract struct for internal _Hazard types.
-"""
-abstract type _Hazard end
 
 """
 Exponential cause-specific hazard.
@@ -135,35 +145,13 @@ Base.@kwdef struct _Spline <: _Hazard
     parnames::Vector{Symbol}
     statefrom::Int64
     stateto::Int64
-    times::ElasticVector{Float64}
+    times::Vector{Float64}
     hazbasis::ElasticArray{Float64}
     chazbasis::ElasticArray{Float64}
     hazobj::RObject{RealSxp}
     chazobj::RObject{RealSxp}
     attr::OrderedDict{Symbol, Any}
 end
-
-# """
-# Spline for cause-specific proportional hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect vis-a-vis the baseline hazard.
-# """
-# Base.@kwdef struct _SplinePH <: _Hazard
-#     hazname::Symbol
-#     data::Array{Float64}
-#     parnames::Vector{Symbol}
-#     statefrom::Int64
-#     stateto::Int64
-#     times::Vector{Float64}
-#     hazbasis::ElasticArray{Float64}
-#     chazbasis::ElasticArray{Float64}
-#     hazobj::RObject{RealSxp}
-#     chazobj::RObject{RealSxp}
-#     attr::OrderedDict{Symbol, Any}
-# end
-
-"""
-Abstract type for total hazards.
-"""
-abstract type _TotalHazard end
 
 """
 Total hazard for absorbing states, contains nothing as the total hazard is always zero.
@@ -177,11 +165,6 @@ Total hazard struct for transient states, contains the indices of cause-specific
 struct _TotalHazardTransient <: _TotalHazard
     components::Vector{Int64}
 end
-
-"""
-    Abstract type for MultistateProcess.
-"""
-abstract type MultistateProcess end
 
 """
     MarkovSurrogate(hazards::Vector{_Hazard}, parameters::VectorOfVectors)
