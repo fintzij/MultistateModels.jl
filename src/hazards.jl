@@ -404,11 +404,11 @@ end
 
 
 """
-    cumulative_incidence(model::MultistateModel, subj, time_since_entry)
+    cumulative_incidence(t, model::MultistateModel, subj::Int64=1)
 
-Compute the cumulative incidence for each possible transition as a function of time since state entry. Assumes the subject starts their observation period at risk and saves cumulative incidence at the supplied vector of times since state entry.
+Compute the cumulative incidence for each possible transition as a function of time since state entry. Assumes the subject starts their observation period at risk and saves cumulative incidence at the supplied vector of times, t.
 """
-function cumulative_incidence(model::MultistateModel, subj, time_since_entry)
+function cumulative_incidence(t, model::MultistateModel, subj::Int64=1)
 
     # grab parameters, hazards and total hazards
     parameters   = model.parameters
@@ -420,7 +420,7 @@ function cumulative_incidence(model::MultistateModel, subj, time_since_entry)
     subj_dat  = view(model.data, subj_inds, :)
 
     # merge times with left endpoints of subject observation intervals
-    subj_times = sort(unique([0.0; time_since_entry]))
+    subj_times = sort(unique([0.0; t]))
 
     # identify transient states
     transients = findall(isa.(totalhazards, _TotalHazardTransient))
@@ -461,7 +461,7 @@ function cumulative_incidence(model::MultistateModel, subj, time_since_entry)
             incidences[r,h] = 
                 survprobs[r,transinds[h]] * 
                 quadgk(t -> (
-                        call_haz(t, parameters[h], subj_inds[interval_inds[r]], hazards[h]; give_log = false) * 
+                        call_haz(t, parameters[h], subj_inds[interval_inds[r]], hazards[h]; give_log = false, newtime = true) * 
                         survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[statefrom], hazards; give_log = false, newtime = true)), 
                         subj_times[r], subj_times[r + 1])[1]
         end        
@@ -472,18 +472,21 @@ function cumulative_incidence(model::MultistateModel, subj, time_since_entry)
 end
 
 """
-    _cumulative_incidence(_model::MultistateModel, subj, time_since_entry, statefrom)
+    cumulative_incidence(t, model::MultistateModel, statefrom, subj::Int64=1)
 
 Compute the cumulative incidence for each possible transition originating in `statefrom` as a function of time since state entry. Assumes the subject starts their observation period at risk and saves cumulative incidence at the supplied vector of times since state entry. This function is used internally.
 """
-function _cumulative_incidence(model::MultistateModel, parameters, hazards::Vector{_Hazard}, subj, time_since_entry, statefrom)
+function cumulative_incidence(t, model::MultistateModel, parameters, statefrom, subj::Int64=1)
+
+    # get hazards
+    hazards = model.hazards
 
     # get total hazards
     totalhazards = model.totalhazards
 
     # return zero if starting from absorbing state
     if isa(totalhazards[statefrom], _TotalHazardAbsorbing)
-        return zeros(length(time_since_entry))
+        return zeros(length(t))
     end
 
     # subject data
@@ -491,7 +494,7 @@ function _cumulative_incidence(model::MultistateModel, parameters, hazards::Vect
     subj_dat  = view(model.data, subj_inds, :)
 
     # merge times with left endpoints of subject observation intervals
-    subj_times = sort(unique([0.0; time_since_entry]))
+    subj_times = sort(unique([0.0; t]))
 
     # initialize cumulative incidence
     n_intervals = length(subj_times) - 1
@@ -521,7 +524,7 @@ function _cumulative_incidence(model::MultistateModel, parameters, hazards::Vect
             incidences[r,h] = 
                 survprobs[r] * 
                 quadgk(t -> (
-                        call_haz(t, parameters[hazinds[h]], subj_inds[interval_inds[r]], hazards[hazinds[h]]; give_log = false) * 
+                        call_haz(t, parameters[hazinds[h]], subj_inds[interval_inds[r]], hazards[hazinds[h]]; give_log = false, newtime = true) * 
                         survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[statefrom], hazards; give_log = false, newtime = true)), 
                         subj_times[r], subj_times[r + 1])[1]
         end        
@@ -529,4 +532,89 @@ function _cumulative_incidence(model::MultistateModel, parameters, hazards::Vect
 
     # return cumulative incidences
     return cumsum(incidences; dims = 1)
+end
+
+"""
+    compute_hazard(t, model::MultistateProcess, hazard::Symbol)
+
+Compute the hazard at times t. 
+
+# Arguments
+- t: time or vector of times. 
+- model: MultistateModel object. 
+- hazard: Symbol specifying the hazard, e.g., :h12 for the hazard for transitioning from state 1 to state 2. 
+- subj: subject id. 
+"""
+function compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int64 = 1)
+
+    # get hazard index
+    hazind = model.hazkeys[hazard]
+
+    # compute hazards
+    hazards = zeros(Float64, length(t))
+    for s in eachindex(t)
+        # get row index
+        rowind = findlast((model.data.id .== subj) .& (model.data.tstart .<= t[s]))
+
+        # compute hazard
+        hazards[s] = call_haz(t[s], model.parameters[hazind], rowind, model.hazards[hazind]; give_log = false, newtime = true)
+    end
+
+    # return hazards
+    return hazards
+end
+
+"""
+    compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, hazard::Symbol, subj::Int64=1)
+
+Compute the cumulative hazard over [tstart,tstop]. 
+
+# Arguments
+- tstart: starting times
+- tstop: stopping times
+- model: MultistateModel object. 
+- hazard: Symbol specifying the hazard, e.g., :h12 for the hazard for transitioning from state 1 to state 2. 
+- subj: subject id. 
+"""
+function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, hazard::Symbol, subj::Int64 = 1)
+
+    # check bounds
+    if (length(tstart) == length(tstop))
+        # nothing to do
+    elseif (length(tstart) == 1) & (length(tstop) != 1)
+        tstart = rep(tstart, length(tstart))
+    elseif (length(tstart) != 1) & (length(tstop) == 1)
+        tstop = rep(tstop, length(tstart))
+    else
+        error("Lengths of tstart and tstop are not compatible.")
+    end
+
+    # get hazard index
+    hazind = model.hazkeys[hazard]
+
+    # compute hazards
+    cumulative_hazards = zeros(Float64, length(tstart))
+    for s in eachindex(tstart)
+
+        # find times between tstart and tstop
+        times = [tstart[s]; model.data.tstart[findall((model.data.id .== subj) .& (model.data.tstart .> tstart[s]) .& (model.data.tstart .< tstop[s]))]; tstop[s]]
+
+        # initialize cumulative hazard
+        chaz = 0.0
+
+        # accumulate
+        for i in 1:(length(times) - 1)
+            # get row index
+            rowind = findlast((model.data.id .== subj) .& (model.data.tstart .<= times[i]))
+
+            # compute hazard
+            chaz += call_cumulhaz(times[i], times[i+1], model.parameters[hazind], rowind, model.hazards[hazind]; give_log = false, newtime = true)
+        end
+
+        # save
+        cumulative_hazards[s] = chaz
+    end
+
+    # return cumulative hazards
+    return cumulative_hazards
 end

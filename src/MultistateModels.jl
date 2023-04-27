@@ -31,6 +31,8 @@ end
 # Write your package code here.
 export
     @formula,
+    compute_hazard,
+    compute_cumulative_hazard,
     cumulative_incidence,
     fit,
     Hazard,

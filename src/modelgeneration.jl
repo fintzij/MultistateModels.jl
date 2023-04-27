@@ -257,7 +257,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
         (;hazard, cumulative_hazard, times) = spline_hazards(hazards[h], data, samplepath_sojourns)
 
             # number of parameters
-            npars = size(hazard)[2] + size(hazdat, 2)
+            npars = size(hazard)[1] + size(hazdat, 2)
 
             # vector for parameters
             hazpars = zeros(Float64, npars)
