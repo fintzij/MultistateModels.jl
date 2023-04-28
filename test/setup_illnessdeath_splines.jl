@@ -15,8 +15,7 @@ dat =
               tstop = repeat(collect(2.0:2.0:10.0), outer = nsubj),
               statefrom = fill(1, 5*nsubj),
               stateto = fill(2, 5*nsubj),
-              obstype = fill(1, 5*nsubj),
-              trt = 1.0)
+              obstype = fill(1, 5*nsubj))
 
 
 # create multistate model object
@@ -26,26 +25,26 @@ model = multistatemodel(h12, h13, h21, h23; data = dat)
 # want mean time to event of 5
 set_parameters!(
     model, 
-    (h12 = [log(1.2), log(0.4)],
-     h21 = [log(1.2), log(0.4)],
+    (h12 = [log(1.3), log(0.4)],
+     h21 = [log(1.3), log(0.4)],
      h13 = [log(0.7), log(0.2)],
      h23 = [log(0.7), log(0.1)]))
 
 simdat, paths = simulate(model; paths = true, data = true);
 
 # create multistate model object with the simulated data
-h12 = Hazard(@formula(0 ~ 1 + trt), "sp", 1, 2; degree = 3, df = 6) # healthy -> ill
-h21 = Hazard(@formula(0 ~ 1), "sp", 2, 1; degree = 2, df = 5) # ill -> healthy
-h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, df = 4) # healthy -> dead
-h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 0, df = 4) # ill -> dead
+h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2; degree = 3, df = 6) # healthy -> ill
+h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1; degree = 2, df = 5) # ill -> healthy
+h13 = Hazard(@formula(0 ~ 1), "wei", 1, 3; degree = 1, df = 4) # healthy -> dead
+h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3; degree = 0, df = 4) # ill -> dead
 
 hazards = (h12, h13, h21, h23); data = simdat[1]
 model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
 
 set_parameters!(
     model, 
-    (h12 = [log(1.2), log(0.4), 0] .+ randn(3),
-     h21 = [log(1.2), log(0.4)] .+ randn(2),
+    (h12 = [log(1.3), log(0.4)] .+ randn(2),
+     h21 = [log(1.3), log(0.4)] .+ randn(2),
      h13 = [log(0.7), log(0.2)] .+ randn(2),
      h23 = [log(0.7), log(0.1)] .+ randn(2)))
 

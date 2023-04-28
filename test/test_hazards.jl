@@ -10,11 +10,13 @@
 @testset "survprob" begin
     # what is the cumulative incidence from time 0 to 2 of exponential with mean time to event of 5
     # should be around 0.32967995
+    MultistateModels.set_parameters!(msm_expwei, (h12 = [log(0.1),], h13 = [log(0.1), 0.0, 0.0, 0.0]))
+
     interval_incid = 1 - MultistateModels.survprob(0.0, 2.0, msm_expwei.parameters, 1, msm_expwei.totalhazards[1], msm_expwei.hazards; give_log = false)
         
     # note that Distributions.jl uses the mean parameterization
     # i.e., 1/rate. 
-    @test cdf(Exponential(0.5), 2) ≈ interval_incid
+    @test cdf(Exponential(5), 2) ≈ interval_incid
 end
 
 # tests for individual hazards
@@ -27,7 +29,6 @@ end
     @test isa(msm_expwei.hazards[1], MultistateModels._Exponential)
     @test MultistateModels.call_haz(0.0, msm_expwei.parameters[1], 1, msm_expwei.hazards[1]; give_log = true) == 0.8
     @test MultistateModels.call_haz(0.0, msm_expwei.parameters[1], 1, msm_expwei.hazards[1]; give_log = false) == exp(0.8)
-
 
     # correct hazard value on log scale, for each row of data
     pars = msm_expwei.parameters[2]
