@@ -50,9 +50,9 @@ function loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::M
         log_surv_prob = 0.0
 
         # accumulate log likelihood
-        while keep_going
-            
-            if tstop == time_R
+        while keep_going            
+
+            if tstop <= time_R
                 # event happens in (time_L, time_R]
                 # accumulate log(Pr(T ≥ timeinstate | T ≥ timespent))
                 log_surv_prob += survprob(timespent, timeinstate, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true, newtime = false)
@@ -66,7 +66,7 @@ function loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::M
                 end
 
                 # increment row index in subj_dat
-                if subj_dat_ind != size(subj_dat, 1)
+                if (tstop == time_R) & (subj_dat_ind != size(subj_dat, 1))
                     subj_dat_ind += 1
                     comp_dat_ind += 1
 

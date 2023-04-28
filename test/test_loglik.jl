@@ -7,8 +7,8 @@ msm = msm_2state_trans
     # initialize log-likelihoods
     ll1 = 
         logpdf(Exponential(10), path1.times[2]) + 
-        logccdf(Exponential(10), 10.0 - path1.times[2]) + 
-        logpdf(Exponential(5), path1.times[3] - 10.0) + 
+        logccdf(Exponential(10), 10.0 - path1.times[2]) +
+        logpdf(Exponential(5), path1.times[3] - 10.0) +  
         logccdf(Exponential(5), 20.0 - path1.times[3]) + 
         logccdf(Exponential(10), 10.0)
         

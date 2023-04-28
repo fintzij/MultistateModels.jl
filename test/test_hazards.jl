@@ -51,6 +51,7 @@ end
 
     # set parameters, log(shape, scale), no covariate adjustment
     MultistateModels.set_parameters!(msm_expwei, (h21 = [-0.25, 0.2],))
+    
 
     # h(t) = shape * scale * t^(shape-1)
     @test MultistateModels.call_haz(1.0, msm_expwei.parameters[3], 1, msm_expwei.hazards[3]; give_log = true) == 0.2 - 0.25
