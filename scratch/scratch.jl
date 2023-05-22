@@ -76,7 +76,7 @@ end
 ````
 # f1 is a hazard
 function f1(t, x)
-    ...
+...
 end
 
 # cumulative hazard

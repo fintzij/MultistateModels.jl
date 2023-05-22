@@ -32,11 +32,3 @@ rs = convert(ElasticArray, rcopy(R"t(splines2::mSpline($x, degree = 4, intercept
 push!(rs, rand(5))
 
 
-
-# notes
-# probably best to hand off splines to splines2 in R
-# shouldn't be a problem for autodiff 
-# see rstanarm for parameterization
-# modifications needed for optional arguments to hazard functions
-# need additional spline related basis objects, maybe bookkeeping
-# should be able to extend @formula to use splines2+RCall as shown in MC's splines2 repo
