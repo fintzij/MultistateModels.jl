@@ -112,17 +112,25 @@ function observe_path(samplepath::SamplePath, model::MultistateModel, subj::Int6
     obsdat.tstart[1] = samplepath.times[1]
     obsdat.statefrom[1] = samplepath.states[1]
 
+    # drop rows where subject starts in an absorbing state
+    transient_states = findall(isa.(model.totalhazards, _TotalHazardTransient))
+    keep_inds = map(x -> obsdat.statefrom[x] in transient_states, collect(1:size(obsdat, 1)))
+
     # return state sequence
-    return obsdat
+    return obsdat[keep_inds,:]
 end
 
 
 """
-    extract_paths(model::MultistateModel)
+    extract_paths(model::MultistateModel; self_transitions = false)
 
-Extract sample paths from a multistate model's data field and return an array of SamplePath objcets.
+Extract sample paths from a multistate model's data field and return an array of SamplePath objects. 
+
+# Arguments
+- model: multistate model object
+- self_transitions: keep self-transitions? Defaults to false.
 """
-function extract_paths(model::MultistateModel)
+function extract_paths(model::MultistateModel; self_transitions = false)
 
     # get IDs
     nsubj = length(model.subjectindices)
@@ -133,13 +141,106 @@ function extract_paths(model::MultistateModel)
     # grab the sample paths
     for i in eachindex(model.subjectindices)
         
+        # get sequence of times
+        times = [model.data[model.subjectindices[i], :tstart]; model.data[model.subjectindices[i][end], :tstop]]
+
+        # get sequence of states
+        states = [model.data[model.subjectindices[i], :statefrom]; model.data[model.subjectindices[i][end], :stateto]]
+
+        # remove duplicates
+        if !self_transitions & (length(states) > 2)
+            if any(states[2:(end - 1)] .== states[1:(end-2)])
+                dropinds = findall(states[2:(end-1)] .== states[1:(end-2)]) .+ 1
+
+                states = states[Not(dropinds)]
+                times = times[Not(dropinds)]
+            end
+        end
+
         # grab the path
-        samplepaths[i] = 
-            SamplePath(
-                i,
-                [model.data[model.subjectindices[i], :tstart]; model.data[model.subjectindices[i][end], :tstop]],
-                [model.data[model.subjectindices[i], :statefrom]; model.data[model.subjectindices[i][end], :stateto]])
+        samplepaths[i] = SamplePath(i, times, states)
     end
 
     return samplepaths
+end
+
+
+"""
+    extract_paths(model::MultistateModel; self_transitions = false)
+
+Extract sample paths from a multistate model's data field and return an array of SamplePath objects. 
+
+# Arguments
+- data: DataFrame with data from multistate model object.
+- self_transitions: keep self-transitions? Defaults to false.
+"""
+function extract_paths(data::DataFrame; self_transitions = false)
+
+    # get IDs
+    nsubj = length(unique(data.id))
+
+    # initialize array of sample paths
+    samplepaths = Vector{SamplePath}(undef, nsubj)
+
+    # get subject indices
+    subjinds = get_subjinds(data)
+
+    # grab the sample paths
+    for i in Base.OneTo(nsubj)
+        
+        # get sequence of times
+        times = [data[subjinds[i], :tstart]; data[subjinds[i][end], :tstop]]
+
+        # get sequence of states
+        states = [data[subjinds[i], :statefrom]; data[subjinds[i][end], :stateto]]
+
+        # remove duplicates
+        if !self_transitions & (length(states) > 2)
+            if any(states[2:(end - 1)] .== states[1:(end-2)])
+                dropinds = findall(states[2:(end-1)] .== states[1:(end-2)]) .+ 1
+
+                states = states[Not(dropinds)]
+                times = times[Not(dropinds)]
+            end
+        end
+
+        # grab the path
+        samplepaths[i] = SamplePath(i, times, states)
+    end
+
+    return samplepaths
+end
+
+"""
+    extract_sojourns(hazard, data::DataFrame, samplepaths::Vector{SamplePath})
+
+Extract unique gap and sojourn times.
+"""
+function extract_sojourns(hazard, data::DataFrame, samplepaths::Vector{SamplePath}; sojourns_only = true)
+
+    # initialize times
+    times = Vector{Float64}()
+    sizehint!(times, length(samplepaths))
+
+    for s in eachindex(samplepaths)
+        
+        # get subject data
+        subj_dat = view(data, findall(data.id .== samplepaths[s].subj), :)
+
+        for i in Base.OneTo(length(samplepaths[s].states)-1)
+            if samplepaths[s].states[i] == hazard.statefrom
+
+                if sojourns_only
+                    append!(times, diff(samplepaths[s].times[i:(i+1)]))
+                else
+                    # append the times at which the hazard and cumulative hazard are evaluated
+                    append!(times, unique([diff([samplepaths[s].times[i]; subj_dat.tstop[findall((subj_dat.tstop .> samplepaths[s].times[i]) .& (subj_dat.tstop .< samplepaths[s].times[i+1]))]; samplepaths[s].times[i+1]]); diff(samplepaths[s].times[i:(i+1)])]))
+                end
+            end
+        end
+    end
+
+    unique!(sort!(times))
+
+    return times
 end

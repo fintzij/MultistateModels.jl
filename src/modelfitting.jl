@@ -10,14 +10,17 @@ function fit(model::MultistateModel; alg = "ml", nparticles = 100)
         
         fitted = fit_exact(model)
 
-    elseif all(model.data.obstype .== 2) & 
+    elseif all(model.data.obstype .== 2) & # 
         # multistate Markov model or competing risks model
         all(isa.(model.hazards, MultistateModels._Exponential) .|| 
             isa.(model.hazards, MultistateModels._ExponentialPH))
+        
         fitted = fit_markov_interval(model)
+
     elseif all(model.data.obstype .== 2) & 
         !all(isa.(model.hazards, MultistateModels._Exponential) .|| 
              isa.(model.hazards, MultistateModels._ExponentialPH))
+        
         fitted = fit_semimarkov_interval(model; nparticles = nparticles)
     end
 
@@ -33,7 +36,7 @@ Fit a multistate model given exactly observed sample paths.
 function fit_exact(model::MultistateModel)
 
     # initialize array of sample paths
-    samplepaths = extract_paths(model)
+    samplepaths = extract_paths(model; self_transitions = false)
 
     # extract and initialize model parameters
     parameters = flatview(model.parameters)
@@ -44,7 +47,7 @@ function fit_exact(model::MultistateModel)
     sol  = solve(prob, Newton())
 
     # oh eff yes.
-    ll = pars -> loglik(pars, ExactData(model, samplepaths);neg=false)
+    ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results

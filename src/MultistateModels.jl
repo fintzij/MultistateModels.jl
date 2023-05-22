@@ -1,7 +1,6 @@
 module MultistateModels
 
 using ArraysOfArrays
-using Chain
 using DataFrames
 using DiffResults
 using Distributions
@@ -9,10 +8,12 @@ using ElasticArrays
 using ExponentialUtilities
 using ForwardDiff
 using LinearAlgebra
+using OrderedCollections
 using Optim # for simulation - keep
 using Optimization # for fitting - keep
 using OptimizationOptimJL
 using QuadGK
+using RCall
 using StatsBase
 using StatsModels
 using StatsFuns
@@ -20,16 +21,25 @@ using StatsFuns
 # need to import fit to overload and reexport it
 import StatsBase.fit
 
+# initialize R session for splines
+function __init__()
+    @eval RCall.@rlibrary splines2
+    nothing
+end
+
 # Write your package code here.
 export
     @formula,
+    compute_hazard,
+    compute_cumulative_hazard,
     cumulative_incidence,
     fit,
     Hazard,
     multistatemodel,
     set_parameters!,
     simulate,
-    statetable
+    statetable,
+    __init__
 
 # typedefs
 include("common.jl")
@@ -63,5 +73,8 @@ include("sampling.jl")
 
 # simulation
 include("simulation.jl")
+
+# smooths
+include("smooths.jl")
 
 end

@@ -1,3 +1,4 @@
+using LinearAlgebra
 using MultistateModels
 using Random
 using Test

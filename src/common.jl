@@ -1,25 +1,72 @@
 """
-    Hazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
-
-Specify a cause-specific hazard function. 
-
-# Arguments
-- 'hazard': regression formula for the (log) hazard, parsed using StatsModels.jl.
-- 'family': parameterization for the baseline hazard, one of "exp" for exponential, "wei" for Weibull, "gom" for Gompertz (not yet implemented),  "ms" for M-spline (on the baseline hazard, not yet implemented), or "bs" for B-spline (on the log baseline hazard, not yet implemented). 
-- 'statefrom': state number for the origin state.
-- 'stateto': state number for the destination state.
+    Abstract type for hazard functions. Subtypes are ParametricHazard or SplineHazard.
 """
-struct Hazard
-    hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
-    family::String     # one of "exp", "wei", "gom", "ms", or "bs"
-    statefrom::Int64   # starting state number
-    stateto::Int64     # destination state number
-end
+abstract type HazardFunction end
 
 """
 Abstract struct for internal _Hazard types.
 """
 abstract type _Hazard end
+
+"""
+Abstract type for total hazards.
+"""
+abstract type _TotalHazard end
+
+"""
+    Abstract type for MultistateProcess.
+"""
+abstract type MultistateProcess end
+
+"""
+    ParametricHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
+
+Specify a cause-specific baseline hazard. 
+
+# Arguments
+- `hazard`: regression formula for the (log) hazard, parsed using StatsModels.jl.
+- `family`: parameterization for the baseline hazard, one of "exp" for exponential, "wei" for Weibull, "gom" for Gompert. 
+- `statefrom`: state number for the origin state.
+- `stateto`: state number for the destination state.
+"""
+struct ParametricHazard <: HazardFunction
+    hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
+    family::String     # one of "exp", "wei", "gom"
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
+end
+
+"""
+    SplineHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing}, degree::Int64, knots::Union{Vector{Float64},Nothing}, boundaryknots::Union{Vector{Float64},Nothing}, intercept::Bool, periodic::Bool)
+
+Specify a cause-specific baseline hazard. 
+
+# Arguments
+- `hazard`: regression formula for the (log) hazard, parsed using StatsModels.jl.
+- `family`: "ms" for M-spline for the baseline hazard.
+- `statefrom`: state number for the origin state.
+- `stateto`: state number for the destination state.
+- `df`: Degrees of freedom.
+- `degree`: Degree of the spline polynomial basis.
+- `knots`: Vector of knots.
+- `boundaryknots`: Length 2 vector of boundary knots.
+- `intercept`: Defaults to true for whether the spline should include an intercept.
+- `periodic`: Periodic spline basis, defaults to false.
+- `monotonic`: Assume that baseline hazard is monotonic, defaults to false. If true, use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
+"""
+struct SplineHazard <: HazardFunction
+    hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
+    family::String     # "ms" for M-Splines
+    statefrom::Int64   # starting state number
+    stateto::Int64     # destination state number
+    df::Union{Nothing,Int64}
+    degree::Int64
+    knots::Union{Nothing,Vector{Float64}}
+    boundaryknots::Union{Nothing,Vector{Float64}}
+    intercept::Bool
+    periodic::Bool
+    monotonic::Bool
+end
 
 """
 Exponential cause-specific hazard.
@@ -90,9 +137,21 @@ Base.@kwdef struct _GompertzPH <: _Hazard
 end
 
 """
-Abstract type for total hazards.
+Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect vis-a-vis the baseline hazard.
 """
-abstract type _TotalHazard end
+Base.@kwdef struct _Spline <: _Hazard
+    hazname::Symbol
+    data::Array{Float64}
+    parnames::Vector{Symbol}
+    statefrom::Int64
+    stateto::Int64
+    times::Vector{Float64}
+    hazbasis::ElasticArray{Float64}
+    chazbasis::ElasticArray{Float64}
+    hazobj::RObject{RealSxp}
+    chazobj::RObject{RealSxp}
+    attr::OrderedDict{Symbol, Any}
+end
 
 """
 Total hazard for absorbing states, contains nothing as the total hazard is always zero.
@@ -106,11 +165,6 @@ Total hazard struct for transient states, contains the indices of cause-specific
 struct _TotalHazardTransient <: _TotalHazard
     components::Vector{Int64}
 end
-
-"""
-    Abstract type for MultistateProcess.
-"""
-abstract type MultistateProcess end
 
 """
     MarkovSurrogate(hazards::Vector{_Hazard}, parameters::VectorOfVectors)
