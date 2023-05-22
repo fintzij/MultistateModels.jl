@@ -8,6 +8,7 @@ h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1) # ill -> healthy
 h13 = Hazard(@formula(0 ~ 1), "wei", 1, 3) # healthy -> dead
 h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3) # ill -> dead
 
+
 nsubj = 1000
 dat = 
     DataFrame(id = repeat(collect(1:nsubj), inner = 5),
