@@ -114,7 +114,7 @@ function observe_path(samplepath::SamplePath, model::MultistateModel, subj::Int6
 
     # drop rows where subject starts in an absorbing state
     transient_states = findall(isa.(model.totalhazards, _TotalHazardTransient))
-    keep_inds = map(x -> obsdat.statefrom[x] in transient_states, collect(1:size(obsdat, 1)))
+    keep_inds = map(x -> ((obsdat.statefrom[x] in transient_states) | ismissing(obsdat.statefrom[x])), collect(1:size(obsdat, 1)))
 
     # return state sequence
     return obsdat[keep_inds,:]

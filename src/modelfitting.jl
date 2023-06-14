@@ -3,37 +3,46 @@
 
 Fit a model. 
 """ 
-function fit(model::MultistateModel; alg = "ml", nparticles = 100)
+# function fit(model::MultistateModel; alg = "ml", nparticles = 100)
     
-    # if sample paths are fully observed, maximize the likelihood directly
-    if all(model.data.obstype .== 1)
+#     # if sample paths are fully observed, maximize the likelihood directly
+#     if all(model.data.obstype .== 1)
         
-        fitted = fit_exact(model)
+#         fitted = fit_exact(model)
 
-    elseif all(model.data.obstype .== 2) & # 
-        # multistate Markov model or competing risks model
-        all(isa.(model.hazards, MultistateModels._Exponential) .|| 
-            isa.(model.hazards, MultistateModels._ExponentialPH))
+#     elseif all(model.data.obstype .== 2) & # Multistate Markov model, panel data, no censored state
+#         all(isa.(model.hazards, MultistateModels._Exponential) .|| 
+#             isa.(model.hazards, MultistateModels._ExponentialPH))
         
-        fitted = fit_markov_interval(model)
+#         fitted = fit_markov_interval(model)
 
-    elseif all(model.data.obstype .== 2) & 
-        !all(isa.(model.hazards, MultistateModels._Exponential) .|| 
-             isa.(model.hazards, MultistateModels._ExponentialPH))
+#     elseif all(model.data.obstype .== 2) & 
+#         !all(isa.(model.hazards, MultistateModels._Exponential) .|| 
+#              isa.(model.hazards, MultistateModels._ExponentialPH))
         
-        fitted = fit_semimarkov_interval(model; nparticles = nparticles)
-    end
+#         fitted = fit_semimarkov_interval(model; nparticles = nparticles)
+#     end
 
-    # return fitted object
-    return fitted
-end 
+#     ### mixed likelihoods to add
+#     # 1. Mixed panel + fully observed data, no censored states, Markov process
+#         # Easy.
+#     # 2. Mixed panel + fully observed data, no censored states, semi-Markov process
+#         # Easy, just need to append fully observed parts of the path in proposal.
+#     # 3. Mixed panel + fully observed data, with censored states, semi-Markov process
+#         # Easy, just sample the censored state. 
+#     # 4. Mixed panel + fully observed data, with censored states, Markov process
+#         # Medium complicated - marginalize over the possible states.
+
+#     # return fitted object
+#     return fitted
+# end 
 
 """
-    fit_exact(model::MultistateModel)
+    fit(model::MultistateModel)
 
 Fit a multistate model given exactly observed sample paths.
 """
-function fit_exact(model::MultistateModel)
+function fit(model::MultistateModel)
 
     # initialize array of sample paths
     samplepaths = extract_paths(model; self_transitions = false)
@@ -67,9 +76,51 @@ end
 
 
 """
-    fit_markov_interval(model::MultistateModel)
+    fit(model::MultistateMarkovModel)
 
 Fit a multistate markov model to interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities).
+"""
+function fit(model::MultistateMarkovModel)
+
+    if all(model.data.obstype .== 2) # panel data
+        # containers for bookkeeping TPMs
+        books = build_tpm_mapping(model.data)
+
+        # extract and initialize model parameters
+        parameters = flatview(model.parameters)
+
+        # optimize the likelihood
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+        prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
+        sol  = solve(prob, Newton())
+
+        # get the variance-covariance matrix
+        ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
+        vcov = inv(ForwardDiff.hessian(ll, sol.u))
+
+        # wrap results
+        return MultistateMarkovModelFitted(
+            model.data,
+            VectorOfVectors(sol.u, model.parameters.elem_ptr),
+            -sol.minimum,
+            vcov,
+            model.hazards,
+            model.totalhazards,
+            model.tmat,
+            model.hazkeys,
+            model.subjectindices,
+            model.markovsurrogate,
+            model.modelcall)
+
+    elseif all(map(x -> x ∈ [1,2]), model.data.obstype) # mix of panel data and exact jump times, no censoring
+    elseif all(map(x -> x ∈ [0,2]), model.data.obstype) # panel data with censoring
+    end
+end
+
+"""
+    fit_markov_mixed(model::MultistateModel)
+
+Fit a multistate markov model to a mix of exactly observed jumps and interval censored data (i.e. model.data.obstype .in [1,2] and all hazards are exponential with possibly piecewise homogeneous transition intensities).
 """
 function fit_markov_interval(model::MultistateModel)
     

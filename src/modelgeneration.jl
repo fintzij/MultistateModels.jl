@@ -362,7 +362,9 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
     surrogate = build_hazards(hazards...; data = data, surrogate = true)
 
     # return the multistate model
-    model = MultistateModel(
+    if all(data.obstype .== 1)
+        # exactly observed
+        model = MultistateModel(
         data,
         parameters,
         _hazards,
@@ -372,6 +374,59 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         subjinds,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
+
+    elseif all(map(x -> x ∈ [1,2]), model.data.obstype) & all(isa.(_hazards, _MarkovHazard))
+        # Multistate Markov model
+        model = MultistateMarkovModel(
+        data,
+        parameters,
+        _hazards,
+        _totalhazards,
+        tmat,
+        hazkeys,
+        subjinds,
+        MarkovSurrogate(surrogate[1], surrogate[2]),
+        modelcall)
+
+    elseif all(map(x -> x ∈ [0,2]), model.data.obstype) & all(isa.(_hazards, _MarkovHazard))
+        # Markov model with censoring
+        model = MultistateMarkovModelCensored(
+        data,
+        parameters,
+        _hazards,
+        _totalhazards,
+        tmat,
+        hazkeys,
+        subjinds,
+        MarkovSurrogate(surrogate[1], surrogate[2]),
+        modelcall)
+
+    elseif all(map(x -> x ∈ [1,2]), model.data.obstype) & all(isa.(_hazards, _SemiMarkovHazard))
+        # Multistate Markov model
+        model = MultistateSemiMarkovModel(
+        data,
+        parameters,
+        _hazards,
+        _totalhazards,
+        tmat,
+        hazkeys,
+        subjinds,
+        MarkovSurrogate(surrogate[1], surrogate[2]),
+        modelcall)
+
+    elseif all(isa.(_hazards, _SemiMarkovHazard))
+        # Multistate Markov model
+        model = MultistateSemiMarkovModel(
+        data,
+        parameters,
+        _hazards,
+        _totalhazards,
+        tmat,
+        hazkeys,
+        subjinds,
+        MarkovSurrogate(surrogate[1], surrogate[2]),
+        modelcall)
+    end
 
     return model
 end

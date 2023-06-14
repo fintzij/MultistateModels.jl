@@ -9,14 +9,25 @@ Abstract struct for internal _Hazard types.
 abstract type _Hazard end
 
 """
+Abstract struct for internal Markov _Hazard types.
+"""
+abstract type _MarkovHazard <: _Hazard end
+
+"""
+Abstract struct for internal semi-Markov _Hazard types.
+"""
+abstract type _SemiMarkovHazard <: _Hazard end
+
+"""
 Abstract type for total hazards.
 """
 abstract type _TotalHazard end
 
 """
-    Abstract type for MultistateProcess.
+    Abstract type for multistate process.
 """
 abstract type MultistateProcess end
+
 
 """
     ParametricHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
@@ -71,7 +82,7 @@ end
 """
 Exponential cause-specific hazard.
 """
-Base.@kwdef struct _Exponential <: _Hazard
+struct _Exponential <: _MarkovHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
@@ -82,7 +93,7 @@ end
 """
 Exponential cause-specific hazard with covariate adjustment. Rate is a log-linear function of covariates.
 """
-Base.@kwdef struct _ExponentialPH <: _Hazard
+struct _ExponentialPH <: _MarkovHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
@@ -93,7 +104,7 @@ end
 """
 Weibull cause-specific hazard.
 """
-Base.@kwdef struct _Weibull <: _Hazard
+struct _Weibull <: _SemiMarkovHazard
     hazname::Symbol
     data::Array{Float64} # just an intercept
     parnames::Vector{Symbol}
@@ -105,7 +116,7 @@ end
 """
 Weibull cause-specific proportional hazard. The log baseline hazard is a linear function of log time and covariates have a multiplicative effect vis-a-vis the baseline hazard.
 """
-Base.@kwdef struct _WeibullPH <: _Hazard
+struct _WeibullPH <: _SemiMarkovHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
@@ -116,7 +127,7 @@ end
 """
 Gompertz cause-specific hazard.
 """
-Base.@kwdef struct _Gompertz <: _Hazard
+struct _Gompertz <: _SemiMarkovHazard
     hazname::Symbol
     data::Array{Float64} # just an intercept
     parnames::Vector{Symbol}
@@ -128,7 +139,7 @@ end
 """
 Gompertz cause-specific proportional hazard. The log baseline hazard is a linear function of time and covariates have a multiplicative effect vis-a-vis the baseline hazard.
 """
-Base.@kwdef struct _GompertzPH <: _Hazard
+struct _GompertzPH <: _SemiMarkovHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
@@ -139,7 +150,7 @@ end
 """
 Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect vis-a-vis the baseline hazard.
 """
-Base.@kwdef struct _Spline <: _Hazard
+struct _Spline <: _SemiMarkovHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
@@ -169,7 +180,7 @@ end
 """
     MarkovSurrogate(hazards::Vector{_Hazard}, parameters::VectorOfVectors)
 """
-Base.@kwdef struct MarkovSurrogate
+struct MarkovSurrogate
     hazards::Vector{_Hazard}
     parameters::VectorOfVectors
 end
@@ -179,7 +190,7 @@ end
 
 Struct containing objects for computing the discrepancy of a Markov surrogate.
 """
-Base.@kwdef struct SurrogateControl
+struct SurrogateControl
     model::MultistateProcess
     statefrom::Int64
     targets::Matrix{Float64}
@@ -188,11 +199,79 @@ Base.@kwdef struct SurrogateControl
 end
 
 """
-    MultistateModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+    MultistateModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{Union{_Exponential, _ExponentialPH}}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
-Mutable struct that fully specifies a multistate process for simulation or inference. 
+Struct that fully specifies a multistate process for simulation or inference, used in the case when sample paths are fully observed. 
 """
-Base.@kwdef struct MultistateModel <: MultistateProcess
+struct MultistateModel <: MultistateProcess
+    data::DataFrame
+    parameters::VectorOfVectors 
+    hazards::Vector{_Hazard}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    markovsurrogate::MarkovSurrogate
+    modelcall::NamedTuple
+end
+
+"""
+    MultistateMarkovModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{Union{_Exponential, _ExponentialPH}}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+
+Struct that fully specifies a multistate Markov process with no censored state for simulation or inference. 
+"""
+struct MultistateMarkovModel <: MultistateProcess
+    data::DataFrame
+    parameters::VectorOfVectors 
+    hazards::Vector{Union{_Exponential,_ExponentialPH}}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    markovsurrogate::MarkovSurrogate
+    modelcall::NamedTuple
+end
+
+"""
+MultistateMarkovModelCensored(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+
+Struct that fully specifies a multistate Markov process with some censored states for simulation or inference. 
+"""
+struct MultistateMarkovModelCensored <: MultistateProcess
+    data::DataFrame
+    parameters::VectorOfVectors 
+    hazards::Vector{Union{_Exponential,_ExponentialPH}}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    markovsurrogate::MarkovSurrogate
+    modelcall::NamedTuple
+end
+
+"""
+MultistateSemiMarkovModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+
+Struct that fully specifies a multistate semi-Markov process with no censored state for simulation or inference. 
+"""
+struct MultistateSemiMarkovModel <: MultistateProcess
+    data::DataFrame
+    parameters::VectorOfVectors 
+    hazards::Vector{_Hazard}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    markovsurrogate::MarkovSurrogate
+    modelcall::NamedTuple
+end
+
+"""
+MultistateSemiMarkovModelCensored(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+
+Struct that fully specifies a multistate semi-Markov process with some censored states for simulation or inference. 
+"""
+struct MultistateSemiMarkovModelCensored <: MultistateProcess
     data::DataFrame
     parameters::VectorOfVectors 
     hazards::Vector{_Hazard}
@@ -207,9 +286,86 @@ end
 """
     MultistateModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
-Mutable struct that fully specifies a fitted multistate model. 
+Struct that fully specifies a fitted multistate model. 
 """
-Base.@kwdef struct MultistateModelFitted <: MultistateProcess
+struct MultistateModelFitted <: MultistateProcess
+    data::DataFrame
+    parameters::VectorOfVectors 
+    loglik::Float64
+    vcov::Matrix{Float64}
+    hazards::Vector{_Hazard}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    markovsurrogate::MarkovSurrogate
+    modelcall::NamedTuple
+end
+
+
+"""
+    MultistateMarkovModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+
+Struct that fully specifies a fitted multistate Markov model. 
+"""
+struct MultistateMarkovModelFitted <: MultistateProcess
+    data::DataFrame
+    parameters::VectorOfVectors 
+    loglik::Float64
+    vcov::Matrix{Float64}
+    hazards::Vector{Union{_Exponential,_ExponentialPH}}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    markovsurrogate::MarkovSurrogate
+    modelcall::NamedTuple
+end
+
+"""
+    MultistateMarkovModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+
+Struct that fully specifies a fitted multistate Markov model with some censored states. 
+"""
+struct MultistateMarkovModelCensoredFitted <: MultistateProcess
+    data::DataFrame
+    parameters::VectorOfVectors 
+    loglik::Float64
+    vcov::Matrix{Float64}
+    hazards::Vector{Union{_Exponential,_ExponentialPH}}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    markovsurrogate::MarkovSurrogate
+    modelcall::NamedTuple
+end
+
+"""
+    MultistateSemiMarkovModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+
+Struct that fully specifies a fitted multistate semi-Markov model. 
+"""
+struct MultistateSemiMarkovModelFitted <: MultistateProcess
+    data::DataFrame
+    parameters::VectorOfVectors 
+    loglik::Float64
+    vcov::Matrix{Float64}
+    hazards::Vector{_Hazard}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    markovsurrogate::MarkovSurrogate
+    modelcall::NamedTuple
+end
+
+"""
+    MultistateSemiMarkovModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+
+Struct that fully specifies a fitted multistate semi-Markov model with some censored states. 
+"""
+struct MultistateSemiMarkovModelCensoredFitted <: MultistateProcess
     data::DataFrame
     parameters::VectorOfVectors 
     loglik::Float64
