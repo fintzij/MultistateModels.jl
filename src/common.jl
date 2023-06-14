@@ -218,7 +218,7 @@ end
 """
     MultistateMarkovModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{Union{_Exponential, _ExponentialPH}}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
-Struct that fully specifies a multistate Markov process with no censored state for simulation or inference. 
+Struct that fully specifies a multistate Markov process with no censored state, used with panel data.
 """
 struct MultistateMarkovModel <: MultistateProcess
     data::DataFrame
@@ -235,7 +235,7 @@ end
 """
 MultistateMarkovModelCensored(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
-Struct that fully specifies a multistate Markov process with some censored states for simulation or inference. 
+Struct that fully specifies a multistate Markov process with some censored states, used with panel data.
 """
 struct MultistateMarkovModelCensored <: MultistateProcess
     data::DataFrame

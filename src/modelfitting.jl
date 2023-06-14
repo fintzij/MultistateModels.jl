@@ -78,11 +78,14 @@ end
 """
     fit(model::MultistateMarkovModel)
 
-Fit a multistate markov model to interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities).
+Fit a multistate markov model to 
+interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities),
+or a mix of panel data and exact jump times.
 """
 function fit(model::MultistateMarkovModel)
-
-    if all(model.data.obstype .== 2) # panel data
+    
+    if all(model.data.obstype .!= 1) # only panel data
+    #if all(model.data.obstype .== 2) # panel data
         # containers for bookkeeping TPMs
         books = build_tpm_mapping(model.data)
 
@@ -112,8 +115,14 @@ function fit(model::MultistateMarkovModel)
             model.markovsurrogate,
             model.modelcall)
 
-    elseif all(map(x -> x ∈ [1,2]), model.data.obstype) # mix of panel data and exact jump times, no censoring
+        #elseif all(map(x -> x ∈ [1,2]), model.data.obstype) # mix of panel data and exact jump times, no censoring
+    elseif any(model.data.obstype .== 1) # mix of panel data and exact jump times. MultistateMarkovModel contains no censored state by construction.
         
+        # TODO
+        # write the likelihood
+        # maximize it numerically
+        # do we need to introduce a censored state before each observed jump time (at time t - epsilon) ?
+
         # wrap results
         return  MultistateMarkovModelFitted(
             model.data,
@@ -126,62 +135,49 @@ function fit(model::MultistateMarkovModel)
             model.hazkeys,
             model.subjectindices,
             model.markovsurrogate,
-            model.modelcall)
+                model.modelcall)
 
-    elseif all(map(x -> x ∈ [0,2]), model.data.obstype) # panel data with censoring
-        
-        # wrap results
-        return  MultistateMarkovModelCensoredFitted(
-            model.data,
-            VectorOfVectors(sol.u, model.parameters.elem_ptr),
-            -sol.minimum,
-            vcov,
-            model.hazards,
-            model.totalhazards,
-            model.tmat,
-            model.hazkeys,
-            model.subjectindices,
-            model.markovsurrogate,
-            model.modelcall)
+        # elseif all(map(x -> x ∈ [0,2]), model.data.obstype) # panel data with censoring
+            
+        #     # wrap results
+        #     return  MultistateMarkovModelCensoredFitted(
+        #         model.data,
+        #         VectorOfVectors(sol.u, model.parameters.elem_ptr),
+        #         -sol.minimum,
+        #         vcov,
+        #         model.hazards,
+        #         model.totalhazards,
+        #         model.tmat,
+        #         model.hazkeys,
+        #         model.subjectindices,
+        #         model.markovsurrogate,
+        #         model.modelcall)
     end
 end
 
 """
-    fit_markov_mixed(model::MultistateModel)
+    fit(model::MultistateMarkovModelCensored)
 
-Fit a multistate markov model to a mix of exactly observed jumps and interval censored data (i.e. model.data.obstype .in [1,2] and all hazards are exponential with possibly piecewise homogeneous transition intensities).
+Fit a multistate markov model to 
+interval censored data, some of which are censored,
+or a mix of panel data, some of which are censored, and exact jump times.
 """
-function fit_markov_interval(model::MultistateModel)
+function fit(model::MultistateMarkovModelCensored)
     
-    # containers for bookkeeping TPMs
-    books = build_tpm_mapping(model.data)
+    if all(model.data.obstype .!= 1) # only panel data
+    # TODO
+    # Equation 13 in msm package
+    # https://cran.r-project.org/web/packages/msm/vignettes/msm-manual.pdf
+    elseif any(model.data.obstype .== 1) # mix of panel data and exact jump times.
+    # TODO
+    # introduce a censored state before each observed jump time.
+    # use Equation 13 from the msm package on each interval between the observed jump times
+    end
 
-    # extract and initialize model parameters
-    parameters = flatview(model.parameters)
-
-    # optimize the likelihood
-    optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-    sol  = solve(prob, Newton())
-
-    # get the variance-covariance matrix
-    ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
-    vcov = inv(ForwardDiff.hessian(ll, sol.u))
-
-    # wrap results
-    return MultistateModelFitted(
-        model.data,
-        VectorOfVectors(sol.u, model.parameters.elem_ptr),
-        -sol.minimum,
-        vcov,
-        model.hazards,
-        model.totalhazards,
-        model.tmat,
-        model.hazkeys,
-        model.subjectindices,
-        model.markovsurrogate,
-        model.modelcall)
 end
+
+# check with J&J that the previous two `fit` functions are correct before doing the same gymnastic with semi-Markov models
+# do the same gymnastic for semi-Markov model
 
 #  MCEM pseudo-code
 # input: z_α, z_β, z_γ, nparticles, K (MC sample size inflation)
