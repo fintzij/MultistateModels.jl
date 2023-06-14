@@ -99,7 +99,7 @@ function fit(model::MultistateMarkovModel)
         vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
         # wrap results
-        return MultistateMarkovModelFitted(
+        return  MultistateMarkovModelFitted(
             model.data,
             VectorOfVectors(sol.u, model.parameters.elem_ptr),
             -sol.minimum,
@@ -113,7 +113,36 @@ function fit(model::MultistateMarkovModel)
             model.modelcall)
 
     elseif all(map(x -> x ∈ [1,2]), model.data.obstype) # mix of panel data and exact jump times, no censoring
+        
+        # wrap results
+        return  MultistateMarkovModelFitted(
+            model.data,
+            VectorOfVectors(sol.u, model.parameters.elem_ptr),
+            -sol.minimum,
+            vcov,
+            model.hazards,
+            model.totalhazards,
+            model.tmat,
+            model.hazkeys,
+            model.subjectindices,
+            model.markovsurrogate,
+            model.modelcall)
+
     elseif all(map(x -> x ∈ [0,2]), model.data.obstype) # panel data with censoring
+        
+        # wrap results
+        return  MultistateMarkovModelCensoredFitted(
+            model.data,
+            VectorOfVectors(sol.u, model.parameters.elem_ptr),
+            -sol.minimum,
+            vcov,
+            model.hazards,
+            model.totalhazards,
+            model.tmat,
+            model.hazkeys,
+            model.subjectindices,
+            model.markovsurrogate,
+            model.modelcall)
     end
 end
 
