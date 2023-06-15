@@ -12,7 +12,7 @@ abstract type _Hazard end
 Abstract struct for internal Markov _Hazard types.
 """
 abstract type _MarkovHazard <: _Hazard end
-
+++
 """
 Abstract struct for internal semi-Markov _Hazard types.
 """
@@ -396,7 +396,7 @@ end
 Struct containing exactly observed sample paths and a model object. Used in fitting a multistate model to completely observed data.
 """
 struct ExactData
-    model::MultistateModel
+    model::MultistateProcess
     paths::Array{SamplePath}
 end
 
@@ -406,7 +406,7 @@ end
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate Markov model to panel data.
 """
 struct MPanelData
-    model::MultistateModel
+    model::MultistateProcess
     books::Tuple # tpm_index and tpm_map, from build_tpm_containers
 end
 
@@ -416,7 +416,7 @@ end
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate semi-Markov model to panel data via MCEM.
 """
 struct SMPanelData
-    model::MultistateModel
+    model::MultistateProcess
     paths::Array{SamplePath}
     weights::ElasticArray{Float64}
     totweights::ElasticArray{Float64}

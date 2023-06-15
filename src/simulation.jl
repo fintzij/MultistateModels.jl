@@ -14,7 +14,7 @@ Simulate `n` datasets or collections of sample paths from a multistate model. If
 - `data`: boolean; if true then return discretely observed sample paths
 - `paths`: boolean; if false then continuous-time sample paths not returned
 """
-function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
+function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false)
 
     # throw an error if neither paths nor data are asked for
     if paths == false & data == false
@@ -76,7 +76,7 @@ Simulate a single sample path.
 - model: multistate model object
 - subj: subject index
 """
-function simulate_path(model::MultistateModel, subj::Int64)
+function simulate_path(model::MultistateProcess, subj::Int64)
 
     # subject data
     subj_inds = model.subjectindices[subj]
