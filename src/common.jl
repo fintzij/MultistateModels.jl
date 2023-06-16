@@ -12,7 +12,7 @@ abstract type _Hazard end
 Abstract struct for internal Markov _Hazard types.
 """
 abstract type _MarkovHazard <: _Hazard end
-++
+
 """
 Abstract struct for internal semi-Markov _Hazard types.
 """

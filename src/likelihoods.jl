@@ -128,7 +128,7 @@ end
 
 Return sum of (negative) log likelihood for a Markov model fit to panel data. 
 """
-function loglik(parameters, data::MPanelData; neg = true) 
+function loglik(parameters, data::MPanelData; neg = true) # Raph: work on this
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)

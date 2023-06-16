@@ -402,7 +402,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         modelcall)
 
     elseif all(map(x -> x ∈ [1,2]), model.data.obstype) & all(isa.(_hazards, _SemiMarkovHazard))
-        # Multistate Markov model
+        # Multistate semi-Markov model
         model = MultistateSemiMarkovModel(
         data,
         parameters,
@@ -415,8 +415,8 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         modelcall)
 
     elseif all(isa.(_hazards, _SemiMarkovHazard))
-        # Multistate Markov model
-        model = MultistateSemiMarkovModel(
+        # Multistate semi-Markov model with censoring
+        model = MultistateSemiMarkovModelCensored(
         data,
         parameters,
         _hazards,
