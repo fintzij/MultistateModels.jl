@@ -178,15 +178,15 @@ struct _TotalHazardTransient <: _TotalHazard
 end
 
 """
-    MarkovSurrogate(hazards::Vector{_Hazard}, parameters::VectorOfVectors)
+    MarkovSurrogate(hazards::Vector{_MarkovHazard}, parameters::VectorOfVectors)
 """
 struct MarkovSurrogate
-    hazards::Vector{_Hazard}
+    hazards::Vector{_MarkovHazard}
     parameters::VectorOfVectors
 end
 
 """
-    SurrogateControl(model::MultistateModel, statefrom, targets, uinds, ginds)
+    SurrogateControl(model::MultistateProcess, statefrom, targets, uinds, ginds)
 
 Struct containing objects for computing the discrepancy of a Markov surrogate.
 """
@@ -223,7 +223,7 @@ Struct that fully specifies a multistate Markov process with no censored state, 
 struct MultistateMarkovModel <: MultistateProcess
     data::DataFrame
     parameters::VectorOfVectors 
-    hazards::Vector{Union{_Exponential,_ExponentialPH}}
+    hazards::Vector{_MarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
@@ -240,7 +240,7 @@ Struct that fully specifies a multistate Markov process with some censored state
 struct MultistateMarkovModelCensored <: MultistateProcess
     data::DataFrame
     parameters::VectorOfVectors 
-    hazards::Vector{Union{_Exponential,_ExponentialPH}}
+    hazards::Vector{_MarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
@@ -391,7 +391,7 @@ struct SamplePath
 end
 
 """
-    ExactData(model::MultistateModel, samplepaths::Array{SamplePath})
+    ExactData(model::MultistateProcess, samplepaths::Array{SamplePath})
 
 Struct containing exactly observed sample paths and a model object. Used in fitting a multistate model to completely observed data.
 """
@@ -401,7 +401,7 @@ struct ExactData
 end
 
 """
-    MPanelData(model::MultistateModel, books::Tuple)
+    MPanelData(model::MultistateProcess, books::Tuple)
 
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate Markov model to panel data.
 """
@@ -411,7 +411,7 @@ struct MPanelData
 end
 
 """
-    SMPanelData(model::MultistateModel, paths::Array{SamplePath}, weights::ElasticArray{Float64})
+    SMPanelData(model::MultistateProcess, paths::Array{SamplePath}, weights::ElasticArray{Float64})
 
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate semi-Markov model to panel data via MCEM.
 """

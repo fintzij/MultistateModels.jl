@@ -4,11 +4,11 @@
 
 ### Exactly observed sample paths ----------------------
 """
-    loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::MultistateProcess) 
+    loglik(parameters, path::SamplePath, hazards::Vector{T}, model::MultistateProcess) where T <: _Hazard
 
 Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
 """
-function loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::MultistateProcess)
+function loglik(parameters, path::SamplePath, hazards::Vector{T}, model::MultistateProcess) where T <: _Hazard
 
     # initialize log likelihood
     ll = 0.0

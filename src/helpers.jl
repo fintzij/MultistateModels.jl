@@ -253,7 +253,7 @@ function build_tpm_mapping(data::DataFrame)
             # first instance of each interval in the data
             for i in Base.OneTo(nrow(tpm_index[k]))
                 tpm_index[k].datind[i] = 
-                    covinds[findfirst(gaps[covinds] .== tpm_index[1].tstop[i])]
+                    covinds[findfirst(gaps[covinds] .== tpm_index[k].tstop[i])]
             end
 
             # fill out the tpm_map 
