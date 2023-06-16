@@ -403,11 +403,11 @@ end
 
 
 """
-    cumulative_incidence(t, model::MultistateModel, subj::Int64=1)
+    cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
 
 Compute the cumulative incidence for each possible transition as a function of time since state entry. Assumes the subject starts their observation period at risk and saves cumulative incidence at the supplied vector of times, t.
 """
-function cumulative_incidence(t, model::MultistateModel, subj::Int64=1)
+function cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
 
     # grab parameters, hazards and total hazards
     parameters   = model.parameters
@@ -471,11 +471,11 @@ function cumulative_incidence(t, model::MultistateModel, subj::Int64=1)
 end
 
 """
-    cumulative_incidence(t, model::MultistateModel, statefrom, subj::Int64=1)
+    cumulative_incidence(t, model::MultistateProcess, statefrom, subj::Int64=1)
 
 Compute the cumulative incidence for each possible transition originating in `statefrom` as a function of time since state entry. Assumes the subject starts their observation period at risk and saves cumulative incidence at the supplied vector of times since state entry. This function is used internally.
 """
-function cumulative_incidence(t, model::MultistateModel, parameters, statefrom, subj::Int64=1)
+function cumulative_incidence(t, model::MultistateProcess, parameters, statefrom, subj::Int64=1)
 
     # get hazards
     hazards = model.hazards
@@ -540,7 +540,7 @@ Compute the hazard at times t.
 
 # Arguments
 - t: time or vector of times. 
-- model: MultistateModel object. 
+- model: MultistateProcess object. 
 - hazard: Symbol specifying the hazard, e.g., :h12 for the hazard for transitioning from state 1 to state 2. 
 - subj: subject id. 
 """
@@ -571,7 +571,7 @@ Compute the cumulative hazard over [tstart,tstop].
 # Arguments
 - tstart: starting times
 - tstop: stopping times
-- model: MultistateModel object. 
+- model: MultistateProcess object. 
 - hazard: Symbol specifying the hazard, e.g., :h12 for the hazard for transitioning from state 1 to state 2. 
 - subj: subject id. 
 """

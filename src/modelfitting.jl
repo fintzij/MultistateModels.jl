@@ -1,8 +1,8 @@
-"""
-    fit(model::MultistateModel; alg = "ml")
+# """
+#     fit(model::MultistateModel; alg = "ml")
 
-Fit a model. 
-""" 
+# Fit a model. 
+# """ 
 # function fit(model::MultistateModel; alg = "ml", nparticles = 100)
     
 #     # if sample paths are fully observed, maximize the likelihood directly
@@ -193,7 +193,7 @@ end
     # end
 
 """
-    fit_semimarkov_interval(model::MultistateModel; nparticles)
+    fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles)
 
 Fit a semi-Markov model to panel data via Monte Carlo EM. 
 
@@ -210,7 +210,7 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 - γ: Standard normal quantile for stopping
 - κ: Inflation factor for MCEM sample size, m_new = m_cur + m_cur/κ
 """
-function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3, verbose = false)
+function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3, verbose = false)
 
     # number of subjects
     nsubj = length(model.subjectindices)

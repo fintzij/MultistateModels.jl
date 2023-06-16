@@ -1,20 +1,20 @@
 """
-    initialize_parameters!(model::MultistateModel)
+    initialize_parameters!(model::MultistateProcess)
 
 Set initial values for the model parameters. Description of how this happens...
 """
-function initialize_parameters!(model::MultistateModel)
+function initialize_parameters!(model::MultistateProcess)
     transmat = statetable(model)
     q_crude_init = crudeinit(transmat, model.tmat)
     # set_parameters!(model, q_crude_init)
 end
 
 """
-    set_parameters!(model::MultistateModel, newvalues::Vector{Float64})
+    set_parameters!(model::MultistateProcess, newvalues::Vector{Float64})
 
 Set model parameters given a vector of values. Copies `newvalues`` to `model.parameters`.
 """
-function set_parameters!(model::MultistateModel, newvalues::Vector{Vector{Float64}})
+function set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Float64}})
     
     # check that we have the right number of parameters
     if(length(model.parameters) != length(newvalues))
@@ -30,11 +30,11 @@ function set_parameters!(model::MultistateModel, newvalues::Vector{Vector{Float6
 end
 
 """
-    set_parameters!(model::MultistateModel, newvalues::Tuple)
+    set_parameters!(model::MultistateProcess, newvalues::Tuple)
 
 Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assigns new values to `model.parameters[i]`, where `i` indexes the cause-specific hazards in the order they appear in the model object.
 """
-function set_parameters!(model::MultistateModel, newvalues::Tuple)
+function set_parameters!(model::MultistateProcess, newvalues::Tuple)
     # check that there is a vector of parameters for each cause-specific hazard
     if(length(model.parameters) != length(newvalues))
         error("Number of supplied parameter vectors not equal to number of cause-specific hazards.")
@@ -51,11 +51,11 @@ function set_parameters!(model::MultistateModel, newvalues::Tuple)
 end
 
 """
-    set_parameters!(model::MultistateModel, newvalues::NamedTuple)
+    set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
 
 Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  
 """
-function set_parameters!(model::MultistateModel, newvalues::NamedTuple)
+function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
     
     # get keys for the new values
     value_keys = keys(newvalues)
