@@ -415,8 +415,8 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         modelcall)
 
     elseif all(isa.(_hazards, _SemiMarkovHazard))
-        # Multistate semi-Markov model with censoring
-        model = MultistateSemiMarkovModelCensored(
+        # Multistate Markov model
+        model = MultistateSemiMarkovModel(
         data,
         parameters,
         _hazards,
