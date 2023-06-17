@@ -164,8 +164,7 @@ function loglik(parameters, data::MPanelData; neg = true) # Raph: work on this
 
         if data.model.data.obstype[i] == 1 # panel data
 
-            ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i],
-             data.model.data.stateto[i]])
+            ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]])
 
         elseif data.model.data.obstype[i] == 2 # exact data
 
@@ -174,6 +173,8 @@ function loglik(parameters, data::MPanelData; neg = true) # Raph: work on this
             if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
 
                 ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], parameters[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true, newtime = false)
+
+            end
         end
         
     end
