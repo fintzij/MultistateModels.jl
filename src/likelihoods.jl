@@ -4,11 +4,11 @@
 
 ### Exactly observed sample paths ----------------------
 """
-    loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::MultistateModel) 
+    loglik(parameters, path::SamplePath, hazards::Vector{T}, model::MultistateProcess) where T <: _Hazard
 
 Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
 """
-function loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::MultistateModel)
+function loglik(parameters, path::SamplePath, hazards::Vector{T}, model::MultistateProcess) where T <: _Hazard
 
     # initialize log likelihood
     ll = 0.0
@@ -128,7 +128,7 @@ end
 
 Return sum of (negative) log likelihood for a Markov model fit to panel data. 
 """
-function loglik(parameters, data::MPanelData; neg = true) 
+function loglik(parameters, data::MPanelData; neg = true) # Raph: work on this
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)

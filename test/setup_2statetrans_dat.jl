@@ -12,7 +12,7 @@ dat =
               tstop = repeat([5.0,10.0], outer = 100),
               statefrom = fill(1, 200),
               stateto = fill(2, 200),
-              obstype = fill(1, 200))
+              obstype = fill(2, 200))
 
 
 # append!(dat, DataFrame(id=1,tstart=10.0,tstop=20.0,statefrom=2,stateto=1,obstype=2))

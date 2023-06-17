@@ -1,5 +1,5 @@
 """
-    survprob(lb::Float64, ub::Float64, parameters::Vector{Vector{Float64}}, rowind::Int64, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+    survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _hazard
 
 Return the survival probability over the interval [lb, ub]. 
 
@@ -13,7 +13,7 @@ Return the survival probability over the interval [lb, ub].
 - `give_log::Bool`: should the log total hazard be returned (default)
 - `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true, newtime = true)
+function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _Hazard
 
     # log total cumulative hazard
     log_survprob = -total_cumulhaz(lb, ub, parameters, rowind, _totalhazard, _hazards; give_log = false, newtime = newtime)
@@ -23,7 +23,7 @@ function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransien
 end
 
 """
-    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true)
+    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _Hazard
 
 Return the log-total cumulative hazard out of a transient state over the interval [lb, ub]. 
 
@@ -37,7 +37,7 @@ Return the log-total cumulative hazard out of a transient state over the interva
 - `give_log::Bool`: should the log total hazard be returned (default)
 - `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{_Hazard}; give_log = true, newtime = true)
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _Hazard
 
     # log total cumulative hazard
     log_tot_haz = 
@@ -60,7 +60,7 @@ function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTr
 end
 
 """
-    total_cumulhaz(lb, ub, parameters, rowind::Int64, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true)
+    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _Hazard
 
 Return zero log-total cumulative hazard over the interval [lb, ub] as the current state is absorbing. 
 
@@ -74,7 +74,7 @@ Return zero log-total cumulative hazard over the interval [lb, ub] as the curren
 - `give_log::Bool`: should the log total hazard be returned (default)
 - `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{_Hazard}; give_log = true, newtime = true)
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _Hazard
 
     # return 0 cumulative hazard
     give_log ? -Inf : 0
@@ -368,11 +368,11 @@ end
 ########################################################
 
 """
-    compute_hazmat!(Q, parameters, hazards::Vector{_Hazard}, tpm_index::DataFrame, ind::Int64)
+    compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame, ind::Int64) where T <: _Hazard
 
 Fill in a matrix of transition intensities for a multistate Markov model.
 """
-function compute_hazmat!(Q, parameters, hazards::Vector{_Hazard}, tpm_index::DataFrame)
+function compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame, ind::Int64) where T <: _Hazard
 
     # compute transition intensities
     for h in eachindex(hazards) 
@@ -390,7 +390,7 @@ function compute_hazmat!(Q, parameters, hazards::Vector{_Hazard}, tpm_index::Dat
 end
 
 """
-    compute_tmat!(P, Q, tpm_index::DataFrame, hazards::Vector{_Hazard}, tmat::Matrix{Int64})
+    compute_tmat!(P, Q, tpm_index::DataFrame, cache)
 
 Calculate transition probability matrices for a multistate Markov process. 
 """
@@ -403,11 +403,11 @@ end
 
 
 """
-    cumulative_incidence(t, model::MultistateModel, subj::Int64=1)
+    cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
 
 Compute the cumulative incidence for each possible transition as a function of time since state entry. Assumes the subject starts their observation period at risk and saves cumulative incidence at the supplied vector of times, t.
 """
-function cumulative_incidence(t, model::MultistateModel, subj::Int64=1)
+function cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
 
     # grab parameters, hazards and total hazards
     parameters   = model.parameters
@@ -471,11 +471,11 @@ function cumulative_incidence(t, model::MultistateModel, subj::Int64=1)
 end
 
 """
-    cumulative_incidence(t, model::MultistateModel, statefrom, subj::Int64=1)
+    cumulative_incidence(t, model::MultistateProcess, statefrom, subj::Int64=1)
 
 Compute the cumulative incidence for each possible transition originating in `statefrom` as a function of time since state entry. Assumes the subject starts their observation period at risk and saves cumulative incidence at the supplied vector of times since state entry. This function is used internally.
 """
-function cumulative_incidence(t, model::MultistateModel, parameters, statefrom, subj::Int64=1)
+function cumulative_incidence(t, model::MultistateProcess, parameters, statefrom, subj::Int64=1)
 
     # get hazards
     hazards = model.hazards
@@ -540,7 +540,7 @@ Compute the hazard at times t.
 
 # Arguments
 - t: time or vector of times. 
-- model: MultistateModel object. 
+- model: MultistateProcess object. 
 - hazard: Symbol specifying the hazard, e.g., :h12 for the hazard for transitioning from state 1 to state 2. 
 - subj: subject id. 
 """
@@ -571,7 +571,7 @@ Compute the cumulative hazard over [tstart,tstop].
 # Arguments
 - tstart: starting times
 - tstop: stopping times
-- model: MultistateModel object. 
+- model: MultistateProcess object. 
 - hazard: Symbol specifying the hazard, e.g., :h12 for the hazard for transitioning from state 1 to state 2. 
 - subj: subject id. 
 """

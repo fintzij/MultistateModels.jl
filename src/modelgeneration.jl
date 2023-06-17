@@ -375,9 +375,8 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
-    #elseif all(map(x -> x ∈ [1,2]), data.obstype) & all(isa.(_hazards, _MarkovHazard))
-    elseif  all(data.obstype .!= 0)                & all(isa.(_hazards, _MarkovHazard))
-        # Multistate Markov model with no censored data
+    elseif all(map(x -> x ∈ [1,2], data.obstype)) & all(isa.(_hazards, _MarkovHazard))
+        # Multistate Markov model
         model = MultistateMarkovModel(
         data,
         parameters,
@@ -389,8 +388,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
-    #elseif all(map(x -> x ∈ [0,2]), model.data.obstype) & all(isa.(_hazards, _MarkovHazard))
-    elseif  all(data.obstype .!= 1)                & all(isa.(_hazards, _MarkovHazard))
+    elseif all(map(x -> x ∈ [0,2], data.obstype)) & all(isa.(_hazards, _MarkovHazard))
         # Markov model with censoring
         model = MultistateMarkovModelCensored(
         data,
@@ -403,8 +401,8 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
-    elseif all(map(x -> x ∈ [1,2]), model.data.obstype) & all(isa.(_hazards, _SemiMarkovHazard))
-        # Multistate Markov model
+    elseif all(map(x -> x ∈ [1,2], data.obstype)) & all(isa.(_hazards, _SemiMarkovHazard))
+        # Multistate semi-Markov model
         model = MultistateSemiMarkovModel(
         data,
         parameters,
@@ -417,8 +415,8 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         modelcall)
 
     elseif all(isa.(_hazards, _SemiMarkovHazard))
-        # Multistate Markov model
-        model = MultistateSemiMarkovModel(
+        # Multistate semi-Markov model with censoring
+        model = MultistateSemiMarkovModelCensored(
         data,
         parameters,
         _hazards,

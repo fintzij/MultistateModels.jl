@@ -1,9 +1,9 @@
 """
-    observe_path(samplepath::SamplePath, model::MultistateModel, ind::Int64)
+    observe_path(samplepath::SamplePath, model::T, ind::Int64) where T <: MultistateProcess
 
 Return `statefrom` and `stateto` for a jump chain observed at `tstart` and `tstop`.
 """
-function observe_path(samplepath::SamplePath, model::MultistateModel, subj::Int64)
+function observe_path(samplepath::SamplePath, model::T, subj::Int64) where T <: MultistateProcess
 
     # grab the subject's data as a view
     subj_inds = model.subjectindices[subj]
@@ -122,7 +122,7 @@ end
 
 
 """
-    extract_paths(model::MultistateModel; self_transitions = false)
+    extract_paths(model::MultistateProcess; self_transitions = false)
 
 Extract sample paths from a multistate model's data field and return an array of SamplePath objects. 
 
@@ -130,7 +130,7 @@ Extract sample paths from a multistate model's data field and return an array of
 - model: multistate model object
 - self_transitions: keep self-transitions? Defaults to false.
 """
-function extract_paths(model::MultistateModel; self_transitions = false)
+function extract_paths(model::MultistateProcess; self_transitions = false)
 
     # get IDs
     nsubj = length(model.subjectindices)
@@ -166,7 +166,7 @@ end
 
 
 """
-    extract_paths(model::MultistateModel; self_transitions = false)
+    extract_paths(model::MultistateProcess; self_transitions = false)
 
 Extract sample paths from a multistate model's data field and return an array of SamplePath objects. 
 
