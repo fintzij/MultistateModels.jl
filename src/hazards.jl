@@ -1,5 +1,5 @@
 """
-    survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _hazard
+    survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _azard
 
 Return the survival probability over the interval [lb, ub]. 
 
@@ -13,7 +13,7 @@ Return the survival probability over the interval [lb, ub].
 - `give_log::Bool`: should the log total hazard be returned (default)
 - `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _Hazard
+function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{<:_Hazard}; give_log = true, newtime = true) 
 
     # log total cumulative hazard
     log_survprob = -total_cumulhaz(lb, ub, parameters, rowind, _totalhazard, _hazards; give_log = false, newtime = newtime)
