@@ -5,7 +5,6 @@ using DataFrames
 cav = CSV.read("scratch/cav.csv", DataFrame)
 
 subjids = unique(cav.PTNUM)
-nsubj = length(subjids)
 
 cav_startstop = DataFrame(
     id=zeros(0),
@@ -71,9 +70,9 @@ set_parameters!(m,
      h32 = [log(0.049),],
      h34 = [log(0.208),]))
 
-model = m
 
-using ArraysOfArrays, Optimization, ExponentialUtilities
-using MultistateModels: build_tpm_mapping, MPanelData, build_hazmat_book, build_tpm_book, compute_hazmat!, compute_tmat!, survprob, call_haz
+m_fit = fit(m)
 
-data = MPanelData(model, books)
+m_fit.parameters
+exp(-2.481188506073330)
+exp(-4.374443139609851)
