@@ -38,7 +38,6 @@ abstract type MultistateMarkovProcess <: MultistateProcess end
 """
 abstract type MultistateSemiMarkovProcess <: MultistateProcess end
 
-
 """
     ParametricHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
 

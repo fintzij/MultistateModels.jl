@@ -181,11 +181,11 @@ function sample_ecctmc!(jumptimes, stateseq, P, Q, a, b, t0, t1)
 end
 
 """
-    draw_samplepath(subj::Int64, model::MultistateModel, tpm_book, hazmat_book, tpm_map)
+    draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map)
 
 Draw sample paths from a Markov surrogate process conditional on panel data.
 """
-function draw_samplepath(subj::Int64, model::MultistateModel, tpm_book, hazmat_book, tpm_map)
+function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map)
 
     # subject data
     subj_inds = model.subjectindices[subj]
