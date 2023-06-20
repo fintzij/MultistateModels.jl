@@ -126,7 +126,7 @@ end
 """
     loglik(parameters, data::MPanelData; neg = true)
 
-Return sum of (negative) log likelihood for a Markov model fit to panel data. 
+Return sum of (negative) log likelihood for a Markov model fit to panel and/or exact data. 
 """
 function loglik(parameters, data::MPanelData; neg = true) # Raph: work on this
 
