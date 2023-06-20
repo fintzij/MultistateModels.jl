@@ -368,11 +368,11 @@ end
 ########################################################
 
 """
-    compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame, ind::Int64) where T <: _Hazard
+    compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame) where T <: _Hazard
 
 Fill in a matrix of transition intensities for a multistate Markov model.
 """
-function compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame, ind::Int64) where T <: _Hazard
+function compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame) where T <: _Hazard
 
     # compute transition intensities
     for h in eachindex(hazards) 

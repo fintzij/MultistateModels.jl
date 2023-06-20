@@ -1,29 +1,3 @@
----
-title: "Untitled"
-format: html
----
-
-```{r}
-#options(repos = c(CRAN = "http://cran.rstudio.com"))
-library(msm)
-library(tidyverse)
-
-set.seed(0)
-cav <- cav %>% mutate(obstype = sample(c(1,2), nrow(.), replace = TRUE)) # mix of panel and exactly observed data
-readr::write_csv(cav, "scratch/cav.csv")
-
-Q_ind <- matrix(# need connections between states 1 and 3.
-    c(0,1,1,1,
-      1,0,1,1,
-      1,1,0,1,
-      0,0,0,0),
-    nrow = 4, byrow = TRUE)
-Q0 <- crudeinits.msm(state ~ years, PTNUM, data = cav, qmatrix = Q_ind)
-m_mixed_12 <- msm(state ~ years, PTNUM, data = cav, qmatrix = Q0, obstype = obstype)
-print(m_mixed_12)
-```
-
-```{julia}
 using MultistateModels
 using CSV
 using DataFrames
@@ -97,24 +71,9 @@ set_parameters!(m,
      h32 = [log(0.049),],
      h34 = [log(0.208),]))
 
-m_fit = fit(m)
-```
+model = m
 
-## scratch -- debug
+using ArraysOfArrays, Optimization, ExponentialUtilities
+using MultistateModels: build_tpm_mapping, MPanelData, build_hazmat_book, build_tpm_book, compute_hazmat!, compute_tmat!, survprob, call_haz
 
-```{julia}
- # containers for bookkeeping TPMs
-    books = MultistateModels.build_tpm_mapping(model.data)
-
-    # extract and initialize model parameters
-    parameters = flatview(model.parameters)
-
-    # optimize the likelihood
-    optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-    sol  = solve(prob, Newton())
-
-    # get the variance-covariance matrix
-    ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
-    vcov = inv(ForwardDiff.hessian(ll, sol.u))
-```
+data = MPanelData(model, books)

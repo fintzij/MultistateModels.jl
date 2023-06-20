@@ -100,7 +100,7 @@ function fit(model::MultistateMarkovModel)
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
-    return  MultistateMarkovModelFitted(
+    return  MultistateModelFitted(
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
         -sol.minimum,

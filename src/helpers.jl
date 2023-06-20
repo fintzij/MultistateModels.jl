@@ -192,7 +192,7 @@ end
 """
     build_tpm_mapping(data::DataFrame)
 
-Construct bookkeeping objects for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. 
+Construct bookkeeping objects for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. The first bookkeeping object is a data frame that 
 """
 function build_tpm_mapping(data::DataFrame) 
 

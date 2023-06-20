@@ -302,6 +302,9 @@ struct MultistateModelFitted <: MultistateProcess
     modelcall::NamedTuple
 end
 
+### helpers - extraction
+loglik(m::MultistateModelFitted) = m.loglik
+parameters(m::MultistateProcess) = m.parameters
 
 # """
 #     MultistateMarkovModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
