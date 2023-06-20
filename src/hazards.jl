@@ -1,5 +1,5 @@
 """
-    survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _azard
+    survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{<:_Hazard}; give_log = true, newtime = true) 
 
 Return the survival probability over the interval [lb, ub]. 
 
@@ -23,7 +23,7 @@ function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransien
 end
 
 """
-    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _Hazard
+    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{<:_Hazard}; give_log = true, newtime = true) 
 
 Return the log-total cumulative hazard out of a transient state over the interval [lb, ub]. 
 
@@ -37,7 +37,7 @@ Return the log-total cumulative hazard out of a transient state over the interva
 - `give_log::Bool`: should the log total hazard be returned (default)
 - `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _Hazard
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{<:_Hazard}; give_log = true, newtime = true) 
 
     # log total cumulative hazard
     log_tot_haz = 
@@ -60,7 +60,7 @@ function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTr
 end
 
 """
-    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _Hazard
+    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{<:_Hazard}; give_log = true, newtime = true) 
 
 Return zero log-total cumulative hazard over the interval [lb, ub] as the current state is absorbing. 
 
@@ -74,7 +74,7 @@ Return zero log-total cumulative hazard over the interval [lb, ub] as the curren
 - `give_log::Bool`: should the log total hazard be returned (default)
 - `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{T}; give_log = true, newtime = true) where T <: _Hazard
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{<:_Hazard}; give_log = true, newtime = true) 
 
     # return 0 cumulative hazard
     give_log ? -Inf : 0
@@ -368,11 +368,11 @@ end
 ########################################################
 
 """
-    compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame, ind::Int64) where T <: _Hazard
+    compute_hazmat!(Q, parameters, hazards::Vector{<:_Hazard}, tpm_index::DataFrame, ind::Int64) 
 
 Fill in a matrix of transition intensities for a multistate Markov model.
 """
-function compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame, ind::Int64) where T <: _Hazard
+function compute_hazmat!(Q, parameters, hazards::Vector{<:_Hazard}, tpm_index::DataFrame, ind::Int64) 
 
     # compute transition intensities
     for h in eachindex(hazards) 
