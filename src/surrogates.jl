@@ -1,9 +1,9 @@
 """
-    optimize_surrogate(parameters, model::MultistateModel)
+    optimize_surrogate(parameters, model::MultistateProcess)
 
 Optimize parameters for a Markov surrogate by minimizing the discrepancy between the cumulative curves.
 """
-function optimize_surrogate(model::MultistateModel)
+function optimize_surrogate(model::MultistateProcess)
 
     # identify transient states
     transients = findall(isa.(model.totalhazards, _TotalHazardTransient))

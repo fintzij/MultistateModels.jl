@@ -28,6 +28,15 @@ abstract type _TotalHazard end
 """
 abstract type MultistateProcess end
 
+"""
+    Abstract type for multistate Markov process.
+"""
+abstract type MultistateMarkovProcess <: MultistateProcess end
+
+"""
+    Abstract type for multistate semi-Markov process.
+"""
+abstract type MultistateSemiMarkovProcess <: MultistateProcess end
 
 """
     ParametricHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
@@ -220,7 +229,7 @@ end
 
 Struct that fully specifies a multistate Markov process with no censored state, used with panel data.
 """
-struct MultistateMarkovModel <: MultistateProcess
+struct MultistateMarkovModel <: MultistateMarkovProcess
     data::DataFrame
     parameters::VectorOfVectors 
     hazards::Vector{_MarkovHazard}
@@ -237,7 +246,7 @@ MultistateMarkovModelCensored(data::DataFrame, parameters::VectorOfVectors,hazar
 
 Struct that fully specifies a multistate Markov process with some censored states, used with panel data.
 """
-struct MultistateMarkovModelCensored <: MultistateProcess
+struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     data::DataFrame
     parameters::VectorOfVectors 
     hazards::Vector{_MarkovHazard}
@@ -254,7 +263,7 @@ MultistateSemiMarkovModel(data::DataFrame, parameters::VectorOfVectors,hazards::
 
 Struct that fully specifies a multistate semi-Markov process with no censored state for simulation or inference. 
 """
-struct MultistateSemiMarkovModel <: MultistateProcess
+struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
     data::DataFrame
     parameters::VectorOfVectors 
     hazards::Vector{_Hazard}
@@ -271,7 +280,7 @@ MultistateSemiMarkovModelCensored(data::DataFrame, parameters::VectorOfVectors,h
 
 Struct that fully specifies a multistate semi-Markov process with some censored states for simulation or inference. 
 """
-struct MultistateSemiMarkovModelCensored <: MultistateProcess
+struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     data::DataFrame
     parameters::VectorOfVectors 
     hazards::Vector{_Hazard}

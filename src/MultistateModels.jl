@@ -23,6 +23,7 @@ import StatsBase.fit
 
 # initialize R session for splines
 function __init__()
+    @eval RCall.R"if (!require('splines2', quietly=TRUE)) install.packages('splines2')"
     @eval RCall.@rlibrary splines2
     nothing
 end

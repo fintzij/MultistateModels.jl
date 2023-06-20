@@ -1,9 +1,9 @@
 """
-    observe_path(samplepath::SamplePath, model::T, ind::Int64) where T <: MultistateProcess
+    observe_path(samplepath::SamplePath, model::MultistateProcess, ind::Int64) 
 
 Return `statefrom` and `stateto` for a jump chain observed at `tstart` and `tstop`.
 """
-function observe_path(samplepath::SamplePath, model::T, subj::Int64) where T <: MultistateProcess
+function observe_path(samplepath::SamplePath, model::MultistateProcess, subj::Int64) 
 
     # grab the subject's data as a view
     subj_inds = model.subjectindices[subj]
