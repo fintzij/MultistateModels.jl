@@ -376,7 +376,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         modelcall)
 
     elseif all(map(x -> x ∈ [1,2], data.obstype)) & all(isa.(_hazards, _MarkovHazard))
-        # Multistate Markov model
+        # Markov model with panel data and/or exactly observed data
         model = MultistateMarkovModel(
         data,
         parameters,
@@ -389,7 +389,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         modelcall)
 
     elseif all(map(x -> x ∈ [0,2], data.obstype)) & all(isa.(_hazards, _MarkovHazard))
-        # Markov model with censoring
+        # Markov model with panel data and/or censored data
         model = MultistateMarkovModelCensored(
         data,
         parameters,
@@ -401,8 +401,8 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
-    elseif all(map(x -> x ∈ [1,2], data.obstype)) & all(isa.(_hazards, _SemiMarkovHazard))
-        # Multistate semi-Markov model
+    elseif all(map(x -> x ∈ [1,2], data.obstype)) & any(isa.(_hazards, _SemiMarkovHazard))
+        # Semi-Markov model with panel data and/or exactly observed data
         model = MultistateSemiMarkovModel(
         data,
         parameters,
@@ -414,8 +414,8 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
-    elseif all(isa.(_hazards, _SemiMarkovHazard))
-        # Multistate Markov model
+    elseif all(map(x -> x ∈ [0,2], data.obstype)) & any(isa.(_hazards, _SemiMarkovHazard))
+        # Semi-Markov Markov model with panel data and/or censored data
         model = MultistateSemiMarkovModel(
         data,
         parameters,
