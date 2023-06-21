@@ -192,7 +192,7 @@ end
 """
     build_tpm_mapping(data::DataFrame)
 
-Construct bookkeeping objects for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. 
+Construct bookkeeping objects for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. The first bookkeeping object is a data frame that 
 """
 function build_tpm_mapping(data::DataFrame) 
 
@@ -267,4 +267,63 @@ function build_tpm_mapping(data::DataFrame)
 
     # return objects
     return tpm_index, tpm_map
+end
+
+
+"""
+    getloglik(model::MultistateModelFitted) 
+
+Return the maximum likelihood estimates. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+"""
+function getloglik(model::MultistateModelFitted) 
+
+    model.loglik
+
+end
+
+"""
+    getestimates(model::MultistateModelFitted; transformed::Bool = true) 
+
+Return the maximum likelihood estimates. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+- `transformed::Bool`: whether to return the estimates on the natural (transformed) scale or on the log scale, defaults to false.
+"""
+function getestimates(model::MultistateModelFitted; transformed::Bool = false) 
+
+    par=reduce(vcat, model.parameters)
+    transformed ? exp.(par) : par
+
+end
+
+"""
+    getgradient(model::MultistateModelFitted) 
+
+Return the gradient at the maximum likelihood estimate. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+"""
+function getgradient(model::MultistateModelFitted) 
+
+    model.gradient
+
+end
+
+"""
+    getvcov(model::MultistateModelFitted) 
+
+Return the variance covariance matrix at the maximum likelihood estimate. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+"""
+function getvcov(model::MultistateModelFitted) 
+
+    model.vcov
+
 end

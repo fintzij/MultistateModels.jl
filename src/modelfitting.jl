@@ -57,6 +57,7 @@ function fit(model::MultistateModel)
 
     # oh eff yes.
     ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
+    gradient = ForwardDiff.gradient(ll, sol.u)
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
@@ -64,6 +65,7 @@ function fit(model::MultistateModel)
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
         -sol.minimum,
+        gradient,
         vcov,
         model.hazards,
         model.totalhazards,
@@ -84,75 +86,36 @@ or a mix of panel data and exact jump times.
 """
 function fit(model::MultistateMarkovModel)
     
-    if all(model.data.obstype .!= 1) # only panel data
-    #if all(model.data.obstype .== 2) # panel data
-        # containers for bookkeeping TPMs
-        books = build_tpm_mapping(model.data)
+    # containers for bookkeeping TPMs
+    books = build_tpm_mapping(model.data)
 
-        # extract and initialize model parameters
-        parameters = flatview(model.parameters)
+    # extract and initialize model parameters
+    parameters = flatview(model.parameters)
 
-        # optimize the likelihood
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-        prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-        sol  = solve(prob, Newton())
+    # optimize the likelihood
+    optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+    prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
+    sol  = solve(prob, Newton())
 
-        # get the variance-covariance matrix
-        ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
-        vcov = inv(ForwardDiff.hessian(ll, sol.u))
+    # get the variance-covariance matrix
+    ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
+    gradient = ForwardDiff.gradient(ll, sol.u)
+    vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
-        # wrap results
-        return  MultistateMarkovModelFitted(
-            model.data,
-            VectorOfVectors(sol.u, model.parameters.elem_ptr),
-            -sol.minimum,
-            vcov,
-            model.hazards,
-            model.totalhazards,
-            model.tmat,
-            model.hazkeys,
-            model.subjectindices,
-            model.markovsurrogate,
-            model.modelcall)
-
-        #elseif all(map(x -> x ∈ [1,2]), model.data.obstype) # mix of panel data and exact jump times, no censoring
-    elseif any(model.data.obstype .== 1) # mix of panel data and exact jump times. MultistateMarkovModel contains no censored state by construction.
-        
-        # TODO
-        # write the likelihood
-        # maximize it numerically
-        # do we need to introduce a censored state before each observed jump time (at time t - epsilon) ?
-
-        # wrap results
-        return  MultistateMarkovModelFitted(
-            model.data,
-            VectorOfVectors(sol.u, model.parameters.elem_ptr),
-            -sol.minimum,
-            vcov,
-            model.hazards,
-            model.totalhazards,
-            model.tmat,
-            model.hazkeys,
-            model.subjectindices,
-            model.markovsurrogate,
-                model.modelcall)
-
-        # elseif all(map(x -> x ∈ [0,2]), model.data.obstype) # panel data with censoring
-            
-        #     # wrap results
-        #     return  MultistateMarkovModelCensoredFitted(
-        #         model.data,
-        #         VectorOfVectors(sol.u, model.parameters.elem_ptr),
-        #         -sol.minimum,
-        #         vcov,
-        #         model.hazards,
-        #         model.totalhazards,
-        #         model.tmat,
-        #         model.hazkeys,
-        #         model.subjectindices,
-        #         model.markovsurrogate,
-        #         model.modelcall)
-    end
+    # wrap results
+    return  MultistateModelFitted(
+        model.data,
+        VectorOfVectors(sol.u, model.parameters.elem_ptr),
+        -sol.minimum,
+        gradient,
+        vcov,
+        model.hazards,
+        model.totalhazards,
+        model.tmat,
+        model.hazkeys,
+        model.subjectindices,
+        model.markovsurrogate,
+        model.modelcall)
 end
 
 """

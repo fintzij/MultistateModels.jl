@@ -293,7 +293,7 @@ struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
 end
 
 """
-    MultistateModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+    MultistateModelFitted(data::DataFrame, parameters::VectorOfVectors, gradient::Vector{Float64}, hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
 Struct that fully specifies a fitted multistate model. 
 """
@@ -301,6 +301,7 @@ struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
     parameters::VectorOfVectors 
     loglik::Float64
+    gradient::Vector{Float64}
     vcov::Matrix{Float64}
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
@@ -310,83 +311,6 @@ struct MultistateModelFitted <: MultistateProcess
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
-
-
-# """
-#     MultistateMarkovModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
-
-# Struct that fully specifies a fitted multistate Markov model. 
-# """
-# struct MultistateMarkovModelFitted <: MultistateProcess
-#     data::DataFrame
-#     parameters::VectorOfVectors 
-#     loglik::Float64
-#     vcov::Matrix{Float64}
-#     hazards::Vector{Union{_Exponential,_ExponentialPH}}
-#     totalhazards::Vector{_TotalHazard}
-#     tmat::Matrix{Int64}
-#     hazkeys::Dict{Symbol, Int64}
-#     subjectindices::Vector{Vector{Int64}}
-#     markovsurrogate::MarkovSurrogate
-#     modelcall::NamedTuple
-# end
-
-# """
-#     MultistateMarkovModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
-
-# Struct that fully specifies a fitted multistate Markov model with some censored states. 
-# """
-# struct MultistateMarkovModelCensoredFitted <: MultistateProcess
-#     data::DataFrame
-#     parameters::VectorOfVectors 
-#     loglik::Float64
-#     vcov::Matrix{Float64}
-#     hazards::Vector{Union{_Exponential,_ExponentialPH}}
-#     totalhazards::Vector{_TotalHazard}
-#     tmat::Matrix{Int64}
-#     hazkeys::Dict{Symbol, Int64}
-#     subjectindices::Vector{Vector{Int64}}
-#     markovsurrogate::MarkovSurrogate
-#     modelcall::NamedTuple
-# end
-
-# """
-#     MultistateSemiMarkovModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
-
-# Struct that fully specifies a fitted multistate semi-Markov model. 
-# """
-# struct MultistateSemiMarkovModelFitted <: MultistateProcess
-#     data::DataFrame
-#     parameters::VectorOfVectors 
-#     loglik::Float64
-#     vcov::Matrix{Float64}
-#     hazards::Vector{_Hazard}
-#     totalhazards::Vector{_TotalHazard}
-#     tmat::Matrix{Int64}
-#     hazkeys::Dict{Symbol, Int64}
-#     subjectindices::Vector{Vector{Int64}}
-#     markovsurrogate::MarkovSurrogate
-#     modelcall::NamedTuple
-# end
-
-# """
-#     MultistateSemiMarkovModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
-
-# Struct that fully specifies a fitted multistate semi-Markov model with some censored states. 
-# """
-# struct MultistateSemiMarkovModelCensoredFitted <: MultistateProcess
-#     data::DataFrame
-#     parameters::VectorOfVectors 
-#     loglik::Float64
-#     vcov::Matrix{Float64}
-#     hazards::Vector{_Hazard}
-#     totalhazards::Vector{_TotalHazard}
-#     tmat::Matrix{Int64}
-#     hazkeys::Dict{Symbol, Int64}
-#     subjectindices::Vector{Vector{Int64}}
-#     markovsurrogate::MarkovSurrogate
-#     modelcall::NamedTuple
-# end
 
 """
     SamplePath(subjID::Int64, times::Vector{Float64}, states::Vector{Int64})

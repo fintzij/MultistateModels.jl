@@ -126,7 +126,7 @@ end
 """
     loglik(parameters, data::MPanelData; neg = true)
 
-Return sum of (negative) log likelihood for a Markov model fit to panel data. 
+Return sum of (negative) log likelihood for a Markov model fit to panel and/or exact data. 
 """
 function loglik(parameters, data::MPanelData; neg = true) # Raph: work on this
 
@@ -161,9 +161,22 @@ function loglik(parameters, data::MPanelData; neg = true) # Raph: work on this
     # accumulate the log likelihood
     ll = 0.0
     for i in Base.OneTo(nrow(data.model.data))
-        ll += 
-            log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i],
-             data.model.data.stateto[i]])
+
+        if data.model.data.obstype[i] == 1 # panel data
+
+            ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]])
+
+        elseif data.model.data.obstype[i] == 2 # exact data
+
+            ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
+
+            if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
+
+                ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], parameters[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true, newtime = false)
+
+            end
+        end
+        
     end
 
     neg ? -ll : ll
