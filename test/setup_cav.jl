@@ -73,6 +73,12 @@ set_parameters!(m,
 
 m_fit = fit(m)
 
-m_fit.parameters
-exp(-2.481188506073330)
-exp(-4.374443139609851)
+MultistateModels.getloglik(m_fit)
+MultistateModels.getestimates(m_fit)
+MultistateModels.getestimates(m_fit; transformed = true)
+
+# todo
+
+## profile code, identify bottlnecks
+
+## compare runtime with R package msm
