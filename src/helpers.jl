@@ -301,20 +301,6 @@ function getestimates(model::MultistateModelFitted; transformed::Bool = false)
 end
 
 """
-    getvcov(model::MultistateModelFitted) 
-
-Return the variance covariance matrix at the maximum likelihood estimate. 
-
-# Arguments 
-- `model::MultistateModelFitted`: fitted model
-"""
-function getvcov(model::MultistateModelFitted) 
-
-    model.vcov
-
-end
-
-"""
     getgradient(model::MultistateModelFitted) 
 
 Return the gradient at the maximum likelihood estimate. 
@@ -325,5 +311,19 @@ Return the gradient at the maximum likelihood estimate.
 function getgradient(model::MultistateModelFitted) 
 
     model.gradient
+
+end
+
+"""
+    getvcov(model::MultistateModelFitted) 
+
+Return the variance covariance matrix at the maximum likelihood estimate. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+"""
+function getvcov(model::MultistateModelFitted) 
+
+    model.vcov
 
 end

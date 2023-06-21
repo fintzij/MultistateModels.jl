@@ -76,6 +76,8 @@ m_fit = fit(m)
 MultistateModels.getloglik(m_fit)
 MultistateModels.getestimates(m_fit)
 MultistateModels.getestimates(m_fit; transformed = true)
+MultistateModels.getgradient(m_fit)
+MultistateModels.getvcov(m_fit)
 
 # todo
 

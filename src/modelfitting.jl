@@ -57,6 +57,7 @@ function fit(model::MultistateModel)
 
     # oh eff yes.
     ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
+    gradient = ForwardDiff.gradient(ll, sol.u)
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
@@ -64,6 +65,7 @@ function fit(model::MultistateModel)
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
         -sol.minimum,
+        gradient,
         vcov,
         model.hazards,
         model.totalhazards,
@@ -97,6 +99,7 @@ function fit(model::MultistateMarkovModel)
 
     # get the variance-covariance matrix
     ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
+    gradient = ForwardDiff.gradient(ll, sol.u)
     vcov = inv(ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
@@ -104,6 +107,7 @@ function fit(model::MultistateMarkovModel)
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
         -sol.minimum,
+        gradient,
         vcov,
         model.hazards,
         model.totalhazards,

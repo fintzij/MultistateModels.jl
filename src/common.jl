@@ -293,7 +293,7 @@ struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
 end
 
 """
-    MultistateModelFitted(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+    MultistateModelFitted(data::DataFrame, parameters::VectorOfVectors, gradient::Vector{Float64}, hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
 Struct that fully specifies a fitted multistate model. 
 """
@@ -301,6 +301,7 @@ struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
     parameters::VectorOfVectors 
     loglik::Float64
+    gradient::Vector{Float64}
     vcov::Matrix{Float64}
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
