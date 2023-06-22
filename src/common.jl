@@ -301,7 +301,6 @@ struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
     parameters::VectorOfVectors 
     loglik::Float64
-    gradient::Vector{Float64}
     vcov::Matrix{Float64}
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
@@ -309,6 +308,7 @@ struct MultistateModelFitted <: MultistateProcess
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     markovsurrogate::MarkovSurrogate
+    #optim::VectorOfVectors
     modelcall::NamedTuple
 end
 
