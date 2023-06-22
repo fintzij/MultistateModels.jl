@@ -73,11 +73,7 @@ set_parameters!(m,
 
 m_fit = fit(m)
 
-MultistateModels.getloglik(m_fit)
-MultistateModels.getestimates(m_fit)
-MultistateModels.getestimates(m_fit; transformed = true)
-MultistateModels.getgradient(m_fit)
-MultistateModels.getvcov(m_fit)
+CI, ll, AIC, BIC = MultistateModels.summary(m_fit)
 
 # todo
 

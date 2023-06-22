@@ -271,29 +271,44 @@ end
 
 
 """
-    getloglik(model::MultistateModelFitted) 
+    loglik(model::MultistateModelFitted) 
 
 Return the maximum likelihood estimates. 
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
 """
-function getloglik(model::MultistateModelFitted) 
+function loglik(model::MultistateModelFitted) 
 
     model.loglik
 
 end
 
 """
-    getestimates(model::MultistateModelFitted; transformed::Bool = true) 
+    parameters(model::MultistateModelFitted; transformed::Bool = true) 
 
 Return the maximum likelihood estimates. 
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
+"""
+function parameters(model::MultistateModelFitted)
+
+    model.parameters
+
+end
+
+
+"""
+    estimates(model::MultistateModelFitted) 
+
+Return the variance covariance matrix at the maximum likelihood estimate. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
 - `transformed::Bool`: whether to return the estimates on the natural (transformed) scale or on the log scale, defaults to false.
 """
-function getestimates(model::MultistateModelFitted; transformed::Bool = false) 
+function estimates(model::MultistateModelFitted; transformed::Bool = false)
 
     par=reduce(vcat, model.parameters)
     transformed ? exp.(par) : par
@@ -301,29 +316,63 @@ function getestimates(model::MultistateModelFitted; transformed::Bool = false)
 end
 
 """
-    getgradient(model::MultistateModelFitted) 
-
-Return the gradient at the maximum likelihood estimate. 
-
-# Arguments 
-- `model::MultistateModelFitted`: fitted model
-"""
-function getgradient(model::MultistateModelFitted) 
-
-    model.gradient
-
-end
-
-"""
-    getvcov(model::MultistateModelFitted) 
+    vcov(model::MultistateModelFitted) 
 
 Return the variance covariance matrix at the maximum likelihood estimate. 
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
 """
-function getvcov(model::MultistateModelFitted) 
+function vcov(model::MultistateModelFitted) 
 
     model.vcov
+
+end
+
+
+"""
+    optim(model::MultistateModelFitted) 
+
+Return the variance covariance matrix at the maximum likelihood estimate. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+"""
+function optim(model::MultistateModelFitted) 
+
+    model.optim
+
+end
+
+"""
+    summary(model::MultistateModelFitted) 
+
+Return the variance covariance matrix at the maximum likelihood estimate. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+"""
+function summary(model::MultistateModelFitted) 
+
+    # maximum likelihood estimates
+    est = estimates(model)
+
+    # confidence intervals
+    vcov = vcov(model)
+    se = sqrt.(vcov[diagind(vcov)])
+    lb =est.-1.96.*se
+    ub =est.+1.96.*se
+    CI = exp.(DataFrame(lower = lb, estimate = est, upper = ub))    
+
+    # log likelihood
+    ll = loglik(model)
+
+    # information criteria
+    p = length(estimates(model))
+    n = nrow(model.data)
+    AIC = -2*ll + 2     *p
+    BIC = -2*ll + log(n)*p
+
+    return CI, ll, AIC, BIC
 
 end
