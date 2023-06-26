@@ -196,6 +196,11 @@ function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat
     times  = [subj_dat.tstart[1]]; sizehint!(times, size(model.tmat, 2) * 2)
     states = [subj_dat.statefrom[1]]; sizehint!(states, size(model.tmat, 2) * 2)
 
+    # sample any censored states with the ffbs algorithm
+    if any(subj_dat.obstype == 0)
+        sample_skeleton() # ffbs
+    end
+
     # loop through data and sample endpoint conditioned paths
     for i in eachindex(subj_inds)
         if subj_dat.obstype[i] == 2
