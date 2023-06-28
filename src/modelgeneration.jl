@@ -330,7 +330,7 @@ end
 
 Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference.
 """
-function multistatemodel(hazards::HazardFunction...; data::DataFrame)
+function multistatemodel(hazards::HazardFunction...; data::DataFrame) # add optional emat matrix argument
 
     # catch the model call
     modelcall = (hazards = hazards, data = data)
@@ -361,7 +361,13 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
     # build exponential surrogate hazards
     surrogate = build_hazards(hazards...; data = data, surrogate = true)
 
-    # return the multistate model
+    # emission matrix
+    if any(data.obstype .== 0 | data.obstype .> 2)
+        #emissions = build_emat(tmat, emat)
+    end
+
+    # return the multistate model - change obstype control flow to allow more censoring codes
+    # emissions should be included in the censored model types
     if all(data.obstype .== 1)
         # exactly observed
         model = MultistateModel(
@@ -396,6 +402,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         _hazards,
         _totalhazards,
         tmat,
+        emissions,
         hazkeys,
         subjinds,
         MarkovSurrogate(surrogate[1], surrogate[2]),
@@ -416,12 +423,13 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
 
     elseif all(map(x -> x ∈ [0,2], data.obstype)) & any(isa.(_hazards, _SemiMarkovHazard))
         # Semi-Markov Markov model with panel data and/or censored data
-        model = MultistateSemiMarkovModel(
+        model = MultistateSemiMarkovModelCensored(
         data,
         parameters,
         _hazards,
         _totalhazards,
         tmat,
+        emissions,
         hazkeys,
         subjinds,
         MarkovSurrogate(surrogate[1], surrogate[2]),

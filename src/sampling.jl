@@ -188,23 +188,32 @@ Draw sample paths from a Markov surrogate process conditional on panel data.
 function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map)
 
     # subject data
-    subj_inds = model.subjectindices[subj]
-    subj_dat  = view(model.data, subj_inds, :)
+    subj_inds = model.subjectindices[subj] # rows in the dataset corresponding to the subject
+    subj_dat     = view(model.data, subj_inds, :) # subject's data - no shallow copy, just pointer
     subj_tpm_map = view(tpm_map, subj_inds, :)
+
+    # sample any censored observation
+    if any(subj_dat.obstype .∉ Ref([1,2]))
+        subj_emat = model.emat[subj]
+        skeleton = sample_skeleton(subj_inds, tpm_book, subj_tpm_map, emat) # ffbs
+        subj_dat.statefrom .= skeleton[1:length(skeleton)-1]
+        subj_dat.stateto   .= skeleton[2:length(skeleton)  ]
+    end
 
     # initialize sample path
     times  = [subj_dat.tstart[1]]; sizehint!(times, size(model.tmat, 2) * 2)
     states = [subj_dat.statefrom[1]]; sizehint!(states, size(model.tmat, 2) * 2)
 
-    # sample any censored states with the ffbs algorithm
-    if any(subj_dat.obstype == 0)
-        sample_skeleton() # ffbs
-    end
-
-    # loop through data and sample endpoint conditioned paths
-    for i in eachindex(subj_inds)
+    # loop through data and sample endpoint conditioned paths - need to give control flow some thought
+    for i in eachindex(subj_inds) # loop over each interval for the subject
         if subj_dat.obstype[i] == 2
             sample_ecctmc!(times, states, tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]], hazmat_book[subj_tpm_map[i,1]], subj_dat.statefrom[i], subj_dat.stateto[i], subj_dat.tstart[i], subj_dat.tstop[i])
+
+            # tpms are indexed first by unique covariates then unique gap times, hence two indices
+            # tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]] gives the tpm for interval i for the subject 
+
+            # transition intensity matrices are only indexed by unique covariates = 1 index
+            #  hazmat_book[subj_tpm_map[i,1]]
         elseif subj_dat.obstype[i] == 1 
             push!(times, subj_dat.tstop[i])
             push!(times, subj_dat.stateto[i])

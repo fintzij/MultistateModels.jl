@@ -17,9 +17,23 @@ dat =
               stateto = fill(2, 5*nsubj),
               obstype = fill(2, 5*nsubj))
 
+nsubj=2
+
+dat =
+    DataFrame(id = repeat(collect(1:nsubj), inner=3),
+              tstart = [[1], [2], [2,3], [1], [2], [2,3,4]],
+              tstop = [[2], [2,3], [1], [2], [2,3,4], [1]]
+    )
+
+
+tmp = DataFrame(tstop = [[2], [2,3], [1], [4]])
+    
 # censor some times and set other intervals to exactly observed
-# dat.obstype[findall(dat.tstop .== 8.0)] .= 1
-dat.obstype[findall(dat.tstart .== 8.0)] .= 1
+dat.obstype[findall(dat.tstop .== 8.0)] .= 0
+dat.obstype[findall(dat.tstart .== 8.0)] .= 0
+
+# emission matrix
+
 
 # create multistate model object
 model = multistatemodel(h12, h13, h21, h23; data = dat)
