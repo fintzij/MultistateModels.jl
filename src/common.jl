@@ -252,7 +252,7 @@ struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     hazards::Vector{_MarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-    emissions::Matrix{Int64}
+    emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     markovsurrogate::MarkovSurrogate
@@ -287,7 +287,7 @@ struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-    emissions::Matrix{Int64}
+    emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     markovsurrogate::MarkovSurrogate
@@ -307,7 +307,7 @@ struct MultistateModelFitted <: MultistateProcess
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-    emissions::Matrix{Int64}
+    emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     markovsurrogate::MarkovSurrogate

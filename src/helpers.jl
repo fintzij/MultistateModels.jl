@@ -154,9 +154,13 @@ function check_data!(data::DataFrame, tmat::Matrix)
         end
     end
 
-    # check that obstype is one of the allowed censoring schemes
+    # check that obstype is one of the allowed censoring schemes;
+    # check that the matrix censoring_patterns has the correct number of columns and that its first column is 3:n_patterns
+    # check that ffbs has at least one possible path
 
     # check that there are no rows for a subject after they hit an absorbing state
+
+
 end
 
 """
