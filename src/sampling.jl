@@ -194,10 +194,9 @@ function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat
 
     # sample any censored observation
     if any(subj_dat.obstype .∉ Ref([1,2]))
-        subj_emat = model.emat[subj]
-        skeleton = sample_skeleton(subj_inds, tpm_book, subj_tpm_map, emat) # ffbs
-        subj_dat.statefrom .= skeleton[1:length(skeleton)-1]
-        subj_dat.stateto   .= skeleton[2:length(skeleton)  ]
+        subj_emat = view(model.emat, subj_inds, :)
+       # skeleton = sample_skeleton(subj_inds, tpm_book, subj_tpm_map, emat) # ffbs
+       SampleSkeleton!(subj_dat, tpm_book, subj_tpm_map, subj_emat) # ffbs
     end
 
     # initialize sample path
@@ -227,4 +226,75 @@ function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat
     end
 
     return SamplePath(subj, times, states)
+end
+
+"""
+    sample_skeleton!(subj_dat, tpm_book, subj_tpm_map, subj_emat) 
+
+Sample the value of censored states using the FFBS algorithm
+"""
+
+function SampleSkeleton!(subj_dat, tpm_book, subj_tpm_map, subj_emat)
+
+    # ffbs
+    m, p = ForwardFiltering(subj_dat, tpm_book, subj_tpm_map, subj_emat) 
+    h    = BackwardSampling(m, p)
+    
+    # update subj_dat
+    subj_dat.stateto = h
+    subj_dat.statefrom[Not(begin)] = h[Not(end)] 
+
+end
+
+
+function ForwardFiltering(subj_dat, tpm_book, subj_tpm_map, subj_emat) 
+
+    n_obs    = size(subj_emat, 1) # number of states visited
+    n_states = size(subj_emat, 2) # number of states
+    m = Array{Float64}(undef, n_obs+1, n_states)  # matrix of marginal probabilities
+    p = Array{Float64}(undef, n_obs, n_states, n_states)   # joint distribution Pr(h_{t-1}=r,h_t=s|d_{1:t})
+    
+    # # forward filtering
+    m[1, subj_dat.statefrom[1]] = 1 # first state is assumed to be known
+    
+    for t in 1:n_obs # loop over each interval for the subject
+        q_t = tpm_book[subj_tpm_map[t,1]][subj_tpm_map[t,2]]
+        #q_t = view(tpm_book[subj_tpm_map[t,1], subj_tpm_map[t,2]], :, :)
+        # joint p_t
+        p_trs = Array{Float64}(undef, n_states, n_states) # unnormalized p_t
+        for r in 1:n_states, s in 1:n_states
+            p_trs[r,s] = m[t,r] * q_t[r,s] * subj_emat[t,s] # marginal * transition * emission [Eq. 6]
+        end
+        normalizing_constant = sum(p_trs)
+        if normalizing_constant == 0
+            id = subj_dat.id[1]
+            error("There is no trajectory that satisfies the censoring patterns for subject $id.")
+        end
+        p[t,:,:] = p_trs ./ normalizing_constant # normalize p_t [Eq. 6]
+        # posterior
+        for s in 1:n_states
+            m[t+1,s] = sum(p[t,:,s]) # marginalize the joint distribution p_t
+        end
+    end
+
+    return m, p
+
+end
+
+function BackwardSampling(m, p) 
+    
+    n_obs = size(p, 1) # number of observations
+    h = Array{Int64}(undef, n_obs)
+
+    # 1. draw draw h_n ~ pi_n
+    h[n_obs] = rand(Categorical(m[n_obs+1,:]))
+
+    # 2. draw h_t|h_{t+1}=s ~ p_{t,.,s}
+    for t in (n_obs-1):-1:1
+        w = p[t+1,:,h[t+1]] / sum(p[t+1,:,h[t+1]])
+       h[t] = rand(Categorical(w)) # [Eq. 10]
+    end
+
+    return h
+
 end
