@@ -357,7 +357,7 @@ end
 
 Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference.
 """
-function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_patterns::Matrix{Int64}) # add optional emat matrix argument
+function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_patterns::Matrix{Int64} = Matrix{Int64}[]) # add optional emat matrix argument
 
     # catch the model call
     modelcall = (hazards = hazards, data = data)
@@ -376,7 +376,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
     tmat = create_tmat(hazinfo)
 
     # function to check data formatting
-    check_data!(data, tmat)
+    check_data!(data, tmat, censoring_patterns)
 
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
@@ -390,6 +390,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
 
     # emission matrix
     if any(data.obstype .∉ Ref([1,2]))
+        check_censoring_patterns(censoring_patterns, tmat)
         emat = build_emat(data, censoring_patterns)
     end
 
