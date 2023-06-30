@@ -1,8 +1,13 @@
 using MultistateModels
+using MultistateModels: flatview, MPanelData, loglik
 using Distributions
 using Plots
 
 include("test/setup_ffbs.jl")
+
+
+#
+# verify that emat is correctly formatted
 
 
 #
@@ -29,17 +34,42 @@ sample_skeleton!(subj_dat_impossible, tpm_book, subj_tpm_map, subj_emat_impossib
 
 
 #
-# comparing Monte Carlo estimates and analytical probabilities
+# Comparing Monte Carlo estimates and analytical probabilities
 
 # Monte Carlo
-M = 100000
-S = zeros(M)
-for i in 1:M
-    m, p = ForwardFiltering(subj_dat_analytical, tpm_book, subj_tpm_map, subj_emat_analytical) 
-    h = BackwardSampling(m, p)
-    S[i] = h[5]
-end
-sum(S.==4) / M
+M = 10000000
+paths = Array{Int64}(undef, M, 5)
+m, p = ForwardFiltering(subj_dat_analytical, tpm_book, subj_tpm_map, subj_emat_analytical)
+
+paths = map(x -> BackwardSampling(m,p), collect(1:M))
+
+paths_id = map(x -> sum(x), paths)
+MC_estimates = [sum(paths_id.==11) sum(paths_id.==12) sum(paths_id.==13) sum(paths_id.==14)] ./ M
+sum(MC_estimates)
 
 # analytical
-1-exp(-1*2) # CDF of exponential distribution
+subj_emat_analytical
+possible_states = (2,3)
+prob_analytical = DataFrame(state_2 = Int64[], state_3 = Int64[], state_4 = Int64[], likelihood = Float64[])
+dat.obstype = fill(2, n_obs) # panel-observed data
+
+
+for state_2 in possible_states, state_3 in possible_states, state_4 in possible_states
+
+    dat.stateto[2:4] = [state_2, state_3, state_4]
+    dat.statefrom[3:5] = [state_2, state_3, state_4]
+    model = multistatemodel(h12, h23, h34; data = dat, censoring_patterns = censoring_patterns)
+    books = build_tpm_mapping(model.data)
+    data = MPanelData(model, books)
+
+    likelihood = exp(loglik(parameters, data::MPanelData; neg = false))
+
+    push!(prob_analytical, [state_2 state_3 state_4 likelihood])
+
+end
+prob_analytical.prob = prob_analytical.likelihood / sum(prob_analytical.likelihood)
+
+# comparison of MC estimates and analytical answer
+
+relative_error = abs.((prob_analytical.prob[[1,2,4,8]] .- MC_estimates[1,:]) ./ prob_analytical.prob[[1,2,4,8]])
+relative_error
