@@ -162,11 +162,11 @@ function loglik(parameters, data::MPanelData; neg = true) # Raph: work on this
     ll = 0.0
     for i in Base.OneTo(nrow(data.model.data))
 
-        if data.model.data.obstype[i] == 1 # panel data
+        if data.model.data.obstype[i] == 2 # panel data
 
             ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]])
 
-        elseif data.model.data.obstype[i] == 2 # exact data
+        elseif data.model.data.obstype[i] == 1 # exact data
 
             ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
 

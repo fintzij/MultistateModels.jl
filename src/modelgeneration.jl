@@ -82,6 +82,7 @@ function create_tmat(hazinfo::DataFrame)
     return tmat
 end
 
+
 # mutable structs
 
 """
@@ -326,11 +327,37 @@ function build_totalhazards(_hazards, tmat)
 end
 
 """
+    build_emat(data::DataFrame, censoring_patterns::Matrix{Int64})
+
+Generate a matrix enumerating instantaneous transitions. Origin states correspond to rows, destination states to columns, and zero entries indicate that an instantaneous state transition is not possible. Transitions are enumerated in non-zero elements of the matrix. `hazinfo` is the output of a call to `enumerate_hazards`.
+"""
+function build_emat(data::DataFrame, censoring_patterns::Matrix{Int64})
+    
+    # initialize the emission matrix
+    n_obs = nrow(data)
+    n_states = size(censoring_patterns, 2) - 1
+    emat = zeros(Int64, n_obs, n_states)
+
+    for i in 1:n_obs
+        if data.obstype[i] ∈ [1, 2] # observation not censored
+            emat[i,data.stateto[i]] = 1
+        elseif data.obstype[i] == 0 # observation censored, all state are possible
+            emat[i,:] = ones(n_states)
+        else
+            emat[i,:] .= censoring_patterns[data.obstype[i] - 2, 2:n_states+1]
+            censoring_patterns[censoring_patterns[:,1] .== data.obstype[i], 2:size(censoring_patterns,2)]
+        end 
+    end
+
+    return emat
+end
+
+"""
     multistatemodel(hazards::HazardFunction...; data::DataFrame)
 
 Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference.
 """
-function multistatemodel(hazards::HazardFunction...; data::DataFrame)
+function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_patterns::Matrix{Int64} = Matrix{Int64}[]) # add optional emat matrix argument
 
     # catch the model call
     modelcall = (hazards = hazards, data = data)
@@ -349,7 +376,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
     tmat = create_tmat(hazinfo)
 
     # function to check data formatting
-    check_data!(data, tmat)
+    check_data!(data, tmat, censoring_patterns)
 
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
@@ -361,7 +388,13 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
     # build exponential surrogate hazards
     surrogate = build_hazards(hazards...; data = data, surrogate = true)
 
-    # return the multistate model
+    # emission matrix
+    if any(data.obstype .∉ Ref([1,2]))
+        check_censoring_patterns(censoring_patterns, tmat)
+        emat = build_emat(data, censoring_patterns)
+    end
+
+    # return the multistate model - change obstype control flow to allow more censoring codes
     if all(data.obstype .== 1)
         # exactly observed
         model = MultistateModel(
@@ -375,7 +408,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
-    elseif all(map(x -> x ∈ [1,2], data.obstype)) & all(isa.(_hazards, _MarkovHazard))
+    elseif all(data.obstype .∈ Ref([1,2])) & all(isa.(_hazards, _MarkovHazard))
         # Markov model with panel data and/or exactly observed data
         model = MultistateMarkovModel(
         data,
@@ -388,7 +421,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
-    elseif all(map(x -> x ∈ [0,2], data.obstype)) & all(isa.(_hazards, _MarkovHazard))
+    elseif all(data.obstype .!= 1) & all(isa.(_hazards, _MarkovHazard))
         # Markov model with panel data and/or censored data
         model = MultistateMarkovModelCensored(
         data,
@@ -396,12 +429,13 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         _hazards,
         _totalhazards,
         tmat,
+        emat,
         hazkeys,
         subjinds,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
-    elseif all(map(x -> x ∈ [1,2], data.obstype)) & any(isa.(_hazards, _SemiMarkovHazard))
+    elseif all(data.obstype .∈ Ref([1,2])) & any(isa.(_hazards, _SemiMarkovHazard))
         # Semi-Markov model with panel data and/or exactly observed data
         model = MultistateSemiMarkovModel(
         data,
@@ -414,14 +448,15 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame)
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
-    elseif all(map(x -> x ∈ [0,2], data.obstype)) & any(isa.(_hazards, _SemiMarkovHazard))
+    elseif all(data.obstype .!= 1) & any(isa.(_hazards, _SemiMarkovHazard))
         # Semi-Markov Markov model with panel data and/or censored data
-        model = MultistateSemiMarkovModel(
+        model = MultistateSemiMarkovModelCensored(
         data,
         parameters,
         _hazards,
         _totalhazards,
         tmat,
+        emat,
         hazkeys,
         subjinds,
         MarkovSurrogate(surrogate[1], surrogate[2]),
