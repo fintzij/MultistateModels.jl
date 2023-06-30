@@ -100,7 +100,7 @@ end
 
 Validate a user-supplied data frame to ensure that it conforms to MultistateModels.jl requirements.
 """
-function check_data!(data::DataFrame, tmat::Matrix)
+function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{Int64})
 
     # validate column names and order
     if any(names(data)[1:6] .!== ["id", "tstart", "tstop", "statefrom", "stateto", "obstype"])
@@ -154,13 +154,61 @@ function check_data!(data::DataFrame, tmat::Matrix)
         end
     end
 
-    # check that obstype is one of the allowed censoring schemes;
-    # check that the matrix censoring_patterns has the correct number of columns and that its first column is 3:n_patterns
-    # check that ffbs has at least one possible path
+    # check that obstype is one of the allowed censoring schemes
+    if any(data.obstype .∉ Ref([1,2]))
+        censoring_patterns_id = censoring_patterns[:,1]
+        if any(data.obstype .∉ Ref([[1,2]; censoring_patterns_id]))
+            error("obstype should be one of 1, 2, or a censoring id from censoring_patterns.")
+        end
+    end
 
-    # check that there are no rows for a subject after they hit an absorbing state
+    # check that there is no row for a subject after they hit an absorbing state
+
+end
 
 
+"""
+check_censoring_patterns(data::DataFrame, emat::Matrix)
+
+Validate a user-supplied data frame to ensure that it conforms to MultistateModels.jl requirements.
+"""
+function check_censoring_patterns(censoring_patterns::Matrix{Int64}, tmat::Matrix)
+    
+    nrow, ncol = size(censoring_patterns)
+
+    # check for empty
+    if nrow == 0 | ncol < 2
+        error("The matrix censoring_patterns seems to be empty, while there are censored states.")
+    end
+
+    # censoring patterns must be labelled as 3, 4, ...
+    if !all(censoring_patterns[:,1] .== 3:(nrow+2))
+        error("The first column of censoring_patterns must be of the form 3, 4, ....")
+    end
+
+    # censoring patterns must be binary
+    if any(censoring_patterns[:,2:ncol] .∉ Ref([0,1]))
+        error("Columns 2, 3, ... of censoring_patterns must be binary.")
+    end
+
+    # censoring patterns must indicate the presence/absence of each state
+    n_states = size(tmat, 1)
+    if ncol - 1 .!= n_states
+        error("The multistate model contains $n_states states, but censoring_patterns contains $(ncol-1) states.")
+    end
+
+    # censoring patterns must have at least one possible state
+    for i in 1:nrow
+        if all(censoring_patterns[i,2:ncol] .== 0)
+            error("Censoring pattern $i has no allowed state.")
+        end
+        if all(censoring_patterns[i,2:ncol] .== 1)
+            println("All states are allowed in censoring pattern $i.")
+        end
+        if sum(censoring_patterns[i,2:ncol]) .== 1
+            println("Censoring pattern $i has only one allowed state; if these observations are not censored there is no need to use a censoring pattern.")
+        end
+    end
 end
 
 """
