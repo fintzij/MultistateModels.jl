@@ -41,7 +41,7 @@ Internal function to compute a table with observed transition counts.
 # end
 
 """
-    statetable(model::MultistateModel, groups::Vararg{Symbol})
+    statetable(model::MultistateProcess, groups::Vararg{Symbol})
 
 Generate a table with counts of observed transitions.
 
@@ -50,7 +50,7 @@ Generate a table with counts of observed transitions.
 - model: multistate model object.
 - groups: variables on which to stratify the tables of transition counts.
 """
-function statetable(model::MultistateModel, groups::Vararg{Symbol})
+function statetable(model::MultistateProcess, groups::Vararg{Symbol})
 
     # apply groupby to get all different combinations of data frames
     if length(groups) == 0
@@ -65,13 +65,14 @@ function statetable(model::MultistateModel, groups::Vararg{Symbol})
 end
 
 """
-    initialize_parameters(model::MultistateModel, groups::Symbol...)
+    initialize_parameters(model::MultistateProcess, groups::Symbol...)
 
 # Arguments
 - model: MultistateModel object
 - groups: different categorical variables to subset on (e.g. male, trt, etc.)
 """
-function initialize_parameters(model::MultistateModel, groups::Symbol...)
+
+function initialize_parameters(model::MultistateProcess, groups::Symbol...)
     # obtain data from multistatemodel object
     data = model.hazards[1].data
 

@@ -4,34 +4,33 @@
 
 ### Exactly observed sample paths ----------------------
 """
-    loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::MultistateModel) 
+    loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess) 
 
 Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
 """
-function loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::MultistateModel)
+function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess) 
 
     # initialize log likelihood
     ll = 0.0
 
-    # number of jumps/left endpoints
-    n_intervals = length(path.times) - 1
-
     # subject data
     subj_inds = model.subjectindices[path.subj]
     subj_dat  = view(model.data, subj_inds, :)
+
+    # number of jumps/left endpoints
+    n_intervals = length(path.times) - 1
 
     # current index
     subj_dat_ind = 1 # row in subject data
     comp_dat_ind = subj_inds[subj_dat_ind] # index in complete data
 
     # data time interval
-    time_L = subj_dat.tstart[1]
-    time_R = subj_dat.tstop[1]
+    time_R = subj_dat.tstop[subj_dat_ind]
 
     # recurse through the sample path
     for i in Base.OneTo(n_intervals)
 
-        # current and next need this?
+        # current and next state
         scur  = path.states[i]
         snext = path.states[i+1]
 
@@ -39,31 +38,40 @@ function loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::M
         keep_going = isa(model.totalhazards[scur], _TotalHazardTransient)
 
         # times in the jump chain (clock forward)
-        # gets reset each time below i gets incremented
-        tcur  = path.times[i]
-        tstop = path.times[i+1]
+        # gets reset each time as i gets incremented
+        tcur  = path.times[i]   # current time
+        tstop = path.times[i+1] # time of next jump
 
         # time in state (clock reset)
-        timespent   = 0.0
-        timeinstate = tstop - tcur 
+        timespent   = 0.0   # accumulates occupancy time
+        timeinstate = tstop - tcur # sojourn time
 
         # initialize survival probability
         log_surv_prob = 0.0
 
         # accumulate log likelihood
-        while keep_going
-            
+        while keep_going            
+
             if tstop <= time_R
                 # event happens in (time_L, time_R]
                 # accumulate log(Pr(T ≥ timeinstate | T ≥ timespent))
-                log_surv_prob += survprob(timespent, timeinstate, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true)
+                log_surv_prob += survprob(timespent, timeinstate, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true, newtime = false)
 
                 # increment log likelihood
                 ll += log_surv_prob
 
                 # if event happened, accrue hazard
                 if snext != scur
-                    ll += call_haz(timeinstate, parameters[model.tmat[scur, snext]], comp_dat_ind, hazards[model.tmat[scur, snext]]; give_log = true)
+                    ll += call_haz(timeinstate, parameters[model.tmat[scur, snext]], comp_dat_ind, hazards[model.tmat[scur, snext]]; give_log = true, newtime = false)
+                end
+
+                # increment row index in subj_dat
+                if (tstop == time_R) & (subj_dat_ind != size(subj_dat, 1))
+                    subj_dat_ind += 1
+                    comp_dat_ind += 1
+
+                    # increment time_R
+                    time_R = subj_dat.tstop[subj_dat_ind]
                 end
 
                 # break out of the while loop
@@ -73,7 +81,7 @@ function loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::M
                 # event doesn't hapen in (time_L, time_R]
                 # accumulate log-survival
                 # accumulate log(Pr(T ≥ time_R | T ≥ timespent))
-                log_surv_prob += survprob(timespent, timespent + time_R - tcur, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true)
+                log_surv_prob += survprob(timespent, timespent + time_R - tcur, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true, newtime = false)
                 
                 # increment timespent
                 timespent += time_R - tcur
@@ -82,12 +90,13 @@ function loglik(parameters, path::SamplePath, hazards::Vector{_Hazard}, model::M
                 tcur = time_R
 
                 # increment row index in subj_dat
-                subj_dat_ind += 1
-                comp_dat_ind += 1
+                if subj_dat_ind != size(subj_dat, 1)
+                    subj_dat_ind += 1
+                    comp_dat_ind += 1
 
-                # increment time_L, time_R
-                time_L = subj_dat.tstart[subj_dat_ind]
-                time_R = subj_dat.tstop[subj_dat_ind]
+                    # increment time_R
+                    time_R = subj_dat.tstop[subj_dat_ind]
+                end
             end
         end
     end
@@ -117,9 +126,9 @@ end
 """
     loglik(parameters, data::MPanelData; neg = true)
 
-Return sum of (negative) log likelihood for a Markov model fit to panel data. 
+Return sum of (negative) log likelihood for a Markov model fit to panel and/or exact data. 
 """
-function loglik(parameters, data::MPanelData; neg = true) 
+function loglik(parameters, data::MPanelData; neg = true) # Raph: work on this
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
@@ -152,9 +161,22 @@ function loglik(parameters, data::MPanelData; neg = true)
     # accumulate the log likelihood
     ll = 0.0
     for i in Base.OneTo(nrow(data.model.data))
-        ll += 
-            log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i],
-             data.model.data.stateto[i]])
+
+        if data.model.data.obstype[i] == 2 # panel data
+
+            ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]])
+
+        elseif data.model.data.obstype[i] == 1 # exact data
+
+            ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
+
+            if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
+
+                ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], parameters[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true, newtime = false)
+
+            end
+        end
+        
     end
 
     neg ? -ll : ll

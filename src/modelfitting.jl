@@ -1,39 +1,51 @@
-"""
-    fit(model::MultistateModel; alg = "ml")
+# """
+#     fit(model::MultistateModel; alg = "ml")
 
-Fit a model. 
-""" 
-function fit(model::MultistateModel; alg = "ml", nparticles = 100)
+# Fit a model. 
+# """ 
+# function fit(model::MultistateModel; alg = "ml", nparticles = 100)
     
-    # if sample paths are fully observed, maximize the likelihood directly
-    if all(model.data.obstype .== 1)
+#     # if sample paths are fully observed, maximize the likelihood directly
+#     if all(model.data.obstype .== 1)
         
-        fitted = fit_exact(model)
+#         fitted = fit_exact(model)
 
-    elseif all(model.data.obstype .== 2) & 
-        # multistate Markov model or competing risks model
-        all(isa.(model.hazards, MultistateModels._Exponential) .|| 
-            isa.(model.hazards, MultistateModels._ExponentialPH))
-        fitted = fit_markov_interval(model)
-    elseif all(model.data.obstype .== 2) & 
-        !all(isa.(model.hazards, MultistateModels._Exponential) .|| 
-             isa.(model.hazards, MultistateModels._ExponentialPH))
-        fitted = fit_semimarkov_interval(model; nparticles = nparticles)
-    end
+#     elseif all(model.data.obstype .== 2) & # Multistate Markov model, panel data, no censored state
+#         all(isa.(model.hazards, MultistateModels._Exponential) .|| 
+#             isa.(model.hazards, MultistateModels._ExponentialPH))
+        
+#         fitted = fit_markov_interval(model)
 
-    # return fitted object
-    return fitted
-end 
+#     elseif all(model.data.obstype .== 2) & 
+#         !all(isa.(model.hazards, MultistateModels._Exponential) .|| 
+#              isa.(model.hazards, MultistateModels._ExponentialPH))
+        
+#         fitted = fit_semimarkov_interval(model; nparticles = nparticles)
+#     end
+
+#     ### mixed likelihoods to add
+#     # 1. Mixed panel + fully observed data, no censored states, Markov process
+#         # Easy.
+#     # 2. Mixed panel + fully observed data, no censored states, semi-Markov process
+#         # Easy, just need to append fully observed parts of the path in proposal.
+#     # 3. Mixed panel + fully observed data, with censored states, semi-Markov process
+#         # Easy, just sample the censored state. 
+#     # 4. Mixed panel + fully observed data, with censored states, Markov process
+#         # Medium complicated - marginalize over the possible states.
+
+#     # return fitted object
+#     return fitted
+# end 
 
 """
-    fit_exact(model::MultistateModel)
+    fit(model::MultistateModel)
 
 Fit a multistate model given exactly observed sample paths.
 """
-function fit_exact(model::MultistateModel)
+function fit(model::MultistateModel)
 
     # initialize array of sample paths
-    samplepaths = extract_paths(model)
+    samplepaths = extract_paths(model; self_transitions = false)
 
     # extract and initialize model parameters
     parameters = flatview(model.parameters)
@@ -44,8 +56,9 @@ function fit_exact(model::MultistateModel)
     sol  = solve(prob, Newton())
 
     # oh eff yes.
-    ll = pars -> loglik(pars, ExactData(model, samplepaths);neg=false)
-    vcov = inv(ForwardDiff.hessian(ll, sol.u))
+    ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
+    gradient = ForwardDiff.gradient(ll, sol.u)
+    vcov = inv(.-ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
     return MultistateModelFitted(
@@ -64,11 +77,13 @@ end
 
 
 """
-    fit_markov_interval(model::MultistateModel)
+    fit(model::MultistateMarkovModel)
 
-Fit a multistate markov model to interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities).
+Fit a multistate markov model to 
+interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities),
+or a mix of panel data and exact jump times.
 """
-function fit_markov_interval(model::MultistateModel)
+function fit(model::MultistateMarkovModel)
     
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -83,10 +98,11 @@ function fit_markov_interval(model::MultistateModel)
 
     # get the variance-covariance matrix
     ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
-    vcov = inv(ForwardDiff.hessian(ll, sol.u))
+    gradient = ForwardDiff.gradient(ll, sol.u)
+    vcov = inv(.-ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
-    return MultistateModelFitted(
+    return  MultistateModelFitted(
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
         -sol.minimum,
@@ -99,6 +115,30 @@ function fit_markov_interval(model::MultistateModel)
         model.markovsurrogate,
         model.modelcall)
 end
+
+"""
+    fit(model::MultistateMarkovModelCensored)
+
+Fit a multistate markov model to 
+interval censored data, some of which are censored,
+or a mix of panel data, some of which are censored, and exact jump times.
+"""
+function fit(model::MultistateMarkovModelCensored)
+    
+    if all(model.data.obstype .!= 1) # only panel data
+    # TODO
+    # Equation 13 in msm package
+    # https://cran.r-project.org/web/packages/msm/vignettes/msm-manual.pdf
+    elseif any(model.data.obstype .== 1) # mix of panel data and exact jump times.
+    # TODO
+    # introduce a censored state before each observed jump time.
+    # use Equation 13 from the msm package on each interval between the observed jump times
+    end
+
+end
+
+# check with J&J that the previous two `fit` functions are correct before doing the same gymnastic with semi-Markov models
+# do the same gymnastic for semi-Markov model
 
 #  MCEM pseudo-code
 # input: z_α, z_β, z_γ, nparticles, K (MC sample size inflation)
@@ -114,7 +154,7 @@ end
     # end
 
 """
-    fit_semimarkov_interval(model::MultistateModel; nparticles)
+    fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles)
 
 Fit a semi-Markov model to panel data via Monte Carlo EM. 
 
@@ -131,7 +171,7 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 - γ: Standard normal quantile for stopping
 - κ: Inflation factor for MCEM sample size, m_new = m_cur + m_cur/κ
 """
-function fit_semimarkov_interval(model::MultistateModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3, verbose = false)
+function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3, verbose = false)
 
     # number of subjects
     nsubj = length(model.subjectindices)

@@ -1,9 +1,40 @@
 """
+    Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing}, intercept::Bool = true, periodic::Bool = false)
+
+Specify a parametric or semi-parametric baseline cause-specific hazard function. 
+
+# Arguments
+- `hazard`: StatsModels.jl FormulaTerm for the log-hazard. Covariates have a multiplicative effect on the baseline cause specific hazard. Must be specified with "0 ~" on the left hand side. 
+- `family`: one of "exp", "wei", or "gom" for exponential, Weibull, or Gompertz cause-specific baseline hazard functions, or "sp" for a semi-parametric spline basis for the baseline hazard (defaults to M-splines).
+- `statefrom`: integer specifying the origin state.
+- `stateto`: integer specifying the destination state.
+
+# Additional arguments for semiparametric baseline hazards. An M-spline is used if the hazard is not assumed to be monotonic, otherwise an I-spline. Spline bases are constructed via a call to the `splines2` package in R. See [the splines2 documentation](https://wwenjie.org/splines2/articles/splines2-intro#mSpline) for additional details. 
+- `df`: Degrees of freedom.
+- `degree`: Degree of the spline polynomial basis.
+- `knots`: Vector of knots.
+- `boundaryknots`: Length 2 vector of boundary knots.
+- `intercept`: Defaults to true for whether the spline should include an intercept.
+- `periodic`: Periodic spline basis, defaults to false.
+- `monotonic`: Assume that baseline hazard is monotonic, defaults to false. If true, use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
+"""
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, intercept::Bool = true, periodic::Bool = false, monotonic::Bool = false)
+    
+    if family != "sp"
+        h = ParametricHazard(hazard, family, statefrom, stateto)
+    else 
+        h = SplineHazard(hazard, family, statefrom, stateto, df, degree, knots, boundaryknots, intercept, periodic, monotonic)
+    end
+
+    return h
+end
+
+"""
     enumerate_hazards(hazards::Hazard...)
 
 Generate a matrix whose columns record the origin state, destination state, and transition number for a collection of hazards. The hazards are reordered by origin state, then by destination state. `hazards::Hazard...` is an iterable collection of user-supplied `Hazard` objects.
 """
-function enumerate_hazards(hazards::Hazard...)
+function enumerate_hazards(hazards::HazardFunction...)
 
     n_haz = length(hazards)
 
@@ -51,6 +82,7 @@ function create_tmat(hazinfo::DataFrame)
     return tmat
 end
 
+
 # mutable structs
 
 """
@@ -62,7 +94,7 @@ Accept iterable collection of `Hazard` objects, plus data.
 
 _hazards[1] corresponds to the first allowable transition enumerated in a transition matrix (in row major order), _hazards[2] to the second and so on... So _hazards will have length equal to number of allowable transitions.
 """
-function build_hazards(hazards::Hazard...; data::DataFrame, surrogate = false)
+function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = false)
     
     # initialize the arrays of hazards
     _hazards = Vector{_Hazard}(undef, length(hazards))
@@ -72,6 +104,11 @@ function build_hazards(hazards::Hazard...; data::DataFrame, surrogate = false)
 
     # initialize a dictionary for indexing into the vector of hazards
     hazkeys = Dict{Symbol, Int64}()
+
+    if any(isa.(hazards, SplineHazard))
+        samplepath_sojourns = extract_paths(data; self_transitions = false)
+        samplepaths_full = extract_paths(data; self_transitions = true)
+    end
 
     # assign a hazard function
     for h in eachindex(hazards) 
@@ -215,8 +252,44 @@ function build_hazards(hazards::Hazard...; data::DataFrame, surrogate = false)
                         hazards[h].statefrom,
                         hazards[h].stateto)
             end
-        elseif family == "gg"
-        else # semi-parametric family
+        elseif family == "sp" # m-splines
+
+            # grab hazard object from splines2
+        (;hazard, cumulative_hazard, times) = spline_hazards(hazards[h], data, samplepath_sojourns)
+
+            # number of parameters
+            npars = size(hazard)[1] + size(hazdat, 2)
+
+            # vector for parameters
+            hazpars = zeros(Float64, npars)
+
+            # append to model parameters
+            push!(parameters, hazpars)
+
+            # parameter names
+            parnames = 
+                vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[2]))),
+                        hazname*"_".*coefnames(hazschema)[2])
+
+            # hazard struct
+            haz_struct = 
+            _Spline(
+                Symbol(hazname),
+                hazdat, 
+                Symbol.(parnames),
+                hazards[h].statefrom,
+                hazards[h].stateto,
+                Vector{Float64}(times),
+                ElasticMatrix{Float64}(rcopy(hazard)),
+                ElasticMatrix{Float64}(rcopy(cumulative_hazard)),
+                hazard, 
+                cumulative_hazard,
+                rcopy(R"attributes($hazard)"))
+
+            # add additional gap times
+            if samplepath_sojourns != samplepaths_full
+                compute_spline_basis!(haz_struct, data, samplepaths_full)
+            end
         end
 
         # note: want a symbol that names the hazard + vector of symbols for parameters
@@ -253,31 +326,38 @@ function build_totalhazards(_hazards, tmat)
     return _totalhazards
 end
 
-### Cumulative hazards
 """
-    build_cumulativehazards(_totalhazard::_TotalHazard)
+    build_emat(data::DataFrame, censoring_patterns::Matrix{Int64})
 
+Generate a matrix enumerating instantaneous transitions. Origin states correspond to rows, destination states to columns, and zero entries indicate that an instantaneous state transition is not possible. Transitions are enumerated in non-zero elements of the matrix. `hazinfo` is the output of a call to `enumerate_hazards`.
 """
-function build_cumulativehazards(_totalhazards::_TotalHazard)
-
-    # initialize a vector of cumulative hazards
-    _cumulativehazards = Vector{_CumulativeHazard}(undef, length(_totalhazards))
-
-    for h in eachindex(_cumulativehazards)
-        if(isa(_totalhazards[h], _TotalHazardAbsorbing))
-        else
-
-        end
-    end
+function build_emat(data::DataFrame, censoring_patterns::Matrix{Int64})
     
+    # initialize the emission matrix
+    n_obs = nrow(data)
+    n_states = size(censoring_patterns, 2) - 1
+    emat = zeros(Int64, n_obs, n_states)
+
+    for i in 1:n_obs
+        if data.obstype[i] ∈ [1, 2] # observation not censored
+            emat[i,data.stateto[i]] = 1
+        elseif data.obstype[i] == 0 # observation censored, all state are possible
+            emat[i,:] = ones(n_states)
+        else
+            emat[i,:] .= censoring_patterns[data.obstype[i] - 2, 2:n_states+1]
+            censoring_patterns[censoring_patterns[:,1] .== data.obstype[i], 2:size(censoring_patterns,2)]
+        end 
+    end
+
+    return emat
 end
 
 """
-    multistatemodel(hazards::Hazard...; data::DataFrame)
+    multistatemodel(hazards::HazardFunction...; data::DataFrame)
 
 Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference.
 """
-function multistatemodel(hazards::Hazard...; data::DataFrame)
+function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_patterns::Matrix{Int64} = Matrix{Int64}[]) # add optional emat matrix argument
 
     # catch the model call
     modelcall = (hazards = hazards, data = data)
@@ -296,7 +376,7 @@ function multistatemodel(hazards::Hazard...; data::DataFrame)
     tmat = create_tmat(hazinfo)
 
     # function to check data formatting
-    check_data!(data, tmat)
+    check_data!(data, tmat, censoring_patterns)
 
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
@@ -308,8 +388,16 @@ function multistatemodel(hazards::Hazard...; data::DataFrame)
     # build exponential surrogate hazards
     surrogate = build_hazards(hazards...; data = data, surrogate = true)
 
-    # return the multistate model
-    model = MultistateModel(
+    # emission matrix
+    if any(data.obstype .∉ Ref([1,2]))
+        check_censoring_patterns(censoring_patterns, tmat)
+        emat = build_emat(data, censoring_patterns)
+    end
+
+    # return the multistate model - change obstype control flow to allow more censoring codes
+    if all(data.obstype .== 1)
+        # exactly observed
+        model = MultistateModel(
         data,
         parameters,
         _hazards,
@@ -319,6 +407,61 @@ function multistatemodel(hazards::Hazard...; data::DataFrame)
         subjinds,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
+
+    elseif all(data.obstype .∈ Ref([1,2])) & all(isa.(_hazards, _MarkovHazard))
+        # Markov model with panel data and/or exactly observed data
+        model = MultistateMarkovModel(
+        data,
+        parameters,
+        _hazards,
+        _totalhazards,
+        tmat,
+        hazkeys,
+        subjinds,
+        MarkovSurrogate(surrogate[1], surrogate[2]),
+        modelcall)
+
+    elseif all(data.obstype .!= 1) & all(isa.(_hazards, _MarkovHazard))
+        # Markov model with panel data and/or censored data
+        model = MultistateMarkovModelCensored(
+        data,
+        parameters,
+        _hazards,
+        _totalhazards,
+        tmat,
+        emat,
+        hazkeys,
+        subjinds,
+        MarkovSurrogate(surrogate[1], surrogate[2]),
+        modelcall)
+
+    elseif all(data.obstype .∈ Ref([1,2])) & any(isa.(_hazards, _SemiMarkovHazard))
+        # Semi-Markov model with panel data and/or exactly observed data
+        model = MultistateSemiMarkovModel(
+        data,
+        parameters,
+        _hazards,
+        _totalhazards,
+        tmat,
+        hazkeys,
+        subjinds,
+        MarkovSurrogate(surrogate[1], surrogate[2]),
+        modelcall)
+
+    elseif all(data.obstype .!= 1) & any(isa.(_hazards, _SemiMarkovHazard))
+        # Semi-Markov Markov model with panel data and/or censored data
+        model = MultistateSemiMarkovModelCensored(
+        data,
+        parameters,
+        _hazards,
+        _totalhazards,
+        tmat,
+        emat,
+        hazkeys,
+        subjinds,
+        MarkovSurrogate(surrogate[1], surrogate[2]),
+        modelcall)
+    end
 
     return model
 end

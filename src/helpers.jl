@@ -1,20 +1,20 @@
 """
-    initialize_parameters!(model::MultistateModel)
+    initialize_parameters!(model::MultistateProcess)
 
 Set initial values for the model parameters. Description of how this happens...
 """
-function initialize_parameters!(model::MultistateModel)
+function initialize_parameters!(model::MultistateProcess)
     transmat = statetable(model)
     q_crude_init = crudeinit(transmat, model.tmat)
     # set_parameters!(model, q_crude_init)
 end
 
 """
-    set_parameters!(model::MultistateModel, newvalues::Vector{Float64})
+    set_parameters!(model::MultistateProcess, newvalues::Vector{Float64})
 
 Set model parameters given a vector of values. Copies `newvalues`` to `model.parameters`.
 """
-function set_parameters!(model::MultistateModel, newvalues::Vector{Vector{Float64}})
+function set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Float64}})
     
     # check that we have the right number of parameters
     if(length(model.parameters) != length(newvalues))
@@ -30,11 +30,11 @@ function set_parameters!(model::MultistateModel, newvalues::Vector{Vector{Float6
 end
 
 """
-    set_parameters!(model::MultistateModel, newvalues::Tuple)
+    set_parameters!(model::MultistateProcess, newvalues::Tuple)
 
 Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assigns new values to `model.parameters[i]`, where `i` indexes the cause-specific hazards in the order they appear in the model object.
 """
-function set_parameters!(model::MultistateModel, newvalues::Tuple)
+function set_parameters!(model::MultistateProcess, newvalues::Tuple)
     # check that there is a vector of parameters for each cause-specific hazard
     if(length(model.parameters) != length(newvalues))
         error("Number of supplied parameter vectors not equal to number of cause-specific hazards.")
@@ -51,11 +51,11 @@ function set_parameters!(model::MultistateModel, newvalues::Tuple)
 end
 
 """
-    set_parameters!(model::MultistateModel, newvalues::NamedTuple)
+    set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
 
 Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  
 """
-function set_parameters!(model::MultistateModel, newvalues::NamedTuple)
+function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
     
     # get keys for the new values
     value_keys = keys(newvalues)
@@ -100,7 +100,7 @@ end
 
 Validate a user-supplied data frame to ensure that it conforms to MultistateModels.jl requirements.
 """
-function check_data!(data::DataFrame, tmat::Matrix)
+function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{Int64})
 
     # validate column names and order
     if any(names(data)[1:6] .!== ["id", "tstart", "tstop", "statefrom", "stateto", "obstype"])
@@ -165,8 +165,60 @@ function check_data!(data::DataFrame, tmat::Matrix)
     end
 
     # check that obstype is one of the allowed censoring schemes
+    if any(data.obstype .∉ Ref([1,2]))
+        censoring_patterns_id = censoring_patterns[:,1]
+        if any(data.obstype .∉ Ref([[1,2]; censoring_patterns_id]))
+            error("obstype should be one of 1, 2, or a censoring id from censoring_patterns.")
+        end
+    end
 
-    # check that there are no rows for a subject after they hit an absorbing state
+    # check that there is no row for a subject after they hit an absorbing state
+
+end
+
+
+"""
+check_censoring_patterns(data::DataFrame, emat::Matrix)
+
+Validate a user-supplied data frame to ensure that it conforms to MultistateModels.jl requirements.
+"""
+function check_censoring_patterns(censoring_patterns::Matrix{Int64}, tmat::Matrix)
+    
+    nrow, ncol = size(censoring_patterns)
+
+    # check for empty
+    if nrow == 0 | ncol < 2
+        error("The matrix censoring_patterns seems to be empty, while there are censored states.")
+    end
+
+    # censoring patterns must be labelled as 3, 4, ...
+    if !all(censoring_patterns[:,1] .== 3:(nrow+2))
+        error("The first column of censoring_patterns must be of the form 3, 4, ....")
+    end
+
+    # censoring patterns must be binary
+    if any(censoring_patterns[:,2:ncol] .∉ Ref([0,1]))
+        error("Columns 2, 3, ... of censoring_patterns must be binary.")
+    end
+
+    # censoring patterns must indicate the presence/absence of each state
+    n_states = size(tmat, 1)
+    if ncol - 1 .!= n_states
+        error("The multistate model contains $n_states states, but censoring_patterns contains $(ncol-1) states.")
+    end
+
+    # censoring patterns must have at least one possible state
+    for i in 1:nrow
+        if all(censoring_patterns[i,2:ncol] .== 0)
+            error("Censoring pattern $i has no allowed state.")
+        end
+        if all(censoring_patterns[i,2:ncol] .== 1)
+            println("All states are allowed in censoring pattern $i.")
+        end
+        if sum(censoring_patterns[i,2:ncol]) .== 1
+            println("Censoring pattern $i has only one allowed state; if these observations are not censored there is no need to use a censoring pattern.")
+        end
+    end
 end
 
 """
@@ -202,7 +254,7 @@ end
 """
     build_tpm_mapping(data::DataFrame)
 
-Construct bookkeeping objects for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. 
+Construct bookkeeping objects for transition probability matrices for time intervals over which a multistate Markov process is piecewise homogeneous. The first bookkeeping object is a data frame that 
 """
 function build_tpm_mapping(data::DataFrame) 
 
@@ -263,7 +315,7 @@ function build_tpm_mapping(data::DataFrame)
             # first instance of each interval in the data
             for i in Base.OneTo(nrow(tpm_index[k]))
                 tpm_index[k].datind[i] = 
-                    covinds[findfirst(gaps[covinds] .== tpm_index[1].tstop[i])]
+                    covinds[findfirst(gaps[covinds] .== tpm_index[k].tstop[i])]
             end
 
             # fill out the tpm_map 
@@ -277,4 +329,112 @@ function build_tpm_mapping(data::DataFrame)
 
     # return objects
     return tpm_index, tpm_map
+end
+
+
+"""
+    loglik(model::MultistateModelFitted) 
+
+Return the maximum likelihood estimates. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+"""
+function loglik(model::MultistateModelFitted) 
+
+    model.loglik
+
+end
+
+"""
+    parameters(model::MultistateModelFitted; transformed::Bool = true) 
+
+Return the maximum likelihood estimates. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+"""
+function parameters(model::MultistateModelFitted)
+
+    model.parameters
+
+end
+
+
+"""
+    estimates(model::MultistateModelFitted) 
+
+Return the variance covariance matrix at the maximum likelihood estimate. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+- `transformed::Bool`: whether to return the estimates on the natural (transformed) scale or on the log scale, defaults to false.
+"""
+function estimates(model::MultistateModelFitted; transformed::Bool = false)
+
+    par=reduce(vcat, model.parameters)
+    transformed ? exp.(par) : par
+
+end
+
+"""
+    vcov(model::MultistateModelFitted) 
+
+Return the variance covariance matrix at the maximum likelihood estimate. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+"""
+function vcov(model::MultistateModelFitted) 
+
+    model.vcov
+
+end
+
+
+"""
+    optim(model::MultistateModelFitted) 
+
+Return the variance covariance matrix at the maximum likelihood estimate. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+"""
+function optim(model::MultistateModelFitted) 
+
+    model.optim
+
+end
+
+"""
+    summary(model::MultistateModelFitted) 
+
+Return the variance covariance matrix at the maximum likelihood estimate. 
+
+# Arguments 
+- `model::MultistateModelFitted`: fitted model
+"""
+function summary(model::MultistateModelFitted) 
+
+    # maximum likelihood estimates
+    est = estimates(model)
+
+    # confidence intervals
+    vcov = vcov(model)
+    se = sqrt.(vcov[diagind(vcov)])
+    lb =est.-1.96.*se
+    ub =est.+1.96.*se
+    CI = exp.(DataFrame(lower = lb, estimate = est, upper = ub))    
+
+    # log likelihood
+    ll = loglik(model)
+
+    # information criteria
+    p = length(estimates(model))
+    n = nrow(model.data)
+    AIC = -2*ll + 2     *p
+    BIC = -2*ll + log(n)*p
+
+    return CI, ll, AIC, BIC
+
 end

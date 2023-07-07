@@ -4,17 +4,17 @@
 # simulate: wrapper around sim_paths and maybe other stuff to simulate new data, also incorporates censoring, etc.
 
 """
-    simulate(model::MultistateModel; n = 1, data = true, paths = false)
+    simulate(model::MultistateProcess; n = 1, data = true, paths = false)
 
 Simulate `n` datasets or collections of sample paths from a multistate model. If `data = true` (the default) discretely observed sample paths are returned, possibly subject to measurement error. If `paths = false` (the default), continuous-time sample paths are not returned.
 
 # Arguments
-- `model::MultistateModel`: object created by multistatemodel()
+- `model::MultistateProcess`: object created by multistatemodel()
 - `nsim`: number of sample paths to simulate
 - `data`: boolean; if true then return discretely observed sample paths
 - `paths`: boolean; if false then continuous-time sample paths not returned
 """
-function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
+function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false)
 
     # throw an error if neither paths nor data are asked for
     if paths == false & data == false
@@ -45,7 +45,7 @@ function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
                 samplepaths[j, i] = samplepath
             end
 
-            # observe path - RESUME HERE, need to think about how data should be returned for different observation schemes
+            # observe path 
             if data == true
                 datasets[j, i] = observe_path(samplepath, model, j)
             end
@@ -68,7 +68,7 @@ function simulate(model::MultistateModel; nsim = 1, data = true, paths = false)
 end
 
 """
-simulate_path(model::MultistateModel, subj::Int64)
+simulate_path(model::MultistateProcess, subj::Int64)
 
 Simulate a single sample path.
 
@@ -76,7 +76,7 @@ Simulate a single sample path.
 - model: multistate model object
 - subj: subject index
 """
-function simulate_path(model::MultistateModel, subj::Int64)
+function simulate_path(model::MultistateProcess, subj::Int64)
 
     # subject data
     subj_inds = model.subjectindices[subj]
@@ -119,13 +119,13 @@ function simulate_path(model::MultistateModel, subj::Int64)
     while keep_going
         
         # calculate event probability over the next interval
-        interval_incid = (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + tstop - tcur, model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false))
+        interval_incid = (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + tstop - tcur, model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false, newtime = true))
 
         # check if event happened in the interval
         if u < (cuminc + interval_incid) && u >= cuminc
 
             # update the current time
-            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false))) - log(u))^2), 0.0, tstop - tcur)
+            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false, newtime = true))) - log(u))^2), 0.0, tstop - tcur)
 
             if Optim.converged(timeincrement)
                 timeinstate += timeincrement.minimizer
@@ -134,7 +134,7 @@ function simulate_path(model::MultistateModel, subj::Int64)
             end            
 
             # calculate next state transition probabilities 
-            next_state_probs!(ns_probs, timeinstate, scur, ind, model.parameters, model.hazards, model.totalhazards, model.tmat)
+            next_state_probs!(ns_probs, timeinstate, scur, ind, model.parameters, model.hazards, model.totalhazards, model.tmat; newtime = true)
 
             # sample the next state
             scur = rand(Categorical(ns_probs))

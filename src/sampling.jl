@@ -181,25 +181,38 @@ function sample_ecctmc!(jumptimes, stateseq, P, Q, a, b, t0, t1)
 end
 
 """
-    draw_samplepath(subj::Int64, model::MultistateModel, tpm_book, hazmat_book, tpm_map)
+    draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map)
 
 Draw sample paths from a Markov surrogate process conditional on panel data.
 """
-function draw_samplepath(subj::Int64, model::MultistateModel, tpm_book, hazmat_book, tpm_map)
+function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map)
 
     # subject data
-    subj_inds = model.subjectindices[subj]
-    subj_dat  = view(model.data, subj_inds, :)
+    subj_inds = model.subjectindices[subj] # rows in the dataset corresponding to the subject
+    subj_dat     = view(model.data, subj_inds, :) # subject's data - no shallow copy, just pointer
     subj_tpm_map = view(tpm_map, subj_inds, :)
+
+    # sample any censored observation
+    if any(subj_dat.obstype .∉ Ref([1,2]))
+        subj_emat = view(model.emat, subj_inds, :)
+       # skeleton = sample_skeleton(subj_inds, tpm_book, subj_tpm_map, emat) # ffbs
+       SampleSkeleton!(subj_dat, tpm_book, subj_tpm_map, subj_emat) # ffbs
+    end
 
     # initialize sample path
     times  = [subj_dat.tstart[1]]; sizehint!(times, size(model.tmat, 2) * 2)
     states = [subj_dat.statefrom[1]]; sizehint!(states, size(model.tmat, 2) * 2)
 
-    # loop through data and sample endpoint conditioned paths
-    for i in eachindex(subj_inds)
+    # loop through data and sample endpoint conditioned paths - need to give control flow some thought
+    for i in eachindex(subj_inds) # loop over each interval for the subject
         if subj_dat.obstype[i] == 2
             sample_ecctmc!(times, states, tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]], hazmat_book[subj_tpm_map[i,1]], subj_dat.statefrom[i], subj_dat.stateto[i], subj_dat.tstart[i], subj_dat.tstop[i])
+
+            # tpms are indexed first by unique covariates then unique gap times, hence two indices
+            # tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]] gives the tpm for interval i for the subject 
+
+            # transition intensity matrices are only indexed by unique covariates = 1 index
+            #  hazmat_book[subj_tpm_map[i,1]]
         elseif subj_dat.obstype[i] == 1 
             push!(times, subj_dat.tstop[i])
             push!(times, subj_dat.stateto[i])
@@ -213,4 +226,75 @@ function draw_samplepath(subj::Int64, model::MultistateModel, tpm_book, hazmat_b
     end
 
     return SamplePath(subj, times, states)
+end
+
+"""
+    sample_skeleton!(subj_dat, tpm_book, subj_tpm_map, subj_emat) 
+
+Sample the value of censored states using the FFBS algorithm
+"""
+
+function SampleSkeleton!(subj_dat, tpm_book, subj_tpm_map, subj_emat)
+
+    # ffbs
+    m, p = ForwardFiltering(subj_dat, tpm_book, subj_tpm_map, subj_emat) 
+    h    = BackwardSampling(m, p)
+    
+    # update subj_dat
+    subj_dat.stateto = h
+    subj_dat.statefrom[Not(begin)] = h[Not(end)] 
+
+end
+
+
+function ForwardFiltering(subj_dat, tpm_book, subj_tpm_map, subj_emat) 
+
+    n_obs    = size(subj_emat, 1) # number of states visited
+    n_states = size(subj_emat, 2) # number of states
+    m = Array{Float64}(undef, n_obs+1, n_states)  # matrix of marginal probabilities
+    p = Array{Float64}(undef, n_obs, n_states, n_states)   # joint distribution Pr(h_{t-1}=r,h_t=s|d_{1:t})
+    
+    # # forward filtering
+    m[1, subj_dat.statefrom[1]] = 1 # first state is assumed to be known
+    
+    for t in 1:n_obs # loop over each interval for the subject
+        q_t = tpm_book[subj_tpm_map[t,1]][subj_tpm_map[t,2]]
+        #q_t = view(tpm_book[subj_tpm_map[t,1], subj_tpm_map[t,2]], :, :)
+        # joint p_t
+        p_trs = Array{Float64}(undef, n_states, n_states) # unnormalized p_t
+        for r in 1:n_states, s in 1:n_states
+            p_trs[r,s] = m[t,r] * q_t[r,s] * subj_emat[t,s] # marginal * transition * emission [Eq. 6]
+        end
+        normalizing_constant = sum(p_trs)
+        if normalizing_constant == 0
+            id = subj_dat.id[1]
+            error("There is no trajectory that satisfies the censoring patterns for subject $id.")
+        end
+        p[t,:,:] = p_trs ./ normalizing_constant # normalize p_t [Eq. 6]
+        # posterior
+        for s in 1:n_states
+            m[t+1,s] = sum(p[t,:,s]) # marginalize the joint distribution p_t
+        end
+    end
+
+    return m, p
+
+end
+
+function BackwardSampling(m, p) 
+    
+    n_obs = size(p, 1) # number of observations
+    h = Array{Int64}(undef, n_obs)
+
+    # 1. draw draw h_n ~ pi_n
+    h[n_obs] = rand(Categorical(m[n_obs+1,:]))
+
+    # 2. draw h_t|h_{t+1}=s ~ p_{t,.,s}
+    for t in (n_obs-1):-1:1
+        w = p[t+1,:,h[t+1]] / sum(p[t+1,:,h[t+1]])
+       h[t] = rand(Categorical(w)) # [Eq. 10]
+    end
+
+    return h
+
 end
