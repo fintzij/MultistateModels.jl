@@ -1,9 +1,9 @@
 """
-    set_crude_init!(model::MultistateModel)
+    set_crude_init!(model::MultistateProcess)
 
-Modify the parameter values in a MultistateModel object
+Modify the parameter values in a MultistateProcess object
 """
-function set_crude_init!(model::MultistateModel)
+function set_crude_init!(model::MultistateProcess)
     crude_par = calculate_crude(model)
     for i in model.hazards
         set_par_to = init_par(i, crude_par[i.statefrom, i.stateto])
@@ -45,13 +45,13 @@ end
 # What about e.g. cancer case where someone is diagnosed at age 45, but realistically they probably have been in that "state" since 30. If fitting Markov model, who cares. But if Weibull or semi-markov, would want to make sure they are 15 years into the hazard function.
 
 """
-    calculate_crude(model::MultistateModel)
+    calculate_crude(model::MultistateProcess)
 
 Return a matrix with same dimensions as model.tmat, but row i column j entry is number of transitions from state i to state j divided by time spent in state i, then log transformed. In other words, a faster version of log exponential rates that fit_exact would return.
 
-Accept a MultistateModel object.
+Accept a MultistateProcess object.
 """
-function calculate_crude(model; give_log=true)
+function calculate_crude(model::MultistateProcess; give_log=true)
     # n_rs is matrix like tmat except each entry is number of transitions from state r to s
     # T_r is vector of length number of states
     n_rs, T_r = compute_suff_stats(model.data, model.tmat)
