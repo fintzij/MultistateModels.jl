@@ -154,6 +154,16 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
         end
     end
 
+    # warning if tmat specifies an allowed transition for which no such transitions were observed in the data
+    n_rs = compute_suff_stats(data, tmat)[1]
+    for r in 1:size(tmat)[1]
+        for s in 1:size(tmat)[2]
+            if tmat[r,s]!=0 && n_rs[r,s]==0
+                @warn "Data does not contain any transitions between state $r and state $s"
+            end
+        end
+    end
+
     # check that obstype is one of the allowed censoring schemes
     if any(data.obstype .∉ Ref([1,2]))
         censoring_patterns_id = censoring_patterns[:,1]

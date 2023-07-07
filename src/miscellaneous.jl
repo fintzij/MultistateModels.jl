@@ -1,29 +1,44 @@
+# store parameters in tuple or vector of vectors
+# collect time spent in each state
+#  store in vector of time in states T_r (msm R notation)
+# collect transitions
+#  store in matrix like tmat, refactor compute_statetable() and statetable()
+
+# loop through hazards in model
+# loop through data to collect events/time at risk
+
+#m2 = deepcopy(model)
+#initpar = deepcopy(m2.parameters)
+#T_r = zeros(size(m2.tmat)[1])
+#n_rs = zeros(size(m2.tmat))
+
+
 """ 
     compute_statetable(dat, tmat)
 
 Internal function to compute a table with observed transition counts. 
 """
-function compute_statetable(dat, tmat)
+# function compute_statetable(dat, tmat)
     
-    # initialize matrix of zeros
-    transmat = zeros(Int64, size(tmat))
+#     # initialize matrix of zeros
+#     transmat = zeros(Int64, size(tmat))
 
-    # grab subject indices
-    uinds = unique(dat.id)
-    subjectindices = map(x -> findall(dat.id .== x), uinds)
+#     # grab subject indices
+#     uinds = unique(dat.id)
+#     subjectindices = map(x -> findall(dat.id .== x), uinds)
 
-    # outer loop over subjects
-    for s in eachindex(subjectindices)
-        # inner loop over data for each subject
-        for r in eachindex(subjectindices[s])
-            transmat[dat.statefrom[subjectindices[s][r]], 
-                     dat.stateto[subjectindices[s][r]]] += 1
-        end
-    end
+#     # outer loop over subjects
+#     for s in eachindex(subjectindices)
+#         # inner loop over data for each subject
+#         for r in eachindex(subjectindices[s])
+#             transmat[dat.statefrom[subjectindices[s][r]], 
+#                      dat.stateto[subjectindices[s][r]]] += 1
+#         end
+#     end
 
-    # return the matrix of state transitions
-    return transmat
-end
+#     # return the matrix of state transitions
+#     return transmat
+# end
 
 """
     statetable(model::MultistateProcess, groups::Vararg{Symbol})
@@ -97,6 +112,3 @@ function crudeinit(transmat, tmat)
     # return the matrix of initial intensity values
     return q_crude_mat
 end
-
-
-
