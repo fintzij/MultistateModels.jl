@@ -195,8 +195,7 @@ function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat
     # sample any censored observation
     if any(subj_dat.obstype .∉ Ref([1,2]))
         subj_emat = view(model.emat, subj_inds, :)
-       # skeleton = sample_skeleton(subj_inds, tpm_book, subj_tpm_map, emat) # ffbs
-       SampleSkeleton!(subj_dat, tpm_book, subj_tpm_map, subj_emat) # ffbs
+        SampleSkeleton!(subj_dat, tpm_book, subj_tpm_map, subj_emat) # ffbs
     end
 
     # initialize sample path
@@ -205,17 +204,11 @@ function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat
 
     # loop through data and sample endpoint conditioned paths - need to give control flow some thought
     for i in eachindex(subj_inds) # loop over each interval for the subject
-        if subj_dat.obstype[i] == 2
-            sample_ecctmc!(times, states, tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]], hazmat_book[subj_tpm_map[i,1]], subj_dat.statefrom[i], subj_dat.stateto[i], subj_dat.tstart[i], subj_dat.tstop[i])
-
-            # tpms are indexed first by unique covariates then unique gap times, hence two indices
-            # tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]] gives the tpm for interval i for the subject 
-
-            # transition intensity matrices are only indexed by unique covariates = 1 index
-            #  hazmat_book[subj_tpm_map[i,1]]
-        elseif subj_dat.obstype[i] == 1 
+        if subj_dat.obstype[i] == 1 
             push!(times, subj_dat.tstop[i])
             push!(times, subj_dat.stateto[i])
+        else
+            sample_ecctmc!(times, states, tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]], hazmat_book[subj_tpm_map[i,1]], subj_dat.statefrom[i], subj_dat.stateto[i], subj_dat.tstart[i], subj_dat.tstop[i])
         end
     end
 
