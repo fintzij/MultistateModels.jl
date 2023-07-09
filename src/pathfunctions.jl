@@ -172,14 +172,11 @@ Extract sample paths from a multistate model's data field and return an array of
 """
 function extract_paths(data::DataFrame; self_transitions = false)
 
-    # get IDs
-    nsubj = length(unique(data.id))
-
+    # get subject indices
+    subjinds, nsubj = get_subjinds(data)
+    
     # initialize array of sample paths
     samplepaths = Vector{SamplePath}(undef, nsubj)
-
-    # get subject indices
-    subjinds = get_subjinds(data)
 
     # grab the sample paths
     for i in Base.OneTo(nsubj)

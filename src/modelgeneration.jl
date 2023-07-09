@@ -357,13 +357,13 @@ end
 
 Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference.
 """
-function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_patterns::Matrix{Int64} = Matrix{Int64}[]) # add optional emat matrix argument
+function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_patterns::Matrix{Int64} = Matrix{Int64}[], weights::Vector{Float64} = Vector{Float64}())
 
     # catch the model call
     modelcall = (hazards = hazards, data = data)
 
     # get indices for each subject in the dataset
-    subjinds = get_subjinds(data)
+    subjinds, nsubj = get_subjinds(data)
 
     # enumerate the hazards and reorder 
     hazinfo = enumerate_hazards(hazards...)
@@ -377,6 +377,13 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
 
     # function to check data formatting
     check_data!(data, tmat, censoring_patterns)
+
+    # create uniform weights if necessary
+    if(length(weights) == 0)
+        weights = ones(nsubj)
+    end
+    # check weights
+    check_weights(weights, data)
 
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
@@ -405,6 +412,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
         tmat,
         hazkeys,
         subjinds,
+        weights,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -418,6 +426,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
         tmat,
         hazkeys,
         subjinds,
+        weights,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -432,6 +441,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
         emat,
         hazkeys,
         subjinds,
+        weights,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -445,6 +455,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
         tmat,
         hazkeys,
         subjinds,
+        weights,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -459,6 +470,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
         emat,
         hazkeys,
         subjinds,
+        weights,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
     end

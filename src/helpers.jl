@@ -92,7 +92,7 @@ function get_subjinds(data::DataFrame)
     end
 
     # return indices
-    return subjinds
+    return subjinds, nsubj
 end
 
 """
@@ -166,7 +166,18 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
 
 end
 
+function check_weights(weights::Vector{Float64}, data::DataFrame)
+    
+    # check that the number of weights is correct
+    if length(weights) !=  length(unique(data.id))
+        error("The number of weights is not equal to the number of subjects.")
+    end
 
+    # check that the weights are non-negative
+    if any(weights <= 0)
+        error("The weights should be non-negative.")
+    end
+end
 """
 check_censoring_patterns(data::DataFrame, emat::Matrix)
 
@@ -183,7 +194,7 @@ function check_censoring_patterns(censoring_patterns::Matrix{Int64}, tmat::Matri
 
     # censoring patterns must be labelled as 3, 4, ...
     if !all(censoring_patterns[:,1] .== 3:(nrow+2))
-        error("The first column of censoring_patterns must be of the form 3, 4, ....")
+        error("The first column of the matrix `censoring_patterns` must be of the form (3, 4, ...) .")
     end
 
     # censoring patterns must be binary
@@ -203,7 +214,7 @@ function check_censoring_patterns(censoring_patterns::Matrix{Int64}, tmat::Matri
             error("Censoring pattern $i has no allowed state.")
         end
         if all(censoring_patterns[i,2:ncol] .== 1)
-            println("All states are allowed in censoring pattern $i.")
+            println("All states are allowed in censoring pattern $(2+i).")
         end
         if sum(censoring_patterns[i,2:ncol]) .== 1
             println("Censoring pattern $i has only one allowed state; if these observations are not censored there is no need to use a censoring pattern.")

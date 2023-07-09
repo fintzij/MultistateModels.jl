@@ -71,6 +71,7 @@ function fit(model::MultistateModel)
         model.tmat,
         model.hazkeys,
         model.subjectindices,
+        model.weights,
         model.markovsurrogate,
         model.modelcall)
 end
@@ -112,6 +113,7 @@ function fit(model::MultistateMarkovModel)
         model.tmat,
         model.hazkeys,
         model.subjectindices,
+        model.weights,
         model.markovsurrogate,
         model.modelcall)
 end

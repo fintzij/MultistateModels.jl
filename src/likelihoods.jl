@@ -50,7 +50,7 @@ function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model:
         log_surv_prob = 0.0
 
         # accumulate log likelihood
-        while keep_going            
+        while keep_going
 
             if tstop <= time_R
                 # event happens in (time_L, time_R]
@@ -101,7 +101,8 @@ function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model:
         end
     end
 
-    return ll
+    # weighted loglikelihood
+    return ll * model.weights[subj_inds]
 end
 
 ########################################################
@@ -118,6 +119,10 @@ function loglik(parameters, data::ExactData; neg = true)
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # send each element of samplepaths to loglik
+    # ll = mapreduce(
+    #     (x, w) -> loglik(pars, x, data.model.hazards, data.model) * w,
+    #     +, 
+    #     data.paths, data.model.weights)
     ll = mapreduce(x -> loglik(pars, x, data.model.hazards, data.model), +, data.paths)
 
     neg ? -ll : ll
@@ -128,7 +133,7 @@ end
 
 Return sum of (negative) log likelihood for a Markov model fit to panel and/or exact data. 
 """
-function loglik(parameters, data::MPanelData; neg = true) # Raph: work on this
+function loglik(parameters, data::MPanelData; neg = true)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
@@ -160,23 +165,35 @@ function loglik(parameters, data::MPanelData; neg = true) # Raph: work on this
 
     # accumulate the log likelihood
     ll = 0.0
-    for i in Base.OneTo(nrow(data.model.data))
+#    for i in Base.OneTo(nrow(data.model.data))
+    for subj in Base.OneTo(length(data.model.weights))
 
-        if data.model.data.obstype[i] == 2 # panel data
+        # subject data
+        subj_inds = model.subjectindices[subj]
+        subj_dat  = view(data.model.data, subj_inds, :)
 
-            ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]])
+        # contribution to likelihood
+        for i in Base.OneTo(nrow(subj_dat))
 
-        elseif data.model.data.obstype[i] == 1 # exact data
+            if data.model.data.obstype[i] == 2 # panel data
 
-            ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
+                subj_ll = log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]])
 
-            if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
+            elseif data.model.data.obstype[i] == 1 # exact data
 
-                ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], parameters[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true, newtime = false)
+                subj_ll = survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
 
+                if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
+
+                    subj_ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], parameters[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true, newtime = false)
+
+                end
             end
         end
         
+        # weighted likelihood
+        ll += subj_ll * data.model.weights(subj)
+
     end
 
     neg ? -ll : ll
