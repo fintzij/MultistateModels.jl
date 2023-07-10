@@ -45,7 +45,7 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
                 samplepaths[j, i] = samplepath
             end
 
-            # observe path - RESUME HERE, need to think about how data should be returned for different observation schemes
+            # observe path 
             if data == true
                 datasets[j, i] = observe_path(samplepath, model, j)
             end

@@ -353,17 +353,17 @@ function build_emat(data::DataFrame, censoring_patterns::Matrix{Int64})
 end
 
 """
-    multistatemodel(hazards::HazardFunction...; data::DataFrame)
+    multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights = nothing, censoring_patterns = nothing)
 
-Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference.
+Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference. Optional keyword arguments specified in kwargs may include sampling weights and censoring patterns.
 """
-function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_patterns::Matrix{Int64} = Matrix{Int64}[]) # add optional emat matrix argument
+function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights = nothing, censoring_patterns = nothing) 
 
     # catch the model call
-    modelcall = (hazards = hazards, data = data)
+    modelcall = (hazards = hazards, data = data, SamplingWeights = SamplingWeights, censoring_patterns = censoring_patterns)
 
     # get indices for each subject in the dataset
-    subjinds = get_subjinds(data)
+    subjinds, nsubj = get_subjinds(data)
 
     # enumerate the hazards and reorder 
     hazinfo = enumerate_hazards(hazards...)
@@ -375,8 +375,21 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
     # compile matrix enumerating instantaneous state transitions
     tmat = create_tmat(hazinfo)
 
+    # initialize SamplingWeights if none supplied
+    if isnothing(SamplingWeights)
+        SamplingWeights = ones(Float64, nsubj)
+    end
+
+    # initialize censoring patterns if none supplied
+    if isnothing(censoring_patterns)
+        censoring_patterns = Matrix{Int64}(undef, 0, size(tmat, 1))
+    end
+
     # function to check data formatting
     check_data!(data, tmat, censoring_patterns)
+
+    # check SamplingWeights
+    check_SamplingWeights(SamplingWeights, data)
 
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
@@ -405,6 +418,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
         tmat,
         hazkeys,
         subjinds,
+        SamplingWeights,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -418,6 +432,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
         tmat,
         hazkeys,
         subjinds,
+        SamplingWeights,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -432,6 +447,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
         emat,
         hazkeys,
         subjinds,
+        SamplingWeights,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -445,6 +461,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
         tmat,
         hazkeys,
         subjinds,
+        SamplingWeights,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -459,6 +476,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
         emat,
         hazkeys,
         subjinds,
+        SamplingWeights,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
     end

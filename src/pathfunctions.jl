@@ -81,14 +81,10 @@ function observe_path(samplepath::SamplePath, model::MultistateProcess, subj::In
             obsdat.tstop[rowind] = subj_dat.tstop[r]
 
             # get the states
-            if subj_dat.obstype[r] == 3
-                obsdat.stateto[rowind] =
-                    maximum(samplepath.states[panel_inds[r]:panel_inds[r+1]])
-
-            elseif subj_dat.obstype[r] == 2
+            if subj_dat.obstype[r] == 2
                 obsdat.stateto[rowind] = samplepath.states[right_ind]
 
-            elseif subj_dat.obstype[r] == 0
+            else
                 obsdat.stateto[rowind] = missing
             end
 
@@ -176,14 +172,11 @@ Extract sample paths from a multistate model's data field and return an array of
 """
 function extract_paths(data::DataFrame; self_transitions = false)
 
-    # get IDs
-    nsubj = length(unique(data.id))
-
+    # get subject indices
+    subjinds, nsubj = get_subjinds(data)
+    
     # initialize array of sample paths
     samplepaths = Vector{SamplePath}(undef, nsubj)
-
-    # get subject indices
-    subjinds = get_subjinds(data)
 
     # grab the sample paths
     for i in Base.OneTo(nsubj)

@@ -92,7 +92,7 @@ function get_subjinds(data::DataFrame)
     end
 
     # return indices
-    return subjinds
+    return subjinds, nsubj
 end
 
 """
@@ -115,7 +115,14 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
     data.statefrom = 
         convert(Vector{Union{Missing,Int64}}, data.statefrom)
     data.stateto   = 
-        convert(Vector{Union{Missing, Int64}}, data.stateto)
+        convert(Vector{Union{Missing, Int64}}, data.stateto)        
+
+    # verify that subject id's are (1, 2, ...)
+    unique_id = unique(data.id)
+    nsubj = length(unique_id)
+    if any(unique_id .!= 1:nsubj)
+        error("The subject id's should be 1, 2, 3, ... .")
+    end
 
     # warn about individuals starting in absorbing states
     # check if there are any absorbing states
@@ -127,7 +134,7 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
         abs_warn = map(x -> any(data.statefrom .== x), which_absorbing)
 
         if any(abs_warn)
-            println("The data contains contains observations where a subject originates in an absorbing state.")
+            @warn "The data contains contains observations where a subject originates in an absorbing state."
         end
     end
 
@@ -137,7 +144,7 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
     end
 
     # within each subject's data, error if tstart or tstop are out of order or there are discontinuities given multiple time intervals
-    for i in unique(data.id)
+    for i in unique_id
         inds = findall(data.id .== i)
 
         # check sorting
@@ -154,6 +161,16 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
         end
     end
 
+    # warning if tmat specifies an allowed transition for which no such transitions were observed in the data
+    n_rs = compute_suff_stats(data, tmat)[1]
+    for r in 1:size(tmat)[1]
+        for s in 1:size(tmat)[2]
+            if tmat[r,s]!=0 && n_rs[r,s]==0
+                @warn "Data does not contain any transitions between state $r and state $s"
+            end
+        end
+    end
+
     # check that obstype is one of the allowed censoring schemes
     if any(data.obstype .∉ Ref([1,2]))
         censoring_patterns_id = censoring_patterns[:,1]
@@ -162,11 +179,24 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
         end
     end
 
+
+
     # check that there is no row for a subject after they hit an absorbing state
 
 end
 
+function check_SamplingWeights(SamplingWeights::Vector{Float64}, data::DataFrame)
+    
+    # check that the number of weights is correct
+    if length(SamplingWeights) != length(unique(data.id))
+        error("The length of SamplingWeights is not equal to the number of subjects.")
+    end
 
+    # check that the weights are non-negative
+    if any(SamplingWeights .<= 0)
+        error("The elements of SamplingWeights should be non-negative.")
+    end
+end
 """
 check_censoring_patterns(data::DataFrame, emat::Matrix)
 
@@ -183,7 +213,7 @@ function check_censoring_patterns(censoring_patterns::Matrix{Int64}, tmat::Matri
 
     # censoring patterns must be labelled as 3, 4, ...
     if !all(censoring_patterns[:,1] .== 3:(nrow+2))
-        error("The first column of censoring_patterns must be of the form 3, 4, ....")
+        error("The first column of the matrix `censoring_patterns` must be of the form (3, 4, ...) .")
     end
 
     # censoring patterns must be binary
@@ -203,7 +233,7 @@ function check_censoring_patterns(censoring_patterns::Matrix{Int64}, tmat::Matri
             error("Censoring pattern $i has no allowed state.")
         end
         if all(censoring_patterns[i,2:ncol] .== 1)
-            println("All states are allowed in censoring pattern $i.")
+            println("All states are allowed in censoring pattern $(2+i).")
         end
         if sum(censoring_patterns[i,2:ncol]) .== 1
             println("Censoring pattern $i has only one allowed state; if these observations are not censored there is no need to use a censoring pattern.")
