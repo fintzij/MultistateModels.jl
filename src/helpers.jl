@@ -184,7 +184,7 @@ function check_weights(weights::Vector{Float64}, data::DataFrame)
     end
 
     # check that the weights are non-negative
-    if any(weights <= 0)
+    if any(weights .<= 0)
         error("The weights should be non-negative.")
     end
 end
