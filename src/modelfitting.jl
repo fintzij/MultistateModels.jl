@@ -71,7 +71,7 @@ function fit(model::MultistateModel)
         model.tmat,
         model.hazkeys,
         model.subjectindices,
-        model.weights,
+        model.SamplingWeights,
         model.markovsurrogate,
         model.modelcall)
 end
@@ -113,7 +113,7 @@ function fit(model::MultistateMarkovModel)
         model.tmat,
         model.hazkeys,
         model.subjectindices,
-        model.weights,
+        model.SamplingWeights,
         model.markovsurrogate,
         model.modelcall)
 end
@@ -210,7 +210,7 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
     samplepaths = ElasticArray{SamplePath}(undef, nsubj, nparticles)
 
     # initialize proposal log likelihoods
-    weights            = ElasticArray{Float64}(undef, nsubj, nparticles)
+    ImportanceWeights  = ElasticArray{Float64}(undef, nsubj, nparticles)
     loglik_surrog      = ElasticArray{Float64}(undef, nsubj, nparticles)
     loglik_target_cur  = ElasticArray{Float64}(undef, nsubj, nparticles)
     loglik_target_prop = ElasticArray{Float64}(undef, nsubj, nparticles)
@@ -220,19 +220,19 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
         for i in 1:nsubj
             samplepaths[i,j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2])
 
-            loglik_surrog[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model)
+            loglik_surrog[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model) * model.SamplingWeights[i]
 
-            loglik_target_cur[i,j] = loglik(model.parameters, samplepaths[i,j], model.hazards, model)
+            loglik_target_cur[i,j] = loglik(model.parameters, samplepaths[i,j], model.hazards, model) * model.SamplingWeights[i]
 
-            weights[i,j] = exp(loglik_target_cur[i,j] - loglik_surrog[i,j])
+            ImportanceWeights[i,j] = exp(loglik_target_cur[i,j] - loglik_surrog[i,j])
         end
     end
 
-    # normalizing constants for weights
-    totweights = sum(weights, dims = 2)
+    # normalizing constants for ImportanceWeights
+    TotImportanceWeights = sum(ImportanceWeights, dims = 2)
 
     # get current estimate of marginal log likelihood
-    mll_cur = mcem_mll(loglik_target_cur, weights, totweights)
+    mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
     # extract and initialize model parameters
     params_cur = flatview(model.parameters)
@@ -243,7 +243,7 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
 
     # optimization function + problem
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, weights, totweights))
+    prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
   
     # go on then
     keep_going = true; iter = 0
@@ -253,19 +253,19 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
         # println(iter)
 
         # optimize the monte carlo marginal likelihood
-        params_prop = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, weights, totweights)), Newton())
+        params_prop = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton())
 
         # recalculate the log likelihoods
-        loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, weights, totweights))
+        loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
 
         # recalculate the marginal log likelihood
-        mll_prop = mcem_mll(loglik_target_prop, weights, totweights)
+        mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, TotImportanceWeights)
 
         # change in mll
         mll_change = mll_prop - mll_cur
         
         # calculate the ASE for ΔQ
-        ase = mcem_ase(loglik_target_prop .- loglik_target_cur, weights, totweights)
+        ase = mcem_ase(loglik_target_prop .- loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
          # calculate the lower bound for ΔQ
         ascent_lb = quantile(Normal(mll_change, ase), α)
@@ -292,9 +292,9 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
             # swap current and proposed log likelihoods
             loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
 
-            # recalculate the importance weights
-            weights = exp.(loglik_target_cur .- loglik_surrog)
-            totweights = sum(weights; dims = 2)
+            # recalculate the importance ImportanceWeights
+            ImportanceWeights = exp.(loglik_target_cur .- loglik_surrog)
+            TotImportanceWeights = sum(ImportanceWeights; dims = 2)
 
             # swap current value of the marginal log likelihood
             mll_cur = mll_prop
@@ -323,24 +323,24 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
                         append!(loglik_surrog, zeros(nsubj))
                         append!(loglik_target_prop, zeros(nsubj))
                         append!(loglik_target_cur, zeros(nsubj))
-                        append!(weights, zeros(nsubj))
+                        append!(ImportanceWeights, zeros(nsubj))
 
                         for i in 1:nsubj
                             samplepaths[i,j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2])
 
-                            loglik_surrog[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model)
+                            loglik_surrog[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model) * model.SamplingWeights[i]
 
-                            loglik_target_cur[i,j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i,j], model.hazards, model)
+                            loglik_target_cur[i,j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i,j], model.hazards, model) * model.SamplingWeights[i]
 
-                            weights[i,j] = exp(loglik_target_cur[i,j] - loglik_surrog[i,j])
+                            ImportanceWeights[i,j] = exp(loglik_target_cur[i,j] - loglik_surrog[i,j])
                         end
                     end
 
-                    # normalizing constants for weights
-                    totweights = sum(weights; dims = 2)
+                    # normalizing constants for ImportanceWeights
+                    TotImportanceWeights = sum(ImportanceWeights; dims = 2)
 
                     # recalculate the marginal log likelihood
-                    mll_cur = mcem_mll(loglik_target_cur, weights, totweights)
+                    mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
                 end
             end
         else 
@@ -355,24 +355,24 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
                 append!(loglik_surrog, zeros(nsubj))
                 append!(loglik_target_prop, zeros(nsubj))
                 append!(loglik_target_cur, zeros(nsubj))
-                append!(weights, zeros(nsubj))
+                append!(ImportanceWeights, zeros(nsubj))
 
                 for i in 1:nsubj
                     samplepaths[i,j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2])
 
-                    loglik_surrog[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model)
+                    loglik_surrog[i,j] = loglik(model.markovsurrogate.parameters, samplepaths[i,j], model.markovsurrogate.hazards, model) * model.SamplingWeights[i]
 
-                    loglik_target_cur[i,j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i,j], model.hazards, model)
+                    loglik_target_cur[i,j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i,j], model.hazards, model) * model.SamplingWeights[i]
 
-                    weights[i,j] = exp(loglik_target_cur[i,j] - loglik_surrog[i,j])
+                    ImportanceWeights[i,j] = exp(loglik_target_cur[i,j] - loglik_surrog[i,j])
                 end
             end
 
-            # normalizing constants for weights
-            totweights = sum(weights; dims = 2)
+            # normalizing constants for ImportanceWeights
+            TotImportanceWeights = sum(ImportanceWeights; dims = 2)
 
             # recalculate the marginal log likelihood
-            mll_cur = mcem_mll(loglik_target_cur, weights, totweights)
+            mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
         end
     end
 
@@ -384,7 +384,7 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
 
         path = Array{SamplePath}(undef, 1)
         diffres = DiffResults.HessianResult(params_cur)
-        ll = pars -> loglik(pars, ExactData(model, path); neg=false)
+        ll = pars -> (loglik(pars, ExactData(model, path); neg=false) * model.SamplingWeights[i])
 
         grads = Array{Float64}(undef, length(params_cur), nparticles)
         hesns = Array{Float64}(undef, length(params_cur), length(params_cur), nparticles)
@@ -406,16 +406,16 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
 
         # accumulate
         for j in 1:nparticles
-            fisher_i1 .+= weights[i,j] * (-hesns[:,:,j] - grads[:,j] * transpose(grads[:,j]))
+            fisher_i1 .+= ImportanceWeights[i,j] * (-hesns[:,:,j] - grads[:,j] * transpose(grads[:,j]))
         end
-        fisher_i1 ./= totweights[i]
+        fisher_i1 ./= TotImportanceWeights[i]
 
         for j in 1:nparticles
             for k in 1:nparticles
-                fisher_i2 .+= weights[i,j] * weights[i,k] * grads[:,j] * transpose(grads[:,k])
+                fisher_i2 .+= ImportanceWeights[i,j] * ImportanceWeights[i,k] * grads[:,j] * transpose(grads[:,k])
             end
         end
-        fisher_i2 ./= totweights[i]^2
+        fisher_i2 ./= TotImportanceWeights[i]^2
 
         fisher[:,:,i] = fisher_i1 + fisher_i2
     end

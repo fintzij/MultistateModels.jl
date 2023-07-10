@@ -115,7 +115,14 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
     data.statefrom = 
         convert(Vector{Union{Missing,Int64}}, data.statefrom)
     data.stateto   = 
-        convert(Vector{Union{Missing, Int64}}, data.stateto)
+        convert(Vector{Union{Missing, Int64}}, data.stateto)        
+
+    # verify that subject id's are (1, 2, ...)
+    unique_id = unique(data.id)
+    nsubj = length(unique_id)
+    if any(unique_id .!= 1:nsubj)
+        error("The subject id's should be 1, 2, 3, ... .")
+    end
 
     # warn about individuals starting in absorbing states
     # check if there are any absorbing states
@@ -137,7 +144,7 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
     end
 
     # within each subject's data, error if tstart or tstop are out of order or there are discontinuities given multiple time intervals
-    for i in unique(data.id)
+    for i in unique_id
         inds = findall(data.id .== i)
 
         # check sorting
@@ -172,20 +179,22 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
         end
     end
 
+
+
     # check that there is no row for a subject after they hit an absorbing state
 
 end
 
-function check_weights(weights::Vector{Float64}, data::DataFrame)
+function check_SamplingWeights(SamplingWeights::Vector{Float64}, data::DataFrame)
     
     # check that the number of weights is correct
-    if length(weights) !=  length(unique(data.id))
-        error("The number of weights is not equal to the number of subjects.")
+    if length(SamplingWeights) != length(unique(data.id))
+        error("The length of SamplingWeights is not equal to the number of subjects.")
     end
 
     # check that the weights are non-negative
-    if any(weights <= 0)
-        error("The weights should be non-negative.")
+    if any(SamplingWeights .<= 0)
+        error("The elements of SamplingWeights should be non-negative.")
     end
 end
 """

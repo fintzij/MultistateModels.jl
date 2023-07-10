@@ -220,7 +220,7 @@ struct MultistateModel <: MultistateProcess
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}},
-    weights::Vector{Float64},
+    SamplingWeights::Vector{Float64},
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -238,7 +238,7 @@ struct MultistateMarkovModel <: MultistateMarkovProcess
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    weights::Vector{Float64},
+    SamplingWeights::Vector{Float64},
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -257,7 +257,7 @@ struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    weights::Vector{Float64},
+    SamplingWeights::Vector{Float64},
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -275,7 +275,7 @@ struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    weights::Vector{Float64},
+    SamplingWeights::Vector{Float64},
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -294,7 +294,7 @@ struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    weights::Vector{Float64},
+    SamplingWeights::Vector{Float64},
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -315,7 +315,7 @@ struct MultistateModelFitted <: MultistateProcess
     emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    weights::Vector{Float64},
+    SamplingWeights::Vector{Float64},
     markovsurrogate::MarkovSurrogate
     #optim::
     modelcall::NamedTuple
@@ -353,14 +353,14 @@ struct MPanelData
 end
 
 """
-    SMPanelData(model::MultistateProcess, paths::Array{SamplePath}, weights::ElasticArray{Float64})
+    SMPanelData(model::MultistateProcess, paths::Array{SamplePath}, ImportanceWeights::ElasticArray{Float64})
 
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate semi-Markov model to panel data via MCEM.
 """
 struct SMPanelData
     model::MultistateProcess
     paths::Array{SamplePath}
-    weights::ElasticArray{Float64}
-    totweights::ElasticArray{Float64}
+    ImportanceWeights::ElasticArray{Float64}
+    TotImportanceWeights::ElasticArray{Float64}
 end
 
