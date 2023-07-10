@@ -327,15 +327,15 @@ function build_totalhazards(_hazards, tmat)
 end
 
 """
-    build_emat(data::DataFrame, censoring_patterns::Matrix{Int64})
+    build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64})
 
 Generate a matrix enumerating instantaneous transitions. Origin states correspond to rows, destination states to columns, and zero entries indicate that an instantaneous state transition is not possible. Transitions are enumerated in non-zero elements of the matrix. `hazinfo` is the output of a call to `enumerate_hazards`.
 """
-function build_emat(data::DataFrame, censoring_patterns::Matrix{Int64})
+function build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64})
     
     # initialize the emission matrix
     n_obs = nrow(data)
-    n_states = size(censoring_patterns, 2) - 1
+    n_states = size(CensoringPatterns, 2) - 1
     emat = zeros(Int64, n_obs, n_states)
 
     for i in 1:n_obs
@@ -344,8 +344,8 @@ function build_emat(data::DataFrame, censoring_patterns::Matrix{Int64})
         elseif data.obstype[i] == 0 # observation censored, all state are possible
             emat[i,:] = ones(n_states)
         else
-            emat[i,:] .= censoring_patterns[data.obstype[i] - 2, 2:n_states+1]
-            censoring_patterns[censoring_patterns[:,1] .== data.obstype[i], 2:size(censoring_patterns,2)]
+            emat[i,:] .= CensoringPatterns[data.obstype[i] - 2, 2:n_states+1]
+            CensoringPatterns[CensoringPatterns[:,1] .== data.obstype[i], 2:size(CensoringPatterns,2)]
         end 
     end
 
@@ -353,14 +353,14 @@ function build_emat(data::DataFrame, censoring_patterns::Matrix{Int64})
 end
 
 """
-    multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights = nothing, censoring_patterns = nothing)
+    multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights = nothing, CensoringPatterns = nothing)
 
 Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference. Optional keyword arguments specified in kwargs may include sampling weights and censoring patterns.
 """
-function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights = nothing, censoring_patterns = nothing) 
+function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights::Union{Nothing,Vector{Float64}} = nothing, CensoringPatterns::Union{Nothing,Matrix{Int64}} = nothing) 
 
     # catch the model call
-    modelcall = (hazards = hazards, data = data, SamplingWeights = SamplingWeights, censoring_patterns = censoring_patterns)
+    modelcall = (hazards = hazards, data = data, SamplingWeights = SamplingWeights, CensoringPatterns = CensoringPatterns)
 
     # get indices for each subject in the dataset
     subjinds, nsubj = get_subjinds(data)
@@ -381,16 +381,21 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
     end
 
     # initialize censoring patterns if none supplied
-    if isnothing(censoring_patterns)
-        censoring_patterns = Matrix{Int64}(undef, 0, size(tmat, 1))
+    if isnothing(CensoringPatterns)
+        CensoringPatterns = Matrix{Int64}(undef, 0, size(tmat, 1))
     end
 
-    # function to check data formatting
-    check_data!(data, tmat, censoring_patterns)
+    # check data formatting
+    check_data!(data, tmat, CensoringPatterns)
 
     # check SamplingWeights
     check_SamplingWeights(SamplingWeights, data)
 
+    # check CensoringPatterns and build emission matrix
+    if any(data.obstype .∉ Ref([1,2]))
+        check_CensoringPatterns(CensoringPatterns, tmat)
+        emat = build_emat(data, CensoringPatterns)
+    end
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
     _hazards, parameters, hazkeys = build_hazards(hazards...; data = data, surrogate = false)
@@ -401,11 +406,6 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
     # build exponential surrogate hazards
     surrogate = build_hazards(hazards...; data = data, surrogate = true)
 
-    # emission matrix
-    if any(data.obstype .∉ Ref([1,2]))
-        check_censoring_patterns(censoring_patterns, tmat)
-        emat = build_emat(data, censoring_patterns)
-    end
 
     # return the multistate model - change obstype control flow to allow more censoring codes
     if all(data.obstype .== 1)
@@ -419,6 +419,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
         hazkeys,
         subjinds,
         SamplingWeights,
+        CensoringPatterns,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -433,6 +434,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
         hazkeys,
         subjinds,
         SamplingWeights,
+        CensoringPatterns,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -448,6 +450,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
         hazkeys,
         subjinds,
         SamplingWeights,
+        CensoringPatterns,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -462,6 +465,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
         hazkeys,
         subjinds,
         SamplingWeights,
+        CensoringPatterns,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
@@ -477,6 +481,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
         hazkeys,
         subjinds,
         SamplingWeights,
+        CensoringPatterns,
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
     end
