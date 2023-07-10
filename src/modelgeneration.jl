@@ -377,7 +377,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, weights = 
 
     # initialize weights if none supplied
     if isnothing(weights)
-        weights = ones(Float64, length(subjinds))
+        weights = ones(Float64, nsubj)
     end
 
     # initialize censoring patterns if none supplied
@@ -388,10 +388,6 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, weights = 
     # function to check data formatting
     check_data!(data, tmat, censoring_patterns)
 
-    # create uniform weights if necessary
-    if(length(weights) == 0)
-        weights = ones(nsubj)
-    end
     # check weights
     check_weights(weights, data)
 
