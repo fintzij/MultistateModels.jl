@@ -219,8 +219,8 @@ struct MultistateModel <: MultistateProcess
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
-    subjectindices::Vector{Vector{Int64}},
-    SamplingWeights::Vector{Float64},
+    subjectindices::Vector{Vector{Int64}}
+    SamplingWeights::Vector{Float64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -238,7 +238,7 @@ struct MultistateMarkovModel <: MultistateMarkovProcess
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    SamplingWeights::Vector{Float64},
+    SamplingWeights::Vector{Float64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -257,7 +257,7 @@ struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    SamplingWeights::Vector{Float64},
+    SamplingWeights::Vector{Float64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -275,7 +275,7 @@ struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
     tmat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    SamplingWeights::Vector{Float64},
+    SamplingWeights::Vector{Float64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -294,7 +294,7 @@ struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    SamplingWeights::Vector{Float64},
+    SamplingWeights::Vector{Float64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -315,7 +315,7 @@ struct MultistateModelFitted <: MultistateProcess
     emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    SamplingWeights::Vector{Float64},
+    SamplingWeights::Vector{Float64}
     markovsurrogate::MarkovSurrogate
     #optim::
     modelcall::NamedTuple

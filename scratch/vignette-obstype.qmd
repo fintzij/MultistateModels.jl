@@ -1,5 +1,5 @@
 ---
-title: "Vignette -- different types of observation"
+title: "Fitting semi-Markov msm to various types of data"
 format:
   html:
     code-fold: true
