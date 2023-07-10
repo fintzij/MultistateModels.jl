@@ -6,9 +6,12 @@ Modify the parameter values in a MultistateProcess object
 function set_crude_init!(model::MultistateProcess)
     crude_par = calculate_crude(model)
     for i in model.hazards
-        set_par_to = init_par(i, crude_par[i.statefrom, i.stateto])
-        
-        set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
+        if !isa(i, _Spline)
+            set_par_to = init_par(i, crude_par[i.statefrom, i.stateto])
+            set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
+        else
+            @warn "Parameters for $(i.hazname) not initialized by set_crude_init!(). Parameters for spline hazards should be initialized manually using set_parameters!()"
+        end
     end
 end
 
