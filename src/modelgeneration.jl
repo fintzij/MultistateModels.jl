@@ -353,14 +353,14 @@ function build_emat(data::DataFrame, censoring_patterns::Matrix{Int64})
 end
 
 """
-    multistatemodel(hazards::HazardFunction...; data::DataFrame)
+    multistatemodel(hazards::HazardFunction...; data::DataFrame, weights = nothing, censoring_patterns = nothing)
 
-Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference.
+Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference. Optional keyword arguments specified in kwargs may include weights and censoring patterns.
 """
-function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_patterns::Matrix{Int64} = Matrix{Int64}[], weights::Vector{Float64} = Vector{Float64}())
+function multistatemodel(hazards::HazardFunction...; data::DataFrame, weights = nothing, censoring_patterns = nothing) 
 
     # catch the model call
-    modelcall = (hazards = hazards, data = data)
+    modelcall = (hazards = hazards, data = data, weights = weights, censoring_patterns = censoring_patterns)
 
     # get indices for each subject in the dataset
     subjinds, nsubj = get_subjinds(data)
@@ -374,6 +374,16 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, censoring_
 
     # compile matrix enumerating instantaneous state transitions
     tmat = create_tmat(hazinfo)
+
+    # initialize weights if none supplied
+    if isnothing(weights)
+        weights = ones(Float64, length(subjinds))
+    end
+
+    # initialize censoring patterns if none supplied
+    if isnothing(censoring_patterns)
+        censoring_patterns = Matrix{Int64}(undef, 0, size(tmat, 1))
+    end
 
     # function to check data formatting
     check_data!(data, tmat, censoring_patterns)

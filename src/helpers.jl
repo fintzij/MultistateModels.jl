@@ -127,7 +127,7 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
         abs_warn = map(x -> any(data.statefrom .== x), which_absorbing)
 
         if any(abs_warn)
-            println("The data contains contains observations where a subject originates in an absorbing state.")
+            @warn "The data contains contains observations where a subject originates in an absorbing state."
         end
     end
 
@@ -150,6 +150,16 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
             if(any(data.tstart[inds[Not(begin)]] .!= 
                     data.tstop[inds[Not(end)]]))
                 error("Time intervals for subject $i contain discontinuities.")
+            end
+        end
+    end
+
+    # warning if tmat specifies an allowed transition for which no such transitions were observed in the data
+    n_rs = compute_suff_stats(data, tmat)[1]
+    for r in 1:size(tmat)[1]
+        for s in 1:size(tmat)[2]
+            if tmat[r,s]!=0 && n_rs[r,s]==0
+                @warn "Data does not contain any transitions between state $r and state $s"
             end
         end
     end
