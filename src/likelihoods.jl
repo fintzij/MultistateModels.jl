@@ -102,7 +102,7 @@ function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model:
     end
 
     # weighted loglikelihood
-    return ll * model.weights[subj_inds]
+    return ll
 end
 
 ########################################################
@@ -119,11 +119,11 @@ function loglik(parameters, data::ExactData; neg = true)
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # send each element of samplepaths to loglik
-    # ll = mapreduce(
-    #     (x, w) -> loglik(pars, x, data.model.hazards, data.model) * w,
-    #     +, 
-    #     data.paths, data.model.weights)
-    ll = mapreduce(x -> loglik(pars, x, data.model.hazards, data.model), +, data.paths)
+    ll = mapreduce(
+        (x, w) -> loglik(pars, x, data.model.hazards, data.model) * w,
+        +, 
+        data.paths, data.model.SamplingWeights)
+    #ll = mapreduce(x -> loglik(pars, x, data.model.hazards, data.model), +, data.paths)
 
     neg ? -ll : ll
 end
@@ -166,22 +166,23 @@ function loglik(parameters, data::MPanelData; neg = true)
     # accumulate the log likelihood
     ll = 0.0
 #    for i in Base.OneTo(nrow(data.model.data))
-    for subj in Base.OneTo(length(data.model.weights))
+    for subj in Base.OneTo(length(data.model.subjinds))
 
         # subject data
         subj_inds = model.subjectindices[subj]
         subj_dat  = view(data.model.data, subj_inds, :)
 
         # contribution to likelihood
+        subj_ll=0.0
         for i in Base.OneTo(nrow(subj_dat))
 
             if data.model.data.obstype[i] == 2 # panel data
 
-                subj_ll = log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]])
+                subj_ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]])
 
             elseif data.model.data.obstype[i] == 1 # exact data
 
-                subj_ll = survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
+                subj_ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
 
                 if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
 
@@ -192,8 +193,7 @@ function loglik(parameters, data::MPanelData; neg = true)
         end
         
         # weighted likelihood
-        ll += subj_ll * data.model.weights(subj)
-
+        ll += subj_ll * data.model.SamplingWeights[subj]
     end
 
     neg ? -ll : ll
@@ -213,7 +213,7 @@ function loglik(parameters, data::SMPanelData; neg = true)
     ll = 0.0
     for j in Base.OneTo(size(data.paths, 2))
         for i in Base.OneTo(size(data.paths, 1))
-            ll += loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.weights[i,j] / data.totweights[i]
+            ll += loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.ImportanceWeights[i,j] / data.TotImportanceWeights[i] * data.model.SamplingWeights[i]
         end
     end
 
@@ -234,7 +234,7 @@ function loglik!(parameters, logliks::ElasticArray{Float64}, data::SMPanelData)
     # compute the semi-markov log-likelihoods
     for j in Base.OneTo(size(data.paths, 2))
         for i in Base.OneTo(size(data.paths, 1))
-            logliks[i,j] = loglik(pars, data.paths[i, j], data.model.hazards, data.model)
+            logliks[i,j] = loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.model.SamplingWeights[i]
         end
     end
 end
