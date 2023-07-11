@@ -7,6 +7,19 @@ using MultistateModels
 using Quadrature
 using QuadGK
 
+# named tuple example - run the first 29 lines of setup_illnessdeath_splines.jl to create a model
+# get symbols
+haznames = map(x -> model.hazards[x].hazname, collect(1:length(model.hazards)))
+
+# create a vector of summary matrices
+S = Vector{DataFrame}(undef, 4)
+for s in eachindex(S)
+    # summary for hazard s
+    S[s] = DataFrame(est = rand(4))
+end
+
+output = (;zip(haznames, S)...)
+
 #### Minimal model
 h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2);
 h13 = Hazard(@formula(0 ~ 1 + trt*age), "exp", 1, 3);
