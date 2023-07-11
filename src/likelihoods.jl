@@ -192,7 +192,7 @@ function loglik(parameters, data::MPanelData; neg = true)
             end
         end
         
-        # weighted likelihood
+        # weighted loglikelihood
         ll += subj_ll * data.model.SamplingWeights[subj]
     end
 
