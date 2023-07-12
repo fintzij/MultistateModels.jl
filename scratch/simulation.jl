@@ -47,7 +47,7 @@ set_parameters!(model, par_true)
 # Simulate data
 simdat, paths = simulate(model; paths = true, data = true)
 # since `obstype=1`, `simdat` contains the exact paths
-println(simdat[1])
+println(simdat[1][1:30,:])
 
 # build model with simulated data
 model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
@@ -78,7 +78,6 @@ dat =
               stateto = fill(2, nobs_per_subj*nsubj), # `stateto` is a placeholder before the simulation
               obstype = fill(2, nobs_per_subj*nsubj)) # `obstype=2` indicates panel data
 
-              
 # create multistate model object
 model = multistatemodel(h12, h13, h21, h23; data = dat)
 
@@ -89,16 +88,13 @@ set_parameters!(model, par_true)
 simdat, paths = simulate(model; paths = true, data = true)
 # since `obstype=2`, `simdat` contains the panel observations
 println(simdat[1][1:30,:])
+# compare with the simulated paths
+println(paths[1])
 
 # build model with simulated data
 model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
-set_parameters!(model, par_true)
-
-# @Jason
-# MultistateModels.set_crude_init!(model)
 
 # fit model
-# slow the first time because of compilation, but much faster the subsequent runs
 model_fitted = fit(model)
 
 # summary of results
@@ -106,7 +102,29 @@ summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
 println(summary_table[:h12])
 println(par_true[:h12]) # true value
 
-model_fitted.parameters
 
-model.SamplingWeights
-#check: i calculation of tpm, ii index of tpm
+#
+# Mixture of exactly observed and panel data
+
+dat = 
+    DataFrame(id = repeat(collect(1:nsubj), inner = nobs_per_subj),
+              tstart = repeat(times_obs[1:nobs_per_subj], outer = nsubj),
+              tstop = repeat(times_obs[2:nobs_per_subj+1], outer = nsubj),
+              statefrom = fill(1, nobs_per_subj*nsubj),
+              stateto = fill(2, nobs_per_subj*nsubj),
+              obstype = repeat(collect(1:2), outer = Int64(nobs_per_subj*nsubj/2))) # mixture of `obstype=1` and `obstype=2`
+
+model = multistatemodel(h12, h13, h21, h23; data = dat)
+set_parameters!(model, par_true)
+simdat, paths = simulate(model; paths = true, data = true)
+
+# `simdat` contains panel observations (`obstype=2`) and intervals during which the paths are exactly observed (`obstype=1`)
+println(simdat[1][1:30,:])
+print(paths[1])
+
+model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
+model_fitted = fit(model)
+
+summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
+println(summary_table[:h12])
+println(par_true[:h12]) # true value
