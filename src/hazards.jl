@@ -122,7 +122,7 @@ end
 """
     call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true, newtime = true)
 
-Return the Weibull cause-specific hazards. No covariate adjustement.
+Return the Weibull cause-specific hazards. No covariate adjustement. See rstanarm R package for parameterization.
 """
 function call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true, newtime = true)
 
@@ -139,7 +139,7 @@ end
 """
     call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true, newtime = true)
 
-Cumulative hazard for Weibull hazards over the interval [lb, ub].
+Cumulative hazard for Weibull hazards over the interval [lb, ub]. See rstanarm R package for parameterization.
 """
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true, newtime = true)
 

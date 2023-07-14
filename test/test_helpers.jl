@@ -39,6 +39,6 @@ end
     sidv = [1, 2, 2, 3, 3, 3, 42, 42]
     sidvv = [[1], [2, 3], [4, 5, 6], [7, 8]]
 
-    @test MultistateModels.get_subjinds(DataFrame(id = sidv)) == sidvv
-
+    @test MultistateModels.get_subjinds(DataFrame(id = sidv))[1] == sidvv
+    @test MultistateModels.get_subjinds(DataFrame(id = sidv))[2] == 4
 end

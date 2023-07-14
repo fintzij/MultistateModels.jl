@@ -109,10 +109,10 @@ end
     lb = 0
     ub = 5
 
-    # cumulative hazard for weibullcause specific hazards, no covariate adjustment
-    @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], 1, msm_expwei.hazards[3], give_log = true) == log(ub^exp(-0.25)-lb^exp(-0.25)) + 0.2 - 0.25
+    # cumulative hazard for weibull cause specific hazards, no covariate adjustment
+    @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], 1, msm_expwei.hazards[3], give_log = true) == log(ub^exp(-0.25)-lb^exp(-0.25)) + 0.2
 
-    @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], 1, msm_expwei.hazards[3], give_log = false) == exp(log(ub^exp(-0.25)-lb^exp(-0.25)) + 0.2 - 0.25)
+    @test MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[3], 1, msm_expwei.hazards[3], give_log = false) == exp(log(ub^exp(-0.25)-lb^exp(-0.25)) + 0.2)
 
     # cumulative hazard for weibull proportional hazards over [lb, ub], with covariate adjustment
     pars =  msm_expwei.parameters[4] 
