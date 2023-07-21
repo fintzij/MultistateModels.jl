@@ -132,19 +132,19 @@ println(par_true[:h12]) # true value
 
 #
 # Covariates
-
+nsubj=100
 # include a treatment effect for some transitions
 h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2) # healthy -> ill
 h13 = Hazard(@formula(0 ~ 1), "exp", 1, 3) # healthy -> dead
-h21 = Hazard(@formula(0 ~ 1 + trt), "exp", 2, 1) # ill -> healthy
-h23 = Hazard(@formula(0 ~ 1 + trt), "exp", 2, 3) # ill -> dead
+h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1) # ill -> healthy
+h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3) # ill -> dead
 
 # parameters
 par_true = (
     h12 = [log(1.1), log(1/3)], # multiplicative effect of treatmet is 1/3 (protective effect)
     h13 = [log(0.3)],
-    h21 = [log(0.7), log(2)], # gets healthy twice as quickly if treated
-    h23 = [log(0.9), log(1/1.5)])
+    h21 = [log(0.7)], # gets healthy twice as quickly if treated
+    h23 = [log(0.9)])
 
 # subject data with a binary covariate (trt)
 dat =
@@ -156,7 +156,16 @@ dat =
             obstype   = fill(1, nsubj), # `obstype=1` indicates exactly observed data
             trt       = repeat(collect(0:1), outer = Int64(nsubj/2))) # odd subjects receive the control (trt=1) and even subjects receive the treatment (trt=1)
 
+model = multistatemodel(h12, h13, h21, h23; data = dat)
+set_parameters!(model, par_true)
+simdat, paths = simulate(model; paths = true, data = true)
+model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
+#set_parameters!(model, par_true) # temporary solution
 
+model_fitted = fit(model)
+summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
+println(summary_table[:h12])
+println(par_true[:h12]) # true value
 
 
 
@@ -165,13 +174,13 @@ dat =
 #
 # Semi-Markov with exactly observed data
 
-par_true = (
-    h12 = [log(1.5), log(2)],
-    h13 = [log(2), log(2.5)],
-    h21 = [log(0.7)],
-    h23 = [log(0.9), log(1)])
+# par_true = (
+#     h12 = [log(1.5), log(2)],
+#     h13 = [log(2), log(2.5)],
+#     h21 = [log(0.7)],
+#     h23 = [log(0.9), log(1)])
 
-h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2) # healthy -> ill
-h13 = Hazard(@formula(0 ~ 1), "wei", 1, 3) # healthy -> dead
-h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1) # ill -> healthy
-h23 = Hazard(@formula(0 ~ 1), "gom", 2, 3) # ill -> dead
+# h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2) # healthy -> ill
+# h13 = Hazard(@formula(0 ~ 1), "wei", 1, 3) # healthy -> dead
+# h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1) # ill -> healthy
+# h23 = Hazard(@formula(0 ~ 1), "gom", 2, 3) # ill -> dead
