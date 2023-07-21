@@ -17,12 +17,18 @@ dat =
               stateto = fill(2, 5*nsubj),
               obstype = fill(1, 5*nsubj))
 
+dat = DataFrame(id = collect(1:nsubj),
+            tstart = fill(0.0, nsubj),
+            tstop = fill(10.0, nsubj),
+            statefrom = fill(1, nsubj),
+            stateto = fill(2, nsubj),
+            obstype = fill(1, nsubj))
+
 
 # create multistate model object
 model = multistatemodel(h12, h13, h21, h23; data = dat)
 
 # set model parameters
-# want mean time to event of 5
 set_parameters!(
     model, 
     (h12 = [log(1.3), log(0.4)],
