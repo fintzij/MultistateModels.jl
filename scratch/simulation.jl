@@ -20,7 +20,7 @@ par_true = (
     h23 = [log(0.9)])
 
 # number of subjects
-nsubj = 10000 # number of subject
+nsubj = 100 # number of subject
 
 # observation window
 tstart = 0.0
@@ -132,7 +132,7 @@ println(par_true[:h12]) # true value
 
 #
 # Covariates
-nsubj=100
+nsubj=25
 # include a treatment effect for some transitions
 h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2) # healthy -> ill
 h13 = Hazard(@formula(0 ~ 1), "exp", 1, 3) # healthy -> dead
@@ -157,9 +157,17 @@ dat =
             trt       = repeat(collect(0:1), outer = Int64(nsubj/2))) # odd subjects receive the control (trt=1) and even subjects receive the treatment (trt=1)
 
 model = multistatemodel(h12, h13, h21, h23; data = dat)
-set_parameters!(model, par_true)
 simdat, paths = simulate(model; paths = true, data = true)
+
+par_init = (
+    h12 = [log(1.1), log(1/3)] .+ randn(2), # multiplicative effect of treatmet is 1/3 (protective effect)
+    h13 = [log(0.3) + randn(1)[1]],
+    h21 = [log(0.7) + randn(1)[1]], # gets healthy twice as quickly if treated
+    h23 = [log(0.9) + randn(1)[1]])
+
+
 model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
+set_parameters!(model, par_init)
 #set_parameters!(model, par_true) # temporary solution
 
 model_fitted = fit(model)
