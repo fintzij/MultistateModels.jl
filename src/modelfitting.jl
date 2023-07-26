@@ -75,6 +75,9 @@ function fit(model::MultistateModel)
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
+        nothing,
+        nothing,
+        nothing,
         model.modelcall)
 end
 
@@ -118,6 +121,9 @@ function fit(model::MultistateMarkovModel)
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
+        nothing,
+        nothing,
+        nothing,
         model.modelcall)
 end
 
@@ -242,6 +248,7 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
 
     # initialize inference
     mll = Vector{Float64}()
+    ess = ElasticArray{Float64}(undef, nsubj) # effective sample size (one for each subject)
     ests = ElasticArray{Float64}(undef, size(params_cur,1), 0)
 
     # optimization function + problem
@@ -299,11 +306,16 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
             ImportanceWeights = exp.(loglik_target_cur .- loglik_surrog)
             TotImportanceWeights = sum(ImportanceWeights; dims = 2)
 
+            # recalculate the effective sample size for each subject
+            NormalizedImportanceWeights = ImportanceWeights ./ TotImportanceWeights
+            ess_cur = 1 ./ sum(NormalizedImportanceWeights .^ 2; dims = 2)
+
             # swap current value of the marginal log likelihood
             mll_cur = mll_prop
 
-            # save marginal log likelihood and parameters
+            # save marginal log likelihood, effective sample size and parameters
             push!(mll, mll_cur)
+            append!(ess, ess_cur)
             append!(ests, params_cur)
 
             # check whether to stop 
@@ -426,7 +438,24 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
     # get the variance-covariance matrix
     vcov = inv(reduce(+, fisher, dims = 3)[:,:,1])
 
-    # return results
-    
-    
+    # wrap results
+    return MultistateModelFitted(
+        model.data,
+        VectorOfVectors(params_cur, model.parameters.elem_ptr),
+        mll_cur,
+        vcov,
+        model.hazards,
+        model.totalhazards,
+        model.tmat,
+        model.hazkeys,
+        model.subjectindices,
+        model.SamplingWeights,
+        model.CensoringPatterns,
+        model.markovsurrogate,
+        mll,
+        ess,
+        ests,
+        model.modelcall)
+        
+    # return mll, ess, loglik ? 
 end
