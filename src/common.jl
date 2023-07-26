@@ -324,6 +324,9 @@ struct MultistateModelFitted <: MultistateProcess
     CensoringPatterns::Matrix{Int64}
     markovsurrogate::MarkovSurrogate
     #optim::
+    seq_loglik::Union{Nothing,Vector{Float64}}
+    seq_ess::Union{Nothing,ElasticArray{Float64}}
+    seq_parameters::Union{Nothing,ElasticArray{Float64}}
     modelcall::NamedTuple
 end
 
