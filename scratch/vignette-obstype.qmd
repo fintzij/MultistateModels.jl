@@ -1,0 +1,86 @@
+---
+title: "Fitting semi-Markov msm to various types of data"
+format:
+  html:
+    code-fold: true
+---
+
+multistate model; subject move from compartments to compartments. Example: Covid19.
+Longitudinal studies; follow subject over time as they progress through the compartments.
+Inference: time spend in each compartment are random variables whose distribution we want to estimate.
+The data available vary across studies. The package `MultistateModels` contains algorithms to find the MLE when the data available consist of exactly observed trajectories (`obstype = 1`), panel-observed data (`obstype = 2`), panel-observed data with censored states (`obstype > 2`), or a a mix of these types of data. 
+Drop the subscript for the subject for simplicity.
+semi-Markov model.
+
+## Exactly observed trajectories
+
+The data for a given subject consist of $n$ times $t_1, \dots, t_n$ and states $s_0, \dots, s_n$. Here $s_0$ denotes the state of the subject at the start of the observation period, $t=0$.
+When the data are exactly observed, $t_i$ corresponds to the $i$th transition and $s_i$ the state into which the subject transitioned at that time; that is, $t_i$ is the time at which the subject transitioned from state $s_{i-1} to state $s_i$. Note that consecutive states cannot be the same, as transitions into the same state are not allowed, that is, $s_j \new s_{j+1}$ for $j=1,dots,n-1$. The path of the subject is therefore $s_0 \rightarrow s_1 \rightarrow \dots \rightarrow s_n$ and the times at which each transition took place are $t_1, \dots, t_n$.
+
+```{julia}
+# data setup
+```
+
+The likelihood of semi-Markov multistate models for exactly observed data can be written in a closed form expression,
+\begin{equation*}
+L(\theta) = \prod_{i=1}^m \prod_{j=1}^{n_i} f_{s_{i,j-1}}(\delta_{i,j})
+\end{equation*}
+where $\delta_{i,j} = t_{i,j} - t_{i,j-1}$ denotes the sojourn time,
+$f_s(delta)$ denotes the density of the distribution of the sojourn time in state $s$ evaluated at the value $delta$.
+
+```{julia}
+# distribution
+```
+
+When the data are exactly observed, the package `MultistateModels` finds the MLE by maximizing the log-likelihood via Newton's method.
+
+```{julia}
+# model fit
+
+# comparison with R package msm
+
+# semi-Markov model
+```
+
+## Panel-observed data
+
+Given some observation times $t_1, \dots, t_n$, the variable $s_j$ indicates the state occupied by the subject at time $t_j$. The path between consecutive observation times is not observed.
+
+In the Markovian case, the likelihood is
+\begin{equation*}
+L(\theta) = \prod_{i=1}^m \prod_{j=1}^{n_i} P_{s_{i,j-1}, s_{i,j}}(\delta_{i,j})
+\end{equation*}
+where $P_{r,s}(\delta)$ denotes the probability to go from state $r$ to state $s$. $P_{r,s}(\delta)$ is computed via matrix exponentiation. The log-likelihood is then maximized via Newton's method to find the MLE.
+```{julia}
+# comparison with R package msm
+```
+
+In the semi-Markov case, the likelihood does not admit a closed-form expression.
+We implement an importance-sampling-based MCEM algorithm (IS-MCEM) to find the MLE. In the IS-MCEM, we generate paths that match the observed data using a Markov msm as proposal. These paths are then weighted in the expectation step of the EM algorithm using importance sampling weights.
+
+```{julia}
+```
+
+## Panel-observed data with censored states
+Let $S=\{1,\dots,K\}$ denote the sample space.
+Given some observation times $t_1, \dots, t_n$, the set $C_j\subset S$ indicates the possible states occupied by the subject at time $t_j$. The path between consecutive observation times is not observed. As an illustration, consider the situation where $K=4$ and the four states are healthy (1), hospital bed (2), hospital ventilator (3) and discharged (4). At some time $t_j$, we may know that a subject is at the hospital, but may not know whether she is simply in bed (2) or using a ventilator (3). In this case, $C_j = \{2,3\}$. If instead we knew that the subject was in bed (2), then $C_j=\{2\}$, which shows that panel-observed data are a special case of cesnored panel-observed data.
+
+Deal with censored states by sampling. The algorithm first samples the censored state using the FFBS algorithm, and then proceed with the IS-MCEM.
+
+```{julia}
+```
+
+
+## Mixed data
+
+
+# Quarto template
+
+For a demonstration of a line plot on a polar axis, see @fig-polar.
+
+```{r}
+#| label: fig-polar
+#| fig-cap: "A line plot on a polar axis"
+
+hist(rnorm(1e3))
+```

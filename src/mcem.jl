@@ -1,9 +1,9 @@
 """
-    mcem_objective(logliks, weights, totweights)
+    mcem_mll(logliks, ImportanceWeights, TotImportanceWeights)
 
 Compute the marginal log likelihood for MCEM.
 """
-function mcem_mll(logliks, ImportanceWeights, TotImportanceWeights) 
+function mcem_mll(logliks, ImportanceWeights, TotImportanceWeights)
 
     obj = 0.0
     for j in 1:size(logliks, 2)
@@ -33,8 +33,9 @@ function var_ris(l, w, t)
 
 end
 
+
 """
-    mcem_ase(delta_ll, weights, totweights)
+    mcem_ase(delta_ll, ImportanceWeights, TotImportanceWeights)
 
 Asymptotic standard error of the change in the MCEM objective function.
 """
@@ -43,6 +44,3 @@ function mcem_ase(delta_ll, ImportanceWeights, TotImportanceWeights)
     sqrt.(sum(map(i -> var_ris(delta_ll[i,:], ImportanceWeights[i,:], TotImportanceWeights[i]), collect(1:length(TotImportanceWeights))))) 
 
 end
-
-
-

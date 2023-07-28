@@ -37,6 +37,7 @@ export
     fit,
     Hazard,
     multistatemodel,
+    set_crude_init!,
     set_parameters!,
     simulate,
     statetable,

@@ -165,16 +165,17 @@ function loglik(parameters, data::MPanelData; neg = true)
 
     # accumulate the log likelihood
     ll = 0.0
-#    for i in Base.OneTo(nrow(data.model.data))
-    for subj in Base.OneTo(length(data.model.subjinds))
+    
+    for subj in Base.OneTo(length(data.model.subjectindices))
 
         # subject data
-        subj_inds = model.subjectindices[subj]
-        subj_dat  = view(data.model.data, subj_inds, :)
+        subj_inds = data.model.subjectindices[subj]
+ #       subj_dat  = view(data.model.data, subj_inds, :)
 
-        # contribution to likelihood
-        subj_ll=0.0
-        for i in Base.OneTo(nrow(subj_dat))
+        # subject contribution to likelihood
+        subj_ll = 0.0
+
+        for i in subj_inds
 
             if data.model.data.obstype[i] == 2 # panel data
 
@@ -192,7 +193,7 @@ function loglik(parameters, data::MPanelData; neg = true)
             end
         end
         
-        # weighted likelihood
+        # weighted loglikelihood
         ll += subj_ll * data.model.SamplingWeights[subj]
     end
 

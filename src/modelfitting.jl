@@ -69,9 +69,11 @@ function fit(model::MultistateModel)
         model.hazards,
         model.totalhazards,
         model.tmat,
+       # model.emat,
         model.hazkeys,
         model.subjectindices,
         model.SamplingWeights,
+        model.CensoringPatterns,
         model.markovsurrogate,
         model.modelcall)
 end
@@ -114,6 +116,7 @@ function fit(model::MultistateMarkovModel)
         model.hazkeys,
         model.subjectindices,
         model.SamplingWeights,
+        model.CensoringPatterns,
         model.markovsurrogate,
         model.modelcall)
 end

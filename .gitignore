@@ -4,6 +4,7 @@
 /Manifest.toml
 .vscode/settings.json
 /branch_talk_11_22_2022/*
+/scratch/data
 .DS_Store
 *.pdf
 .vscode/
