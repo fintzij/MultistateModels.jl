@@ -7,7 +7,7 @@ function set_crude_init!(model::MultistateProcess)
     crude_par = calculate_crude(model)
     for i in model.hazards
         if !isa(i, _Spline)
-            set_par_to = init_par(i, crude_par[i.statefrom, i.stateto])
+            set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
             set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
         else
             @warn "Parameters for $(i.hazname) not initialized by set_crude_init!(). Parameters for spline hazards should be initialized manually using set_parameters!()"
@@ -54,7 +54,7 @@ Return a matrix with same dimensions as model.tmat, but row i column j entry is 
 
 Accept a MultistateProcess object.
 """
-function calculate_crude(model::MultistateProcess; give_log=true)
+function calculate_crude(model::MultistateProcess)
     # n_rs is matrix like tmat except each entry is number of transitions from state r to s
     # T_r is vector of length number of states
     n_rs, T_r = compute_suff_stats(model.data, model.tmat)
@@ -72,10 +72,11 @@ function calculate_crude(model::MultistateProcess; give_log=true)
     crude_mat[findall(model.tmat .== 0)] .= 0
 
     for i in 1:length(T_r)
-        crude_mat[i, i] = 1 - sum(crude_mat[i, Not(i)])
+        crude_mat[i, i] =  -sum(crude_mat[i, Not(i)])
     end
-
-    give_log ? log.(crude_mat) : crude_mat
+    
+    return crude_mat
+    #give_log ? log.(crude_mat) : crude_mat
 
 end
 
