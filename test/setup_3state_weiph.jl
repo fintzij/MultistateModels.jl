@@ -12,7 +12,7 @@ dat =
               tstop = [10, 10, 10],
               statefrom = [1, 2, 1],
               stateto = [3, 3, 3],
-              obstype = zeros(3),
+              obstype = ones(3),
               trt = [0, 1, 0],
               age = [23, 32, 50])
 
