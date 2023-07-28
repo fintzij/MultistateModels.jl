@@ -182,7 +182,7 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 - γ: Standard normal quantile for stopping
 - κ: Inflation factor for MCEM sample size, m_new = m_cur + m_cur/κ
 """
-function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3, verbose = false)
+function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3, verbose = false)
 
     # number of subjects
     nsubj = length(model.subjectindices)
@@ -247,23 +247,24 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
     params_cur = flatview(model.parameters)
 
     # initialize inference
-    mll = Vector{Float64}()
-    ess = ElasticArray{Float64}(undef, nsubj) # effective sample size (one for each subject)
-    ests = ElasticArray{Float64}(undef, size(params_cur,1), 0)
+    mll = Vector{Float64}() # marginal loglikelihood
+    ess = ElasticArray{Float64}(undef, nsubj, 0) # effective sample size (one for each subject)
+    ests = ElasticArray{Float64}(undef, size(params_cur,1), 0) # parameter estimates
 
     # optimization function + problem
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
     prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
   
     # go on then
-    keep_going = true; iter = 0
+    keep_going = true
+    iter = 0
     convergence = false
     while keep_going
-
-        # println(iter)
+        #println(iter)
 
         # optimize the monte carlo marginal likelihood
-        params_prop = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton())
+        params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton())
+        params_prop = params_prop_optim.u
 
         # recalculate the log likelihoods
         loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
@@ -273,7 +274,7 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
 
         # change in mll
         mll_change = mll_prop - mll_cur
-        
+
         # calculate the ASE for ΔQ
         ase = mcem_ase(loglik_target_prop .- loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
@@ -283,8 +284,9 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
         if verbose
             println("Iteration: $(iter+1)")
             println("Monte Carlo sample size: $nparticles")
+            println("Loglikelihood: $mll_cur")
             println("MCEM Asymptotic SE: $ase")
-            println("Ascent lower bound: $ascent_lb")
+            println("Ascent lower bound: $ascent_lb\n")
         end
 
          # cache results or increase MCEM effort
@@ -307,8 +309,8 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
             TotImportanceWeights = sum(ImportanceWeights; dims = 2)
 
             # recalculate the effective sample size for each subject
-            NormalizedImportanceWeights = ImportanceWeights ./ TotImportanceWeights
-            ess_cur = 1 ./ sum(NormalizedImportanceWeights .^ 2; dims = 2)
+            NormalizedImportanceWeights = ImportanceWeights ./ TotImportanceWeights            
+            ess_cur = collect(1 ./ sum(NormalizedImportanceWeights .^ 2; dims = 2))
 
             # swap current value of the marginal log likelihood
             mll_cur = mll_prop
@@ -452,10 +454,9 @@ function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        mll,
+        mll, # change name to mll_trace
         ess,
         ests,
+        # include everything that is printed as a matrix (ConvergenceRecords)
         model.modelcall)
-        
-    # return mll, ess, loglik ? 
 end
