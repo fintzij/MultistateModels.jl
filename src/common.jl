@@ -221,6 +221,7 @@ struct MultistateModel <: MultistateProcess
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     SamplingWeights::Vector{Float64}
+    CensoringPatterns::Matrix{Int64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -239,6 +240,7 @@ struct MultistateMarkovModel <: MultistateMarkovProcess
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     SamplingWeights::Vector{Float64}
+    CensoringPatterns::Matrix{Int64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -258,6 +260,7 @@ struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     SamplingWeights::Vector{Float64}
+    CensoringPatterns::Matrix{Int64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -276,6 +279,7 @@ struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     SamplingWeights::Vector{Float64}
+    CensoringPatterns::Matrix{Int64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -295,6 +299,7 @@ struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     SamplingWeights::Vector{Float64}
+    CensoringPatterns::Matrix{Int64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -312,10 +317,11 @@ struct MultistateModelFitted <: MultistateProcess
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-    emat::Matrix{Int64}
+#    emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     SamplingWeights::Vector{Float64}
+    CensoringPatterns::Matrix{Int64}
     markovsurrogate::MarkovSurrogate
     #optim::
     modelcall::NamedTuple

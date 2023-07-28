@@ -100,7 +100,7 @@ end
 
 Validate a user-supplied data frame to ensure that it conforms to MultistateModels.jl requirements.
 """
-function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{Int64})
+function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{Int64})
 
     # validate column names and order
     if any(names(data)[1:6] .!== ["id", "tstart", "tstop", "statefrom", "stateto", "obstype"])
@@ -173,9 +173,9 @@ function check_data!(data::DataFrame, tmat::Matrix, censoring_patterns::Matrix{I
 
     # check that obstype is one of the allowed censoring schemes
     if any(data.obstype .∉ Ref([1,2]))
-        censoring_patterns_id = censoring_patterns[:,1]
-        if any(data.obstype .∉ Ref([[1,2]; censoring_patterns_id]))
-            error("obstype should be one of 1, 2, or a censoring id from censoring_patterns.")
+        CensoringPatterns_id = CensoringPatterns[:,1]
+        if any(data.obstype .∉ Ref([[1,2]; CensoringPatterns_id]))
+            error("obstype should be one of 1, 2, or a censoring id from CensoringPatterns.")
         end
     end
 
@@ -187,55 +187,55 @@ end
 
 function check_SamplingWeights(SamplingWeights::Vector{Float64}, data::DataFrame)
     
-    # check that the number of weights is correct
+    # check that the number of sampling weights is correct
     if length(SamplingWeights) != length(unique(data.id))
         error("The length of SamplingWeights is not equal to the number of subjects.")
     end
 
-    # check that the weights are non-negative
+    # check that the sampling weights are non-negative
     if any(SamplingWeights .<= 0)
         error("The elements of SamplingWeights should be non-negative.")
     end
 end
 """
-check_censoring_patterns(data::DataFrame, emat::Matrix)
+check_CensoringPatterns(data::DataFrame, emat::Matrix)
 
 Validate a user-supplied data frame to ensure that it conforms to MultistateModels.jl requirements.
 """
-function check_censoring_patterns(censoring_patterns::Matrix{Int64}, tmat::Matrix)
+function check_CensoringPatterns(CensoringPatterns::Matrix{Int64}, tmat::Matrix)
     
-    nrow, ncol = size(censoring_patterns)
+    nrow, ncol = size(CensoringPatterns)
 
     # check for empty
     if nrow == 0 | ncol < 2
-        error("The matrix censoring_patterns seems to be empty, while there are censored states.")
+        error("The matrix CensoringPatterns seems to be empty, while there are censored states.")
     end
 
     # censoring patterns must be labelled as 3, 4, ...
-    if !all(censoring_patterns[:,1] .== 3:(nrow+2))
-        error("The first column of the matrix `censoring_patterns` must be of the form (3, 4, ...) .")
+    if !all(CensoringPatterns[:,1] .== 3:(nrow+2))
+        error("The first column of the matrix `CensoringPatterns` must be of the form (3, 4, ...) .")
     end
 
     # censoring patterns must be binary
-    if any(censoring_patterns[:,2:ncol] .∉ Ref([0,1]))
-        error("Columns 2, 3, ... of censoring_patterns must be binary.")
+    if any(CensoringPatterns[:,2:ncol] .∉ Ref([0,1]))
+        error("Columns 2, 3, ... of CensoringPatterns must be binary.")
     end
 
     # censoring patterns must indicate the presence/absence of each state
     n_states = size(tmat, 1)
     if ncol - 1 .!= n_states
-        error("The multistate model contains $n_states states, but censoring_patterns contains $(ncol-1) states.")
+        error("The multistate model contains $n_states states, but CensoringPatterns contains $(ncol-1) states.")
     end
 
     # censoring patterns must have at least one possible state
     for i in 1:nrow
-        if all(censoring_patterns[i,2:ncol] .== 0)
+        if all(CensoringPatterns[i,2:ncol] .== 0)
             error("Censoring pattern $i has no allowed state.")
         end
-        if all(censoring_patterns[i,2:ncol] .== 1)
+        if all(CensoringPatterns[i,2:ncol] .== 1)
             println("All states are allowed in censoring pattern $(2+i).")
         end
-        if sum(censoring_patterns[i,2:ncol]) .== 1
+        if sum(CensoringPatterns[i,2:ncol]) .== 1
             println("Censoring pattern $i has only one allowed state; if these observations are not censored there is no need to use a censoring pattern.")
         end
     end
@@ -433,28 +433,48 @@ Return the variance covariance matrix at the maximum likelihood estimate.
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
+- `confidence_level::Float64`: confidence level of the confidence intervals
 """
-function summary(model::MultistateModelFitted) 
+function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95) 
 
-    # maximum likelihood estimates
-    est = estimates(model)
-
-    # confidence intervals
-    vcov = vcov(model)
+    #
+    # summary table
+    
+    # standard error
+    vcov = model.vcov
     se = sqrt.(vcov[diagind(vcov)])
-    lb =est.-1.96.*se
-    ub =est.+1.96.*se
-    CI = exp.(DataFrame(lower = lb, estimate = est, upper = ub))    
+    se_vv = VectorOfVectors(se, model.parameters.elem_ptr)
 
+    # name of hazards
+    haznames = map(x -> model.hazards[x].hazname, collect(1:length(model.hazards)))
+
+    # table
+    summary_table = Vector{DataFrame}(undef, length(haznames))
+    z_critical = quantile(Normal(0.0, 1.0), 1-(1-confidence_level)/2)
+    for s in eachindex(summary_table)
+        # summary for hazard s
+        summary_table[s] = DataFrame(
+            estimate = reduce(vcat, model.parameters[s]),
+            se = reduce(vcat, se_vv[s]))
+
+        summary_table[s].upper = summary_table[s].estimate .+ z_critical .* summary_table[s].se
+        summary_table[s].lower = summary_table[s].estimate .- z_critical .* summary_table[s].se
+    end
+
+    # add hazard names to the table
+    summary_table = (;zip(haznames, summary_table)...)
+    
+    #
     # log likelihood
     ll = loglik(model)
 
+    #
     # information criteria
     p = length(estimates(model))
     n = nrow(model.data)
     AIC = -2*ll + 2     *p
     BIC = -2*ll + log(n)*p
 
-    return CI, ll, AIC, BIC
+    return summary_table, ll, AIC, BIC
 
 end
