@@ -9,3 +9,4 @@
 *.pdf
 .vscode/
 .github/
+scratch/data/*
