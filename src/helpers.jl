@@ -352,6 +352,8 @@ function build_tpm_mapping(data::DataFrame)
 end
 
 
+
+
 """
     loglik(model::MultistateModelFitted) 
 
@@ -361,9 +363,7 @@ Return the maximum likelihood estimates.
 - `model::MultistateModelFitted`: fitted model
 """
 function loglik(model::MultistateModelFitted) 
-
     model.loglik
-
 end
 
 """
@@ -375,27 +375,10 @@ Return the maximum likelihood estimates.
 - `model::MultistateModelFitted`: fitted model
 """
 function parameters(model::MultistateModelFitted)
-
     model.parameters
-
+#    reduce(vcat, model.parameters)
 end
 
-
-"""
-    estimates(model::MultistateModelFitted) 
-
-Return the variance covariance matrix at the maximum likelihood estimate. 
-
-# Arguments 
-- `model::MultistateModelFitted`: fitted model
-- `transformed::Bool`: whether to return the estimates on the natural (transformed) scale or on the log scale, defaults to false.
-"""
-function estimates(model::MultistateModelFitted; transformed::Bool = false)
-
-    par=reduce(vcat, model.parameters)
-    transformed ? exp.(par) : par
-
-end
 
 """
     vcov(model::MultistateModelFitted) 
@@ -406,9 +389,7 @@ Return the variance covariance matrix at the maximum likelihood estimate.
 - `model::MultistateModelFitted`: fitted model
 """
 function vcov(model::MultistateModelFitted) 
-
     model.vcov
-
 end
 
 
@@ -421,9 +402,7 @@ Return the variance covariance matrix at the maximum likelihood estimate.
 - `model::MultistateModelFitted`: fitted model
 """
 function optim(model::MultistateModelFitted) 
-
     model.optim
-
 end
 
 """
@@ -470,11 +449,10 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95)
 
     #
     # information criteria
-    p = length(estimates(model))
+    p = length(reduce(vcat, model.parameters))
     n = nrow(model.data)
     AIC = -2*ll + 2     *p
     BIC = -2*ll + log(n)*p
 
     return summary_table, ll, AIC, BIC
-
 end
