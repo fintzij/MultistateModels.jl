@@ -52,9 +52,13 @@ println(simdat[1][1:30,:])
 # build model with simulated data
 model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
 
+# set initial values to crude estimates
+set_crude_init!(model)
+
 # fit model
 # slow the first time because of compilation, but much faster the subsequent runs
 model_fitted = fit(model)
+
 
 # summary of results
 summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
@@ -82,6 +86,7 @@ dat =
 model = multistatemodel(h12, h13, h21, h23; data = dat)
 
 # set model parameters
+set_crude_init!(model)
 set_parameters!(model, par_true)
 
 # Simulate data
@@ -172,7 +177,7 @@ println(par_true[:h21]) # true value
 
 
 #
-# Semi-Markov with exactly observed data
+# Semi-Marov model with panel data
 
 # semi-Markov model
 h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2) # healthy -> ill
@@ -187,21 +192,42 @@ par_true = (
     h21 = [log(0.7)],
     h23 = [log(0.9)])
 
-# subject data with a binary covariate (trt)
-dat =
-DataFrame(id        = collect(1:nsubj), # subject id
-          tstart    = fill(tstart, nsubj),
-          tstop     = fill(tstop, nsubj),
-          statefrom = fill(1, nsubj), # state at time `tstart`
-          stateto   = fill(2, nsubj), # `stateto` is a placeholder before the simulation
-          obstype   = fill(1, nsubj)) # `obstype=1` indicates exactly observed data
+# subject data
+nsubj=100
+tstart = 0.0
+tstop = 3.0
+nobs_per_subj = 10
+times_obs = collect(range(tstart, stop = tstop, length = nobs_per_subj+1))
+dat = 
+    DataFrame(id = repeat(collect(1:nsubj), inner = nobs_per_subj),
+              tstart = repeat(times_obs[1:nobs_per_subj], outer = nsubj),
+              tstop = repeat(times_obs[2:nobs_per_subj+1], outer = nsubj),
+              statefrom = fill(1, nobs_per_subj*nsubj), # `statefrom` after `tstart=0` is a placeholder before the simulation
+              stateto = fill(2, nobs_per_subj*nsubj), # `stateto` is a placeholder before the simulation
+              obstype = fill(2, nobs_per_subj*nsubj)) # `obstype=2` indicates panel data
 
+# simulate artificial data
 model = multistatemodel(h12, h13, h21, h23; data = dat)
 set_parameters!(model, par_true)
 simdat, paths = simulate(model; paths = true, data = true)
+
+# get mle from Markov process
+h12_markov = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+model_markov = multistatemodel(h12_markov, h13, h21, h23; data = simdat[1])
+model_markov_fitted = fit(model_markov)
+mle_markov=model_markov_fitted.parameters
+
+# use mle from
 model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
 
-model_fitted = fit(model)
+par_mle = (
+    h12 = [log(1), mle_markov[1][1]],
+    h13 = mle_markov[2],
+    h21 = mle_markov[3],
+    h23 = mle_markov[4])
+set_parameters!(model,par_mle)
+
+model_fitted = fit(model; verbose=true)
 summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
 println(summary_table[:h12])
-println(par_true[:h12]) # true value
+println(par_true[:h12])
