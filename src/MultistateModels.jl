@@ -41,6 +41,7 @@ export
     set_parameters!,
     simulate,
     statetable,
+    summary,
     __init__
 
 # typedefs
