@@ -240,6 +240,10 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
     # normalizing constants for ImportanceWeights
     TotImportanceWeights = sum(ImportanceWeights, dims = 2)
 
+    # recalculate the effective sample size for each subject
+    NormalizedImportanceWeights = ImportanceWeights ./ TotImportanceWeights            
+    ess_cur = collect(1 ./ sum(NormalizedImportanceWeights .^ 2; dims = 2))
+
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
@@ -286,6 +290,7 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
             println("Monte Carlo sample size: $nparticles")
             println("Loglikelihood: $mll_cur")
             println("MCEM Asymptotic SE: $ase")
+            println("Smallest ESS: $(min(ess_cur))")
             println("Ascent lower bound: $ascent_lb\n")
         end
 
