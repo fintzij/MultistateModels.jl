@@ -201,7 +201,7 @@ par_true = (
     h23 = [log(0.9)])
 
 # subject data
-nsubj=100
+nsubj=10000
 tstart = 0.0
 tstop = 3.0
 nobs_per_subj = 10
@@ -219,23 +219,38 @@ model = multistatemodel(h12, h13, h21, h23; data = dat)
 set_parameters!(model, par_true)
 simdat, paths = simulate(model; paths = true, data = true)
 
+# set up semi-Markov model
+model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
+
 # get mle from Markov process
 h12_markov = Hazard(@formula(0 ~ 1), "exp", 1, 2)
 model_markov = multistatemodel(h12_markov, h13, h21, h23; data = simdat[1])
 model_markov_fitted = fit(model_markov)
 mle_markov=model_markov_fitted.parameters
 
-# use mle from
-model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
-
-par_mle = (
+# use mle from Markov model
+par_mle_markov = (
     h12 = [log(1), mle_markov[1][1]],
     h13 = mle_markov[2],
     h21 = mle_markov[3],
     h23 = mle_markov[4])
-set_parameters!(model,par_mle)
+set_parameters!(model,par_mle_markov)
 
 model_fitted = fit(model; verbose=true)
+summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
+println(summary_table[:h12])
+println(par_true[:h12])
+
+# add noise to true parameters
+sd=0.2
+par_noise = (
+    h12 = [log(1.5), log(1)] .+ rand(Normal(0,sd), 2),
+    h13 = [log(0.3)] .+ rand(Normal(0,sd), 1),
+    h21 = [log(0.7)] .+ rand(Normal(0,sd), 1),
+    h23 = [log(0.9)] .+ rand(Normal(0,sd), 1))
+set_parameters!(model,par_noise)
+
+model_fitted = fit(model; verbose=true, nparticles = 100)
 summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
 println(summary_table[:h12])
 println(par_true[:h12])
