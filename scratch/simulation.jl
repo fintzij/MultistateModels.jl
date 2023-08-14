@@ -141,14 +141,14 @@ println(par_true[:h12]) # true value
 # include a treatment effect for some transitions
 h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2) # healthy -> ill
 h13 = Hazard(@formula(0 ~ 1), "exp", 1, 3) # healthy -> dead
-h21 = Hazard(@formula(0 ~ 1 + trt), "exp", 2, 1) # ill -> healthy
+h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1) # ill -> healthy
 h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3) # ill -> dead
 
 # parameters
 par_true = (
     h12 = [log(1.1), log(1/3)], # multiplicative effect of treatmet is 1/3 (protective effect)
     h13 = [log(0.3)],
-    h21 = [log(0.7), log(2)], # gets healthy twice as quickly if treated
+    h21 = [log(0.7)],
     h23 = [log(0.9)])
 
 # subject data with a binary covariate (trt)
@@ -167,13 +167,12 @@ simdat, paths = simulate(model; paths = true, data = true)
 par_init = (
     h12 = [log(1.1), log(1/3)] .+ randn(2), # multiplicative effect of treatmet is 1/3 (protective effect)
     h13 = [log(0.3) + randn(1)[1]],
-    h21 = [log(0.7) + randn(1)[1]], # gets healthy twice as quickly if treated
+    h21 = [log(0.7) + randn(1)[1]],
     h23 = [log(0.9) + randn(1)[1]])
 
 
 model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
 set_parameters!(model, par_init)
-#set_parameters!(model, par_true) # temporary solution
 
 model_fitted = fit(model)
 summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
@@ -235,6 +234,12 @@ par_mle_markov = (
     h21 = mle_markov[3],
     h23 = mle_markov[4])
 set_parameters!(model,par_mle_markov)
+#for i in model.hazards
+#    set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
+#    set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
+#end
+
+
 
 model_fitted = fit(model; verbose=true)
 summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
