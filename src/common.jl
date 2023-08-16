@@ -322,7 +322,10 @@ struct MultistateModelFitted <: MultistateProcess
     SamplingWeights::Vector{Float64}
     CensoringPatterns::Matrix{Int64}
     markovsurrogate::MarkovSurrogate
-    OptimizationCriteria::Union{Nothing, NamedTuple}
+    ConvergenceRecords::Union{Nothing, NamedTuple}
+    #seq_loglik::Union{Nothing,Vector{Float64}}
+    #seq_ess::Union{Nothing,ElasticArray{Float64}}
+    #seq_parameters::Union{Nothing,ElasticArray{Float64}}
     modelcall::NamedTuple
 end
 

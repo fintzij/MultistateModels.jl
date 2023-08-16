@@ -52,9 +52,13 @@ println(simdat[1][1:30,:])
 # build model with simulated data
 model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
 
+# set initial values to crude estimates
+set_crude_init!(model)
+
 # fit model
 # slow the first time because of compilation, but much faster the subsequent runs
 model_fitted = fit(model)
+
 
 # summary of results
 summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
@@ -82,6 +86,7 @@ dat =
 model = multistatemodel(h12, h13, h21, h23; data = dat)
 
 # set model parameters
+set_crude_init!(model)
 set_parameters!(model, par_true)
 
 # Simulate data
@@ -132,7 +137,7 @@ println(par_true[:h12]) # true value
 
 #
 # Covariates
-nsubj=25
+
 # include a treatment effect for some transitions
 h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2) # healthy -> ill
 h13 = Hazard(@formula(0 ~ 1), "exp", 1, 3) # healthy -> dead
@@ -143,7 +148,7 @@ h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3) # ill -> dead
 par_true = (
     h12 = [log(1.1), log(1/3)], # multiplicative effect of treatmet is 1/3 (protective effect)
     h13 = [log(0.3)],
-    h21 = [log(0.7)], # gets healthy twice as quickly if treated
+    h21 = [log(0.7)],
     h23 = [log(0.9)])
 
 # subject data with a binary covariate (trt)
@@ -162,33 +167,95 @@ simdat, paths = simulate(model; paths = true, data = true)
 par_init = (
     h12 = [log(1.1), log(1/3)] .+ randn(2), # multiplicative effect of treatmet is 1/3 (protective effect)
     h13 = [log(0.3) + randn(1)[1]],
-    h21 = [log(0.7) + randn(1)[1]], # gets healthy twice as quickly if treated
+    h21 = [log(0.7) + randn(1)[1]],
     h23 = [log(0.9) + randn(1)[1]])
 
 
 model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
 set_parameters!(model, par_init)
-#set_parameters!(model, par_true) # temporary solution
 
 model_fitted = fit(model)
 summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
-println(summary_table[:h12])
-println(par_true[:h12]) # true value
+println(summary_table[:h21])
+println(par_true[:h21]) # true value
 
 
 
 
 
 #
-# Semi-Markov with exactly observed data
+# Semi-Marov model with panel data
 
-# par_true = (
-#     h12 = [log(1.5), log(2)],
-#     h13 = [log(2), log(2.5)],
-#     h21 = [log(0.7)],
-#     h23 = [log(0.9), log(1)])
+# semi-Markov model
+h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2) # healthy -> ill
+h13 = Hazard(@formula(0 ~ 1), "exp", 1, 3) # healthy -> dead
+h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1) # ill -> healthy
+h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3) # ill -> dead
 
-# h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2) # healthy -> ill
-# h13 = Hazard(@formula(0 ~ 1), "wei", 1, 3) # healthy -> dead
-# h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1) # ill -> healthy
-# h23 = Hazard(@formula(0 ~ 1), "gom", 2, 3) # ill -> dead
+# parameters
+par_true = (
+    h12 = [log(1.5), log(1)],
+    h13 = [log(0.3)],
+    h21 = [log(0.7)],
+    h23 = [log(0.9)])
+
+# subject data
+nsubj=10000
+tstart = 0.0
+tstop = 3.0
+nobs_per_subj = 10
+times_obs = collect(range(tstart, stop = tstop, length = nobs_per_subj+1))
+dat = 
+    DataFrame(id = repeat(collect(1:nsubj), inner = nobs_per_subj),
+              tstart = repeat(times_obs[1:nobs_per_subj], outer = nsubj),
+              tstop = repeat(times_obs[2:nobs_per_subj+1], outer = nsubj),
+              statefrom = fill(1, nobs_per_subj*nsubj), # `statefrom` after `tstart=0` is a placeholder before the simulation
+              stateto = fill(2, nobs_per_subj*nsubj), # `stateto` is a placeholder before the simulation
+              obstype = fill(2, nobs_per_subj*nsubj)) # `obstype=2` indicates panel data
+
+# simulate artificial data
+model = multistatemodel(h12, h13, h21, h23; data = dat)
+set_parameters!(model, par_true)
+simdat, paths = simulate(model; paths = true, data = true)
+
+# set up semi-Markov model
+model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
+
+# get mle from Markov process
+h12_markov = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+model_markov = multistatemodel(h12_markov, h13, h21, h23; data = simdat[1])
+model_markov_fitted = fit(model_markov)
+mle_markov=model_markov_fitted.parameters
+
+# use mle from Markov model
+par_mle_markov = (
+    h12 = [log(1), mle_markov[1][1]],
+    h13 = mle_markov[2],
+    h21 = mle_markov[3],
+    h23 = mle_markov[4])
+set_parameters!(model,par_mle_markov)
+#for i in model.hazards
+#    set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
+#    set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
+#end
+
+
+
+model_fitted = fit(model; verbose=true)
+summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
+println(summary_table[:h12])
+println(par_true[:h12])
+
+# add noise to true parameters
+sd=0.2
+par_noise = (
+    h12 = [log(1.5), log(1)] .+ rand(Normal(0,sd), 2),
+    h13 = [log(0.3)] .+ rand(Normal(0,sd), 1),
+    h21 = [log(0.7)] .+ rand(Normal(0,sd), 1),
+    h23 = [log(0.9)] .+ rand(Normal(0,sd), 1))
+set_parameters!(model,par_noise)
+
+model_fitted = fit(model; verbose=true, nparticles = 100)
+summary_table, ll, AIC, BIC = MultistateModels.summary(model_fitted)
+println(summary_table[:h12])
+println(par_true[:h12])

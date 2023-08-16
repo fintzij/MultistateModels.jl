@@ -214,6 +214,10 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
     # normalizing constants for ImportanceWeights
     TotImportanceWeights = sum(ImportanceWeights, dims = 2)
 
+    # recalculate the effective sample size for each subject
+    NormalizedImportanceWeights = ImportanceWeights ./ TotImportanceWeights            
+    ess_cur = collect(1 ./ sum(NormalizedImportanceWeights .^ 2; dims = 2))
+
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
@@ -221,22 +225,24 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
     params_cur = flatview(model.parameters)
 
     # initialize inference
-    mll = Vector{Float64}()
-    ests = ElasticArray{Float64}(undef, size(params_cur,1), 0)
+    mll = Vector{Float64}() # marginal loglikelihood
+    ess = ElasticArray{Float64}(undef, nsubj, 0) # effective sample size (one for each subject)
+    ests = ElasticArray{Float64}(undef, size(params_cur,1), 0) # parameter estimates
 
     # optimization function + problem
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
     prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
   
     # go on then
-    keep_going = true; iter = 0
+    keep_going = true
+    iter = 0
     convergence = false
     while keep_going
-
-        # println(iter)
+        #println(iter)
 
         # optimize the monte carlo marginal likelihood
-        params_prop = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton())
+        params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton())
+        params_prop = params_prop_optim.u
 
         # recalculate the log likelihoods
         loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
@@ -246,7 +252,7 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
 
         # change in mll
         mll_change = mll_prop - mll_cur
-        
+
         # calculate the ASE for ΔQ
         ase = mcem_ase(loglik_target_prop .- loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
@@ -256,8 +262,10 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
         if verbose
             println("Iteration: $(iter+1)")
             println("Monte Carlo sample size: $nparticles")
+            println("Loglikelihood: $mll_cur")
             println("MCEM Asymptotic SE: $ase")
-            println("Ascent lower bound: $ascent_lb")
+            println("Smallest ESS: $(min(ess_cur))")
+            println("Ascent lower bound: $ascent_lb\n")
         end
 
          # cache results or increase MCEM effort
@@ -279,11 +287,16 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
             ImportanceWeights = exp.(loglik_target_cur .- loglik_surrog)
             TotImportanceWeights = sum(ImportanceWeights; dims = 2)
 
+            # recalculate the effective sample size for each subject
+            NormalizedImportanceWeights = ImportanceWeights ./ TotImportanceWeights            
+            ess_cur = collect(1 ./ sum(NormalizedImportanceWeights .^ 2; dims = 2))
+
             # swap current value of the marginal log likelihood
             mll_cur = mll_prop
 
-            # save marginal log likelihood and parameters
+            # save marginal log likelihood, effective sample size and parameters
             push!(mll, mll_cur)
+            append!(ess, ess_cur)
             append!(ests, params_cur)
 
             # check whether to stop 
@@ -406,7 +419,24 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
     # get the variance-covariance matrix
     vcov = inv(reduce(+, fisher, dims = 3)[:,:,1])
 
-    # return results
-    
-    
+    # wrap results
+    return MultistateModelFitted(
+        model.data,
+        VectorOfVectors(params_cur, model.parameters.elem_ptr),
+        mll_cur,
+        vcov,
+        model.hazards,
+        model.totalhazards,
+        model.tmat,
+        model.hazkeys,
+        model.subjectindices,
+        model.SamplingWeights,
+        model.CensoringPatterns,
+        model.markovsurrogate,
+        nothing, # OptimizationCriteria::Union{Nothing, NamedTuple}
+        #mll, # change name to mll_trace
+        #ess,
+        #ests,
+        # include everything that is printed as a matrix (ConvergenceRecords)
+        model.modelcall)
 end

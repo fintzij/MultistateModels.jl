@@ -363,6 +363,8 @@ function build_tpm_mapping(data::DataFrame)
 end
 
 
+
+
 """
     loglik(model::MultistateModelFitted) 
 
@@ -372,9 +374,7 @@ Return the maximum likelihood estimates.
 - `model::MultistateModelFitted`: fitted model
 """
 function loglik(model::MultistateModelFitted) 
-
     model.loglik
-
 end
 
 """
@@ -386,27 +386,10 @@ Return the maximum likelihood estimates.
 - `model::MultistateModelFitted`: fitted model
 """
 function parameters(model::MultistateModelFitted)
-
     model.parameters
-
+#    reduce(vcat, model.parameters)
 end
 
-
-"""
-    estimates(model::MultistateModelFitted) 
-
-Return the variance covariance matrix at the maximum likelihood estimate. 
-
-# Arguments 
-- `model::MultistateModelFitted`: fitted model
-- `transformed::Bool`: whether to return the estimates on the natural (transformed) scale or on the log scale, defaults to false.
-"""
-function estimates(model::MultistateModelFitted; transformed::Bool = false)
-
-    par=reduce(vcat, model.parameters)
-    transformed ? exp.(par) : par
-
-end
 
 """
     vcov(model::MultistateModelFitted) 
@@ -417,9 +400,7 @@ Return the variance covariance matrix at the maximum likelihood estimate.
 - `model::MultistateModelFitted`: fitted model
 """
 function vcov(model::MultistateModelFitted) 
-
     model.vcov
-
 end
 
 
@@ -432,9 +413,7 @@ Return the variance covariance matrix at the maximum likelihood estimate.
 - `model::MultistateModelFitted`: fitted model
 """
 function optim(model::MultistateModelFitted) 
-
     model.optim
-
 end
 
 """
@@ -451,8 +430,11 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95)
     #
     # summary table
     
+    # maximum likelihood estimates
+    mle=parameters(model)
+    
     # standard error
-    vcov = model.vcov
+    vcov = MultistateModels.vcov(model)
     se = sqrt.(vcov[diagind(vcov)])
     se_vv = VectorOfVectors(se, model.parameters.elem_ptr)
 
@@ -465,9 +447,8 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95)
     for s in eachindex(summary_table)
         # summary for hazard s
         summary_table[s] = DataFrame(
-            estimate = reduce(vcat, model.parameters[s]),
+            estimate = reduce(vcat, mle[s]),
             se = reduce(vcat, se_vv[s]))
-
         summary_table[s].upper = summary_table[s].estimate .+ z_critical .* summary_table[s].se
         summary_table[s].lower = summary_table[s].estimate .- z_critical .* summary_table[s].se
     end
@@ -481,11 +462,10 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95)
 
     #
     # information criteria
-    p = length(estimates(model))
+    p = length(reduce(vcat, mle))
     n = nrow(model.data)
     AIC = -2*ll + 2     *p
     BIC = -2*ll + log(n)*p
 
     return summary_table, ll, AIC, BIC
-
 end
