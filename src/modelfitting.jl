@@ -69,7 +69,6 @@ function fit(model::MultistateModel)
         model.hazards,
         model.totalhazards,
         model.tmat,
-       # model.emat,
         model.hazkeys,
         model.subjectindices,
         model.SamplingWeights,
@@ -86,8 +85,8 @@ Fit a multistate markov model to
 interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities),
 or a mix of panel data and exact jump times.
 """
-function fit(model::MultistateMarkovModel)
-    
+function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored})
+
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
 
@@ -119,27 +118,6 @@ function fit(model::MultistateMarkovModel)
         model.CensoringPatterns,
         model.markovsurrogate,
         model.modelcall)
-end
-
-"""
-    fit(model::MultistateMarkovModelCensored)
-
-Fit a multistate markov model to 
-interval censored data, some of which are censored,
-or a mix of panel data, some of which are censored, and exact jump times.
-"""
-function fit(model::MultistateMarkovModelCensored)
-    
-    if all(model.data.obstype .!= 1) # only panel data
-    # TODO
-    # Equation 13 in msm package
-    # https://cran.r-project.org/web/packages/msm/vignettes/msm-manual.pdf
-    elseif any(model.data.obstype .== 1) # mix of panel data and exact jump times.
-    # TODO
-    # introduce a censored state before each observed jump time.
-    # use Equation 13 from the msm package on each interval between the observed jump times
-    end
-
 end
 
 # check with J&J that the previous two `fit` functions are correct before doing the same gymnastic with semi-Markov models
@@ -176,7 +154,7 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 - γ: Standard normal quantile for stopping
 - κ: Inflation factor for MCEM sample size, m_new = m_cur + m_cur/κ
 """
-function fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3, verbose = false)
+function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3, verbose = false)
 
     # number of subjects
     nsubj = length(model.subjectindices)
