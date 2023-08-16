@@ -74,7 +74,7 @@ function fit(model::MultistateModel)
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        nothing, # OptimizationCriteria::Union{Nothing, NamedTuple}
+        nothing, # ConvergenceRecords::Union{Nothing, NamedTuple}
         model.modelcall)
 end
 
@@ -118,7 +118,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored})
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        nothing, # OptimizationCriteria::Union{Nothing, NamedTuple}
+        nothing, # ConvergenceRecords::Union{Nothing, NamedTuple}
         model.modelcall)
 end
 
@@ -433,7 +433,7 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        nothing, # OptimizationCriteria::Union{Nothing, NamedTuple}
+        nothing, # ConvergenceRecords::Union{Nothing, NamedTuple}
         #mll, # change name to mll_trace
         #ess,
         #ests,
