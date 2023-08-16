@@ -38,7 +38,33 @@ function compute_suff_stats(data, tmat)
             n_rs[rd.statefrom, rd.stateto] += 1
         end
     end
+
     return n_rs, T_r
+end
+
+"""
+    compute_suff_stats(dat, tmat)
+
+Return a matrix in same format as tmat with observed transition counts, and a vector of time spent in each state. Used for checking data and calculating crude initialization rates.
+"""
+function compute_number_transitions(data, tmat)
+    # matrix to store number of transitions from state r to state s, stored using same convention as model.tmat
+    n_rs = zeros(size(tmat))
+
+    # vector of length equal to number of states to store time spent in state
+    T_r = zeros(size(tmat)[1])
+
+    for rd in eachrow(data)
+        # loop through data rows
+        if(rd.statefrom != rd.stateto)
+            # if a state transition happens then increment transition by 1 in n_rs
+            if(rd.statefrom >0 && rd.stateto>0)
+                n_rs[rd.statefrom, rd.stateto] += 1
+            end
+        end
+    end
+
+    return n_rs
 end
 
 # Raphael comment: what about progressive states. E.g. say you can go from 1 to 2 and 2 to 3, but directly from 1 to 3 is NOT allowed. But we have panel data and observe a 1 to 3 transition - that implies that someone definitely spent time in 2x, and as the above is currently written, we would accrue a 1 to 3 transition which is not allowed. 2023 June 6th.
@@ -61,6 +87,9 @@ function calculate_crude(model::MultistateProcess)
 
     # crude fix to avoid taking the log of zero (for pairs of states with no observed transitions) by turning zeros to 0.5. Also check_data!() should have thrown an error during model generation if this is the case.
     n_rs = max.(n_rs, 0.5)
+    
+    # give a reasonable sojourn time to states never visited
+    T_r[T_r .== 0] .= mean(model.data.tstop - model.data.tstart)
 
 # UNALLOWED TRANSITIONS SHOULD BE ZERO
 # ALLOWED TRANSITIONS WITH ZERO SHOULD BE 0.5
