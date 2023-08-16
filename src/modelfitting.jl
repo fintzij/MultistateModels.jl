@@ -69,15 +69,12 @@ function fit(model::MultistateModel)
         model.hazards,
         model.totalhazards,
         model.tmat,
-       # model.emat,
         model.hazkeys,
         model.subjectindices,
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        nothing,
-        nothing,
-        nothing,
+        nothing, # OptimizationCriteria::Union{Nothing, NamedTuple}
         model.modelcall)
 end
 
@@ -89,8 +86,8 @@ Fit a multistate markov model to
 interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities),
 or a mix of panel data and exact jump times.
 """
-function fit(model::MultistateMarkovModel)
-    
+function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored})
+
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
 
@@ -121,31 +118,8 @@ function fit(model::MultistateMarkovModel)
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        nothing,
-        nothing,
-        nothing,
+        nothing, # OptimizationCriteria::Union{Nothing, NamedTuple}
         model.modelcall)
-end
-
-"""
-    fit(model::MultistateMarkovModelCensored)
-
-Fit a multistate markov model to 
-interval censored data, some of which are censored,
-or a mix of panel data, some of which are censored, and exact jump times.
-"""
-function fit(model::MultistateMarkovModelCensored)
-    
-    if all(model.data.obstype .!= 1) # only panel data
-    # TODO
-    # Equation 13 in msm package
-    # https://cran.r-project.org/web/packages/msm/vignettes/msm-manual.pdf
-    elseif any(model.data.obstype .== 1) # mix of panel data and exact jump times.
-    # TODO
-    # introduce a censored state before each observed jump time.
-    # use Equation 13 from the msm package on each interval between the observed jump times
-    end
-
 end
 
 # check with J&J that the previous two `fit` functions are correct before doing the same gymnastic with semi-Markov models
@@ -459,9 +433,10 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        mll, # change name to mll_trace
-        ess,
-        ests,
+        nothing, # OptimizationCriteria::Union{Nothing, NamedTuple}
+        #mll, # change name to mll_trace
+        #ess,
+        #ests,
         # include everything that is printed as a matrix (ConvergenceRecords)
         model.modelcall)
 end

@@ -322,10 +322,10 @@ struct MultistateModelFitted <: MultistateProcess
     SamplingWeights::Vector{Float64}
     CensoringPatterns::Matrix{Int64}
     markovsurrogate::MarkovSurrogate
-    #ConvergenceRecords::NamedTuple # will include seq_loglik, seq_ess, seq_parameters
-    seq_loglik::Union{Nothing,Vector{Float64}}
-    seq_ess::Union{Nothing,ElasticArray{Float64}}
-    seq_parameters::Union{Nothing,ElasticArray{Float64}}
+    ConvergenceRecords::Union{Nothing, NamedTuple}
+    #seq_loglik::Union{Nothing,Vector{Float64}}
+    #seq_ess::Union{Nothing,ElasticArray{Float64}}
+    #seq_parameters::Union{Nothing,ElasticArray{Float64}}
     modelcall::NamedTuple
 end
 

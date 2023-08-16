@@ -406,10 +406,9 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
     # build exponential surrogate hazards
     surrogate = build_hazards(hazards...; data = data, surrogate = true)
 
-
-    # return the multistate model - change obstype control flow to allow more censoring codes
-    if all(data.obstype .== 1)
-        # exactly observed
+    # construct multistate mode
+    # exactly observed data
+    if all(data.obstype .== 1)        
         model = MultistateModel(
         data,
         parameters,
@@ -423,67 +422,71 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
         MarkovSurrogate(surrogate[1], surrogate[2]),
         modelcall)
 
-    elseif all(data.obstype .∈ Ref([1,2])) & all(isa.(_hazards, _MarkovHazard))
-        # Markov model with panel data and/or exactly observed data
-        model = MultistateMarkovModel(
-        data,
-        parameters,
-        _hazards,
-        _totalhazards,
-        tmat,
-        hazkeys,
-        subjinds,
-        SamplingWeights,
-        CensoringPatterns,
-        MarkovSurrogate(surrogate[1], surrogate[2]),
-        modelcall)
+    # panel data and/or exactly observed data
+    elseif all(data.obstype .∈ Ref([1,2]))
+        # Markov model
+        if all(isa.(_hazards, _MarkovHazard))
+            model = MultistateMarkovModel(
+                data,
+                parameters,
+                _hazards,
+                _totalhazards,
+                tmat,
+                hazkeys,
+                subjinds,
+                SamplingWeights,
+                CensoringPatterns,
+                MarkovSurrogate(surrogate[1], surrogate[2]),
+                modelcall)
+        # Semi-Markov model
+        elseif any(isa.(_hazards, _SemiMarkovHazard))
+            model = MultistateSemiMarkovModel(
+                data,
+                parameters,
+                _hazards,
+                _totalhazards,
+                tmat,
+                hazkeys,
+                subjinds,
+                SamplingWeights,
+                CensoringPatterns,
+                MarkovSurrogate(surrogate[1], surrogate[2]),
+                modelcall)
+        end
 
-    elseif all(data.obstype .!= 1) & all(isa.(_hazards, _MarkovHazard))
-        # Markov model with panel data and/or censored data
-        model = MultistateMarkovModelCensored(
-        data,
-        parameters,
-        _hazards,
-        _totalhazards,
-        tmat,
-        emat,
-        hazkeys,
-        subjinds,
-        SamplingWeights,
-        CensoringPatterns,
-        MarkovSurrogate(surrogate[1], surrogate[2]),
-        modelcall)
-
-    elseif all(data.obstype .∈ Ref([1,2])) & any(isa.(_hazards, _SemiMarkovHazard))
-        # Semi-Markov model with panel data and/or exactly observed data
-        model = MultistateSemiMarkovModel(
-        data,
-        parameters,
-        _hazards,
-        _totalhazards,
-        tmat,
-        hazkeys,
-        subjinds,
-        SamplingWeights,
-        CensoringPatterns,
-        MarkovSurrogate(surrogate[1], surrogate[2]),
-        modelcall)
-
-    elseif all(data.obstype .!= 1) & any(isa.(_hazards, _SemiMarkovHazard))
-        # Semi-Markov Markov model with panel data and/or censored data
-        model = MultistateSemiMarkovModelCensored(
-        data,
-        parameters,
-        _hazards,
-        _totalhazards,
-        tmat,
-        emat,
-        hazkeys,
-        subjinds,
-        SamplingWeights,
-        CensoringPatterns,
-        MarkovSurrogate(surrogate[1], surrogate[2]),
-        modelcall)
+    # censored states and/or panel data and/or exactly observed data
+    elseif any(data.obstype .> 2)
+        # Markov model
+        if all(isa.(_hazards, _MarkovHazard))
+            model = MultistateMarkovModelCensored(
+                data,
+                parameters,
+                _hazards,
+                _totalhazards,
+                tmat,
+                emat,
+                hazkeys,
+                subjinds,
+                SamplingWeights,
+                CensoringPatterns,
+                MarkovSurrogate(surrogate[1], surrogate[2]),
+                modelcall)
+        # semi-Markov model
+        elseif any(isa.(_hazards, _SemiMarkovHazard))
+            model = MultistateSemiMarkovModelCensored(
+                data,
+                parameters,
+                _hazards,
+                _totalhazards,
+                tmat,
+                emat,
+                hazkeys,
+                subjinds,
+                SamplingWeights,
+                CensoringPatterns,
+                MarkovSurrogate(surrogate[1], surrogate[2]),
+                modelcall)
+        end        
     end
 
     return model
