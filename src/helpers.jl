@@ -112,10 +112,8 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
     data.tstart    = convert(Vector{Float64}, data.tstart)
     data.tstop     = convert(Vector{Float64}, data.tstop)
     data.obstype   = convert(Vector{Int64},   data.obstype)
-    data.statefrom = 
-        convert(Vector{Union{Missing,Int64}}, data.statefrom)
-    data.stateto   = 
-        convert(Vector{Union{Missing, Int64}}, data.stateto)        
+    data.statefrom = convert(Vector{Union{Missing,Int64}}, data.statefrom)
+    data.stateto   = convert(Vector{Union{Missing, Int64}}, data.stateto)        
 
     # verify that subject id's are (1, 2, ...)
     unique_id = unique(data.id)
@@ -166,7 +164,7 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
     for r in 1:size(tmat)[1]
         for s in 1:size(tmat)[2]
             if tmat[r,s]!=0 && n_rs[r,s]==0
-                @warn "Data does not contain any transitions between state $r and state $s"
+                @warn "Data does not contain any transitions from state $r to state $s"
             end
         end
     end
@@ -179,7 +177,20 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
         end
     end
 
+    # check that stateto is 0 when obstype is not 1 or 2
+    for i in Base.OneTo(nrow(data))
+        if (data.obstype[i] > 2) & (data.stateto[i] .!= 0)            
+            error("When obstype>2, stateto should be 0.")
+        end
+    end
 
+    # check that subjects start in an observed state (statefrom!=0)
+    for subj in Base.OneTo(nsubj)
+        datasubj = filter(:id => ==(subj), data)
+        if datasubj.statefrom[1] == 0          
+            error("Subject $subj should not start in state 0.")
+        end
+    end
 
     # check that there is no row for a subject after they hit an absorbing state
 
