@@ -36,7 +36,9 @@ export
     cumulative_incidence,
     fit,
     Hazard,
+    loglik,
     multistatemodel,
+    parameters,
     set_crude_init!,
     set_parameters!,
     simulate,
@@ -70,6 +72,9 @@ include("modelfitting.jl")
 
 # model generation
 include("modelgeneration.jl")
+
+# model output
+include("modeloutput.jl")
 
 # path functions
 include("pathfunctions.jl")
