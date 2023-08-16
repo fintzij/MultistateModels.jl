@@ -14,7 +14,7 @@ end
 
 Set model parameters given a vector of values. Copies `newvalues`` to `model.parameters`.
 """
-function set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Float64}})
+function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVectors,Vector{Vector{Float64}}})
     
     # check that we have the right number of parameters
     if(length(model.parameters) != length(newvalues))
@@ -162,7 +162,7 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
     end
 
     # warning if tmat specifies an allowed transition for which no such transitions were observed in the data
-    n_rs = compute_suff_stats(data, tmat)[1]
+    n_rs = compute_number_transitions(data, tmat)
     for r in 1:size(tmat)[1]
         for s in 1:size(tmat)[2]
             if tmat[r,s]!=0 && n_rs[r,s]==0
