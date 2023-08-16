@@ -74,6 +74,7 @@ function fit(model::MultistateModel)
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
+        nothing, # OptimizationCriteria::Union{Nothing, NamedTuple}
         model.modelcall)
 end
 
@@ -117,6 +118,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored})
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
+        nothing, # OptimizationCriteria::Union{Nothing, NamedTuple}
         model.modelcall)
 end
 

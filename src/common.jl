@@ -317,13 +317,12 @@ struct MultistateModelFitted <: MultistateProcess
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-#    emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     SamplingWeights::Vector{Float64}
     CensoringPatterns::Matrix{Int64}
     markovsurrogate::MarkovSurrogate
-    #optim::
+    OptimizationCriteria::Union{Nothing, NamedTuple}
     modelcall::NamedTuple
 end
 
