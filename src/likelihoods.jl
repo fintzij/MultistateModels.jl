@@ -166,32 +166,70 @@ function loglik(parameters, data::MPanelData; neg = true)
     # accumulate the log likelihood
     ll = 0.0
     
+    # for each subject, compute the likelihood contribution
     for subj in Base.OneTo(length(data.model.subjectindices))
 
         # subject data
         subj_inds = data.model.subjectindices[subj]
- #       subj_dat  = view(data.model.data, subj_inds, :)
+        #subj_dat  = view(data.model.data, subj_inds, :)
 
-        # subject contribution to likelihood
-        subj_ll = 0.0
+        # no state is censored
+        if all(data.model.data.obstype[subj_inds] .∈ Ref([1,2]))
+            
+            # subject contribution to the loglikelihood
+            subj_ll = 0.0
 
-        for i in subj_inds
-
-            if data.model.data.obstype[i] == 1 # exact data
-                subj_ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
-                if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
-                    subj_ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], parameters[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true, newtime = false)
-                end
-
-            else # panel or censored data #if data.model.data.obstype[i] == 2 # panel data
-                # get the state(s) of origin
-                StatesFrom = data.model.data.statefrom[i] > 0 ? data.model.data.statefrom[i] : findall(data.model.emat[i-1] == 1)
-                # get the state(s) of destination
-                StatesTo = data.model.data.stateto[i] > 0 ? data.model.data.stateto[i] : findall(data.model.emat[i] == 1)
-                for sf in StatesFrom, st in StatesTo
-                    subj_ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][sf, st])
+            # add the contribution of each observation
+            for i in subj_inds
+                if data.model.data.obstype[i] == 1 # exact data
+                    subj_ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
+                    if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
+                        subj_ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], parameters[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true, newtime = false)
+                    end
+                else # panel data
+                    subj_ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]])
                 end
             end
+
+        # at least one state is censored
+        else
+            
+            # subject contribution to the likelihood
+            subj_lik = 1.0
+
+            # add the contribution of each observation
+            for i in subj_inds
+                # get the state(s) of origin
+                StatesFrom = data.model.data.statefrom[i] > 0 ? [data.model.data.statefrom[i]] : findall(data.model.emat[i-1,:] .== 1)
+                # get the state(s) of destination
+                StatesTo = data.model.data.stateto[i] > 0 ? [data.model.data.stateto[i]] : findall(data.model.emat[i,:] .== 1)
+
+                # forward filtering
+                if data.model.data.obstype[i] == 1 # exact data
+                    # verify that, when we have an exact observation, there is a single state to which the subject transitions.
+                    if size(StatesTo,1)>1
+                        error("Observation $subj_inds is exact")
+                    end
+                    # contribution of observation i
+                    subj_lik_i = 1.0
+                    # add the contribution of each possible statefrom
+                    for sf in StatesFrom
+                        # contribution from statefrom sf 
+                        subj_lik_i_sf = 1.0
+                        subj_lik_i_sf *= survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[sf], data.model.hazards; give_log = false, newtime = false)
+                        if sf != data.model.data.stateto[i] # if there is a transition, add hazard
+                            subj_lik_i_sf *= call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], parameters[data.model.tmat[sf, data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[sf, data.model.data.stateto[i]]]; give_log = false, newtime = false)
+                        end
+                        subj_lik_i += subj_lik_i_sf
+                    end
+                    subj_lik *= subj_lik_i
+                else # panel data
+                    subj_lik *= tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][StatesFrom, StatesTo]
+                end
+            end
+            
+            subj_lik = sum(subj_lik)
+            subj_ll = log(subj_lik)
         end
         
         # weighted loglikelihood
