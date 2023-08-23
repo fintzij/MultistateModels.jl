@@ -75,6 +75,7 @@ function fit(model::MultistateModel)
         model.CensoringPatterns,
         model.markovsurrogate,
         nothing, # ConvergenceRecords::Union{Nothing, NamedTuple}
+        nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall)
 end
 
@@ -86,7 +87,7 @@ Fit a multistate markov model to
 interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities),
 or a mix of panel data and exact jump times.
 """
-function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored})
+function fit(model::Union{MultistateSemiMarkovModel,MultistateMarkovModelCensored})
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -103,7 +104,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored})
     ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
     gradient = ForwardDiff.gradient(ll, sol.u)
     vcov = inv(.-ForwardDiff.hessian(ll, sol.u))
-
+    
     # wrap results
     return  MultistateModelFitted(
         model.data,
@@ -119,6 +120,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored})
         model.CensoringPatterns,
         model.markovsurrogate,
         nothing, # ConvergenceRecords::Union{Nothing, NamedTuple}
+        nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall)
 end
 
@@ -156,7 +158,10 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 - γ: Standard normal quantile for stopping
 - κ: Inflation factor for MCEM sample size, m_new = m_cur + m_cur/κ
 """
-function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3, verbose = false)
+function fit(
+    model::MultistateSemiMarkovModel; 
+    nparticles = 10, maxiter = 100, tol = 1e-4, α = 0.9, β = 0.3, γ = 0.05, κ = 3,
+    verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
     # number of subjects
     nsubj = length(model.subjectindices)
@@ -224,10 +229,10 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
     # extract and initialize model parameters
     params_cur = flatview(model.parameters)
 
-    # initialize inference
-    mll = Vector{Float64}() # marginal loglikelihood
-    ess = ElasticArray{Float64}(undef, nsubj, 0) # effective sample size (one for each subject)
-    ests = ElasticArray{Float64}(undef, size(params_cur,1), 0) # parameter estimates
+    # collectors
+    mll_trace = Vector{Float64}() # marginal loglikelihood
+    ess_trace = ElasticArray{Float64}(undef, nsubj, 0) # effective sample size (one for each subject)
+    parameters_trace = ElasticArray{Float64}(undef, size(params_cur,1), 0) # parameter estimates
 
     # optimization function + problem
     optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
@@ -264,7 +269,7 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
             println("Monte Carlo sample size: $nparticles")
             println("Loglikelihood: $mll_cur")
             println("MCEM Asymptotic SE: $ase")
-            println("Smallest ESS: $(min(ess_cur))")
+            println("Smallest ESS: $(min(ess_cur...))")
             println("Ascent lower bound: $ascent_lb\n")
         end
 
@@ -295,9 +300,9 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
             mll_cur = mll_prop
 
             # save marginal log likelihood, effective sample size and parameters
-            push!(mll, mll_cur)
-            append!(ess, ess_cur)
-            append!(ests, params_cur)
+            push!(mll_trace, mll_cur)
+            append!(ess_trace, ess_cur)
+            append!(parameters_trace, params_cur)
 
             # check whether to stop 
             if convergence || (iter > maxiter)
@@ -419,6 +424,13 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
     # get the variance-covariance matrix
     vcov = inv(reduce(+, fisher, dims = 3)[:,:,1])
 
+    # return convergence records
+    ConvergenceRecords = return_ConvergenceRecords ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace) : nothing
+
+    # return sampled paths
+    ProposedPaths = return_ProposedPaths ? (paths=samplepaths, weights=ImportanceWeights) : nothing
+
+
     # wrap results
     return MultistateModelFitted(
         model.data,
@@ -433,10 +445,7 @@ function fit(model::MultistateSemiMarkovModel; nparticles = 10, poolsize = 20, m
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        nothing, # ConvergenceRecords::Union{Nothing, NamedTuple}
-        #mll, # change name to mll_trace
-        #ess,
-        #ests,
-        # include everything that is printed as a matrix (ConvergenceRecords)
+        ConvergenceRecords,
+        ProposedPaths,
         model.modelcall)
 end
