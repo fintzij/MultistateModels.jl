@@ -206,7 +206,7 @@ function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat
     for i in eachindex(subj_inds) # loop over each interval for the subject
         if subj_dat.obstype[i] == 1 
             push!(times, subj_dat.tstop[i])
-            push!(times, subj_dat.stateto[i])
+            push!(states, subj_dat.stateto[i])
         else
             sample_ecctmc!(times, states, tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]], hazmat_book[subj_tpm_map[i,1]], subj_dat.statefrom[i], subj_dat.stateto[i], subj_dat.tstart[i], subj_dat.tstop[i])
         end
@@ -244,8 +244,8 @@ function ForwardFiltering(subj_dat, tpm_book, subj_tpm_map, subj_emat)
 
     n_obs    = size(subj_emat, 1) # number of states visited
     n_states = size(subj_emat, 2) # number of states
-    m = Array{Float64}(undef, n_obs+1, n_states)  # matrix of marginal probabilities
-    p = Array{Float64}(undef, n_obs, n_states, n_states)   # joint distribution Pr(h_{t-1}=r,h_t=s|d_{1:t})
+    m = zeros(n_obs+1, n_states)  # matrix of marginal probabilities
+    p = zeros(n_obs, n_states, n_states)  # joint distribution Pr(h_{t-1}=r,h_t=s|d_{1:t})
     
     # # forward filtering
     m[1, subj_dat.statefrom[1]] = 1 # first state is assumed to be known
