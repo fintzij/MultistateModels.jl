@@ -17,7 +17,7 @@ Simulate `n` datasets or collections of sample paths from a multistate model. If
 function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false)
 
     # throw an error if neither paths nor data are asked for
-    if paths == false & data == false
+    if paths == false && data == false
         error("Why are you calling `simulate` if you don't want sample paths or data? Stop wasting my time.")
     end
 
