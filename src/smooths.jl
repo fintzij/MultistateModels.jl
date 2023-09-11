@@ -19,10 +19,12 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame, samplepaths::Vect
     knots = isnothing(hazard.knots) ? Float64[] : hazard.knots
 
     # intercept, periodic, and degree
-    (;intercept,periodic,degree) = hazard
+    intercept = true
+    periodic = hazard.periodic
+    degree = hazard.degree
 
     # get spline objects from splines2
-    if hazard.monotonic
+    if !hazard.monotonic
         # mSpline via splines2
         sphaz = R"t(splines2::mSpline($sojourns, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))"
 
@@ -44,7 +46,7 @@ end
 
 Set up the spline basis for a semi-parametric hazard function given a set of sample paths.
 """
-function compute_spline_basis!(hazard::_Spline, data::DataFrame, samplepaths::Vector{SamplePath})
+function compute_spline_basis!(hazard::Union{_Spline, _SplinePH}, data::DataFrame, samplepaths::Vector{SamplePath})
 
     # get new times
     times = unique(setdiff(extract_sojourns(hazard, data, samplepaths; sojourns_only = false), hazard.times))
