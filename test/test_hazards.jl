@@ -144,9 +144,9 @@ end
 
     # tests that we are computing proportional hazards correctly
     for i in 1:2
-        @test MultistateModels.call_haz(t, splinemod.parameters[i], 1, splinemod.hazards[i]; newtime = false) + log(0.1) ≈ MultistateModels.call_haz(t, splinemod.parameters[i+2], 1, splinemod.hazards[i+2]; newtime = false)
+        @test MultistateModels.call_haz(t, splinemod.parameters[i], 1, splinemod.hazards[i]; newtime = false) + 0.1 ≈ MultistateModels.call_haz(t, splinemod.parameters[i+2], 1, splinemod.hazards[i+2]; newtime = false)
 
-        @test MultistateModels.call_cumulhaz(lb, ub, splinemod.parameters[i], 1, splinemod.hazards[i]; newtime = false) + log(0.1) ≈ MultistateModels.call_cumulhaz(lb, ub, splinemod.parameters[i+2], 1, splinemod.hazards[i+2]; newtime = false)
+        @test MultistateModels.call_cumulhaz(lb, ub, splinemod.parameters[i], 1, splinemod.hazards[i]; newtime = false) + 0.1 ≈ MultistateModels.call_cumulhaz(lb, ub, splinemod.parameters[i+2], 1, splinemod.hazards[i+2]; newtime = false)
     end
 end
 

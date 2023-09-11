@@ -47,19 +47,19 @@ simdat[1][!,:x] = randn(size(simdat[1], 1))
 
 # create multistate model object with the simulated data
 h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0) # healthy -> ill
-h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 3) # healthy -> dead
-h21 = Hazard(@formula(0 ~ 1 + x), "sp", 2, 1; degree = 0) # ill -> healthy
-h23 = Hazard(@formula(0 ~ 1 + x), "sp", 2, 3; degree = 3) # ill -> dead
+h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 0) # healthy -> dead
+h21 = Hazard(@formula(0 ~ 1), "sp", 2, 1; degree = 0) # ill -> healthy
+h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 0) # ill -> dead
 
 hazards = (h12, h13, h21, h23); data = simdat[1]
 model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
 
 set_parameters!(
     model, 
-    (h12 = [log(0.4)],
-     h13 = [log(0.2), 0.1, 0.1, 0.1],
-     h21 = [log(0.4), 0.1],
-     h23 = [log(0.1), 0.1, 0.1, 0.1, 0.1]))
+    (h12 = [log(0.4)] + randn(1),
+     h13 = [log(0.2)] + randn(1),
+     h21 = [log(0.4)] + randn(1),
+     h23 = [log(0.1)] + randn(1)))
 
 # set_parameters!(
 #     model, 
