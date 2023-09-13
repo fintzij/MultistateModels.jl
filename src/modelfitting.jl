@@ -159,8 +159,8 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 - κ: Inflation factor for MCEM sample size, m_new = m_cur + m_cur/κ
 """
 function fit(
-    model::Union{MultistateSemiMarkovModel,MultistateSemiMarkovModelCensored};
-    nparticles = 10, maxiter = 100, tol = 1e-4, α = 0.9, β = 0.3, γ = 0.05, κ = 3,
+    model::Union{MultistateSemiMarkovModel,MultistateSemiMarkovModelCensored}; 
+    nparticles = 10, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3,
     verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
     # number of subjects
@@ -269,7 +269,7 @@ function fit(
             println("Monte Carlo sample size: $nparticles")
             println("Loglikelihood: $mll_cur")
             println("MCEM Asymptotic SE: $ase")
-            println("Smallest ESS: $(min(ess_cur...))")
+            println("Smallest ESS per-subject: $(min(ess_cur...))")
             println("Ascent lower bound: $ascent_lb\n")
         end
 

@@ -1,5 +1,5 @@
 """
-    Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing}, intercept::Bool = true, periodic::Bool = false)
+    Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing}, periodic::Bool = false, monotonic::Bool = false)
 
 Specify a parametric or semi-parametric baseline cause-specific hazard function. 
 
@@ -14,16 +14,15 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 - `degree`: Degree of the spline polynomial basis.
 - `knots`: Vector of knots.
 - `boundaryknots`: Length 2 vector of boundary knots.
-- `intercept`: Defaults to true for whether the spline should include an intercept.
 - `periodic`: Periodic spline basis, defaults to false.
 - `monotonic`: Assume that baseline hazard is monotonic, defaults to false. If true, use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, intercept::Bool = true, periodic::Bool = false, monotonic::Bool = false)
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, periodic::Bool = false, monotonic::Bool = false)
     
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
-        h = SplineHazard(hazard, family, statefrom, stateto, df, degree, knots, boundaryknots, intercept, periodic, monotonic)
+        h = SplineHazard(hazard, family, statefrom, stateto, df, degree, knots, boundaryknots, periodic, monotonic)
     end
 
     return h
@@ -255,10 +254,10 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
         elseif family == "sp" # m-splines
 
             # grab hazard object from splines2
-        (;hazard, cumulative_hazard, times) = spline_hazards(hazards[h], data, samplepath_sojourns)
+            (;hazard, cumulative_hazard, times) = spline_hazards(hazards[h], data, samplepath_sojourns)
 
             # number of parameters
-            npars = size(hazard)[1] + size(hazdat, 2)
+            npars = size(hazard)[1] + size(hazdat, 2) - 1
 
             # vector for parameters
             hazpars = zeros(Float64, npars)
@@ -266,25 +265,46 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             # append to model parameters
             push!(parameters, hazpars)
 
-            # parameter names
-            parnames = 
-                vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[2]))),
-                        hazname*"_".*coefnames(hazschema)[2])
+            # generate hazard struct
+            if(size(hazdat, 2) == 1) 
+                ### no covariates
+                # parameter names
+                parnames = vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1])))
+                    
+                # hazard struct
+                haz_struct = 
+                _Spline(
+                    Symbol(hazname),
+                    hazdat, 
+                    Symbol.(parnames),
+                    hazards[h].statefrom,
+                    hazards[h].stateto,
+                    Vector{Float64}(times),
+                    ElasticMatrix{Float64}(rcopy(hazard)),
+                    ElasticMatrix{Float64}(rcopy(cumulative_hazard)),
+                    hazard, 
+                    cumulative_hazard,
+                    rcopy(R"attributes($hazard)"))                
+            else
+                ### proportional hazards
+                # parameter names
+                parnames = vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), hazname*"_".*coefnames(hazschema)[2][Not(1)])
 
-            # hazard struct
-            haz_struct = 
-            _Spline(
-                Symbol(hazname),
-                hazdat, 
-                Symbol.(parnames),
-                hazards[h].statefrom,
-                hazards[h].stateto,
-                Vector{Float64}(times),
-                ElasticMatrix{Float64}(rcopy(hazard)),
-                ElasticMatrix{Float64}(rcopy(cumulative_hazard)),
-                hazard, 
-                cumulative_hazard,
-                rcopy(R"attributes($hazard)"))
+                # hazard struct
+                haz_struct = 
+                _SplinePH(
+                    Symbol(hazname),
+                    hazdat[:,Not(1)], 
+                    Symbol.(parnames),
+                    hazards[h].statefrom,
+                    hazards[h].stateto,
+                    Vector{Float64}(times),
+                    ElasticMatrix{Float64}(rcopy(hazard)),
+                    ElasticMatrix{Float64}(rcopy(cumulative_hazard)),
+                    hazard, 
+                    cumulative_hazard,
+                    rcopy(R"attributes($hazard)")) 
+            end
 
             # add additional gap times
             if samplepath_sojourns != samplepaths_full
@@ -396,6 +416,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
         check_CensoringPatterns(CensoringPatterns, tmat)
         emat = build_emat(data, CensoringPatterns)
     end
+
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
     _hazards, parameters, hazkeys = build_hazards(hazards...; data = data, surrogate = false)
