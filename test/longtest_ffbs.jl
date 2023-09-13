@@ -1,75 +1,66 @@
 using MultistateModels
-using MultistateModels: flatview, MPanelData, loglik
+using MultistateModels: flatview, MPanelData, loglik, SampleSkeleton!
 using Distributions
 using Plots
 
-include("test/setup_ffbs.jl")
+include("setup_ffbs.jl")
 
 
 #
-# verify that emat is correctly formatted
-
-
-#
-# Sampling when there is no censoring
-
-# true trajectory
-subj_dat_no_censoring.stateto
-
-# emission matrix
-subj_emat_no_censoring
+# Censoring with degenerate censoring patterns
 
 # sampled trajectory
-m, p = ForwardFiltering(subj_dat_no_censoring, tpm_book, subj_tpm_map, subj_emat_no_censoring) 
+m, p = ForwardFiltering(model_degenerate.data, tpm_book_degenerate, books_degenerate[2], model_degenerate.emat) 
 h = BackwardSampling(m, p) 
 
 # verify match
-all(subj_dat_no_censoring.stateto .== h)
-
-
-#
-# Impossible censoring patterns
-subj_emat_impossible # impossible to have a transition from states (3,4) to states (1,2) at step 5 in a progressive model
-sample_skeleton!(subj_dat_impossible, tpm_book, subj_tpm_map, subj_emat_impossible)
+true_trajectory = [1,1,2,3,3] 
+all(true_trajectory .== h)
 
 
 #
 # Comparing Monte Carlo estimates and analytical probabilities
 
-# Monte Carlo
-M = 10000000
+# Monte Carlo estimates of the path probabilities based on the FFBS algorithm
+M = 10^6
 paths = Array{Int64}(undef, M, 5)
-m, p = ForwardFiltering(subj_dat_analytical, tpm_book, subj_tpm_map, subj_emat_analytical)
+m, p = ForwardFiltering(model_MC.data, tpm_book_MC, books_MC[2], model_MC.emat) 
 
 paths = map(x -> BackwardSampling(m,p), collect(1:M))
 
 paths_id = map(x -> sum(x), paths)
-MC_estimates = [sum(paths_id.==11) sum(paths_id.==12) sum(paths_id.==13) sum(paths_id.==14)] ./ M
-sum(MC_estimates)
+estimates_MC = [sum(paths_id.==11), sum(paths_id.==12), sum(paths_id.==13), sum(paths_id.==14)] ./ M
 
-# analytical
-subj_emat_analytical
+# numerical expression of the path probabilities from matrix eponentiation
+estimates_numerical = DataFrame(state_2 = Int64[], state_3 = Int64[], state_4 = Int64[], likelihood = Float64[])
 possible_states = (2,3)
-prob_analytical = DataFrame(state_2 = Int64[], state_3 = Int64[], state_4 = Int64[], likelihood = Float64[])
-dat.obstype = fill(2, n_obs) # panel-observed data
-
 
 for state_2 in possible_states, state_3 in possible_states, state_4 in possible_states
+    # impute the data
+    dat.obstype = fill(2, n_obs)
+    dat.statefrom = [1, 1, state_2, state_3, state_4]
+    dat.stateto = [1, state_2, state_3, state_4, 4]
 
-    dat.stateto[2:4] = [state_2, state_3, state_4]
-    dat.statefrom[3:5] = [state_2, state_3, state_4]
-    model = multistatemodel(h12, h23, h34; data = dat, censoring_patterns = censoring_patterns)
-    books = build_tpm_mapping(model.data)
-    data = MPanelData(model, books)
+    # set up model
+    model_loop = multistatemodel(h12, h23, h34; data = dat, CensoringPatterns = CensoringPatterns_MC);
+    set_parameters!(model_loop, pars)
 
-    likelihood = exp(loglik(parameters, data::MPanelData; neg = false))
+    # compute likelihood
+    books_loop = build_tpm_mapping(model_loop.data)
+    data_loop = MPanelData(model_loop, books)
+    likelihood = exp(loglik(flatview(model_loop.parameters), data_loop; neg = false))
 
-    push!(prob_analytical, [state_2 state_3 state_4 likelihood])
-
+    # save results
+    push!(estimates_numerical, [state_2 state_3 state_4 likelihood])
 end
-prob_analytical.prob = prob_analytical.likelihood / sum(prob_analytical.likelihood)
+estimates_numerical.prob = estimates_numerical.likelihood / sum(estimates_numerical.likelihood)
 
-# comparison of MC estimates and analytical answer
+# comparison of MC and numerical estimates and analytical answer
+relative_error = abs.((estimates_numerical.prob[[1,2,4,8]] .- estimates_MC) ./ estimates_numerical.prob[[1,2,4,8]])
+all(relative_error .< 0.01)
 
-relative_error = abs.((prob_analytical.prob[[1,2,4,8]] .- MC_estimates[1,:]) ./ prob_analytical.prob[[1,2,4,8]])
-relative_error
+
+#
+# Impossible censoring patterns
+model_impossible.emat # impossible to have a transition from states (3,4) to states (1,2) at step 5 in a progressive model
+SampleSkeleton!(model_impossible.data, tpm_book_impossible, books_impossible[2], model_impossible.emat)
