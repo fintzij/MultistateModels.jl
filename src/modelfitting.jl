@@ -87,7 +87,7 @@ Fit a multistate markov model to
 interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities),
 or a mix of panel data and exact jump times.
 """
-function fit(model::Union{MultistateSemiMarkovModel,MultistateMarkovModelCensored})
+function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored})
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -159,7 +159,7 @@ Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... +
 - κ: Inflation factor for MCEM sample size, m_new = m_cur + m_cur/κ
 """
 function fit(
-    model::MultistateSemiMarkovModel; 
+    model::Union{MultistateSemiMarkovModel,MultistateSemiMarkovModelCensored};
     nparticles = 10, maxiter = 100, tol = 1e-4, α = 0.9, β = 0.3, γ = 0.05, κ = 3,
     verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
