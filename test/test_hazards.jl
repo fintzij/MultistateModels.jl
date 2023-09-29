@@ -129,6 +129,27 @@ end
 
 end
 
+@testset "test_splines" begin
+
+    t = 2.0
+    lb = 2.0
+    ub = 10.0
+
+    # test that we get the same hazard and cumul. haz. for newtimes vs. times when the basis is precomputed
+    for i in 1:4
+        @test MultistateModels.call_haz(t, splinemod.parameters[i], 1, splinemod.hazards[i]; newtime = true) == MultistateModels.call_haz(t, splinemod.parameters[i], 1, splinemod.hazards[i]; newtime = false)
+
+        @test MultistateModels.call_cumulhaz(lb, ub, splinemod.parameters[i], 1, splinemod.hazards[i]; newtime = true) == MultistateModels.call_cumulhaz(lb, ub, splinemod.parameters[i], 1, splinemod.hazards[i]; newtime = false)
+    end
+
+    # tests that we are computing proportional hazards correctly
+    for i in 1:2
+        @test MultistateModels.call_haz(t, splinemod.parameters[i], 1, splinemod.hazards[i]; newtime = false) + 0.1 ≈ MultistateModels.call_haz(t, splinemod.parameters[i+2], 1, splinemod.hazards[i+2]; newtime = false)
+
+        @test MultistateModels.call_cumulhaz(lb, ub, splinemod.parameters[i], 1, splinemod.hazards[i]; newtime = false) + 0.1 ≈ MultistateModels.call_cumulhaz(lb, ub, splinemod.parameters[i+2], 1, splinemod.hazards[i+2]; newtime = false)
+    end
+end
+
 @testset "test_totalcumulativehazards" begin
 
     # set parameters, lower bound, and upper bound

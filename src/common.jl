@@ -70,7 +70,6 @@ Specify a cause-specific baseline hazard.
 - `degree`: Degree of the spline polynomial basis.
 - `knots`: Vector of knots.
 - `boundaryknots`: Length 2 vector of boundary knots.
-- `intercept`: Defaults to true for whether the spline should include an intercept.
 - `periodic`: Periodic spline basis, defaults to false.
 - `monotonic`: Assume that baseline hazard is monotonic, defaults to false. If true, use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
 """
@@ -83,7 +82,6 @@ struct SplineHazard <: HazardFunction
     degree::Int64
     knots::Union{Nothing,Vector{Float64}}
     boundaryknots::Union{Nothing,Vector{Float64}}
-    intercept::Bool
     periodic::Bool
     monotonic::Bool
 end
@@ -157,9 +155,26 @@ struct _GompertzPH <: _SemiMarkovHazard
 end
 
 """
-Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect vis-a-vis the baseline hazard.
+Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. 
 """
 struct _Spline <: _SemiMarkovHazard
+    hazname::Symbol
+    data::Array{Float64}
+    parnames::Vector{Symbol}
+    statefrom::Int64
+    stateto::Int64
+    times::Vector{Float64}
+    hazbasis::ElasticArray{Float64}
+    chazbasis::ElasticArray{Float64}
+    hazobj::RObject{RealSxp}
+    chazobj::RObject{RealSxp}
+    attr::OrderedDict{Symbol, Any}
+end
+
+"""
+Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect vis-a-vis the baseline hazard.
+"""
+struct _SplinePH <: _SemiMarkovHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}

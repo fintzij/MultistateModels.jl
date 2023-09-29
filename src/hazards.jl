@@ -199,7 +199,7 @@ function call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true, ne
     log_scale = parameters[2]
 
     # compute hazard 
-    log_haz = log_scale + exp(log_shape) * t 
+    log_haz = log_scale + log_shape * t 
 
     give_log ? log_haz : exp(log_haz)
 end
@@ -212,7 +212,7 @@ Cumulative hazard for Gompertz hazards over the interval [lb, ub].
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log = true, newtime = true)
 
     # scale and shape
-    shape = exp(parameters[1])
+    shape = parameters[1]
     log_scale = parameters[2]
 
     # cumulative hazard
@@ -229,7 +229,7 @@ Return the Gompertz cause-specific proportional hazards.
 function call_haz(t, parameters, rowind, _hazard::_GompertzPH; give_log = true, newtime = true)
 
     # compute hazard
-    log_haz = exp(parameters[1]) * t + dot(parameters[2:end], _hazard.data[rowind,:])
+    log_haz = parameters[1] * t + dot(parameters[2:end], _hazard.data[rowind,:])
 
     give_log ? log_haz : exp(log_haz)
 end
@@ -242,7 +242,7 @@ Cumulative hazard for Gompertz proportional hazards over the interval [lb, ub].
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_log = true, newtime = true)
 
     # scale and shape
-    shape = exp(parameters[1])
+    shape = parameters[1]
 
     # cumulative hazard
     log_cumul_haz = 
@@ -259,15 +259,13 @@ Return the spline cause-specific hazards.
 function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true, newtime = true)
 
     if newtime
-        # compute the log hazard at the new time t
-        loghaz = log(dot(rcopy(R"predict($(_hazard.hazobj), $t)"), softmax(parameters[1:size(_hazard.hazbasis, 1)]))) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.hazbasis, 1))])
-
+        loghaz = log(dot(rcopy(R"predict($(_hazard.hazobj), $t)"), exp.(parameters)))
     else
         # get the index
         ind = searchsortedfirst(_hazard.times, t)
 
-        # compute the log hazard
-        loghaz = log(dot(softmax(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.hazbasis, 1))])
+        # compute the hazard
+        loghaz = log(dot(exp.(parameters), _hazard.hazbasis[:,ind]))
     end
 
     # return the log hazard
@@ -282,16 +280,55 @@ Return the spline cause-specific cumulative hazards over the interval [lb,ub].
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true, newtime = true)
 
     if newtime
-        # compute the log hazard
-        logchaz = log(dot(rcopy(R"diff(predict($(_hazard.chazobj), c($lb,$ub)))"),softmax(parameters[1:size(_hazard.chazbasis, 1)]))) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
-
+        logchaz = log(dot(rcopy(R"diff(predict($(_hazard.chazobj), c($lb, $ub)))"), exp.(parameters)))
     else
         # get the index
         lbind = searchsortedfirst(_hazard.times, lb)
         ubind = searchsortedfirst(_hazard.times, ub)
 
-        # compute the log hazard
-        logchaz = log(dot(softmax(parameters[1:size(_hazard.chazbasis, 1)]), (_hazard.chazbasis[:,ubind] - _hazard.chazbasis[:,lbind]))) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
+        logchaz = log(dot(exp.(parameters), _hazard.chazbasis[:,ubind] - _hazard.chazbasis[:,lbind]))
+    end
+
+    # return the log hazard
+    give_log ? logchaz : exp(logchaz)
+end
+
+"""
+    call_haz(t, parameters, rowind, _hazard::_SplinePH; give_log = true, newtime = true)
+
+Return the spline cause-specific hazards.
+"""
+function call_haz(t, parameters, rowind, _hazard::_SplinePH; give_log = true, newtime = true)
+
+    if newtime
+        loghaz = log(dot(rcopy(R"predict($(_hazard.hazobj), $t)"), exp.(parameters[1:size(_hazard.hazbasis, 1)]))) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.hazbasis, 1))])
+    else
+        # get the index
+        ind = searchsortedfirst(_hazard.times, t)
+
+        # compute the hazard
+        loghaz = log(dot(exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.hazbasis, 1))])
+    end
+
+    # return the log hazard
+    give_log ? loghaz : exp(loghaz)
+end
+
+"""
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log = true, newtime = true)
+
+Return the spline cause-specific cumulative hazards over the interval [lb,ub].
+"""
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log = true, newtime = true)
+
+    if newtime
+        logchaz = log(dot(rcopy(R"diff(predict($(_hazard.chazobj), c($lb, $ub)))"), exp.(parameters[1:size(_hazard.hazbasis, 1)]))) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
+    else
+        # get the index
+        lbind = searchsortedfirst(_hazard.times, lb)
+        ubind = searchsortedfirst(_hazard.times, ub)
+
+        logchaz = log(dot(exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.chazbasis[:,ubind] - _hazard.chazbasis[:,lbind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
     end
 
     # return the log hazard

@@ -9,6 +9,8 @@ h13 = Hazard(@formula(0 ~ 1 + trt*age), "exp", 1, 3);
 h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1)
 h23 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 3);
 
+nsubj = 3
+
 dat_exact = 
     DataFrame(id = collect(1:3),
               tstart = [0, 0, 0],
@@ -49,8 +51,6 @@ dat_interval =
 
 hazards = (h12, h21, h23, h13)
 data = dat_exact2
-
-
 
 # create multistate model object
 msm_expwei = multistatemodel(h12, h23, h13, h21; data = dat_exact2)
