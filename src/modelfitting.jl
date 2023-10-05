@@ -141,11 +141,10 @@ end
     # end
 
 """
-    fit_semimarkov_interval(model::MultistateSemiMarkovModel; nparticles)
+fit(model::Union{MultistateSemiMarkovModel,MultistateSemiMarkovModelCensored}; 
+    nparticles = 10, maxiter = 100, tol = 1e-4, α = 0.1, β = 0.3, γ = 0.05, κ = 3, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
 Fit a semi-Markov model to panel data via Monte Carlo EM. 
-
-Latent paths are sampled via MCMC and are subsampled at points t_k = x_1 + ... + x_k, where x_i - 1 ~ Pois(subrate * k ^ subscale). The arguments subrate and subscale default to 1 and 0.5, respectively.
 
 # Arguments
 
