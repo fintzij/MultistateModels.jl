@@ -154,6 +154,9 @@ function fit(
     surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 10,
     verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
+    # check MaxSamplingEffort > 1 
+    # check κ > 1 
+
     # number of subjects
     nsubj = length(model.subjectindices)
 
@@ -252,7 +255,7 @@ function fit(
 
     # while ess too low, sample additional paths
     ess_target = ess_target_initial
-    npaths_additional = nparticles    
+    npaths_additional = nparticles 
 
     if verbose
         println("Sampling the initial sample paths ...\n")
@@ -264,8 +267,8 @@ function fit(
             # if too many sample paths, resample
             n_path_max = MaxSamplingEffort*ess_target
             if length(samplepaths[i]) > n_path_max
-                @warn "More than $n_path_max sample paths are required to obtain ess>$ess_target for individual $i."
-                break
+                @warn "More than $n_path_max sample paths are required to obtain ess>$ess_target for individual $i. The current ess for this individual is $(ess_cur[i])."
+                continue
             end
             npaths = length(samplepaths[i])
             append!(samplepaths[i], Vector{SamplePath}(undef, npaths_additional))
@@ -316,7 +319,7 @@ function fit(
                 n_path_max = MaxSamplingEffort*ess_target
                 if length(samplepaths[i]) > n_path_max
                     @warn "More than $n_path_max sample paths are required to obtain ess>$ess_target for individual $i."
-                    break
+                    continue
                     # npaths = Integer(round(n_path_max/2))
                     # path_indices = wsample(1:length(samplepaths[i]), NormalizedImportanceWeights, npaths) # sample with replacements
                     # samplepaths[i] = samplepaths[i][path_indices]
@@ -372,7 +375,7 @@ function fit(
             println("Loglikelihood: $mll_cur")
             println("MCEM Asymptotic SE: $ase")
             println("Smallest ESS per-subject: $(round(min(ess_cur...), digits = 2))")
-            println("Largest number of sample paths per-subject: $(max(length.(samplepaths)...))")
+            println("Largest number of sample paths needed per-subject: $(max(length.(samplepaths)...))")
             println("Ascent lower bound: $ascent_lb")
             println("Ascent upper bound: $ascent_ub\n")
             #println("Time: $(Dates.format(now(), "HH:MM"))\n")
