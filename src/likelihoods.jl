@@ -182,9 +182,9 @@ function loglik(parameters, data::MPanelData; neg = true)
             # add the contribution of each observation
             for i in subj_inds
                 if data.model.data.obstype[i] == 1 # exact data
-                    subj_ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
+                    subj_ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
                     if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
-                        subj_ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], parameters[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true, newtime = false)
+                        subj_ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true, newtime = false)
                     end
                 else # panel data
                     subj_ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]])
@@ -216,9 +216,9 @@ function loglik(parameters, data::MPanelData; neg = true)
                     for sf in StatesFrom
                         # contribution from statefrom sf 
                         subj_lik_i_sf = 1.0
-                        subj_lik_i_sf *= survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], parameters, i, data.model.totalhazards[sf], data.model.hazards; give_log = false, newtime = false)
+                        subj_lik_i_sf *= survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[sf], data.model.hazards; give_log = false, newtime = false)
                         if sf != data.model.data.stateto[i] # if there is a transition, add hazard
-                            subj_lik_i_sf *= call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], parameters[data.model.tmat[sf, data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[sf, data.model.data.stateto[i]]]; give_log = false, newtime = false)
+                            subj_lik_i_sf *= call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[sf, data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[sf, data.model.data.stateto[i]]]; give_log = false, newtime = false)
                         end
                         subj_lik_i += subj_lik_i_sf
                     end
@@ -251,9 +251,12 @@ function loglik(parameters, data::SMPanelData; neg = true)
 
     # compute the semi-markov log-likelihoods
     ll = 0.0
-    for j in Base.OneTo(size(data.paths, 2))
-        for i in Base.OneTo(size(data.paths, 1))
-            ll += loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.ImportanceWeights[i,j] / data.TotImportanceWeights[i] * data.model.SamplingWeights[i]
+    # for j in Base.OneTo(size(data.paths, 2))
+    #     for i in Base.OneTo(size(data.paths, 1))
+    #         ll += loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.ImportanceWeights[i,j] / data.TotImportanceWeights[i] * data.model.SamplingWeights[i]
+    for i in Base.OneTo(length(data.paths))
+        for j in Base.OneTo(length(data.paths[i]))
+            ll += loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.ImportanceWeights[i][j] / data.TotImportanceWeights[i] * data.model.SamplingWeights[i]
         end
     end
 
@@ -266,15 +269,18 @@ end
 
 Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data. 
 """
-function loglik!(parameters, logliks::ElasticArray{Float64}, data::SMPanelData)
+function loglik!(parameters, logliks::Vector{}, data::SMPanelData)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # compute the semi-markov log-likelihoods
-    for j in Base.OneTo(size(data.paths, 2))
-        for i in Base.OneTo(size(data.paths, 1))
-            logliks[i,j] = loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.model.SamplingWeights[i]
+    # for j in Base.OneTo(size(data.paths, 2))
+    #     for i in Base.OneTo(size(data.paths, 1))
+    #         logliks[i,j] = loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.model.SamplingWeights[i]
+    for i in Base.OneTo(length(data.paths))
+        for j in Base.OneTo(length(data.paths[i]))
+            logliks[i][j] = loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.model.SamplingWeights[i]
         end
     end
 end
