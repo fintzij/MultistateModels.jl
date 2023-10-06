@@ -380,8 +380,8 @@ Struct containing panel data, a model object, and bookkeeping objects. Used in f
 """
 struct SMPanelData
     model::MultistateProcess
-    paths::Array{SamplePath}
-    ImportanceWeights::ElasticArray{Float64}
-    TotImportanceWeights::ElasticArray{Float64}
+    paths::Vector{}
+    ImportanceWeights::Vector{}
+    TotImportanceWeights::Vector{}
 end
 
