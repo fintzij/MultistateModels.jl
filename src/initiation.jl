@@ -6,12 +6,14 @@ Modify the parameter values in a MultistateProcess object
 function set_crude_init!(model::MultistateProcess)
     crude_par = calculate_crude(model)
     for i in model.hazards
-        if !isa(i, _Spline)
-            set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
-            set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
-        else
-            @warn "Parameters for $(i.hazname) not initialized by set_crude_init!(). Parameters for spline hazards should be initialized manually using set_parameters!()"
-        end
+        set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
+        set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
+        # if !isa(i, _Spline)
+        #     set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
+        #     set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
+        # else
+        #     @warn "Parameters for $(i.hazname) not initialized by set_crude_init!(). Parameters for spline hazards should be initialized manually using set_parameters!()"
+        # end
     end
 end
 
@@ -32,10 +34,14 @@ function compute_suff_stats(data, tmat)
         
         # track how much time has been spent in state
         #T_r_accumulator += r.tstop - r.tstart
-        T_r[rd.statefrom] += rd.tstop - rd.tstart
-        if(rd.statefrom != rd.stateto)
-            # if a state transition happens then increment transition by 1 in n_rs
-            n_rs[rd.statefrom, rd.stateto] += 1
+        if rd.statefrom>0
+            T_r[rd.statefrom] += rd.tstop - rd.tstart
+        end        
+        # if a state transition happens then increment transition by 1 in n_rs
+        if rd.statefrom != rd.stateto
+            if rd.statefrom>0 && rd.stateto>0
+                n_rs[rd.statefrom, rd.stateto] += 1
+            end
         end
     end
 
@@ -51,14 +57,11 @@ function compute_number_transitions(data, tmat)
     # matrix to store number of transitions from state r to state s, stored using same convention as model.tmat
     n_rs = zeros(size(tmat))
 
-    # vector of length equal to number of states to store time spent in state
-    T_r = zeros(size(tmat)[1])
-
     for rd in eachrow(data)
         # loop through data rows
-        if(rd.statefrom != rd.stateto)
+        if rd.statefrom != rd.stateto
             # if a state transition happens then increment transition by 1 in n_rs
-            if(rd.statefrom >0 && rd.stateto>0)
+            if rd.statefrom>0 && rd.stateto>0
                 n_rs[rd.statefrom, rd.stateto] += 1
             end
         end
@@ -181,4 +184,27 @@ function init_par(_hazard::_GompertzPH, crude_log_rate=0)
     # pass through crude exponential rate 
     # set covariate coefficients to 0
     return vcat([0, crude_log_rate], zeros(size(_hazard.data, 2) - 1))
+end
+
+
+"""
+
+spline without covariates
+"""
+function init_par(_hazard::_Spline, crude_log_rate=0)
+    # set shape to 0 (i.e. log(1)) 
+    # pass through crude exponential rate
+    npars = length(_hazard.parnames)
+    return repeat([crude_log_rate], npars)
+end
+
+"""
+
+spline with covariates
+"""
+function init_par(_hazard::_SplinePH, crude_log_rate=0)
+    # set shape to 0 (i.e. log(1)) 
+    # pass through crude exponential rate 
+    # set covariate coefficients to 0
+    return vcat(repeat([crude_log_rate], npars), zeros(size(_hazard.data, 2) - 1))
 end
