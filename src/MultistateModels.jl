@@ -8,6 +8,7 @@ using ElasticArrays
 using ExponentialUtilities
 using ForwardDiff
 using LinearAlgebra
+using MacroTools
 using OrderedCollections
 using Optim # for simulation - keep
 using Optimization # for fitting - keep
@@ -33,6 +34,7 @@ export
     @formula,
     compute_hazard,
     compute_cumulative_hazard,
+    make_constraints,
     cumulative_incidence,
     fit,
     GetConvergenceRecords,
