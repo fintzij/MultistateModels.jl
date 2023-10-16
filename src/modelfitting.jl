@@ -207,8 +207,22 @@ function fit(
             println("Obtaining the MLE for the Markov surrogate model ...\n")
         end
 
-        # get mle of surrogate model
-        model_markov = MultistateMarkovModelCensored(
+        # depends on censoring
+        if isa(model, MultistateSemiMarkovModel)
+            model_markov = MultistateMarkovModel(
+            model.data,
+            model.markovsurrogate.parameters,
+            model.markovsurrogate.hazards,
+            model.totalhazards,
+            model.tmat,
+            model.hazkeys,
+            model.subjectindices,
+            model.SamplingWeights,
+            model.CensoringPatterns,
+            model.markovsurrogate,
+            model.modelcall)
+        else 
+            model_markov = MultistateMarkovModelCensored(
             model.data,
             model.markovsurrogate.parameters,
             model.markovsurrogate.hazards,
@@ -221,6 +235,9 @@ function fit(
             model.CensoringPatterns,
             model.markovsurrogate,
             model.modelcall)
+        end
+
+        # get mle of surrogate model
         model_markov_fitted = fit(model_markov)
         surrogate_parameter=model_markov_fitted.parameters
     end
