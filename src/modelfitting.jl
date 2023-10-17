@@ -180,8 +180,8 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 """
 function fit(
     model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
-    constraints = nothing, npaths_initial = 10, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 1.5,
-    surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 10,
+    constraints = nothing, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 1.5,
+    surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10,
     verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
     # check that constraints for the initial values are satisfied
@@ -210,17 +210,26 @@ function fit(
     #
     # initialization
 
+    # MCEM
+    keep_going = true
+    iter = 0
+    convergence = false
+
     # number of subjects
     nsubj = length(model.subjectindices)
 
     # containers for bookkeeping TPMs
-    books = build_tpm_mapping(model.data)
+    books = build_tpm_mapping(model.data)    
+
+    # transition probability objects for Markov surrogate
+    hazmat_book_surrogate = build_hazmat_book(Float64, model.tmat, books[1])
+    tpm_book_surrogate = build_tpm_book(Float64, model.tmat, books[1])
+
+    # allocate memory for matrix exponential
+    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book_surrogate[1]), ExpMethodGeneric())
 
     # extract and initialize model parameters
     params_cur = flatview(model.parameters)
-
-    # number of additional paths
-    npaths_additional = 10 # we could let the user chose this value
 
     # initialize ess target
     ess_target = ess_target_initial
@@ -228,6 +237,7 @@ function fit(
     # containers for latent sample paths, proposal and target log likelihoods, importance sampling weights
     TotImportanceWeights = zeros(nsubj)
     ess_cur = zeros(nsubj)
+
     samplepaths        = Vector{ElasticArray{SamplePath}}(undef, nsubj)
     loglik_surrog      = Vector{ElasticArray{Float64}}(undef, nsubj)
     loglik_target_cur  = Vector{ElasticArray{Float64}}(undef, nsubj)
@@ -241,79 +251,49 @@ function fit(
         ImportanceWeights[i]  = ElasticArray{Float64}(undef, 0)
     end
 
+    # fill!(samplepaths, ElasticVector{SamplePath}(undef, 0))
+    # fill!(loglik_surrog, ElasticVector{Float64}(undef, 0))
+    # fill!(loglik_target_cur, ElasticVector{Float64}(undef, 0))
+    # fill!(loglik_target_prop, ElasticVector{Float64}(undef, 0))
+    # fill!(ImportanceWeights, ElasticVector{Float64}(undef, 0))
+
     # containers for traces
     mll_trace = Vector{Float64}() # marginal loglikelihood
     ess_trace = ElasticArray{Float64}(undef, nsubj, 0) # effective sample size (one per subject)
     parameters_trace = ElasticArray{Float64}(undef, length(flatview(model.parameters)), 0) # parameter estimates
 
+
+    #
     # Markov surrogate model
+
+    # build surrogate
     if isnothing(surrogate_parameter)
-        # if no parameters for the surrogate are provided, compute the mle of the surrogate
+        # if no parameters for the surrogate are provided, fit the surrogate
         if verbose
             println("Obtaining the MLE for the Markov surrogate model ...\n")
         end
         surrogate = fit_surrogate(model)
     else
-        # if parameters for the surrogate are provided, simply create the surrogate
+        # if parameters for the surrogate are provided, simply use these values
         surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_parameter)
     end
 
-    # transition probability objects for Markov surrogate
-    hazmat_book_surrogate = build_hazmat_book(Float64, model.tmat, books[1])
-    tpm_book_surrogate = build_tpm_book(Float64, model.tmat, books[1])
-
-    # allocate memory for matrix exponential
-    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book_surrogate[1]), ExpMethodGeneric())
-
     # Solve Kolmogorov equations for TPMs
     for t in eachindex(books[1])
-
         # compute the transition intensity matrix
-        compute_hazmat!(
-            hazmat_book_surrogate[t],
-            surrogate.parameters,
-            surrogate.hazards,
-            books[1][t])
-
+        compute_hazmat!(hazmat_book_surrogate[t], surrogate.parameters, surrogate.hazards, books[1][t])
         # compute transition probability matrices
-        compute_tmat!(
-            tpm_book_surrogate[t],
-            hazmat_book_surrogate[t],
-            books[1][t],
-            cache)
+        compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
     end
 
-    # containers for latent sample paths, proposal and target log likelihoods, importance sampling weights
-    samplepaths        = Vector{ElasticArray{SamplePath}}(undef, nsubj)
-    loglik_surrog      = Vector{ElasticArray{Float64}}(undef, nsubj)
-    loglik_target_cur  = Vector{ElasticArray{Float64}}(undef, nsubj)
-    loglik_target_prop = Vector{ElasticArray{Float64}}(undef, nsubj)
-    ImportanceWeights  = Vector{ElasticArray{Float64}}(undef, nsubj)
 
-    fill!(samplepaths, ElasticVector{SamplePath}(undef, nparticles))
-    fill!(loglik_surrog, ElasticVector{Float64}(undef, nparticles))
-    fill!(loglik_target_cur, ElasticVector{Float64}(undef, nparticles))
-    fill!(loglik_target_prop, ElasticVector{Float64}(undef, nparticles))
-    fill!(ImportanceWeights, ElasticVector{Float64}(undef, nparticles))
+    #
+    # Sample initial paths
 
-    # containers for traces
-    mll_trace = Vector{Float64}() # marginal loglikelihood
-    ess_trace = ElasticArray{Float64}(undef, nsubj, 0) # effective sample size (one per subject)
-    parameters_trace = ElasticArray{Float64}(undef, length(flatview(model.parameters)), 0) # parameter estimates
-
-    # compute ess
-    TotImportanceWeights = zeros(nsubj)
-    ess_cur = zeros(nsubj)
-    for i in 1:nsubj
-        TotImportanceWeights[i] = sum(ImportanceWeights[i])
-        NormalizedImportanceWeights = ImportanceWeights[i] ./ TotImportanceWeights[i]
-        ess_cur[i] = 1 / sum(NormalizedImportanceWeights .^ 2)
-    end
-
-    # while ess too low, sample additional paths
+    # target ess
     ess_target = ess_target_initial
-    npaths_additional = nparticles
 
+    # draw sample paths until the target ess is reached 
     if verbose
         println("Sampling the initial sample paths ...\n")
     end
@@ -325,11 +305,14 @@ function fit(
             tpm_book_surrogate, hazmat_book_surrogate, books,
             npaths_additional, params_cur, surrogate)
     end
-
+    
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
-    # optimization function + problem
+
+    #
+    # Optimization function + problem
+
     if isnothing(constraints)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
@@ -338,10 +321,8 @@ function fit(
         prob = OptimizationProblem(optf, parameters, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
     end
 
-    # go on then
-    keep_going = true
-    iter = 0
-    convergence = false
+    #
+    # MCEM iterations
 
     if verbose
         println("Initial target ESS: $(round(ess_target; digits=2)) per-subject")
@@ -366,11 +347,15 @@ function fit(
         mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
         # optimize the monte carlo marginal likelihood
-        params_prop_optim = isnothing(constraints) ? solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) : solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
-
         println("Starting optimization ...")
-        params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
-        #params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), BFGS()) # gradient-based
+        if isnothing(constraints)
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
+            #params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), ConjugateGradient()) # gradient-based
+        else
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
+        end
+        # params_prop_optim = isnothing(constraints) ? solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) : solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
+
         params_prop = params_prop_optim.u
         println("Done with optimization.\n")
 
