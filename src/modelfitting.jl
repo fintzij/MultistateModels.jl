@@ -54,7 +54,7 @@ function fit(model::MultistateModel; constraints = nothing)
     if isnothing(constraints)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
-        sol  = solve(prob, NewtonTrustRegion())
+        sol  = solve(prob, Newton())
     else
         # create constraint function and check that constraints are satisfied at the initial values
         consfun = parse_constraints(constraints.cons, model.hazards)
@@ -112,7 +112,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     if isnothing(constraints)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-        sol  = solve(prob, NewtonTrustRegion())
+        sol  = solve(prob, Newton())
     else
         # create constraint function and check that constraints are satisfied at the initial values
         consfun = parse_constraints(constraints.cons, model.hazards)
@@ -316,7 +316,7 @@ function fit(
         # optimize the monte carlo marginal likelihood
         println("Starting optimization ...")
         if isnothing(constraints)
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), NewtonTrustRegion()) # hessian-based
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
         else
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
         end
@@ -364,8 +364,9 @@ function fit(
             params_cur = params_prop
             mll_cur = mll_prop
 
-            # swap current and proposed log likelihoods
-            loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
+            # update the current log-likelihoods
+            copyto!(loglik_target_cur, loglik_target_prop)
+            # loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
 
             # recalculate the importance ImportanceWeights and ess
             for i in 1:nsubj

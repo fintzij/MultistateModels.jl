@@ -27,7 +27,7 @@ function DrawSamplePaths!(i, model::MultistateProcess, ess_target, ess_cur, MaxS
     samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
 
     n_path_max = MaxSamplingEffort*ess_target
-    keep_sampling = true
+    keep_sampling = ess_cur[i] < ess_target
 
     while keep_sampling
         npaths = length(samplepaths[i])
@@ -49,11 +49,11 @@ function DrawSamplePaths!(i, model::MultistateProcess, ess_target, ess_cur, MaxS
         ess_cur[i] = 1 / sum(NormalizedImportanceWeights .^ 2)
     
         # check whether to stop
-        if ess_cur[i] > ess_target
+        if ess_cur[i] >= ess_target
             keep_sampling = false
         end
         if length(samplepaths[i]) > n_path_max
-            keep_sampling = false
+            # keep_sampling = false
             @warn "More than $n_path_max sample paths are required to obtain ess>$ess_target for individual $i."
             # npaths = Integer(round(n_path_max/2))
             # path_indices = wsample(1:length(samplepaths[i]), NormalizedImportanceWeights, npaths) # sample with replacements
@@ -64,8 +64,6 @@ function DrawSamplePaths!(i, model::MultistateProcess, ess_target, ess_cur, MaxS
         end
     end
 end
-
-
 
 """
    sample_ecctmc(P, Q, a, b, t0, t1)

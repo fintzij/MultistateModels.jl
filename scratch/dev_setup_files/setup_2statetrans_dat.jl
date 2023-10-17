@@ -36,7 +36,7 @@ model = multistatemodel(h12, h21; data = simdat[1])
 
 MultistateModels.set_crude_init!(model)
 
-# errors b/c there is no emat in the model
+# fit model
 fitted = fit(model) 
 
 
@@ -47,15 +47,15 @@ constraints = nothing; nparticles = 10; maxiter = 100; tol = 1e-4; α = 0.1; γ 
 surrogate_parameter = nothing; ess_target_initial = 100; MaxSamplingEffort = 10;
 verbose = true; return_ConvergenceRecords = true; return_ProposedPaths = true; npaths_additional = 10
 
-using MultistateModels: build_tpm_mapping, MultistateMarkovModel, MultistateMarkovModelCensored, fit, MarkovSurrogate, build_hazmat_book, build_tpm_book, compute_hazmat!, compute_tmat!, SamplePath, fit_surrogate, DrawSamplePaths!, mcem_mll, loglik, SMPanelData 
+using MultistateModels: build_tpm_mapping, MultistateMarkovModel, MultistateMarkovModelCensored, fit, MarkovSurrogate, build_hazmat_book, build_tpm_book, compute_hazmat!, compute_tmat!, SamplePath, fit_surrogate, DrawSamplePaths!, mcem_mll, loglik, SMPanelData, make_surrogate_model 
 
 # timing
-@btime solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Optim.NewtonTrustRegion()) #
+# @btime solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Optim.NewtonTrustRegion()) #
 
-# profile
-Profile.clear()
-ProfileView.@profview solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
+# # profile
+# Profile.clear()
+# ProfileView.@profview solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
 
-Profile.clear()
-ProfileView.@profview loglik(Vector(params_cur), SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)) 
+# Profile.clear()
+# ProfileView.@profview loglik(Vector(params_cur), SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)) 
 
