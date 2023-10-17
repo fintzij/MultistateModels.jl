@@ -275,13 +275,12 @@ function fit(
     loglik_target_cur  = Vector{ElasticArray{Float64}}(undef, nsubj)
     loglik_target_prop = Vector{ElasticArray{Float64}}(undef, nsubj)
     ImportanceWeights  = Vector{ElasticArray{Float64}}(undef, nsubj)
-    for i in 1:nsubj
-        samplepaths[i]        = ElasticArray{SamplePath}(undef, nparticles)
-        loglik_surrog[i]      = ElasticArray{Float64}(undef, nparticles)
-        loglik_target_cur[i]  = ElasticArray{Float64}(undef, nparticles)
-        loglik_target_prop[i] = ElasticArray{Float64}(undef, nparticles)
-        ImportanceWeights[i]  = ElasticArray{Float64}(undef, nparticles)
-    end
+
+    fill!(samplepaths, ElasticVector{SamplePath}(undef, nparticles))
+    fill!(loglik_surrog, ElasticVector{Float64}(undef, nparticles))
+    fill!(loglik_target_cur, ElasticVector{Float64}(undef, nparticles))
+    fill!(loglik_target_prop, ElasticVector{Float64}(undef, nparticles))
+    fill!(ImportanceWeights, ElasticVector{Float64}(undef, nparticles))
     
     # containers for traces
     mll_trace = Vector{Float64}() # marginal loglikelihood
