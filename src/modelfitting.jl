@@ -38,11 +38,11 @@
 # end 
 
 """
-    fit(model::MultistateModel)
+    fit(model::MultistateModel; constraints = nothing)
 
 Fit a multistate model given exactly observed sample paths.
 """
-function fit(model::MultistateModel)
+function fit(model::MultistateModel; constraints = nothing)
 
     # initialize array of sample paths
     samplepaths = extract_paths(model; self_transitions = false)
@@ -50,15 +50,30 @@ function fit(model::MultistateModel)
     # extract and initialize model parameters
     parameters = flatview(model.parameters)
 
-    # optimize
-    optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))    
-    sol  = solve(prob, Newton())
+    # parse constraints, or not, and solve
+    if isnothing(constraints)
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+        prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths)) 
+        sol  = solve(prob, Newton())  
+    else
+        # create constraint function and check that constraints are satisfied at the initial values
+        consfun = parse_constraints(constraints.cons, model.hazards)
+        
+        initcons = consfun(zeros(length(constraints.cons)), parameters, nothing)
+        badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
+        if length(badcons) > 0
+            @error "Constraints $badcons are violated at the initial parameter values." 
+        end
 
-    # oh eff yes.
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun)
+        prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths), lcons = constraints.lcons, ucons = constraints.ucons)   
+        sol  = solve(prob, IPNewton())  
+    end
+
+    # get hessian
     ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
     gradient = ForwardDiff.gradient(ll, sol.u)
-    vcov = inv(.-ForwardDiff.hessian(ll, sol.u))
+    vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
 
     # wrap results
     return MultistateModelFitted(
@@ -81,13 +96,11 @@ end
 
 
 """
-    fit(model::MultistateMarkovModel)
+    fit(model::MultistateMarkovModel; constraints = nothing)
 
-Fit a multistate markov model to 
-interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities),
-or a mix of panel data and exact jump times.
+Fit a multistate markov model to interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities), or a mix of panel data and exact jump times.
 """
-function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored})
+function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -95,15 +108,30 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored})
     # extract and initialize model parameters
     parameters = flatview(model.parameters)
 
-    # optimize the likelihood
-    optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-    sol  = solve(prob, Newton())
+    # parse constraints, or not, and solve
+    if isnothing(constraints)
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+        prob = OptimizationProblem(optf, parameters, MPanelData(model, books)) 
+        sol  = solve(prob, Newton())  
+    else
+        # create constraint function and check that constraints are satisfied at the initial values
+        consfun = parse_constraints(constraints.cons, model.hazards)
+        
+        initcons = consfun(zeros(length(constraints.cons)), parameters, nothing)
+        badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
+        if length(badcons) > 0
+            @error "Constraints $badcons are violated at the initial parameter values." 
+        end
+
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun)
+        prob = OptimizationProblem(optf, parameters, MPanelData(model, books), lcons = constraints.lcons, ucons = constraints.ucons)   
+        sol  = solve(prob, IPNewton())  
+    end
 
     # get the variance-covariance matrix
     ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
     gradient = ForwardDiff.gradient(ll, sol.u)
-    vcov = inv(.-ForwardDiff.hessian(ll, sol.u))
+    vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
     
     # wrap results
     return MultistateModelFitted(
@@ -127,7 +155,7 @@ end
 
 """
 fit(model::Union{MultistateSemiMarkovModel,MultistateSemiMarkovModelCensored}; 
-npaths_initial = 10, npaths_max = 500, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 3,
+constraints = nothing, npaths_initial = 10, npaths_max = 500, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 3,
     surrogate_parameter = nothing, ess_target_initial = 50,
     MaxSamplingEffort = 10,
     verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
@@ -137,6 +165,8 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 # Arguments
 
 - model: multistate model object
+- constraints: tuple for specifying parameter constraints
+- nparticles: initial number of particles per participant for MCEM
 - npaths_initial: initial number of sample paths per participant for MCEM
 - maxiter: maximum number of MCEM iterations
 - tol: tolerance for the change in the MLL, i.e., upper bound of the stopping rule to be ruled out
@@ -149,11 +179,24 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 """
 function fit(
-    model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; 
-    maxiter = 10, tol = 1e-4, α = 0.1, γ = 0.05, κ = 1.5,
-    surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 20,
+    model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; constraints = nothing, npaths_initial = 10, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 1.5,
+    surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 10,
     verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
+    # check MaxSamplingEffort > 1 
+    # check κ > 1 
+
+    # check that constraints for the initial values are satisfied
+    if !isnothing(constraints) 
+        # create constraint function and check that constraints are satisfied at the initial values
+        consfun = parse_constraints(constraints.cons, model.hazards)
+        
+        initcons = consfun(zeros(length(constraints.cons)), flatview(parameters), nothing)
+        badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
+        if length(badcons) > 0
+            @error "Constraints $badcons are violated at the initial parameter values." 
+        end
+    end
     #
     # checks
     if MaxSamplingEffort <= 1
@@ -210,6 +253,44 @@ function fit(
         # compute the mle of the surrogate model if no parameters are provided
         if verbose
             println("Obtaining the MLE for the Markov surrogate model ...\n")
+        end
+
+        # depends on censoring
+        if isa(model, MultistateSemiMarkovModel)
+            model_markov = MultistateMarkovModel(
+            model.data,
+            model.markovsurrogate.parameters,
+            model.markovsurrogate.hazards,
+            model.totalhazards,
+            model.tmat,
+            model.hazkeys,
+            model.subjectindices,
+            model.SamplingWeights,
+            model.CensoringPatterns,
+            model.markovsurrogate,
+            model.modelcall)
+        else 
+            model_markov = MultistateMarkovModelCensored(
+            model.data,
+            model.markovsurrogate.parameters,
+            model.markovsurrogate.hazards,
+            model.totalhazards,
+            model.tmat,
+            model.emat,
+            model.hazkeys,
+            model.subjectindices,
+            model.SamplingWeights,
+            model.CensoringPatterns,
+            model.markovsurrogate,
+            model.modelcall)
+        end
+
+        # get mle of surrogate model
+        model_markov_fitted = fit(model_markov)
+        surrogate_parameter=model_markov_fitted.parameters
+    end
+
+    surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_parameter)
         end    
         surrogate = fit_surrogate(model)
     else
@@ -258,8 +339,13 @@ function fit(
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
     # optimization function + problem
-    optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-    prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
+    if isnothing(constraints)
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+        prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
+    else
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun)
+        prob = OptimizationProblem(optf, parameters, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)   
+    end
   
     # go on then
     keep_going = true
@@ -289,6 +375,8 @@ function fit(
         mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
         # optimize the monte carlo marginal likelihood
+        params_prop_optim = isnothing(constraints) ? solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) : solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
+                
         println("Starting optimization ...")
         #params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
         params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), BFGS()) # gradient-based
@@ -372,7 +460,7 @@ function fit(
     fisher = zeros(Float64, length(params_cur), length(params_cur), nsubj)
     
     # compute complete data gradients and hessians
-    Threads.@threads for i in 1:nsubj
+    for i in 1:nsubj
 
         npaths = length(samplepaths[i])
 

@@ -206,5 +206,5 @@ function init_par(_hazard::_SplinePH, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 
     # pass through crude exponential rate 
     # set covariate coefficients to 0
-    return vcat(repeat([crude_log_rate], npars), zeros(size(_hazard.data, 2) - 1))
+    return vcat(repeat([crude_log_rate], length(_hazard.parnames) - size(_hazard.data, 2)), zeros(size(_hazard.data, 2) - 1))
 end

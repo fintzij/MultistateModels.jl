@@ -145,7 +145,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             push!(parameters, hazpars)
 
             # get names
-            parnames = hazname*"_".*coefnames(hazschema)[2]
+            parnames = replace.(hazname*"_".*coefnames(hazschema)[2], "(Intercept)" => "Intercept")
 
             # generate hazard struct
             if npars == 1
@@ -181,7 +181,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             if npars == 1
                 
                 # parameter names
-                parnames = vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2])
+                parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "(Intercept)" => "Intercept")
 
                 haz_struct = 
                     _Weibull(
@@ -194,10 +194,9 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             else
                 
                 # parameter names
-                parnames = 
-                    vcat(
-                        hazname * "_shape_(Intercept)",
-                        hazname * "_scale_(Intercept)",
+                parnames = vcat(
+                        hazname * "_shape_Intercept",
+                        hazname * "_scale_Intercept",
                         hazname*"_".*coefnames(hazschema)[2][Not(1)])
 
                 haz_struct = 
@@ -224,7 +223,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             if npars == 1
                 
                 # parameter names
-                parnames = vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2])
+                parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "(Intercept)" => "Intercept")
 
                 haz_struct = 
                     _Gompertz(
@@ -237,10 +236,9 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             else
                 
                 # parameter names
-                parnames = 
-                    vcat(
-                        hazname * "_shape_(Intercept)",
-                        hazname * "_scale_(Intercept)",
+                parnames = vcat(
+                        hazname * "_shape_Intercept",
+                        hazname * "_scale_Intercept",
                         hazname*"_".*coefnames(hazschema)[2][Not(1)])
 
                 haz_struct = 
@@ -269,7 +267,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             if(size(hazdat, 2) == 1) 
                 ### no covariates
                 # parameter names
-                parnames = vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1])))
+                parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), "(Intercept)" => "Intercept")
                     
                 # hazard struct
                 haz_struct = 
@@ -288,7 +286,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             else
                 ### proportional hazards
                 # parameter names
-                parnames = vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), hazname*"_".*coefnames(hazschema)[2][Not(1)])
+                parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), hazname*"_".*coefnames(hazschema)[2][Not(1)]), "(Intercept)" => "Intercept")
 
                 # hazard struct
                 haz_struct = 
@@ -476,7 +474,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
         end
 
     # censored states and/or panel data and/or exactly observed data
-    elseif any(data.obstype .> 2)
+    elseif !all(data.obstype .∈ Ref([1,2]))
         # Markov model
         if all(isa.(_hazards, _MarkovHazard))
             model = MultistateMarkovModelCensored(
