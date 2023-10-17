@@ -1,16 +1,15 @@
 """
-    DrawAdditionalSamplePaths(i, model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, 
+    DrawSamplePaths(i, model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, 
 tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
 
 Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
 """
-function DrawAdditionalSamplePaths!(model::MultistateProcess, ess_target, ess_cur, MaxSamplingEffort,
-    samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, 
-    tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
+function DrawSamplePaths!(model::MultistateProcess, ess_target, ess_cur, MaxSamplingEffort,
+    samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
 
     nsubj = length(model.subjectindices)
     for i in 1:nsubj
-        DrawAdditionalSamplePaths!(
+        DrawSamplePaths!(
             i, model, ess_target, ess_cur, MaxSamplingEffort, 
             samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights,
             tpm_book_surrogate, hazmat_book_surrogate, books,
@@ -19,14 +18,13 @@ function DrawAdditionalSamplePaths!(model::MultistateProcess, ess_target, ess_cu
 end
 
 """
-    DrawAdditionalSamplePaths(i, model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, 
+    DrawSamplePaths(i, model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, 
 tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
 
 Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
 """
-function DrawAdditionalSamplePaths!(i, model::MultistateProcess, ess_target, ess_cur, MaxSamplingEffort, 
-    samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, 
-    tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
+function DrawSamplePaths!(i, model::MultistateProcess, ess_target, ess_cur, MaxSamplingEffort, 
+    samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
 
     n_path_max = MaxSamplingEffort*ess_target
     keep_sampling = true

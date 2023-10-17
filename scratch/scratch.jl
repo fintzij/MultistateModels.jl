@@ -1,12 +1,20 @@
 using ArraysOfArrays
 using ElasticArrays
+using BenchmarkTools
 
-testarr = VectorOfArrays{ElasticArray{Float64}, 1}()
 
-append!(testarr, ElasticArray{Float64, 1}(zeros(5)))
-push!(testarr, ElasticArray{Float64}(undef, 5))
+testvec = [sizehint!(ElasticArray{Float64, 1}(undef, 0), 1000) for i in 1:1000]
 
-append!(testarr[1], zeros(3))
+testvec2 = [sizehint!(Vector{Float64}(), 1000) for i in 1:1000]
 
-samplepaths        = Vector{ElasticArray{SamplePath}}(undef, nsubj)
-fill!(samplepaths, ElasticArray{SamplePath}(undef, nsubj))
+
+function app!(v, n)
+    for i in 1:length(v)
+        for j in 1:n
+            append!(v[i], 0.0)
+        end
+    end
+end
+
+@btime app!(testvec, 1000)
+@btime app!(testvec2, 1000) # vector of vectors is slightly faster

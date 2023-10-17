@@ -174,15 +174,14 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - γ: Standard normal quantile for stopping
 - κ: Inflation factor for target ESS per person, ESS_new = ESS_cur * κ
 - MaxSamplingEffort: factor of the ESS needed to trigger subsampling
+- npaths_additional: increment for number of additional paths when augmenting the pool of paths
 - verbose: print status
 - return_ConvergenceRecords: save history throughout the run
 - return_ProposedPaths: save latent paths and importance weights
 """
 function fit(
     model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
-    constraints = nothing, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 1.5,
-    surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10,
-    verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
+    constraints = nothing, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 1.5, surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -206,11 +205,7 @@ function fit(
         error("κ must be greater than 1.")
     end
 
-
-    #
-    # initialization
-
-    # MCEM
+    # MCEM initialization
     keep_going = true
     iter = 0
     convergence = false
@@ -238,33 +233,17 @@ function fit(
     TotImportanceWeights = zeros(nsubj)
     ess_cur = zeros(nsubj)
 
-    samplepaths        = Vector{ElasticArray{SamplePath}}(undef, nsubj)
-    loglik_surrog      = Vector{ElasticArray{Float64}}(undef, nsubj)
-    loglik_target_cur  = Vector{ElasticArray{Float64}}(undef, nsubj)
-    loglik_target_prop = Vector{ElasticArray{Float64}}(undef, nsubj)
-    ImportanceWeights  = Vector{ElasticArray{Float64}}(undef, nsubj)
-    for i in 1:nsubj
-        samplepaths[i]        = ElasticArray{SamplePath}(undef, 0)
-        loglik_surrog[i]      = ElasticArray{Float64}(undef, 0)
-        loglik_target_cur[i]  = ElasticArray{Float64}(undef, 0)
-        loglik_target_prop[i] = ElasticArray{Float64}(undef, 0)
-        ImportanceWeights[i]  = ElasticArray{Float64}(undef, 0)
-    end
-
-    # fill!(samplepaths, ElasticVector{SamplePath}(undef, 0))
-    # fill!(loglik_surrog, ElasticVector{Float64}(undef, 0))
-    # fill!(loglik_target_cur, ElasticVector{Float64}(undef, 0))
-    # fill!(loglik_target_prop, ElasticVector{Float64}(undef, 0))
-    # fill!(ImportanceWeights, ElasticVector{Float64}(undef, 0))
+    # initialize containers
+    samplepaths     = [sizehint!(Vector{SamplePath}(), ess_target_initial * MaxSamplingEffort * 20) for i in 1:nsubj]
+    loglik_surrog   = [sizehint!(Vector{Float64}(undef, 0), ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+    loglik_target_cur  = [sizehint!(Vector{Float64}(undef, 0), ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+    loglik_target_prop = [sizehint!(Vector{Float64}(undef, 0), ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+    ImportanceWeights  = [sizehint!(Vector{Float64}(undef, 0), ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
 
     # containers for traces
     mll_trace = Vector{Float64}() # marginal loglikelihood
-    ess_trace = ElasticArray{Float64}(undef, nsubj, 0) # effective sample size (one per subject)
-    parameters_trace = ElasticArray{Float64}(undef, length(flatview(model.parameters)), 0) # parameter estimates
-
-
-    #
-    # Markov surrogate model
+    ess_trace = ElasticArray{Float64, 2}(undef, nsubj, 0) # effective sample size (one per subject)
+    parameters_trace = ElasticArray{Float64, 2}(undef, length(flatview(model.parameters)), 0) # parameter estimates
 
     # build surrogate
     if isnothing(surrogate_parameter)
@@ -286,10 +265,6 @@ function fit(
         compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
     end
 
-
-    #
-    # Sample initial paths
-
     # target ess
     ess_target = ess_target_initial
 
@@ -299,31 +274,23 @@ function fit(
     end
 
     for i in 1:nsubj
-        DrawAdditionalSamplePaths!(
-            i, model, ess_target, ess_cur, MaxSamplingEffort,
-            samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights,
-            tpm_book_surrogate, hazmat_book_surrogate, books,
-            npaths_additional, params_cur, surrogate)
+        DrawSamplePaths!(
+            i, model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
     end
     
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
-
-    #
-    # Optimization function + problem
-
+    # generate optimization problem
     if isnothing(constraints)
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-        prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
+        optf = OptimizationFunction{true}(loglik, Optimization.AutoForwardDiff())
+        prob = OptimizationProblem{true}(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
     else
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun)
         prob = OptimizationProblem(optf, parameters, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
     end
 
-    #
-    # MCEM iterations
-
+    # print output
     if verbose
         println("Initial target ESS: $(round(ess_target; digits=2)) per-subject")
         println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
@@ -336,7 +303,7 @@ function fit(
 
         # ensure that ess per person is sufficient
         for i in 1:nsubj
-            DrawAdditionalSamplePaths!(
+            DrawSamplePaths!(
                 i, model, ess_target, ess_cur, MaxSamplingEffort,
                 samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights,
                 tpm_book_surrogate, hazmat_book_surrogate, books,
