@@ -179,12 +179,10 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 """
 function fit(
-    model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; constraints = nothing, npaths_initial = 10, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 1.5,
+    model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
+    constraints = nothing, npaths_initial = 10, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 1.5,
     surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 10,
     verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
-
-    # check MaxSamplingEffort > 1 
-    # check κ > 1 
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints) 
@@ -197,11 +195,13 @@ function fit(
             @error "Constraints $badcons are violated at the initial parameter values." 
         end
     end
-    #
-    # checks
+
+    # check that MaxSamplingEffort is greater than 1
     if MaxSamplingEffort <= 1
         error("MaxSamplingEffort must be greater than 1.")
     end
+
+    # check that κ is greater than 1
     if κ <= 1
         error("κ must be greater than 1.")
     end
@@ -246,56 +246,17 @@ function fit(
     ess_trace = ElasticArray{Float64}(undef, nsubj, 0) # effective sample size (one per subject)
     parameters_trace = ElasticArray{Float64}(undef, length(flatview(model.parameters)), 0) # parameter estimates
 
-
-    #
     # Markov surrogate model
     if isnothing(surrogate_parameter)
-        # compute the mle of the surrogate model if no parameters are provided
+        # if no parameters for the surrogate are provided, compute the mle of the surrogate
         if verbose
             println("Obtaining the MLE for the Markov surrogate model ...\n")
-        end
-
-        # depends on censoring
-        if isa(model, MultistateSemiMarkovModel)
-            model_markov = MultistateMarkovModel(
-            model.data,
-            model.markovsurrogate.parameters,
-            model.markovsurrogate.hazards,
-            model.totalhazards,
-            model.tmat,
-            model.hazkeys,
-            model.subjectindices,
-            model.SamplingWeights,
-            model.CensoringPatterns,
-            model.markovsurrogate,
-            model.modelcall)
-        else 
-            model_markov = MultistateMarkovModelCensored(
-            model.data,
-            model.markovsurrogate.parameters,
-            model.markovsurrogate.hazards,
-            model.totalhazards,
-            model.tmat,
-            model.emat,
-            model.hazkeys,
-            model.subjectindices,
-            model.SamplingWeights,
-            model.CensoringPatterns,
-            model.markovsurrogate,
-            model.modelcall)
-        end
-
-        # get mle of surrogate model
-        model_markov_fitted = fit(model_markov)
-        surrogate_parameter=model_markov_fitted.parameters
-    end
-
-    surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_parameter)
-        end    
+        end 
         surrogate = fit_surrogate(model)
     else
+        # if parameters for the surrogate are provided, simply create the surrogate
         surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_parameter)
-    end    
+    end
 
     # transition probability objects for Markov surrogate
     hazmat_book_surrogate = build_hazmat_book(Float64, model.tmat, books[1])
@@ -528,60 +489,4 @@ function fit(
         ConvergenceRecords,
         ProposedPaths,
         model.modelcall)
-end
-
-
-"""
-fit_surrogate(model::MultistateSemiMarkovModel)
-
-Fit a Markov surrogate model. 
-
-# Arguments
-
-- model: multistate model object
-"""
-function fit_surrogate(model::MultistateSemiMarkovModel)
-    surrogate = MultistateModels.MultistateMarkovModel(
-        model.data,
-        model.markovsurrogate.parameters,
-        model.markovsurrogate.hazards,
-        model.totalhazards,
-        model.tmat,
-        model.emat,
-        model.hazkeys,
-        model.subjectindices,
-        model.SamplingWeights,
-        model.CensoringPatterns,
-        model.markovsurrogate,
-        model.modelcall);
-    set_crude_init!(surrogate)
-    return fit(surrogate)
-end
-
-
-"""
-fit_surrogate(model::MultistateSemiMarkovModelCensored)
-
-Fit a Markov surrogate model with censored states. 
-
-# Arguments
-
-- model: multistate model object
-"""
-function fit_surrogate(model::MultistateSemiMarkovModelCensored)
-    surrogate = MultistateModels.MultistateMarkovModelCensored(
-        model.data,
-        model.markovsurrogate.parameters,
-        model.markovsurrogate.hazards,
-        model.totalhazards,
-        model.tmat,
-        model.emat,
-        model.hazkeys,
-        model.subjectindices,
-        model.SamplingWeights,
-        model.CensoringPatterns,
-        model.markovsurrogate,
-        model.modelcall);
-    set_crude_init!(surrogate)
-    return fit(surrogate)
 end
