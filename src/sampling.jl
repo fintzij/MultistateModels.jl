@@ -1,4 +1,75 @@
 """
+    DrawAdditionalSamplePaths(i, model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, 
+tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
+
+Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
+"""
+function DrawAdditionalSamplePaths!(model::MultistateProcess, ess_target, ess_cur, MaxSamplingEffort,
+    samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, 
+    tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
+
+    nsubj = length(model.subjectindices)
+    for i in 1:nsubj
+        DrawAdditionalSamplePaths!(
+            i, model, ess_target, ess_cur, MaxSamplingEffort, 
+            samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights,
+            tpm_book_surrogate, hazmat_book_surrogate, books,
+            npaths_additional, params_cur, surrogate)
+    end
+end
+
+"""
+    DrawAdditionalSamplePaths(i, model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, 
+tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
+
+Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
+"""
+function DrawAdditionalSamplePaths!(i, model::MultistateProcess, ess_target, ess_cur, MaxSamplingEffort, 
+    samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, 
+    tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
+
+    n_path_max = MaxSamplingEffort*ess_target
+    keep_sampling = true
+
+    while keep_sampling
+        npaths = length(samplepaths[i])
+        append!(samplepaths[i], Vector{SamplePath}(undef, npaths_additional))
+        append!(loglik_surrog[i], zeros(npaths_additional))
+        append!(loglik_target_prop[i], zeros(npaths_additional))
+        append!(loglik_target_cur[i], zeros(npaths_additional))
+        append!(ImportanceWeights[i], zeros(npaths_additional))
+
+        for j in npaths.+(1:npaths_additional)
+            samplepaths[i][j]       = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2])
+            loglik_surrog[i][j]     = loglik(surrogate.parameters, samplepaths[i][j], surrogate.hazards, model) * model.SamplingWeights[i]
+            loglik_target_cur[i][j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i][j], model.hazards, model) * model.SamplingWeights[i]
+            ImportanceWeights[i][j] = exp(loglik_target_cur[i][j] - loglik_surrog[i][j])
+        end
+        # update ess
+        TotImportanceWeights[i] = sum(ImportanceWeights[i])
+        NormalizedImportanceWeights = ImportanceWeights[i] ./ TotImportanceWeights[i]
+        ess_cur[i] = 1 / sum(NormalizedImportanceWeights .^ 2)
+    
+        # check whether to stop
+        if ess_cur[i] > ess_target
+            keep_sampling = false
+        end
+        if length(samplepaths[i]) > n_path_max
+            keep_sampling = false
+            @warn "More than $n_path_max sample paths are required to obtain ess>$ess_target for individual $i."
+            # npaths = Integer(round(n_path_max/2))
+            # path_indices = wsample(1:length(samplepaths[i]), NormalizedImportanceWeights, npaths) # sample with replacements
+            # samplepaths[i] = samplepaths[i][path_indices]
+            # loglik_surrog[i] = ones(npaths)
+            # loglik_target_cur[i] = ones(npaths)
+            # ImportanceWeights[i] = ones(npaths) # ./ npaths
+        end
+    end
+end
+
+
+
+"""
    sample_ecctmc(P, Q, a, b, t0, t1)
 
 Sample path for an endpoint conditioned CTMC whose states at times `t0` and `t1` are `a` and `b`. `P` is the transition probability matrix over the interval, `Q` is the transition intensity matrix. 
@@ -261,7 +332,8 @@ function ForwardFiltering(subj_dat, tpm_book, subj_tpm_map, subj_emat)
         normalizing_constant = sum(p_trs)
         if normalizing_constant == 0
             id = subj_dat.id[1]
-            error("There is no trajectory that satisfies the censoring patterns for subject $id.")
+            error("No trajectory satisfies the censoring patterns for subject $id.")
+            #error("test error.")
         end
         p[t,:,:] = p_trs ./ normalizing_constant # normalize p_t [Eq. 6]
         # posterior
