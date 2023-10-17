@@ -1,8 +1,10 @@
 using DataFrames
 using ExponentialUtilities
 using Distributions
+using Plots
 using MultistateModels
-using MultistateModels: draw_samplepath, SampleSkeleton!, build_tpm_mapping, build_hazmat_book, build_tpm_book, compute_hazmat!, compute_tmat!, ForwardFiltering, BackwardSampling
+using MultistateModels: draw_samplepath, SampleSkeleton!, build_tpm_mapping, build_hazmat_book, build_tpm_book, compute_hazmat!, compute_tmat!, ForwardFiltering, BackwardSampling, flatview, MPanelData, loglik
+
 
 # progressive four-state model
 h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
@@ -43,7 +45,7 @@ books_degenerate = build_tpm_mapping(model_degenerate.data)
 tpm_book_degenerate = build_tpm_book(eltype(flatview(model_degenerate.parameters)), model_degenerate.tmat, books_degenerate[1])
 hazmat_book_degenerate = build_hazmat_book(eltype(flatview(model_degenerate.parameters)), model_degenerate.tmat, books_degenerate[1])
 cache_degenerate = ExponentialUtilities.alloc_mem(similar(hazmat_book_degenerate[1]), ExpMethodGeneric())
-for t in eachindex(books[1])
+for t in eachindex(books_degenerate[1])
     compute_hazmat!(hazmat_book_degenerate[t],model_degenerate.parameters,model_degenerate.hazards,books_degenerate[1][t])
     compute_tmat!(tpm_book_degenerate[t],hazmat_book_degenerate[t],books_degenerate[1][t],cache_degenerate)
 end
@@ -62,7 +64,7 @@ books_MC = build_tpm_mapping(model_MC.data)
 tpm_book_MC = build_tpm_book(eltype(flatview(model_MC.parameters)), model_MC.tmat, books_MC[1])
 hazmat_book_MC = build_hazmat_book(eltype(flatview(model_MC.parameters)), model_MC.tmat, books_MC[1])
 cache_MC = ExponentialUtilities.alloc_mem(similar(hazmat_book_MC[1]), ExpMethodGeneric())
-for t in eachindex(books[1])
+for t in eachindex(books_MC[1])
     compute_hazmat!(hazmat_book_MC[t],model_MC.parameters,model_MC.hazards,books_MC[1][t])
     compute_tmat!(tpm_book_MC[t],hazmat_book_MC[t],books_MC[1][t],cache_MC)
 end
@@ -83,7 +85,7 @@ books_impossible = build_tpm_mapping(model_impossible.data)
 tpm_book_impossible = build_tpm_book(eltype(flatview(model_impossible.parameters)), model_impossible.tmat, books_impossible[1])
 hazmat_book_impossible = build_hazmat_book(eltype(flatview(model_impossible.parameters)), model_impossible.tmat, books_impossible[1])
 cache_impossible = ExponentialUtilities.alloc_mem(similar(hazmat_book_impossible[1]), ExpMethodGeneric())
-for t in eachindex(books[1])
+for t in eachindex(books_impossible[1])
     compute_hazmat!(hazmat_book_impossible[t],model_impossible.parameters,model_impossible.hazards,books_impossible[1][t])
     compute_tmat!(tpm_book_impossible[t],hazmat_book_impossible[t],books_impossible[1][t],cache_impossible)
 end
