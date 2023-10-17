@@ -92,4 +92,7 @@ include("simulation.jl")
 # smooths
 include("smooths.jl")
 
+# surrogate
+include("surrogates.jl")
+
 end

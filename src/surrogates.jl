@@ -59,7 +59,7 @@ Fit a Markov surrogate model.
 
 - model: multistate model object
 """
-function fit_surrogate(model::Union{MultistateSemiMarkovModel,MultistateSemiMarkovModelCensored})
+function fit_surrogate(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored})
     surrogate = make_surrogate_model(model)
     set_crude_init!(surrogate)
     surrogate = fit(surrogate)
