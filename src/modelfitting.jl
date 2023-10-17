@@ -54,7 +54,7 @@ function fit(model::MultistateModel; constraints = nothing)
     if isnothing(constraints)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
-        sol  = solve(prob, Newton())
+        sol  = solve(prob, NewtonTrustRegion())
     else
         # create constraint function and check that constraints are satisfied at the initial values
         consfun = parse_constraints(constraints.cons, model.hazards)
@@ -112,7 +112,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     if isnothing(constraints)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-        sol  = solve(prob, Newton())
+        sol  = solve(prob, NewtonTrustRegion())
     else
         # create constraint function and check that constraints are satisfied at the initial values
         consfun = parse_constraints(constraints.cons, model.hazards)
@@ -283,8 +283,8 @@ function fit(
 
     # generate optimization problem
     if isnothing(constraints)
-        optf = OptimizationFunction{true}(loglik, Optimization.AutoForwardDiff())
-        prob = OptimizationProblem{true}(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+        prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
     else
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun)
         prob = OptimizationProblem(optf, parameters, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
@@ -316,12 +316,10 @@ function fit(
         # optimize the monte carlo marginal likelihood
         println("Starting optimization ...")
         if isnothing(constraints)
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
-            #params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), ConjugateGradient()) # gradient-based
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), NewtonTrustRegion()) # hessian-based
         else
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
         end
-        # params_prop_optim = isnothing(constraints) ? solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) : solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
 
         params_prop = params_prop_optim.u
         println("Done with optimization.\n")
