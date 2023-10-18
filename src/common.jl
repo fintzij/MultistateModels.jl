@@ -374,14 +374,17 @@ struct MPanelData
 end
 
 """
-    SMPanelData(model::MultistateProcess, paths::Array{SamplePath}, ImportanceWeights::ElasticArray{Float64})
+    SMPanelData(model::MultistateProcess
+    paths::Vector{Vector{SamplePath}}
+    ImportanceWeights::Vector{Vector{Float64}}
+    TotImportanceWeights::Vector{Float64})
 
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate semi-Markov model to panel data via MCEM.
 """
 struct SMPanelData
     model::MultistateProcess
-    paths::Vector{}
-    ImportanceWeights::Vector{}
-    TotImportanceWeights::Vector{}
+    paths::Vector{Vector{SamplePath}}
+    ImportanceWeights::Vector{Vector{Float64}}
+    TotImportanceWeights::Vector{Float64}
 end
 

@@ -3,12 +3,12 @@ using DataFrames
 using Distributions
 using MultistateModels
 
-h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
 h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1)
 
 nsubj = 100
-ntimes = 5
-dat = DataFrame(id = repeat(collect(1:100), inner = ntimes),
+ntimes = 10
+dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
                 tstart = repeat(collect(0:(10/ntimes):(10 - 10/ntimes)), outer = nsubj),
                 tstop = repeat(collect((10/ntimes):(10/ntimes):10), outer = nsubj),
                 statefrom = fill(1, nsubj * ntimes),
@@ -26,7 +26,7 @@ model = multistatemodel(h12, h21; data = dat)
 # want mean time to event of 5
 set_parameters!(
     model, 
-    (h12 = [log(0.4), log(1)],
+    (h12 = [log(0.4)],
      h21 = [log(0.4)]))
 
 simdat, paths = simulate(model; paths = true, data = true);

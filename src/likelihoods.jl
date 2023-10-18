@@ -251,11 +251,8 @@ function loglik(parameters, data::SMPanelData; neg = true)
 
     # compute the semi-markov log-likelihoods
     ll = 0.0
-    # for j in Base.OneTo(size(data.paths, 2))
-    #     for i in Base.OneTo(size(data.paths, 1))
-    #         ll += loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.ImportanceWeights[i,j] / data.TotImportanceWeights[i] * data.model.SamplingWeights[i]
-    for i in Base.OneTo(length(data.paths))
-        for j in Base.OneTo(length(data.paths[i]))
+    for i in eachindex(data.paths)
+        for j in eachindex(data.paths[i])
             ll += loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.ImportanceWeights[i][j] / data.TotImportanceWeights[i] * data.model.SamplingWeights[i]
         end
     end
@@ -274,12 +271,8 @@ function loglik!(parameters, logliks::Vector{}, data::SMPanelData)
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
-    # compute the semi-markov log-likelihoods
-    # for j in Base.OneTo(size(data.paths, 2))
-    #     for i in Base.OneTo(size(data.paths, 1))
-    #         logliks[i,j] = loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.model.SamplingWeights[i]
-    for i in Base.OneTo(length(data.paths))
-        for j in Base.OneTo(length(data.paths[i]))
+    for i in eachindex(data.paths)
+        for j in eachindex(data.paths[i])
             logliks[i][j] = loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.model.SamplingWeights[i]
         end
     end

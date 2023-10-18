@@ -11,7 +11,7 @@ Random.seed!(52787)
 include("test/setup_3state_expwei.jl")
 include("test/setup_3state_weiph.jl")
 include("test/setup_2state_trans.jl")
-include("test/setup_ffbs.jl")
+include("test/setup_illnessdeath_splines.jl")
 
 @testset "runtests" begin
     include("test/test_modelgeneration.jl")

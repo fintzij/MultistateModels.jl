@@ -54,7 +54,7 @@ function fit(model::MultistateModel; constraints = nothing)
     if isnothing(constraints)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
-        sol  = solve(prob, Newton())
+        sol  = solve(prob, NewtonTrustRegion())
     else
         # create constraint function and check that constraints are satisfied at the initial values
         consfun = parse_constraints(constraints.cons, model.hazards)
@@ -112,7 +112,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     if isnothing(constraints)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-        sol  = solve(prob, Newton())
+        sol  = solve(prob, NewtonTrustRegion())
     else
         # create constraint function and check that constraints are satisfied at the initial values
         consfun = parse_constraints(constraints.cons, model.hazards)
@@ -272,10 +272,20 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         println("Initializing sample paths ...\n")
     end
 
-    for i in 1:nsubj
-        DrawSamplePaths!(
-            i, model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
-    end
+    DrawSamplePaths!(model; 
+        ess_target = ess_target, 
+        ess_cur = ess_cur, 
+        MaxSamplingEffort = MaxSamplingEffort,
+        samplepaths = samplepaths, 
+        loglik_surrog = loglik_surrog, 
+        loglik_target_prop = loglik_target_prop, 
+        loglik_target_cur = loglik_target_cur, 
+        ImportanceWeights = ImportanceWeights, 
+        TotImportanceWeights = TotImportanceWeights, tpm_book_surrogate = tpm_book_surrogate, hazmat_book_surrogate = hazmat_book_surrogate, 
+        books = books, 
+        npaths_additional = npaths_additional, 
+        params_cur = params_cur, 
+        surrogate = surrogate)
     
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
@@ -293,6 +303,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     if verbose
         println("Initial target ESS: $(round(ess_target; digits=2)) per-subject")
         println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
+        
         println("Log-likelihood: $mll_cur\n")
 
         println("Starting Monte Carlo EM...\n")
@@ -302,27 +313,33 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     while keep_going
 
         # ensure that ess per person is sufficient
-        for i in 1:nsubj
-            DrawSamplePaths!(
-                i, model, ess_target, ess_cur, MaxSamplingEffort,
-                samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights,
-                tpm_book_surrogate, hazmat_book_surrogate, books,
-                npaths_additional, params_cur, surrogate)
-        end
+        DrawSamplePaths!(model; 
+            ess_target = ess_target, 
+            ess_cur = ess_cur, 
+            MaxSamplingEffort = MaxSamplingEffort,
+            samplepaths = samplepaths, 
+            loglik_surrog = loglik_surrog, 
+            loglik_target_prop = loglik_target_prop, 
+            loglik_target_cur = loglik_target_cur, 
+            ImportanceWeights = ImportanceWeights, 
+            TotImportanceWeights = TotImportanceWeights,    tpm_book_surrogate = tpm_book_surrogate,   hazmat_book_surrogate = hazmat_book_surrogate, 
+            books = books, 
+            npaths_additional = npaths_additional, 
+            params_cur = params_cur, 
+            surrogate = surrogate)
 
         # recalculate the marginal log likelihood 
         mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
         # optimize the monte carlo marginal likelihood
-        println("Starting optimization ...")
+        println("Optimizing...")
         if isnothing(constraints)
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), NewtonTrustRegion()) # hessian-based
         else
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
         end
 
         params_prop = params_prop_optim.u
-        println("Done with optimization.\n")
 
         # recalculate the log likelihoods
         loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
@@ -359,8 +376,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             for i in 1:nsubj
                 ImportanceWeights[i] = exp.(loglik_target_cur[i] .- loglik_surrog[i])
                 TotImportanceWeights[i] = sum(ImportanceWeights[i])
-                NormalizedImportanceWeights = ImportanceWeights[i] ./ TotImportanceWeights[i]
-                ess_cur[i] = 1 / sum(NormalizedImportanceWeights .^ 2)
+                ess_cur[i] = 1 / sum((ImportanceWeights[i] ./ TotImportanceWeights[i]) .^ 2)
             end
 
             # save marginal log likelihood, parameters and effective sample size
@@ -369,7 +385,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             append!(ess_trace, ess_cur)
 
             if verbose
-                println("Iteration: $(iter+1)")
+                println("Iteration: $(iter)")
                 println("Current target ESS: $(round(ess_target; digits=2)) per-subject")
                 println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
                 println("Estimate of the marginal log-likelihood: $mll_cur")

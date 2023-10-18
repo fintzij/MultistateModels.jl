@@ -6,11 +6,9 @@ Compute the marginal log likelihood for MCEM.
 function mcem_mll(logliks, ImportanceWeights, TotImportanceWeights)
 
     obj = 0.0
-    #for j in 1:size(logliks, 2)
-        #for i in 1:size(logliks, 1)
-            #obj += logliks[i,j] * ImportanceWeights[i,j] / TotImportanceWeights[i]
-    for i in 1:length(logliks)
-        for j in 1:length(logliks[i])
+    
+    for i in eachindex(logliks)
+        for j in eachindex(logliks[i])
             obj += logliks[i][j] * ImportanceWeights[i][j] / TotImportanceWeights[i]
         end
     end
