@@ -3,8 +3,8 @@ using DataFrames
 using Distributions
 using MultistateModels
 
-h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
-h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1)
+h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3)
 
 nsubj = 100
 ntimes = 10
@@ -20,31 +20,30 @@ dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
 # sort!(dat, [:id,])
 
 # create multistate model object
-model = multistatemodel(h12, h21; data = dat)
+model = multistatemodel(h12, h23; data = dat)
 
 # set model parameters
 # want mean time to event of 5
 set_parameters!(
     model, 
-    (h12 = [log(0.4)],
-     h21 = [log(0.4)]))
+    (h12 = [log(1.5), log(0.4)],
+     h23 = [log(0.7), log(0.4)]))
 
 simdat, paths = simulate(model; paths = true, data = true);
 
 # create multistate model object with the simulated data
-model = multistatemodel(h12, h21; data = simdat[1])
+model = multistatemodel(h12, h23; data = simdat[1])
 
 MultistateModels.set_crude_init!(model)
 
 # fit model
 fitted = fit(model) 
 
-
 # load libraries and functions
 using ArraysOfArrays, Optimization, Optim, StatsModels, StatsFuns, ExponentialUtilities, ElasticArrays, BenchmarkTools, Profile, ProfileView
 
 constraints = nothing; nparticles = 10; maxiter = 100; tol = 1e-4; α = 0.1; γ = 0.05; κ = 1.5;
-surrogate_parameter = nothing; ess_target_initial = 100; MaxSamplingEffort = 10;
+surrogate_parameter = nothing; ess_target_initial = 10; MaxSamplingEffort = 10;
 verbose = true; return_ConvergenceRecords = true; return_ProposedPaths = true; npaths_additional = 10
 
 using MultistateModels: build_tpm_mapping, MultistateMarkovModel, MultistateMarkovModelCensored, fit, MarkovSurrogate, build_hazmat_book, build_tpm_book, compute_hazmat!, compute_tmat!, SamplePath, fit_surrogate, DrawSamplePaths!, mcem_mll, loglik, SMPanelData, make_surrogate_model, loglik!, mcem_ase, draw_samplepath
