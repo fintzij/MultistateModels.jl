@@ -43,17 +43,17 @@ function DrawSamplePaths!(i, model::MultistateProcess, ess_target, ess_cur, MaxS
             loglik_target_cur[i][j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i][j], model.hazards, model) * model.SamplingWeights[i]
             ImportanceWeights[i][j] = exp(loglik_target_cur[i][j] - loglik_surrog[i][j])
         end
+
         # update ess
         TotImportanceWeights[i] = sum(ImportanceWeights[i])
-        NormalizedImportanceWeights = ImportanceWeights[i] ./ TotImportanceWeights[i]
-        ess_cur[i] = 1 / sum(NormalizedImportanceWeights .^ 2)
+        ess_cur[i] = 1 / sum((ImportanceWeights[i] ./ TotImportanceWeights[i]) .^ 2)
     
         # check whether to stop
         if ess_cur[i] >= ess_target
             keep_sampling = false
         end
         if length(samplepaths[i]) > n_path_max
-            # keep_sampling = false
+            keep_sampling = false
             @warn "More than $n_path_max sample paths are required to obtain ess>$ess_target for individual $i."
             # npaths = Integer(round(n_path_max/2))
             # path_indices = wsample(1:length(samplepaths[i]), NormalizedImportanceWeights, npaths) # sample with replacements

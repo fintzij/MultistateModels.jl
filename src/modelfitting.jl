@@ -179,8 +179,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ConvergenceRecords: save history throughout the run
 - return_ProposedPaths: save latent paths and importance weights
 """
-function fit(
-    model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
     constraints = nothing, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 1.5, surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
     # check that constraints for the initial values are satisfied
@@ -212,16 +211,6 @@ function fit(
 
     # number of subjects
     nsubj = length(model.subjectindices)
-
-    # containers for bookkeeping TPMs
-    books = build_tpm_mapping(model.data)    
-
-    # transition probability objects for Markov surrogate
-    hazmat_book_surrogate = build_hazmat_book(Float64, model.tmat, books[1])
-    tpm_book_surrogate = build_tpm_book(Float64, model.tmat, books[1])
-
-    # allocate memory for matrix exponential
-    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book_surrogate[1]), ExpMethodGeneric())
 
     # extract and initialize model parameters
     params_cur = flatview(model.parameters)
@@ -257,6 +246,16 @@ function fit(
         surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_parameter)
     end
 
+     # containers for bookkeeping TPMs
+     books = build_tpm_mapping(model.data)    
+
+     # transition probability objects for Markov surrogate
+     hazmat_book_surrogate = build_hazmat_book(Float64, model.tmat, books[1])
+     tpm_book_surrogate = build_tpm_book(Float64, model.tmat, books[1])
+ 
+     # allocate memory for matrix exponential
+     cache = ExponentialUtilities.alloc_mem(similar(hazmat_book_surrogate[1]), ExpMethodGeneric())
+
     # Solve Kolmogorov equations for TPMs
     for t in eachindex(books[1])
         # compute the transition intensity matrix
@@ -270,7 +269,7 @@ function fit(
 
     # draw sample paths until the target ess is reached 
     if verbose
-        println("Sampling the initial sample paths ...\n")
+        println("Initializing sample paths ...\n")
     end
 
     for i in 1:nsubj
@@ -294,11 +293,12 @@ function fit(
     if verbose
         println("Initial target ESS: $(round(ess_target; digits=2)) per-subject")
         println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
-        println("Loglikelihood: $mll_cur\n")
+        println("Log-likelihood: $mll_cur\n")
 
-        println("Starting the MCEM iterations ...\n")
+        println("Starting Monte Carlo EM...\n")
     end
 
+    # start algorithm
     while keep_going
 
         # ensure that ess per person is sufficient
@@ -310,7 +310,7 @@ function fit(
                 npaths_additional, params_cur, surrogate)
         end
 
-        # recalculate the marginal log likelihood
+        # recalculate the marginal log likelihood 
         mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
         # optimize the monte carlo marginal likelihood
@@ -340,34 +340,21 @@ function fit(
         ascent_lb = quantile(Normal(mll_change, ase), α)
         ascent_ub = quantile(Normal(mll_change, ase), 1-γ)
 
-        if verbose
-            println("Iteration: $(iter+1)")
-            println("Current target ESS: $(round(ess_target; digits=2)) per-subject")
-            println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
-            println("Estimate of the marginal loglikelihood: $mll_cur")
-            println("MCEM Asymptotic SE: $ase")
-            println("Ascent lower bound: $ascent_lb")
-            println("Ascent upper bound: $ascent_ub\n")
-            #println("Time: $(Dates.format(now(), "HH:MM"))\n")
-        end
-
         if ascent_lb < 0
             # increase the target ess for the factor κ
             ess_target = κ*ess_target
-        else
-            # cache the results
 
+        else
             # increment the iteration
             iter += 1
 
             # set proposed parameter and marginal likelihood values to current values
-            params_cur = params_prop
-            mll_cur = mll_prop
+            params_cur, params_prop = params_prop, params_cur
+            mll_cur, mll_prop = mll_prop, mll_cur
 
             # update the current log-likelihoods
-            copyto!(loglik_target_cur, loglik_target_prop)
-            # loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
-
+            loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
+            
             # recalculate the importance ImportanceWeights and ess
             for i in 1:nsubj
                 ImportanceWeights[i] = exp.(loglik_target_cur[i] .- loglik_surrog[i])
@@ -380,6 +367,18 @@ function fit(
             append!(parameters_trace, params_cur)
             push!(mll_trace, mll_cur)
             append!(ess_trace, ess_cur)
+
+            if verbose
+                println("Iteration: $(iter+1)")
+                println("Current target ESS: $(round(ess_target; digits=2)) per-subject")
+                println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
+                println("Estimate of the marginal log-likelihood: $mll_cur")
+                println("Change in marginal log-likelihood: $mll_change")
+                println("MCEM Asymptotic SE: $ase")
+                println("Ascent lower bound: $ascent_lb")
+                println("Ascent upper bound: $ascent_ub\n")
+                #println("Time: $(Dates.format(now(), "HH:MM"))\n")
+            end
 
             # check convergence
             convergence = ascent_ub < tol
