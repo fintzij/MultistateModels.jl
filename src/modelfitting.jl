@@ -503,7 +503,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         model.subjectindices,
         model.SamplingWeights,
         model.CensoringPatterns,
-        MarkovSurrogate(model.markovsurrogate.hazards, surrogate.parameters),
+        surrogate,
         ConvergenceRecords,
         ProposedPaths,
         model.modelcall)

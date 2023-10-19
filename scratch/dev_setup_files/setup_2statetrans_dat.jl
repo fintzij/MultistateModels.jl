@@ -4,7 +4,7 @@ using Distributions
 using MultistateModels
 
 h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
-h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
+h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3)
 
 nsubj = 100
 ntimes = 10
@@ -25,9 +25,9 @@ model = multistatemodel(h12, h23; data = dat)
 # set model parameters
 # want mean time to event of 5
 set_parameters!(
-    model,
-    (h12 = [log(0.4), log(0.8)],
-     h23 = [log(0.4)]))
+    model, 
+    (h12 = [log(1.5), log(0.4)],
+     h23 = [log(1.5), log(0.4)]))
 
 simdat, paths = simulate(model; paths = true, data = true);
 
@@ -37,7 +37,7 @@ model = multistatemodel(h12, h23; data = simdat[1])
 MultistateModels.set_crude_init!(model)
 
 # fit model
-fitted = fit(model; tol = 1e-2, γ = 0.05, ess_target_initial = 10)
+fitted = fit(model; tol = 1e-2, γ = 0.05, ess_target_initial = 10) 
 
 # load libraries and functions
 using ArraysOfArrays, Optimization, Optim, StatsModels, StatsFuns, ExponentialUtilities, ElasticArrays, BenchmarkTools, Profile, ProfileView, DiffResults, ForwardDiff
@@ -56,4 +56,5 @@ using MultistateModels: build_tpm_mapping, MultistateMarkovModel, MultistateMark
 # ProfileView.@profview solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
 
 # Profile.clear()
-# ProfileView.@profview loglik(Vector(params_cur), SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
+# ProfileView.@profview loglik(Vector(params_cur), SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)) 
+

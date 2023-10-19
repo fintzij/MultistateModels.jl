@@ -127,7 +127,7 @@ function loglik(parameters, data::ExactData; neg = true)
 end
 
 """
-    loglik(parameters, data::ExactData; neg = true) 
+    loglik(parameters, data::ExactDataAD; neg = true) 
 
 Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. 
 """
