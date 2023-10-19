@@ -272,11 +272,7 @@ function fit(
     if verbose
         println("Sampling the initial sample paths ...\n")
     end
-
-    for i in 1:nsubj
-        DrawSamplePaths!(
-            i, model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
-    end
+    DrawSamplePaths!(model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
     
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
@@ -302,13 +298,7 @@ function fit(
     while keep_going
 
         # ensure that ess per person is sufficient
-        for i in 1:nsubj
-            DrawSamplePaths!(
-                i, model, ess_target, ess_cur, MaxSamplingEffort,
-                samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights,
-                tpm_book_surrogate, hazmat_book_surrogate, books,
-                npaths_additional, params_cur, surrogate)
-        end
+        DrawSamplePaths!(model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
 
         # recalculate the marginal log likelihood
         mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
@@ -365,8 +355,8 @@ function fit(
             mll_cur = mll_prop
 
             # update the current log-likelihoods
-            copyto!(loglik_target_cur, loglik_target_prop)
-            # loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
+            # copyto!(loglik_target_cur, loglik_target_prop)
+            loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
 
             # recalculate the importance ImportanceWeights and ess
             for i in 1:nsubj
@@ -466,7 +456,7 @@ function fit(
         model.subjectindices,
         model.SamplingWeights,
         model.CensoringPatterns,
-        surrogate,
+        MarkovSurrogate(model.markovsurrogate.hazards, surrogate.parameters),
         ConvergenceRecords,
         ProposedPaths,
         model.modelcall)
