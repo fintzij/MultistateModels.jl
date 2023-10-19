@@ -6,7 +6,7 @@ using MultistateModels
 h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
 h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3)
 
-nsubj = 100
+nsubj = 1000
 ntimes = 10
 dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
                 tstart = repeat(collect(0:(10/ntimes):(10 - 10/ntimes)), outer = nsubj),
@@ -15,9 +15,9 @@ dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
                 stateto = fill(2, nsubj * ntimes),
                 obstype = fill(2, nsubj * ntimes))
 
-# append!(dat, DataFrame(id=1,tstart=10.0,tstop=20.0,statefrom=2,stateto=1,obstype=2))
-# append!(dat, DataFrame(id=1,tstart=20.0,tstop=30.0,statefrom=2,stateto=1,obstype=3))
-# sort!(dat, [:id,])
+
+dat.tstop[Not(collect(10:ntimes:(ntimes*nsubj)))] .= dat.tstop[Not(collect(10:ntimes:(ntimes*nsubj)))] + rand(nsubj * (ntimes - 1))
+dat.tstart[Not(collect(1:ntimes:(ntimes*nsubj)))] .= dat.tstop[Not(collect(10:ntimes:(ntimes*nsubj)))]
 
 # create multistate model object
 model = multistatemodel(h12, h23; data = dat)

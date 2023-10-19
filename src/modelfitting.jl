@@ -180,7 +180,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 """
 function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
-    constraints = nothing, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 1.5, surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
+    constraints = nothing, maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.05, κ = 4/3, surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)

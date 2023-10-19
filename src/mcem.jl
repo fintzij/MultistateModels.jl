@@ -42,11 +42,11 @@ Asymptotic standard error of the change in the MCEM objective function.
 """
 function mcem_ase(delta_ll, ImportanceWeights, TotImportanceWeights)
 
-    #sqrt.(sum(map(i -> var_ris(delta_ll[i,:], ImportanceWeights[i,:], TotImportanceWeights[i]), collect(1:length(TotImportanceWeights))))) 
-    VarRis = zeros(length(TotImportanceWeights))
-    for i in 1:length(TotImportanceWeights)
-        VarRis[i]=var_ris(delta_ll[i], ImportanceWeights[i], TotImportanceWeights[i])
+    VarRis = 0.0
+    for i in eachindex(TotImportanceWeights)
+        VarRis += var_ris(delta_ll[i], ImportanceWeights[i], TotImportanceWeights[i]) / length(ImportanceWeights[i])
     end
-    sqrt(sum(VarRis))
 
+    # return the asymptotic standard error
+    sqrt(VarRis)
 end
