@@ -180,7 +180,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 """
 function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
-    constraints = nothing, maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.05, κ = 4/3, surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
+    constraints = nothing, maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.05, κ = 4/3, surrogate_parameters = nothing, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -235,15 +235,21 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     parameters_trace = ElasticArray{Float64, 2}(undef, length(flatview(model.parameters)), 0) # parameter estimates
 
     # build surrogate
-    if isnothing(surrogate_parameter)
+    if isnothing(surrogate_parameters)
         # if no parameters for the surrogate are provided, fit the surrogate
         if verbose
             println("Obtaining the MLE for the Markov surrogate model ...\n")
         end
-        surrogate = fit_surrogate(model)
+        surrogate_fitted = fit_surrogate(model)
+        surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_fitted.parameters)
     else
+        # check that the surrogate parameters are a vector of vectors
+        if !isa(surrogate_parameters, VectorOfVectors)
+            @error "surrogate_parameters must be a VectorOfVectors"
+        end
+
         # if parameters for the surrogate are provided, simply use these values
-        surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_parameter)
+        surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_parameters)
     end
 
      # containers for bookkeeping TPMs
@@ -416,20 +422,36 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # initialize Fisher information matrix
     fisher = zeros(Float64, length(params_cur), length(params_cur), nsubj)
 
-    # compute complete data gradients and hessians
+    if verbose
+        println("Computing variance-covariance matrix at final estimates")
+    end
+    
+    # set up containers for path and sampling weight
+    path = Array{SamplePath}(undef, 1)
+    samplingweight = Vector{Float64}(undef, 1)
+
+    # container for gradient and hessian
+    diffres = DiffResults.HessianResult(params_cur)
+    fisher_i1 = zeros(Float64, length(params_cur), length(params_cur))
+    fisher_i2 = similar(fisher_i1)
+
+    # define objective
+    ll = pars -> (loglik(pars, ExactData(model, path); neg=false) * samplingweight[1])
+
+    # accumulate Fisher information
     for i in 1:nsubj
 
+        # set importance weight
+        samplingweight[1] = model.SamplingWeights[i]
+
+        # number of paths
         npaths = length(samplepaths[i])
 
-        path = Array{SamplePath}(undef, 1)
-        diffres = DiffResults.HessianResult(params_cur)
-        ll = pars -> (loglik(pars, ExactData(model, path); neg=false) * model.SamplingWeights[i])
-
+        # for accumulating gradients and hessians
         grads = Array{Float64}(undef, length(params_cur), length(samplepaths[i]))
         hesns = Array{Float64}(undef, length(params_cur), length(params_cur), npaths)
-        fisher_i1 = zeros(Float64, length(params_cur), length(params_cur))
-        fisher_i2 = similar(fisher_i1)
 
+        # reset matrices for accumulating Fisher info contributions
         fill!(fisher_i1, 0.0)
         fill!(fisher_i2, 0.0)
 

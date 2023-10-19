@@ -364,6 +364,17 @@ struct ExactData
 end
 
 """
+    ExactDataAD(model::MultistateProcess, samplepaths::Array{SamplePath})
+
+Struct containing exactly observed sample paths and a model object. Used in fitting a multistate model to completely observed data.
+"""
+struct ExactDataAD
+    path::SamplePath
+    hazards::Vector{<:_Hazard}
+    model::MultistateProcess
+end
+
+"""
     MPanelData(model::MultistateProcess, books::Tuple)
 
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate Markov model to panel data.

@@ -6,7 +6,7 @@ using MultistateModels
 h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
 h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3)
 
-nsubj = 1000
+nsubj = 100
 ntimes = 10
 dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
                 tstart = repeat(collect(0:(10/ntimes):(10 - 10/ntimes)), outer = nsubj),
@@ -37,7 +37,7 @@ model = multistatemodel(h12, h23; data = simdat[1])
 MultistateModels.set_crude_init!(model)
 
 # fit model
-fitted = fit(model) 
+fitted = fit(model; tol = 1e-2, γ = 0.1, ess_target_initial = 10) 
 
 # load libraries and functions
 using ArraysOfArrays, Optimization, Optim, StatsModels, StatsFuns, ExponentialUtilities, ElasticArrays, BenchmarkTools, Profile, ProfileView
