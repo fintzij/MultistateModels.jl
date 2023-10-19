@@ -4,7 +4,7 @@ using Distributions
 using MultistateModels
 
 h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
-h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3)
+h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1)
 
 nsubj = 100
 ntimes = 10
@@ -20,24 +20,24 @@ dat.tstop[Not(collect(10:ntimes:(ntimes*nsubj)))] .= dat.tstop[Not(collect(10:nt
 dat.tstart[Not(collect(1:ntimes:(ntimes*nsubj)))] .= dat.tstop[Not(collect(10:ntimes:(ntimes*nsubj)))]
 
 # create multistate model object
-model = multistatemodel(h12, h23; data = dat)
+model = multistatemodel(h12, h21; data = dat)
 
 # set model parameters
 # want mean time to event of 5
 set_parameters!(
     model, 
     (h12 = [log(1.5), log(0.4)],
-     h23 = [log(0.7), log(0.4)]))
+     h21 = [log(1.5), log(0.4)]))
 
 simdat, paths = simulate(model; paths = true, data = true);
 
 # create multistate model object with the simulated data
-model = multistatemodel(h12, h23; data = simdat[1])
+model = multistatemodel(h12, h21; data = simdat[1])
 
 MultistateModels.set_crude_init!(model)
 
 # fit model
-fitted = fit(model; tol = 1e-2, γ = 0.1, ess_target_initial = 10) 
+fitted = fit(model; tol = 1e-3, γ = 0.05, ess_target_initial = 10) 
 
 # load libraries and functions
 using ArraysOfArrays, Optimization, Optim, StatsModels, StatsFuns, ExponentialUtilities, ElasticArrays, BenchmarkTools, Profile, ProfileView, DiffResults, ForwardDiff

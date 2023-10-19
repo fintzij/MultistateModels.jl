@@ -8,9 +8,39 @@ actt = CSV.read("/home/liangcj/scratch/actt1_mm.csv", DataFrame)
 
 # rename states 1 and 2 as state 3 then subtract 2 from all states so states start at 1
 # so 1: recovered, 2: hospitalized, 3: suppl O2, 4: NIPPV/high flow, 5: vent, 6: dead
-actt.stateto[actt.stateto .< 4] .= 3
-actt.statefrom .= actt.statefrom .- 2
-actt.stateto .= actt.stateto .- 2
+# actt.stateto[actt.stateto .< 4] .= 3
+# actt.statefrom .= actt.statefrom .- 2
+# actt.stateto .= actt.stateto .- 2
+
+# jon's version of preprocessing
+for s in unique(actt.id)
+    subj_dat = view(actt.id, findall(actt.id .== s))
+
+    # replace post-ICU hospitalized states
+    if [6,7] .∈ Ref(subj_dat.tstop) 
+        # find last index of 6 or 7
+        lasticu = findlast([6,7] .∈ Ref(subj_dat.tstop))
+        subjdat.stateto[findall(subj_dat.tstop[lasticu:nrow(subj_dat)] .∈ Ref([4,5]))] .= -3
+    end
+
+    # replace other non-ICU hospitalized states
+    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([4,5]))] .= -1
+
+    # replace ICU states
+    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([6,7]))] .= -2
+
+    # replace recovered states
+    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([1,2,3]))] .= -4
+
+    # recode death
+    subj_dat.stateto[findall(subj_dat.stateto .== 8)] .= -5
+
+    # make positive
+    subj_dat.stateto .= -subj_dat.stateto
+
+    # fill in statefrom
+    subj_dat.statefrom[Not(1)] = subj_dat.stateto[Not(last)]
+end
 
 # fit exponential model with no covariates
 h21 = Hazard(@formula(0~1), "exp", 2, 1) # hosp to recovered
