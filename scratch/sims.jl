@@ -8,29 +8,87 @@ actt = CSV.read("/home/liangcj/scratch/actt1_mm.csv", DataFrame)
 
 # rename states 1 and 2 as state 3 then subtract 2 from all states so states start at 1
 # so 1: recovered, 2: hospitalized, 3: suppl O2, 4: NIPPV/high flow, 5: vent, 6: dead
-# actt.stateto[actt.stateto .< 4] .= 3
-# actt.statefrom .= actt.statefrom .- 2
-# actt.stateto .= actt.stateto .- 2
 
-# jon's version of preprocessing
+# 1: recovered, 2: hospitalized no ICU, 3: ICU, 4: hospitalized with ICU, 5: dead
+
+# in ICU 6/7, hosp w/ icu 4/5 following 6/7, hosp w/o icu 4/5, recover, dead
+# constrain all trans to recover to same trt effect, all trans to death same trt effect
+
+for i in unique(actt.id)
+    icu = 0
+    for j in findall(actt.id .== i)
+        # patient has visited ICU
+        if ((actt.statefrom[j] ∈ [6,7]) | (actt.stateto[j] ∈ [6,7]))
+            icu = 1
+        end
+        newfrom = 0
+        newto = 0
+
+        # hospitalized with ICU history
+        if ((actt.statefrom[j] ∈ [4,5]) & (icu == 1))
+            newfrom = 4
+        end
+        if ((actt.stateto[j] ∈ [4,5]) & (icu == 1))
+            newto = 4
+        end
+
+        # hospitalized with no ICU history
+        if ((actt.statefrom[j] ∈ [4,5]) & (icu == 0))
+            newfrom = 2
+        end
+        if ((actt.stateto[j] ∈ [4,5]) & (icu == 0))
+            newto = 2
+        end
+
+        # ICU
+        if (actt.statefrom[j] ∈ [6,7])
+            newfrom = 3
+        end
+        if (actt.stateto[j] ∈ [6,7])
+            newto = 3
+        end
+
+        # recovered
+        if (actt.statefrom[j] ∈ [1,2])
+            newfrom = 1
+        end
+        if (actt.stateto[j] ∈ [1,2])
+            newto = 1
+        end
+
+        # dead
+        if (actt.statefrom[j] == 8)
+            newfrom = 5
+        end
+        if (actt.stateto[j] == 8)
+            newto = 5
+        end
+
+        actt.statefrom[j] = newfrom
+        actt.stateto[j] = newto
+    end
+end
+
+
+#= jon's version of preprocessing
 for s in unique(actt.id)
-    subj_dat = view(actt.id, findall(actt.id .== s))
+    subj_dat = @view actt[findall(actt.id .== s), :]
 
     # replace post-ICU hospitalized states
-    if [6,7] .∈ Ref(subj_dat.tstop) 
+    if any(subj_dat.stateto .∈ Ref([6,7])) 
         # find last index of 6 or 7
-        lasticu = findlast([6,7] .∈ Ref(subj_dat.tstop))
-        subjdat.stateto[findall(subj_dat.tstop[lasticu:nrow(subj_dat)] .∈ Ref([4,5]))] .= -3
+        lasticu = findlast(subj_dat.stateto .∈ Ref([6,7]))
+        subj_dat.stateto[findall(subj_dat.stateto[lasticu:nrow(subj_dat)] .∈ Ref([4,5]))] .= -4
     end
 
     # replace other non-ICU hospitalized states
-    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([4,5]))] .= -1
+    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([4,5]))] .= -2
 
     # replace ICU states
-    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([6,7]))] .= -2
+    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([6,7]))] .= -3
 
     # replace recovered states
-    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([1,2,3]))] .= -4
+    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([1,2,3]))] .= -1
 
     # recode death
     subj_dat.stateto[findall(subj_dat.stateto .== 8)] .= -5
@@ -41,7 +99,8 @@ for s in unique(actt.id)
     # fill in statefrom
     subj_dat.statefrom[Not(1)] = subj_dat.stateto[Not(last)]
 end
-
+ =#
+ 
 # fit exponential model with no covariates
 h21 = Hazard(@formula(0~1), "exp", 2, 1) # hosp to recovered
 h23 = Hazard(@formula(0~1), "exp", 2, 3) # hosp to suppl O2
