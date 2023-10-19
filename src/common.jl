@@ -366,10 +366,11 @@ end
 """
     ExactDataAD(model::MultistateProcess, samplepaths::Array{SamplePath})
 
-Struct containing exactly observed sample paths and a model object. Used in fitting a multistate model to completely observed data.
+Struct containing exactly observed sample paths and a model object. Used in fitting a multistate model to completely observed data. Used for computing the variance-covariance matrix via autodiff.
 """
 struct ExactDataAD
-    path::SamplePath
+    path::Vector{SamplePath}
+    samplingweight::Vector{Float64}
     hazards::Vector{<:_Hazard}
     model::MultistateProcess
 end

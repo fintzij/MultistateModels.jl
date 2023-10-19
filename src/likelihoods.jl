@@ -121,9 +121,22 @@ function loglik(parameters, data::ExactData; neg = true)
     # send each element of samplepaths to loglik
     ll = mapreduce(
         (x, w) -> loglik(pars, x, data.model.hazards, data.model) * w,
-        +, 
-        data.paths, data.model.SamplingWeights)
-    #ll = mapreduce(x -> loglik(pars, x, data.model.hazards, data.model), +, data.paths)
+        +, data.paths, data.model.SamplingWeights)
+    
+    neg ? -ll : ll
+end
+
+"""
+    loglik(parameters, data::ExactData; neg = true) 
+
+Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. 
+"""
+function loglik(parameters, data::ExactDataAD; neg = true)
+
+    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+
+    # send each element of samplepaths to loglik
+    ll = loglik(pars, data.path[1], data.model.hazards, data.model) * data.samplingweight[1]
 
     neg ? -ll : ll
 end

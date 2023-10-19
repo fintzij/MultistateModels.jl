@@ -436,7 +436,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     fisher_i2 = similar(fisher_i1)
 
     # define objective
-    ll = pars -> (loglik(pars, ExactData(model, path); neg=false) * samplingweight[1])
+    ll = pars -> (loglik(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
 
     # accumulate Fisher information
     for i in 1:nsubj

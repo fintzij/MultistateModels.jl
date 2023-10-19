@@ -40,13 +40,13 @@ MultistateModels.set_crude_init!(model)
 fitted = fit(model; tol = 1e-2, γ = 0.1, ess_target_initial = 10) 
 
 # load libraries and functions
-using ArraysOfArrays, Optimization, Optim, StatsModels, StatsFuns, ExponentialUtilities, ElasticArrays, BenchmarkTools, Profile, ProfileView
+using ArraysOfArrays, Optimization, Optim, StatsModels, StatsFuns, ExponentialUtilities, ElasticArrays, BenchmarkTools, Profile, ProfileView, DiffResults, ForwardDiff
 
-constraints = nothing; nparticles = 10; maxiter = 100; tol = 1e-4; α = 0.1; γ = 0.05; κ = 1.5;
-surrogate_parameter = nothing; ess_target_initial = 10; MaxSamplingEffort = 10;
+constraints = nothing; nparticles = 10; maxiter = 100; tol = 1e-2; α = 0.1; γ = 0.05; κ = 1.5;
+surrogate_parameters = nothing; ess_target_initial = 10; MaxSamplingEffort = 10;
 verbose = true; return_ConvergenceRecords = true; return_ProposedPaths = true; npaths_additional = 10
 
-using MultistateModels: build_tpm_mapping, MultistateMarkovModel, MultistateMarkovModelCensored, fit, MarkovSurrogate, build_hazmat_book, build_tpm_book, compute_hazmat!, compute_tmat!, SamplePath, fit_surrogate, DrawSamplePaths!, mcem_mll, loglik, SMPanelData, make_surrogate_model, loglik!, mcem_ase, draw_samplepath
+using MultistateModels: build_tpm_mapping, MultistateMarkovModel, MultistateMarkovModelCensored, fit, MarkovSurrogate, build_hazmat_book, build_tpm_book, compute_hazmat!, compute_tmat!, SamplePath, fit_surrogate, DrawSamplePaths!, mcem_mll, loglik, SMPanelData, make_surrogate_model, loglik!, mcem_ase, draw_samplepath, ExactDataAD
 
 # timing
 # @btime solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Optim.NewtonTrustRegion()) #
