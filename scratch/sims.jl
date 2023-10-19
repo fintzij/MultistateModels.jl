@@ -8,6 +8,69 @@ actt = CSV.read("/home/liangcj/scratch/actt1_mm.csv", DataFrame)
 
 # rename states 1 and 2 as state 3 then subtract 2 from all states so states start at 1
 # so 1: recovered, 2: hospitalized, 3: suppl O2, 4: NIPPV/high flow, 5: vent, 6: dead
+
+# 1: recovered, 2: hospitalized no ICU, 3: ICU, 4: hospitalized with ICU, 5: dead
+
+# in ICU 6/7, hosp w/ icu 4/5 following 6/7, hosp w/o icu 4/5, recover, dead
+# constrain all trans to recover to same trt effect, all trans to death same trt effect
+
+for i in unique(actt.id)
+    icu = 0
+    for j in findall(actt.id .== i)
+        # patient has visited ICU
+        if ((actt.statefrom[j] ∈ [6,7]) | (actt.stateto[j] ∈ [6,7]))
+            icu = 1
+        end
+        newfrom = 0
+        newto = 0
+
+        # hospitalized with ICU history
+        if ((actt.statefrom[j] ∈ [4,5]) & (icu == 1))
+            newfrom = 4
+        end
+        if ((actt.stateto[j] ∈ [4,5]) & (icu == 1))
+            newto = 4
+        end
+
+        # hospitalized with no ICU history
+        if ((actt.statefrom[j] ∈ [4,5]) & (icu == 0))
+            newfrom = 2
+        end
+        if ((actt.stateto[j] ∈ [4,5]) & (icu == 0))
+            newto = 2
+        end
+
+        # ICU
+        if (actt.statefrom[j] ∈ [6,7])
+            newfrom = 3
+        end
+        if (actt.stateto[j] ∈ [6,7])
+            newto = 3
+        end
+
+        # recovered
+        if (actt.statefrom[j] ∈ [1,2])
+            newfrom = 1
+        end
+        if (actt.stateto[j] ∈ [1,2])
+            newto = 1
+        end
+
+        # dead
+        if (actt.statefrom[j] == 8)
+            newfrom = 5
+        end
+        if (actt.stateto[j] == 8)
+            newto = 5
+        end
+
+        actt.statefrom[j] = newfrom
+        actt.stateto[j] = newto
+    end
+end
+
+
+
 actt.stateto[actt.stateto .< 4] .= 3
 actt.statefrom .= actt.statefrom .- 2
 actt.stateto .= actt.stateto .- 2
