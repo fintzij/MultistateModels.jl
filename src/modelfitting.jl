@@ -54,7 +54,7 @@ function fit(model::MultistateModel; constraints = nothing)
     if isnothing(constraints)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
-        sol  = solve(prob, NewtonTrustRegion())
+        sol  = solve(prob, Newton())
     else
         # create constraint function and check that constraints are satisfied at the initial values
         consfun = parse_constraints(constraints.cons, model.hazards)
@@ -112,7 +112,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     if isnothing(constraints)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-        sol  = solve(prob, NewtonTrustRegion())
+        sol  = solve(prob, Newton())
     else
         # create constraint function and check that constraints are satisfied at the initial values
         consfun = parse_constraints(constraints.cons, model.hazards)
@@ -340,7 +340,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # optimize the monte carlo marginal likelihood
         println("Optimizing...")
         if isnothing(constraints)
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), NewtonTrustRegion()) # hessian-based
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
         else
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
         end

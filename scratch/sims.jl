@@ -70,11 +70,37 @@ for i in unique(actt.id)
 end
 
 
+#= jon's version of preprocessing
+for s in unique(actt.id)
+    subj_dat = @view actt[findall(actt.id .== s), :]
 
-actt.stateto[actt.stateto .< 4] .= 3
-actt.statefrom .= actt.statefrom .- 2
-actt.stateto .= actt.stateto .- 2
+    # replace post-ICU hospitalized states
+    if any(subj_dat.stateto .∈ Ref([6,7])) 
+        # find last index of 6 or 7
+        lasticu = findlast(subj_dat.stateto .∈ Ref([6,7]))
+        subj_dat.stateto[findall(subj_dat.stateto[lasticu:nrow(subj_dat)] .∈ Ref([4,5]))] .= -4
+    end
 
+    # replace other non-ICU hospitalized states
+    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([4,5]))] .= -2
+
+    # replace ICU states
+    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([6,7]))] .= -3
+
+    # replace recovered states
+    subj_dat.stateto[findall(subj_dat.stateto .∈ Ref([1,2,3]))] .= -1
+
+    # recode death
+    subj_dat.stateto[findall(subj_dat.stateto .== 8)] .= -5
+
+    # make positive
+    subj_dat.stateto .= -subj_dat.stateto
+
+    # fill in statefrom
+    subj_dat.statefrom[Not(1)] = subj_dat.stateto[Not(last)]
+end
+ =#
+ 
 # fit exponential model with no covariates
 h21 = Hazard(@formula(0~1), "exp", 2, 1) # hosp to recovered
 h23 = Hazard(@formula(0~1), "exp", 2, 3) # hosp to suppl O2
