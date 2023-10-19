@@ -37,7 +37,7 @@ model = multistatemodel(h12, h21; data = simdat[1])
 MultistateModels.set_crude_init!(model)
 
 # fit model
-fitted = fit(model; tol = 1e-3, γ = 0.05, ess_target_initial = 10) 
+fitted = fit(model; tol = 1e-2, γ = 0.05, ess_target_initial = 10) 
 
 # load libraries and functions
 using ArraysOfArrays, Optimization, Optim, StatsModels, StatsFuns, ExponentialUtilities, ElasticArrays, BenchmarkTools, Profile, ProfileView, DiffResults, ForwardDiff
