@@ -179,9 +179,8 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ConvergenceRecords: save history throughout the run
 - return_ProposedPaths: save latent paths and importance weights
 """
-function fit(
-    model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
-    constraints = nothing, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 1.5, surrogate_parameter = nothing, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
+    constraints = nothing, maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.05, κ = 4/3, surrogate_parameters = nothing, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -213,16 +212,6 @@ function fit(
     # number of subjects
     nsubj = length(model.subjectindices)
 
-    # containers for bookkeeping TPMs
-    books = build_tpm_mapping(model.data)    
-
-    # transition probability objects for Markov surrogate
-    hazmat_book_surrogate = build_hazmat_book(Float64, model.tmat, books[1])
-    tpm_book_surrogate = build_tpm_book(Float64, model.tmat, books[1])
-
-    # allocate memory for matrix exponential
-    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book_surrogate[1]), ExpMethodGeneric())
-
     # extract and initialize model parameters
     params_cur = flatview(model.parameters)
 
@@ -246,16 +235,32 @@ function fit(
     parameters_trace = ElasticArray{Float64, 2}(undef, length(flatview(model.parameters)), 0) # parameter estimates
 
     # build surrogate
-    if isnothing(surrogate_parameter)
+    if isnothing(surrogate_parameters)
         # if no parameters for the surrogate are provided, fit the surrogate
         if verbose
             println("Obtaining the MLE for the Markov surrogate model ...\n")
         end
-        surrogate = fit_surrogate(model)
+        surrogate_fitted = fit_surrogate(model)
+        surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_fitted.parameters)
     else
+        # check that the surrogate parameters are a vector of vectors
+        if !isa(surrogate_parameters, VectorOfVectors)
+            @error "surrogate_parameters must be a VectorOfVectors"
+        end
+
         # if parameters for the surrogate are provided, simply use these values
-        surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_parameter)
+        surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_parameters)
     end
+
+     # containers for bookkeeping TPMs
+     books = build_tpm_mapping(model.data)    
+
+     # transition probability objects for Markov surrogate
+     hazmat_book_surrogate = build_hazmat_book(Float64, model.tmat, books[1])
+     tpm_book_surrogate = build_tpm_book(Float64, model.tmat, books[1])
+ 
+     # allocate memory for matrix exponential
+     cache = ExponentialUtilities.alloc_mem(similar(hazmat_book_surrogate[1]), ExpMethodGeneric())
 
     # Solve Kolmogorov equations for TPMs
     for t in eachindex(books[1])
@@ -270,9 +275,23 @@ function fit(
 
     # draw sample paths until the target ess is reached 
     if verbose
-        println("Sampling the initial sample paths ...\n")
+        println("Initializing sample paths ...\n")
     end
-    DrawSamplePaths!(model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
+
+    DrawSamplePaths!(model; 
+        ess_target = ess_target, 
+        ess_cur = ess_cur, 
+        MaxSamplingEffort = MaxSamplingEffort,
+        samplepaths = samplepaths, 
+        loglik_surrog = loglik_surrog, 
+        loglik_target_prop = loglik_target_prop, 
+        loglik_target_cur = loglik_target_cur, 
+        ImportanceWeights = ImportanceWeights, 
+        TotImportanceWeights = TotImportanceWeights, tpm_book_surrogate = tpm_book_surrogate, hazmat_book_surrogate = hazmat_book_surrogate, 
+        books = books, 
+        npaths_additional = npaths_additional, 
+        params_cur = params_cur, 
+        surrogate = surrogate)
     
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
@@ -290,21 +309,36 @@ function fit(
     if verbose
         println("Initial target ESS: $(round(ess_target; digits=2)) per-subject")
         println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
-        println("Loglikelihood: $mll_cur\n")
+        
+        println("Log-likelihood: $mll_cur\n")
 
-        println("Starting the MCEM iterations ...\n")
+        println("Starting Monte Carlo EM...\n")
     end
 
+    # start algorithm
     while keep_going
 
         # ensure that ess per person is sufficient
-        DrawSamplePaths!(model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate)
+        DrawSamplePaths!(model; 
+            ess_target = ess_target, 
+            ess_cur = ess_cur, 
+            MaxSamplingEffort = MaxSamplingEffort,
+            samplepaths = samplepaths, 
+            loglik_surrog = loglik_surrog, 
+            loglik_target_prop = loglik_target_prop, 
+            loglik_target_cur = loglik_target_cur, 
+            ImportanceWeights = ImportanceWeights, 
+            TotImportanceWeights = TotImportanceWeights,    tpm_book_surrogate = tpm_book_surrogate,   hazmat_book_surrogate = hazmat_book_surrogate, 
+            books = books, 
+            npaths_additional = npaths_additional, 
+            params_cur = params_cur, 
+            surrogate = surrogate)
 
-        # recalculate the marginal log likelihood
+        # recalculate the marginal log likelihood 
         mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
         # optimize the monte carlo marginal likelihood
-        println("Starting optimization ...")
+        println("Optimizing...")
         if isnothing(constraints)
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
         else
@@ -312,7 +346,6 @@ function fit(
         end
 
         params_prop = params_prop_optim.u
-        println("Done with optimization.\n")
 
         # recalculate the log likelihoods
         loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
@@ -330,46 +363,44 @@ function fit(
         ascent_lb = quantile(Normal(mll_change, ase), α)
         ascent_ub = quantile(Normal(mll_change, ase), 1-γ)
 
-        if verbose
-            println("Iteration: $(iter+1)")
-            println("Current target ESS: $(round(ess_target; digits=2)) per-subject")
-            println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
-            println("Estimate of the marginal loglikelihood: $mll_cur")
-            println("MCEM Asymptotic SE: $ase")
-            println("Ascent lower bound: $ascent_lb")
-            println("Ascent upper bound: $ascent_ub\n")
-            #println("Time: $(Dates.format(now(), "HH:MM"))\n")
-        end
-
         if ascent_lb < 0
             # increase the target ess for the factor κ
-            ess_target = κ*ess_target
-        else
-            # cache the results
+            ess_target = ceil(κ*ess_target)
 
+        else
             # increment the iteration
             iter += 1
 
             # set proposed parameter and marginal likelihood values to current values
-            params_cur = params_prop
-            mll_cur = mll_prop
+            params_cur, params_prop = params_prop, params_cur
+            mll_cur, mll_prop = mll_prop, mll_cur
 
             # update the current log-likelihoods
-            # copyto!(loglik_target_cur, loglik_target_prop)
             loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
-
+            
             # recalculate the importance ImportanceWeights and ess
             for i in 1:nsubj
                 ImportanceWeights[i] = exp.(loglik_target_cur[i] .- loglik_surrog[i])
                 TotImportanceWeights[i] = sum(ImportanceWeights[i])
-                NormalizedImportanceWeights = ImportanceWeights[i] ./ TotImportanceWeights[i]
-                ess_cur[i] = 1 / sum(NormalizedImportanceWeights .^ 2)
+                ess_cur[i] = 1 / sum((ImportanceWeights[i] ./ TotImportanceWeights[i]) .^ 2)
             end
 
             # save marginal log likelihood, parameters and effective sample size
             append!(parameters_trace, params_cur)
             push!(mll_trace, mll_cur)
             append!(ess_trace, ess_cur)
+
+            if verbose
+                println("Iteration: $(iter)")
+                println("Current target ESS per-subject: $ess_target")
+                println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
+                println("Estimate of the marginal log-likelihood: $mll_cur")
+                println("Change in marginal log-likelihood: $mll_change")
+                println("MCEM Asymptotic SE: $ase")
+                println("Ascent lower bound: $ascent_lb")
+                println("Ascent upper bound: $ascent_ub\n")
+                #println("Time: $(Dates.format(now(), "HH:MM"))\n")
+            end
 
             # check convergence
             convergence = ascent_ub < tol
@@ -391,20 +422,36 @@ function fit(
     # initialize Fisher information matrix
     fisher = zeros(Float64, length(params_cur), length(params_cur), nsubj)
 
-    # compute complete data gradients and hessians
+    if verbose
+        println("Computing variance-covariance matrix at final estimates")
+    end
+    
+    # set up containers for path and sampling weight
+    path = Array{SamplePath}(undef, 1)
+    samplingweight = Vector{Float64}(undef, 1)
+
+    # container for gradient and hessian
+    diffres = DiffResults.HessianResult(params_cur)
+    fisher_i1 = zeros(Float64, length(params_cur), length(params_cur))
+    fisher_i2 = similar(fisher_i1)
+
+    # define objective
+    ll = pars -> (loglik(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
+
+    # accumulate Fisher information
     for i in 1:nsubj
 
+        # set importance weight
+        samplingweight[1] = model.SamplingWeights[i]
+
+        # number of paths
         npaths = length(samplepaths[i])
 
-        path = Array{SamplePath}(undef, 1)
-        diffres = DiffResults.HessianResult(params_cur)
-        ll = pars -> (loglik(pars, ExactData(model, path); neg=false) * model.SamplingWeights[i])
-
+        # for accumulating gradients and hessians
         grads = Array{Float64}(undef, length(params_cur), length(samplepaths[i]))
         hesns = Array{Float64}(undef, length(params_cur), length(params_cur), npaths)
-        fisher_i1 = zeros(Float64, length(params_cur), length(params_cur))
-        fisher_i2 = similar(fisher_i1)
 
+        # reset matrices for accumulating Fisher info contributions
         fill!(fisher_i1, 0.0)
         fill!(fisher_i2, 0.0)
 

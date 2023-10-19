@@ -121,9 +121,22 @@ function loglik(parameters, data::ExactData; neg = true)
     # send each element of samplepaths to loglik
     ll = mapreduce(
         (x, w) -> loglik(pars, x, data.model.hazards, data.model) * w,
-        +, 
-        data.paths, data.model.SamplingWeights)
-    #ll = mapreduce(x -> loglik(pars, x, data.model.hazards, data.model), +, data.paths)
+        +, data.paths, data.model.SamplingWeights)
+    
+    neg ? -ll : ll
+end
+
+"""
+    loglik(parameters, data::ExactData; neg = true) 
+
+Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. 
+"""
+function loglik(parameters, data::ExactDataAD; neg = true)
+
+    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+
+    # send each element of samplepaths to loglik
+    ll = loglik(pars, data.path[1], data.model.hazards, data.model) * data.samplingweight[1]
 
     neg ? -ll : ll
 end
@@ -251,11 +264,8 @@ function loglik(parameters, data::SMPanelData; neg = true)
 
     # compute the semi-markov log-likelihoods
     ll = 0.0
-    # for j in Base.OneTo(size(data.paths, 2))
-    #     for i in Base.OneTo(size(data.paths, 1))
-    #         ll += loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.ImportanceWeights[i,j] / data.TotImportanceWeights[i] * data.model.SamplingWeights[i]
-    for i in Base.OneTo(length(data.paths))
-        for j in Base.OneTo(length(data.paths[i]))
+    for i in eachindex(data.paths)
+        for j in eachindex(data.paths[i])
             ll += loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.ImportanceWeights[i][j] / data.TotImportanceWeights[i] * data.model.SamplingWeights[i]
         end
     end
@@ -274,12 +284,8 @@ function loglik!(parameters, logliks::Vector{}, data::SMPanelData)
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
-    # compute the semi-markov log-likelihoods
-    # for j in Base.OneTo(size(data.paths, 2))
-    #     for i in Base.OneTo(size(data.paths, 1))
-    #         logliks[i,j] = loglik(pars, data.paths[i, j], data.model.hazards, data.model) * data.model.SamplingWeights[i]
-    for i in Base.OneTo(length(data.paths))
-        for j in Base.OneTo(length(data.paths[i]))
+    for i in eachindex(data.paths)
+        for j in eachindex(data.paths[i])
             logliks[i][j] = loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.model.SamplingWeights[i]
         end
     end

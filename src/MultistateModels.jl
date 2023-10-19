@@ -61,7 +61,7 @@ include("helpers.jl")
 include("hazards.jl")
 
 # crude parameter initialization functions
-include("initiation.jl")
+include("initialization.jl")
 
 # likelihood functions
 include("likelihoods.jl")

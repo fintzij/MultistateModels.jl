@@ -7,17 +7,17 @@ h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
 h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
 
 nsubj = 100
-ntimes = 5
-dat = DataFrame(id = repeat(collect(1:100), inner = ntimes),
+ntimes = 10
+dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
                 tstart = repeat(collect(0:(10/ntimes):(10 - 10/ntimes)), outer = nsubj),
                 tstop = repeat(collect((10/ntimes):(10/ntimes):10), outer = nsubj),
                 statefrom = fill(1, nsubj * ntimes),
                 stateto = fill(2, nsubj * ntimes),
                 obstype = fill(2, nsubj * ntimes))
 
-# append!(dat, DataFrame(id=1,tstart=10.0,tstop=20.0,statefrom=2,stateto=1,obstype=2))
-# append!(dat, DataFrame(id=1,tstart=20.0,tstop=30.0,statefrom=2,stateto=1,obstype=3))
-# sort!(dat, [:id,])
+
+dat.tstop[Not(collect(10:ntimes:(ntimes*nsubj)))] .= dat.tstop[Not(collect(10:ntimes:(ntimes*nsubj)))] + rand(nsubj * (ntimes - 1))
+dat.tstart[Not(collect(1:ntimes:(ntimes*nsubj)))] .= dat.tstop[Not(collect(10:ntimes:(ntimes*nsubj)))]
 
 # create multistate model object
 model = multistatemodel(h12, h23; data = dat)
@@ -41,13 +41,13 @@ fitted = fit(model, maxiter = 5);
 
 
 # load libraries and functions
-using ArraysOfArrays, Optimization, Optim, StatsModels, StatsFuns, ExponentialUtilities, ElasticArrays, BenchmarkTools, Profile, ProfileView, FlameGraphs, Zygote, OptimizationOptimisers
+using ArraysOfArrays, Optimization, Optim, StatsModels, StatsFuns, ExponentialUtilities, ElasticArrays, BenchmarkTools, Profile, ProfileView, DiffResults, ForwardDiff
 
-constraints = nothing; nparticles = 10; maxiter = 100; tol = 1e-4; α = 0.1; γ = 0.05; κ = 1.5;
-surrogate_parameter = nothing; ess_target_initial = 100; MaxSamplingEffort = 10;
+constraints = nothing; nparticles = 10; maxiter = 100; tol = 1e-2; α = 0.1; γ = 0.05; κ = 1.5;
+surrogate_parameters = nothing; ess_target_initial = 10; MaxSamplingEffort = 10;
 verbose = true; return_ConvergenceRecords = true; return_ProposedPaths = true; npaths_additional = 10
 
-using MultistateModels: build_tpm_mapping, MultistateMarkovModel, MultistateMarkovModelCensored, fit, MarkovSurrogate, build_hazmat_book, build_tpm_book, compute_hazmat!, compute_tmat!, SamplePath, fit_surrogate, DrawSamplePaths!, mcem_mll, loglik, SMPanelData, make_surrogate_model 
+using MultistateModels: build_tpm_mapping, MultistateMarkovModel, MultistateMarkovModelCensored, fit, MarkovSurrogate, build_hazmat_book, build_tpm_book, compute_hazmat!, compute_tmat!, SamplePath, fit_surrogate, DrawSamplePaths!, mcem_mll, loglik, SMPanelData, make_surrogate_model, loglik!, mcem_ase, draw_samplepath, ExactDataAD
 
 # timing
 # @btime solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Optim.NewtonTrustRegion()) #

@@ -9,7 +9,7 @@ Create a Markov surrogate model.
 
 - model: multistate model object
 """
-function make_surrogate_model(model::MultistateSemiMarkovModel)
+function make_surrogate_model(model::Union{MultistateMarkovModel, MultistateSemiMarkovModel})
     MultistateModels.MultistateMarkovModel(
         model.data,
         model.markovsurrogate.parameters,
@@ -33,7 +33,7 @@ Create a Markov surrogate model with censored states.
 
 - model: multistate model object
 """
-function make_surrogate_model(model::MultistateSemiMarkovModelCensored)
+function make_surrogate_model(model::Union{MultistateMarkovModelCensored,MultistateSemiMarkovModelCensored})
     MultistateModels.MultistateMarkovModelCensored(
         model.data,
         model.markovsurrogate.parameters,
@@ -59,7 +59,7 @@ Fit a Markov surrogate model.
 
 - model: multistate model object
 """
-function fit_surrogate(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored})
+function fit_surrogate(model)
     surrogate = make_surrogate_model(model)
     set_crude_init!(surrogate)
     surrogate = fit(surrogate)
