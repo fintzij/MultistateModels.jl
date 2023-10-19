@@ -65,12 +65,6 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
         if length(samplepaths[i]) > n_path_max
             keep_sampling = false
             @warn "More than $n_path_max sample paths are required to obtain ess>$ess_target for individual $i."
-            # npaths = Integer(round(n_path_max/2))
-            # path_indices = wsample(1:length(samplepaths[i]), NormalizedImportanceWeights, npaths) # sample with replacements
-            # samplepaths[i] = samplepaths[i][path_indices]
-            # loglik_surrog[i] = ones(npaths)
-            # loglik_target_cur[i] = ones(npaths)
-            # ImportanceWeights[i] = ones(npaths) # ./ npaths
         end
     end
 end

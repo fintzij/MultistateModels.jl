@@ -359,7 +359,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         if ascent_lb < 0
             # increase the target ess for the factor κ
-            ess_target = κ*ess_target
+            ess_target = ceil(κ*ess_target)
 
         else
             # increment the iteration
@@ -386,7 +386,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
             if verbose
                 println("Iteration: $(iter)")
-                println("Current target ESS: $(round(ess_target; digits=2)) per-subject")
+                println("Current target ESS per-subject: $ess_target")
                 println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
                 println("Estimate of the marginal log-likelihood: $mll_cur")
                 println("Change in marginal log-likelihood: $mll_change")
