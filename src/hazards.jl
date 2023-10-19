@@ -13,7 +13,7 @@ Return the survival probability over the interval [lb, ub].
 - `give_log::Bool`: should the log total hazard be returned (default)
 - `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{<:_Hazard}; give_log = true, newtime = true) 
+function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards; give_log = true, newtime = true) 
 
     # log total cumulative hazard
     log_survprob = -total_cumulhaz(lb, ub, parameters, rowind, _totalhazard, _hazards; give_log = false, newtime = newtime)
@@ -37,26 +37,24 @@ Return the log-total cumulative hazard out of a transient state over the interva
 - `give_log::Bool`: should the log total hazard be returned (default)
 - `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{<:_Hazard}; give_log = true, newtime = true) 
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards; give_log = true, newtime = true) 
 
     # log total cumulative hazard
-    log_tot_haz = 
-        logsumexp(
-            map(x -> 
-                call_cumulhaz(
+    tot_haz = 0.0
+
+    for x in _totalhazard.components
+        tot_haz += call_cumulhaz(
                     lb,
                     ub, 
                     parameters[x],
                     rowind, 
                     _hazards[x];
-                    give_log = true,
-                    newtime = newtime
-                ), _totalhazard.components
-            )
-        )
+                    give_log = false,
+                    newtime = newtime)
+    end
     
     # return the log, or not
-    give_log ? log_tot_haz : exp(log_tot_haz)
+    give_log ? log(tot_haz) : tot_haz
 end
 
 """
@@ -74,7 +72,7 @@ Return zero log-total cumulative hazard over the interval [lb, ub] as the curren
 - `give_log::Bool`: should the log total hazard be returned (default)
 - `newtime::Bool`: Are lb and ub new times, defaults to true. 
 """
-function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{<:_Hazard}; give_log = true, newtime = true) 
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards; give_log = true, newtime = true) 
 
     # return 0 cumulative hazard
     give_log ? -Inf : 0

@@ -1,39 +1,39 @@
 
 """
-    loglik(model::MultistateModelFitted) 
+GetLoglik(model::MultistateModelFitted) 
 
 Return the maximum likelihood estimates. 
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
 """
-function loglik(model::MultistateModelFitted) 
+function GetLoglik(model::MultistateModelFitted) 
     model.loglik
 end
 
 """
-    parameters(model::MultistateModelFitted; transformed::Bool = true) 
+GetParameters(model::MultistateModelFitted; transformed::Bool = true) 
 
 Return the maximum likelihood estimates. 
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
 """
-function parameters(model::MultistateModelFitted)
+function GetParameters(model::MultistateModelFitted)
     model.parameters
 #    reduce(vcat, model.parameters)
 end
 
 
 """
-    vcov(model::MultistateModelFitted) 
+GetVcov(model::MultistateModelFitted) 
 
 Return the variance covariance matrix at the maximum likelihood estimate. 
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
 """
-function vcov(model::MultistateModelFitted) 
+function GetVcov(model::MultistateModelFitted) 
     model.vcov
 end
 
@@ -46,7 +46,7 @@ Return the variance covariance matrix at the maximum likelihood estimate.
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
 """
-function ConvergenceRecords(model::MultistateModelFitted) 
+function GetConvergenceRecords(model::MultistateModelFitted) 
     model.ConvergenceRecords
 end
 
@@ -62,10 +62,10 @@ Return the variance covariance matrix at the maximum likelihood estimate.
 function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95) 
     
     # maximum likelihood estimates
-    mle=parameters(model)
+    mle=GetParameters(model)
     
     # standard error
-    vcov = MultistateModels.vcov(model)
+    vcov = GetVcov(model)
     se = sqrt.(vcov[diagind(vcov)])
     se_vv = VectorOfVectors(se, model.parameters.elem_ptr)
 
@@ -88,7 +88,7 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95)
     summary_table = (;zip(haznames, summary_table)...)
     
     # log likelihood
-    ll = loglik(model)
+    ll = MultistateModels.GetLoglik(model)
 
     # information criteria
     p = length(reduce(vcat, mle))

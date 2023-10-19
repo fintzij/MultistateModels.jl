@@ -364,6 +364,18 @@ struct ExactData
 end
 
 """
+    ExactDataAD(model::MultistateProcess, samplepaths::Array{SamplePath})
+
+Struct containing exactly observed sample paths and a model object. Used in fitting a multistate model to completely observed data. Used for computing the variance-covariance matrix via autodiff.
+"""
+struct ExactDataAD
+    path::Vector{SamplePath}
+    samplingweight::Vector{Float64}
+    hazards::Vector{<:_Hazard}
+    model::MultistateProcess
+end
+
+"""
     MPanelData(model::MultistateProcess, books::Tuple)
 
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate Markov model to panel data.
@@ -374,14 +386,17 @@ struct MPanelData
 end
 
 """
-    SMPanelData(model::MultistateProcess, paths::Array{SamplePath}, ImportanceWeights::ElasticArray{Float64})
+    SMPanelData(model::MultistateProcess
+    paths::Vector{Vector{SamplePath}}
+    ImportanceWeights::Vector{Vector{Float64}}
+    TotImportanceWeights::Vector{Float64})
 
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate semi-Markov model to panel data via MCEM.
 """
 struct SMPanelData
     model::MultistateProcess
-    paths::Array{SamplePath}
-    ImportanceWeights::ElasticArray{Float64}
-    TotImportanceWeights::ElasticArray{Float64}
+    paths::Vector{Vector{SamplePath}}
+    ImportanceWeights::Vector{Vector{Float64}}
+    TotImportanceWeights::Vector{Float64}
 end
 

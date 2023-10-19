@@ -8,10 +8,12 @@ using ElasticArrays
 using ExponentialUtilities
 using ForwardDiff
 using LinearAlgebra
+using MacroTools
 using OrderedCollections
 using Optim # for simulation - keep
 using Optimization # for fitting - keep
 using OptimizationOptimJL
+using PrecompileTools    
 using QuadGK
 using RCall
 using StatsBase
@@ -33,12 +35,15 @@ export
     @formula,
     compute_hazard,
     compute_cumulative_hazard,
+    make_constraints,
     cumulative_incidence,
     fit,
+    GetConvergenceRecords,
+    GetLoglik,
+    GetParameters,
+    GetVcov,
     Hazard,
-    loglik,
     multistatemodel,
-    parameters,
     set_crude_init!,
     set_parameters!,
     simulate,
@@ -56,7 +61,7 @@ include("helpers.jl")
 include("hazards.jl")
 
 # crude parameter initialization functions
-include("initiation.jl")
+include("initialization.jl")
 
 # likelihood functions
 include("likelihoods.jl")
@@ -87,5 +92,8 @@ include("simulation.jl")
 
 # smooths
 include("smooths.jl")
+
+# surrogate
+include("surrogates.jl")
 
 end
