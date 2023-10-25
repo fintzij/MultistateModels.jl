@@ -2,6 +2,7 @@
 using DataFrames
 using Distributions
 using MultistateModels
+using Plots
 
 h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
 h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3)
@@ -20,7 +21,7 @@ dat.tstop[Not(collect(10:ntimes:(ntimes*nsubj)))] .= dat.tstop[Not(collect(10:nt
 dat.tstart[Not(collect(1:ntimes:(ntimes*nsubj)))] .= dat.tstop[Not(collect(10:ntimes:(ntimes*nsubj)))]
 
 # create multistate model object
-model = multistatemodel(h12, h23; data = dat)
+model = multistatemodel(h12, h23; data = dat);
 
 # set model parameters
 # want mean time to event of 5
@@ -32,12 +33,12 @@ set_parameters!(
 simdat, paths = simulate(model; paths = true, data = true);
 
 # create multistate model object with the simulated data
-model = multistatemodel(h12, h23; data = simdat[1])
+model = multistatemodel(h12, h23; data = simdat[1]);
 
 MultistateModels.set_crude_init!(model)
 
 # fit model
-fitted = fit(model; tol = 1e-2, γ = 0.05, ess_target_initial = 10) 
+fitted = fit(model; tol = 1e-4, ess_target_initial = 100);
 
 # load libraries and functions
 using ArraysOfArrays, Optimization, Optim, StatsModels, StatsFuns, ExponentialUtilities, ElasticArrays, BenchmarkTools, Profile, ProfileView, DiffResults, ForwardDiff
@@ -58,3 +59,20 @@ using MultistateModels: build_tpm_mapping, MultistateMarkovModel, MultistateMark
 # Profile.clear()
 # ProfileView.@profview loglik(Vector(params_cur), SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)) 
 
+
+
+# marginal loglikelihood
+plot(fitted.ConvergenceRecords.mll_trace, title="Marginal Logikelihood", label=nothing, linewidth=3)
+    xlabel!("Monte Carlo EM iteration")
+    ylabel!("Marginal loglikelihood")
+
+# ess per subject and per iteration
+plot(fitted.ConvergenceRecords.ess_trace', title="ESS per subject",legend = :outertopright, linewidth=3)
+xlabel!("Monte Carlo EM iteration")
+    ylabel!("ESS")
+
+# trace of parameters
+haznames = map(x -> String(fitted.hazards[x].hazname), collect(1:length(fitted.hazards)))
+plot(fitted.ConvergenceRecords.parameters_trace', title="Trace of the parameters", linewidth=3) # label=permutedims(haznames),legend = :outertopright)
+    xlabel!("Monte Carlo EM iteration")
+    ylabel!("Parameters")
