@@ -15,6 +15,7 @@ using Optimization # for fitting - keep
 using OptimizationOptimJL
 using QuadGK
 using RCall
+using RuntimeGeneratedFunctions
 using StatsBase
 using StatsModels
 using StatsFuns
@@ -28,6 +29,9 @@ function __init__()
     @eval RCall.@rlibrary splines2
     nothing
 end
+
+# initialize runtime generated function cache
+RuntimeGeneratedFunctions.init(@__MODULE__)
 
 # Write your package code here.
 export
