@@ -117,6 +117,9 @@ end
     make_constraints(cons::Vector{Expr}, lcons::Vector{Float64}, ucons::Vector{Float64})
 """
 function make_constraints(;cons::Vector{Expr}, lcons::Vector{Float64}, ucons::Vector{Float64})
+    if !(length(cons) == length(lcons) == length(ucons))
+        @error "cons, lcons, and ucons must all be the same length."
+    end
     return (cons = cons, lcons = lcons, ucons = ucons)
 end
 
