@@ -309,8 +309,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     if verbose
         println("Initial target ESS: $(round(ess_target;digits=2)) per-subject")
         println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
-        
-        println("Log-likelihood: $mll_cur\n")
+        println("Estimate of the marginal log-likelihood: $(round(mll_cur;digits=2))\n")
 
         println("Starting Monte Carlo EM...\n")
     end
@@ -340,7 +339,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # optimize the monte carlo marginal likelihood
         println("Optimizing...")
         if isnothing(constraints)
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton(); reltol = 1e-1) # hessian-based
         else
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
         end
@@ -392,9 +391,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
             if verbose
                 println("Iteration: $iter")
-                println("Initial target ESS: $(round(ess_target;digits=2)) per-subject")
+                println("Current target ESS: $(round(ess_target;digits=2)) per-subject")
                 println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
                 println("Estimate of the marginal log-likelihood: $(round(mll_cur;digits=2))")
+                println("Previous estimate of the marginal log-likelihood: $(round(mll_prop;digits=2))")
                 println("Change in marginal log-likelihood: $(round(mll_change;sigdigits=3))")
                 println("MCEM Asymptotic SE: $(round(ase;sigdigits=3))")
                 println("Ascent lower bound: $(round(ascent_lb; sigdigits=2))")
