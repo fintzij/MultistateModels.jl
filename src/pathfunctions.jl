@@ -116,6 +116,16 @@ function observe_path(samplepath::SamplePath, model::MultistateProcess, subj::In
     return obsdat[keep_inds,:]
 end
 
+"""
+    observe_path(samplepath::SamplePath, times::Vector{Float64}, ind::Int64) 
+
+Return a vector with the states at the specified times.
+"""
+function observe_path(samplepath::SamplePath, times::Vector{Float64}) 
+
+    samplepath.states[searchsortedlast.(Ref(samplepath.times), times)]
+end
+
 
 """
     extract_paths(model::MultistateProcess; self_transitions = false)
