@@ -57,15 +57,15 @@ function fit(model::MultistateModel; constraints = nothing)
         sol  = solve(prob, Newton())
     else
         # create constraint function and check that constraints are satisfied at the initial values
-        consfun = parse_constraints(constraints.cons, model.hazards)
+        consfun_multistate = parse_constraints(constraints.cons, model.hazards; consfun_name = :consfun_multistate)
 
-        initcons = consfun(zeros(length(constraints.cons)), parameters, nothing)
+        initcons = consfun_multistate(zeros(length(constraints.cons)), parameters, nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
         if length(badcons) > 0
             @error "Constraints $badcons are violated at the initial parameter values."
         end
 
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun)
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_multistate)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths), lcons = constraints.lcons, ucons = constraints.ucons)
         sol  = solve(prob, IPNewton())
     end
@@ -115,15 +115,15 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         sol  = solve(prob, Newton())
     else
         # create constraint function and check that constraints are satisfied at the initial values
-        consfun = parse_constraints(constraints.cons, model.hazards)
+        consfun_markov = parse_constraints(constraints.cons, model.hazards; consfun_name = :consfun_markov)
 
-        initcons = consfun(zeros(length(constraints.cons)), parameters, nothing)
+        initcons = consfun_markov(zeros(length(constraints.cons)), parameters, nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
         if length(badcons) > 0
             @error "Constraints $badcons are violated at the initial parameter values."
         end
 
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun)
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_markov)
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books), lcons = constraints.lcons, ucons = constraints.ucons)
         sol  = solve(prob, IPNewton())
     end
@@ -187,9 +187,9 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
         # create constraint function and check that constraints are satisfied at the initial values
-        consfun = parse_constraints(constraints.cons, model.hazards)
+        consfun_semimarkov = parse_constraints(constraints.cons, model.hazards; consfun_name = :consfun_semimarkov)
 
-        initcons = consfun(zeros(length(constraints.cons)), flatview(model.parameters), nothing)
+        initcons = consfun_semimarkov(zeros(length(constraints.cons)), flatview(model.parameters), nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
         if length(badcons) > 0
             @error "Constraints $badcons are violated at the initial parameter values."
@@ -252,10 +252,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # generate the constraint function and test at initial values
         if !isnothing(surrogate_constraints)
             # create the function
-            consfun_surr = parse_constraints(surrogate_constraints.cons, surrogate_model.hazards)
+            consfun_surrogate = parse_constraints(surrogate_constraints.cons, surrogate_model.hazards; consfun_name = :consfun_surrogate)
 
             # test the initial values
-            initcons = consfun_surr(zeros(length(surrogate_constraints.cons)), flatview(surrogate_model.parameters), nothing)
+            initcons = consfun_surrogate(zeros(length(surrogate_constraints.cons)), flatview(surrogate_model.parameters), nothing)
             
             badcons = findall(initcons .< surrogate_constraints.lcons .|| initcons .> surrogate_constraints.ucons)
 
@@ -332,7 +332,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
     else
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun)
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
         prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
     end
 

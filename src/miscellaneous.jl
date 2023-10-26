@@ -124,11 +124,11 @@ function make_constraints(;cons::Vector{Expr}, lcons::Vector{Float64}, ucons::Ve
 end
 
 """
-    parse_constraints(cons, hazards)
+    parse_constraints(cons, hazards; consfun_name = :consfun)
 
 Parse user-defined constraints to generate a function constraining parameters for use in the solvers provided by Optimization.jl.
 """
-function parse_constraints(cons::Vector{Expr}, hazards)
+function parse_constraints(cons::Vector{Expr}, hazards; consfun_name = :consfun_model)
 
     # grab parameter names
     pars_flat = reduce(vcat, map(x -> x.parnames, hazards))
@@ -148,13 +148,14 @@ function parse_constraints(cons::Vector{Expr}, hazards)
 
     # manually construct the body of the constraint function
     cons_body = Meta.parse("res .= " * string(:[$(cons...),]))
-    cons_call = Expr(:call, :consfun, :(res), :(parameters), :(data))
-    cons_decl = Expr(:function, cons_call, cons_body)
+    cons_call = Expr(:call, consfun_name, :(res), :(parameters), :(data))
+    consfun_name = Expr(:function, cons_call, cons_body)
 
     # evaluate to compile the function
-    eval(cons_decl)
+    # this leads to a world age problem
+    # consider whether generated functions would work (maybe not as requires macro)
+    # or use RuntimeGeneratedFunctions.jl ?
 
-    # return the function
-    return consfun
+    @RuntimeGeneratedFunction(consfun_name)
 end
 
