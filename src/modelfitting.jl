@@ -338,7 +338,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
     # print output
     if verbose
-        println("Initial target ESS: $(round(ess_target; digits=2)) per-subject")
+        println("Initial target ESS: $(round(ess_target;digits=2)) per-subject")
         println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
         
         println("Log-likelihood: $mll_cur\n")
@@ -422,14 +422,14 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             append!(ess_trace, ess_cur)
 
             if verbose
-                println("Iteration: $(iter)")
-                println("Current target ESS per-subject: $ess_target")
+                println("Iteration: $iter")
+                println("Initial target ESS: $(round(ess_target;digits=2)) per-subject")
                 println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
-                println("Estimate of the marginal log-likelihood: $mll_cur")
-                println("Change in marginal log-likelihood: $mll_change")
-                println("MCEM Asymptotic SE: $ase")
-                println("Ascent lower bound: $ascent_lb")
-                println("Ascent upper bound: $ascent_ub\n")
+                println("Estimate of the marginal log-likelihood: $(round(mll_cur;digits=2))")
+                println("Change in marginal log-likelihood: $(round(mll_change;sigdigits=3))")
+                println("MCEM Asymptotic SE: $(round(ase;sigdigits=3))")
+                println("Ascent lower bound: $(round(ascent_lb; sigdigits=2))")
+                println("Ascent upper bound: $(round(ascent_ub; sigdigits=2))\n")
                 #println("Time: $(Dates.format(now(), "HH:MM"))\n")
             end
 
