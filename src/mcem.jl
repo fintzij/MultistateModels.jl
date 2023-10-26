@@ -45,8 +45,6 @@ function mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, TotI
 
     VarRis = 0.0
     for i in eachindex(TotImportanceWeights)
-        vr =  var_ris(loglik_target_prop[i] - loglik_target_cur[i], ImportanceWeights[i], TotImportanceWeights[i]) / length(ImportanceWeights[i])
-        println(vr)
         VarRis += var_ris(loglik_target_prop[i] - loglik_target_cur[i], ImportanceWeights[i], TotImportanceWeights[i]) / length(ImportanceWeights[i])
     end
 
