@@ -96,11 +96,11 @@ function get_subjinds(data::DataFrame)
 end
 
 """
-    check_data!(data::DataFrame)
+    check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{Int64}; verbose = true)
 
 Validate a user-supplied data frame to ensure that it conforms to MultistateModels.jl requirements.
 """
-function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{Int64})
+function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{Int64}; verbose = true)
 
     # validate column names and order
     if any(names(data)[1:6] .!== ["id", "tstart", "tstop", "statefrom", "stateto", "obstype"])
@@ -131,7 +131,7 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
         which_absorbing = findall(absorbing .== true)
         abs_warn = map(x -> any(data.statefrom .== x), which_absorbing)
 
-        if any(abs_warn)
+        if verbose && abs_warn
             @warn "The data contains contains observations where a subject originates in an absorbing state."
         end
     end
@@ -163,7 +163,7 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
     n_rs = compute_number_transitions(data, tmat)
     for r in 1:size(tmat)[1]
         for s in 1:size(tmat)[2]
-            if tmat[r,s]!=0 && n_rs[r,s]==0
+            if verbose && tmat[r,s]!=0 && n_rs[r,s]==0 
                 @warn "Data does not contain any transitions from state $r to state $s"
             end
         end
