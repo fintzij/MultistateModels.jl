@@ -41,6 +41,7 @@ export
     make_constraints,
     cumulative_incidence,
     fit,
+    fit_surrogate,
     GetConvergenceRecords,
     GetLoglik,
     GetParameters,

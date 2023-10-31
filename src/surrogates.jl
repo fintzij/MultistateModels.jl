@@ -59,15 +59,47 @@ Fit a Markov surrogate model.
 
 - model: multistate model object
 """
-function fit_surrogate(model; surrogate_parameters = nothing)
-    surrogate = make_surrogate_model(model)
-    if isnothing(surrogate_parameters)
-        set_crude_init!(surrogate)
+function fit_surrogate(model; surrogate_parameters = nothing, surrogate_constraints = nothing, verbose = true)
+    # surrogate = make_surrogate_model(model)
+    # if isnothing(surrogate_parameters)
+    #     set_crude_init!(surrogate)
+    # else
+    #     set_parameters!(surrogate, surrogate_parameters)
+    # end
+    # surrogate = fit(surrogate)
+
+    # initialize the surrogate
+    surrogate_model = make_surrogate_model(model)
+
+    # set parameters to supplied or crude inits
+    if !isnothing(surrogate_parameters) 
+        set_parameters!(surrogate_model, surrogate_parameters)
     else
-        set_parameters!(surrogate, surrogate_parameters)
+        set_crude_init!(surrogate_model)
     end
-    surrogate = fit(surrogate)
-    return surrogate
+
+    # generate the constraint function and test at initial values
+    if !isnothing(surrogate_constraints)
+        # create the function
+        consfun_surrogate = parse_constraints(surrogate_constraints.cons, surrogate_model.hazards; consfun_name = :consfun_surrogate)
+
+        # test the initial values
+        initcons = consfun_surrogate(zeros(length(surrogate_constraints.cons)), flatview(surrogate_model.parameters), nothing)
+        
+        badcons = findall(initcons .< surrogate_constraints.lcons .|| initcons .> surrogate_constraints.ucons)
+
+        if length(badcons) > 0
+            @error "Constraints $badcons are violated at the initial parameter values for the Markov surrogate. Consider manually setting surrogate parameters."
+        end
+    end
+
+    # optimize the Markov surrogate
+    if verbose
+        println("Obtaining the MLE for the Markov surrogate model ...\n")
+    end
+    surrogate_fitted = fit(surrogate_model; constraints = surrogate_constraints)
+
+    return surrogate_fitted
 end
 
 
