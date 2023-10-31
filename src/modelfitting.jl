@@ -72,8 +72,10 @@ function fit(model::MultistateModel; constraints = nothing)
 
     # get hessian
     ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
-    gradient = ForwardDiff.gradient(ll, sol.u)
-    vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
+    diffres = DiffResults.HessianResult(sol)    
+    diffres = ForwardDiff.hessian!(diffres, ll, sol)
+    gradient = DiffResults.gradient(diffres)
+    vcov = pinv(.-DiffResults.hessian(diffres))
 
     # wrap results
     return MultistateModelFitted(
@@ -130,8 +132,10 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
     # get the variance-covariance matrix
     ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
-    gradient = ForwardDiff.gradient(ll, sol.u)
-    vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
+    diffres = DiffResults.HessianResult(sol)    
+    diffres = ForwardDiff.hessian!(diffres, ll, sol)
+    gradient = DiffResults.gradient(diffres)
+    vcov = pinv(.-DiffResults.hessian(diffres))
 
     # wrap results
     return MultistateModelFitted(

@@ -154,7 +154,7 @@ function extract_paths(model::MultistateProcess; self_transitions = false)
         states = [model.data[model.subjectindices[i], :statefrom]; model.data[model.subjectindices[i][end], :stateto]]
 
         # remove duplicates
-        if !self_transitions & (length(states) > 2)
+        if !self_transitions && (length(states) > 2)
             if any(states[2:(end - 1)] .== states[1:(end-2)])
                 dropinds = findall(states[2:(end-1)] .== states[1:(end-2)]) .+ 1
 
@@ -198,7 +198,7 @@ function extract_paths(data::DataFrame; self_transitions = false)
         states = [data[subjinds[i], :statefrom]; data[subjinds[i][end], :stateto]]
 
         # remove duplicates
-        if !self_transitions & (length(states) > 2)
+        if !self_transitions && (length(states) > 2)
             if any(states[2:(end - 1)] .== states[1:(end-2)])
                 dropinds = findall(states[2:(end-1)] .== states[1:(end-2)]) .+ 1
 
@@ -237,7 +237,7 @@ function extract_sojourns(hazard, data::DataFrame, samplepaths::Vector{SamplePat
                     append!(times, diff(samplepaths[s].times[i:(i+1)]))
                 else
                     # append the times at which the hazard and cumulative hazard are evaluated
-                    append!(times, unique([diff([samplepaths[s].times[i]; subj_dat.tstop[findall((subj_dat.tstop .> samplepaths[s].times[i]) .& (subj_dat.tstop .< samplepaths[s].times[i+1]))]; samplepaths[s].times[i+1]]); diff(samplepaths[s].times[i:(i+1)])]))
+                    append!(times, unique([diff([samplepaths[s].times[i]; subj_dat.tstop[findall((subj_dat.tstop .> samplepaths[s].times[i]) .&& (subj_dat.tstop .< samplepaths[s].times[i+1]))]; samplepaths[s].times[i+1]]); diff(samplepaths[s].times[i:(i+1)])]))
                 end
             end
         end

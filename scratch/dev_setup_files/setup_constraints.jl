@@ -48,8 +48,8 @@ simdat[1][!,:x] = randn(size(simdat[1], 1))
 # create multistate model object with the simulated data
 h12 = Hazard(@formula(0 ~ 1 + x), "exp", 1, 2) # healthy -> ill
 h13 = Hazard(@formula(0 ~ 1 + x), "exp", 1, 3) # healthy -> dead
-h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1) # ill -> healthy
-h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3) # ill -> dead
+h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1) # ill -> healthy
+h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3) # ill -> dead
 
 hazards = (h12, h13, h21, h23); data = simdat[1]
 model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
@@ -58,8 +58,8 @@ set_parameters!(
     model, 
     (h12 = [log(0.5), 0.1],
      h13 = [log(0.5), 0.1],
-     h21 = [0.0, log(0.3)],
-     h23 = [0.0, log(0.3)]))
+     h21 = [log(0.3)],
+     h23 = [log(0.3)]))
 
 constraints = make_constraints(cons = [:(h12_x - h13_x), ], lcons = [0.0,], ucons = [0.0,])
 hazards = model.hazards
@@ -72,7 +72,7 @@ surrogate_parameters =
     h21 = [log(0.1)],
     h23 = [log(0.5)])
 
-fitted = fit(model; constraints = constraints, surrogate_constraints = surrogate_constraints, surrogate_parameters = surrogate_parameters)
+fitted = fit(model; constraints = constraints)#, surrogate_constraints = surrogate_constraints, surrogate_parameters = surrogate_parameters)
 
 using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra, OptimizationOptimisers, RCall, Plots, StatsFuns, MacroTools, FunctionWrappers, RuntimeGeneratedFunctions
 
