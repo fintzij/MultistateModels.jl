@@ -328,7 +328,7 @@ struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
     parameters::VectorOfVectors 
     loglik::Float64
-    vcov::Matrix{Float64}
+    vcov::Union{Nothing,Matrix{Float64}}
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}

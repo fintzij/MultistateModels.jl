@@ -55,6 +55,11 @@ function fit(model::MultistateModel; constraints = nothing)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
         sol  = solve(prob, Newton())
+
+        # get hessian
+        ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
+        gradient = ForwardDiff.gradient(ll, sol.u)
+        vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
     else
         # create constraint function and check that constraints are satisfied at the initial values
         consfun_multistate = parse_constraints(constraints.cons, model.hazards; consfun_name = :consfun_multistate)
@@ -68,12 +73,11 @@ function fit(model::MultistateModel; constraints = nothing)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_multistate)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths), lcons = constraints.lcons, ucons = constraints.ucons)
         sol  = solve(prob, IPNewton())
-    end
 
-    # get hessian
-    ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
-    gradient = ForwardDiff.gradient(ll, sol.u)
-    vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
+        # no hessian when there are constraints
+        @warn "No covariance matrix is returned when constraints are provided."
+        vcov = nothing
+    end
 
     # wrap results
     return MultistateModelFitted(
@@ -113,6 +117,11 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
         sol  = solve(prob, Newton())
+
+        # get the variance-covariance matrix
+        ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
+        gradient = ForwardDiff.gradient(ll, sol.u)
+        vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
     else
         # create constraint function and check that constraints are satisfied at the initial values
         consfun_markov = parse_constraints(constraints.cons, model.hazards; consfun_name = :consfun_markov)
@@ -126,12 +135,11 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_markov)
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books), lcons = constraints.lcons, ucons = constraints.ucons)
         sol  = solve(prob, IPNewton())
-    end
 
-    # get the variance-covariance matrix
-    ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
-    gradient = ForwardDiff.gradient(ll, sol.u)
-    vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
+        # no hessian when there are constraints
+        @warn "No covariance matrix is returned when constraints are provided."
+        vcov = nothing
+    end
 
     # wrap results
     return MultistateModelFitted(
@@ -182,7 +190,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 """
 function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
-    optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
+    optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.01, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -239,39 +247,41 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # build surrogate
     if optimize_surrogate
 
-        # initialize the surrogate
-        surrogate_model = make_surrogate_model(model)
+        # # initialize the surrogate
+        # surrogate_model = make_surrogate_model(model)
 
-        # set parameters to supplied or crude inits
-        if !isnothing(surrogate_parameters) 
-            set_parameters!(surrogate_model, surrogate_parameters)
-        else
-            set_crude_init!(surrogate_model)
-        end
+        # # set parameters to supplied or crude inits
+        # if !isnothing(surrogate_parameters) 
+        #     set_parameters!(surrogate_model, surrogate_parameters)
+        # else
+        #     set_crude_init!(surrogate_model)
+        # end
 
-        # generate the constraint function and test at initial values
-        if !isnothing(surrogate_constraints)
-            # create the function
-            consfun_surrogate = parse_constraints(surrogate_constraints.cons, surrogate_model.hazards; consfun_name = :consfun_surrogate)
+        # # generate the constraint function and test at initial values
+        # if !isnothing(surrogate_constraints)
+        #     # create the function
+        #     consfun_surrogate = parse_constraints(surrogate_constraints.cons, surrogate_model.hazards; consfun_name = :consfun_surrogate)
 
-            # test the initial values
-            initcons = consfun_surrogate(zeros(length(surrogate_constraints.cons)), flatview(surrogate_model.parameters), nothing)
+        #     # test the initial values
+        #     initcons = consfun_surrogate(zeros(length(surrogate_constraints.cons)), flatview(surrogate_model.parameters), nothing)
             
-            badcons = findall(initcons .< surrogate_constraints.lcons .|| initcons .> surrogate_constraints.ucons)
+        #     badcons = findall(initcons .< surrogate_constraints.lcons .|| initcons .> surrogate_constraints.ucons)
 
-            if length(badcons) > 0
-                @error "Constraints $badcons are violated at the initial parameter values for the Markov surrogate. Consider manually setting surrogate parameters."
-            end
-        end
+        #     if length(badcons) > 0
+        #         @error "Constraints $badcons are violated at the initial parameter values for the Markov surrogate. Consider manually setting surrogate parameters."
+        #     end
+        # end
 
-        # optimize the Markov surrogate
-        if verbose
-            println("Obtaining the MLE for the Markov surrogate model ...\n")
-        end
-        surrogate_fitted = fit(surrogate_model; constraints = surrogate_constraints)
+        # # optimize the Markov surrogate
+        # if verbose
+        #     println("Obtaining the MLE for the Markov surrogate model ...\n")
+        # end
+        # surrogate_fitted = fit(surrogate_model; constraints = surrogate_constraints)
+
+        surrogate_fitted = fit_surrogate(model; surrogate_parameters=surrogate_parameters, surrogate_constraints=surrogate_constraints, verbose=verbose)
 
         # create the surrogate object
-        surrogate = MarkovSurrogate(surrogate_model.hazards, surrogate_fitted.parameters)
+        surrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters)
         
     else
         # set to supplied initial values
@@ -339,8 +349,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # print output
     if verbose
         println("Initial target ESS: $(round(ess_target;digits=2)) per-subject")
-        println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
-        println("Estimate of the marginal log-likelihood: $(round(mll_cur;digits=2))\n")
+        println("Range of the number of sample paths per-subject: [$(min(length.(samplepaths)...)), $(max(length.(samplepaths)...))]")
+        println("Estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))\n")
 
         println("Starting Monte Carlo EM...\n")
     end
@@ -370,7 +380,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # optimize the monte carlo marginal likelihood
         println("Optimizing...")
         if isnothing(constraints)
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton(); reltol = 1e-1) # hessian-based
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
         else
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
         end
@@ -423,13 +433,13 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             if verbose
                 println("Iteration: $iter")
                 println("Current target ESS: $(round(ess_target;digits=2)) per-subject")
-                println("Range of the number of sample paths per-subject: ($(min(length.(samplepaths)...)), $(max(length.(samplepaths)...)))")
-                println("Estimate of the marginal log-likelihood: $(round(mll_cur;digits=2))")
-                println("Previous estimate of the marginal log-likelihood: $(round(mll_prop;digits=2))")
+                println("Range of the number of sample paths per-subject: [$(min(length.(samplepaths)...)), $(max(length.(samplepaths)...))]")
+                println("Current estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))")
+                println("Reweighted prior estimate of the marginal log-likelihood: $(round(mll_prop;digits=3))")
                 println("Change in marginal log-likelihood: $(round(mll_change;sigdigits=3))")
                 println("MCEM Asymptotic SE: $(round(ase;sigdigits=3))")
-                println("Ascent lower bound: $(round(ascent_lb; sigdigits=2))")
-                println("Ascent upper bound: $(round(ascent_ub; sigdigits=2))\n")
+                println("Ascent lower bound: $(round(ascent_lb; sigdigits=3))")
+                println("Ascent upper bound: $(round(ascent_ub; sigdigits=3))\n")
                 #println("Time: $(Dates.format(now(), "HH:MM"))\n")
             end
 
@@ -450,70 +460,79 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         end
     end
 
-    # initialize Fisher information matrix
-    fisher = zeros(Float64, length(params_cur), length(params_cur), nsubj)
+    # hessian
+    if !isnothing(constraints)
 
-    if verbose
-        println("Computing variance-covariance matrix at final estimates")
-    end
+        # no hessian when there are constraints
+        @warn "No covariance matrix is returned when constraints are provided."
+        vcov = nothing
+    else
+
+        if verbose
+            println("Computing variance-covariance matrix at final estimates")
+        end
+
+        # initialize Fisher information matrix
+        fisher = zeros(Float64, length(params_cur), length(params_cur), nsubj)
+        
+        # set up containers for path and sampling weight
+        path = Array{SamplePath}(undef, 1)
+        samplingweight = Vector{Float64}(undef, 1)
     
-    # set up containers for path and sampling weight
-    path = Array{SamplePath}(undef, 1)
-    samplingweight = Vector{Float64}(undef, 1)
+        # container for gradient and hessian
+        diffres = DiffResults.HessianResult(params_cur)
+        fisher_i1 = zeros(Float64, length(params_cur), length(params_cur))
+        fisher_i2 = similar(fisher_i1)
+    
+        # define objective
+        ll = pars -> (loglik(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
 
-    # container for gradient and hessian
-    diffres = DiffResults.HessianResult(params_cur)
-    fisher_i1 = zeros(Float64, length(params_cur), length(params_cur))
-    fisher_i2 = similar(fisher_i1)
+        # accumulate Fisher information
+        for i in 1:nsubj
 
-    # define objective
-    ll = pars -> (loglik(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
+            # set importance weight
+            samplingweight[1] = model.SamplingWeights[i]
 
-    # accumulate Fisher information
-    for i in 1:nsubj
+            # number of paths
+            npaths = length(samplepaths[i])
 
-        # set importance weight
-        samplingweight[1] = model.SamplingWeights[i]
+            # for accumulating gradients and hessians
+            grads = Array{Float64}(undef, length(params_cur), length(samplepaths[i]))
+            hesns = Array{Float64}(undef, length(params_cur), length(params_cur), npaths)
 
-        # number of paths
-        npaths = length(samplepaths[i])
+            # reset matrices for accumulating Fisher info contributions
+            fill!(fisher_i1, 0.0)
+            fill!(fisher_i2, 0.0)
 
-        # for accumulating gradients and hessians
-        grads = Array{Float64}(undef, length(params_cur), length(samplepaths[i]))
-        hesns = Array{Float64}(undef, length(params_cur), length(params_cur), npaths)
+            # calculate gradient and hessian for paths
+            for j in 1:npaths
+                path[1] = samplepaths[i][j]
+                diffres = ForwardDiff.hessian!(diffres, ll, params_cur)
 
-        # reset matrices for accumulating Fisher info contributions
-        fill!(fisher_i1, 0.0)
-        fill!(fisher_i2, 0.0)
-
-        # calculate gradient and hessian for paths
-        for j in 1:npaths
-            path[1] = samplepaths[i][j]
-            diffres = ForwardDiff.hessian!(diffres, ll, params_cur)
-
-            # grab hessian and gradient
-            hesns[:,:,j] = DiffResults.hessian(diffres)
-            grads[:,j] = DiffResults.gradient(diffres)
-        end
-
-        # accumulate
-        for j in 1:npaths
-            fisher_i1 .+= ImportanceWeights[i][j] * (-hesns[:,:,j] - grads[:,j] * transpose(grads[:,j]))
-        end
-        fisher_i1 ./= TotImportanceWeights[i]
-
-        for j in 1:npaths
-            for k in 1:npaths
-                fisher_i2 .+= ImportanceWeights[i][j] * ImportanceWeights[i][k] * grads[:,j] * transpose(grads[:,k])
+                # grab hessian and gradient
+                hesns[:,:,j] = DiffResults.hessian(diffres)
+                grads[:,j] = DiffResults.gradient(diffres)
             end
+
+            # accumulate
+            for j in 1:npaths
+                fisher_i1 .+= ImportanceWeights[i][j] * (-hesns[:,:,j] - grads[:,j] * transpose(grads[:,j]))
+            end
+            fisher_i1 ./= TotImportanceWeights[i]
+
+            for j in 1:npaths
+                for k in 1:npaths
+                    fisher_i2 .+= ImportanceWeights[i][j] * ImportanceWeights[i][k] * grads[:,j] * transpose(grads[:,k])
+                end
+            end
+            fisher_i2 ./= TotImportanceWeights[i]^2
+
+            fisher[:,:,i] = fisher_i1 + fisher_i2
         end
-        fisher_i2 ./= TotImportanceWeights[i]^2
 
-        fisher[:,:,i] = fisher_i1 + fisher_i2
+        # get the variance-covariance matrix
+        vcov = pinv(reduce(+, fisher, dims = 3)[:,:,1])
     end
-
-    # get the variance-covariance matrix
-    vcov = pinv(reduce(+, fisher, dims = 3)[:,:,1])
 
     # return convergence records
     ConvergenceRecords = return_ConvergenceRecords ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace) : nothing
