@@ -79,6 +79,13 @@ function fit(model::MultistateModel; constraints = nothing)
         vcov = nothing
     end
 
+    # get hessian
+    # ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
+    # diffres = DiffResults.HessianResult(sol)    
+    # diffres = ForwardDiff.hessian!(diffres, ll, sol)
+    # gradient = DiffResults.gradient(diffres)
+    # vcov = pinv(.-DiffResults.hessian(diffres))
+
     # wrap results
     return MultistateModelFitted(
         model.data,

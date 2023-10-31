@@ -371,11 +371,11 @@ function build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64})
 end
 
 """
-    multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights = nothing, CensoringPatterns = nothing)
+    multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights = nothing, CensoringPatterns = nothing, verbose = false)
 
 Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference. Optional keyword arguments specified in kwargs may include sampling weights and censoring patterns.
 """
-function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights::Union{Nothing,Vector{Float64}} = nothing, CensoringPatterns::Union{Nothing,Matrix{Int64}} = nothing) 
+function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights::Union{Nothing,Vector{Float64}} = nothing, CensoringPatterns::Union{Nothing,Matrix{Int64}} = nothing, verbose = false) 
 
     # catch the model call
     modelcall = (hazards = hazards, data = data, SamplingWeights = SamplingWeights, CensoringPatterns = CensoringPatterns)
@@ -404,7 +404,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
     end
 
     # check data formatting
-    check_data!(data, tmat, CensoringPatterns)
+    check_data!(data, tmat, CensoringPatterns; verbose = verbose)
 
     # check SamplingWeights
     check_SamplingWeights(SamplingWeights, data)
