@@ -159,6 +159,13 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
         end
     end
 
+    # error if data includes states not in the unique states
+    statespace = sort(vcat(unique(tmat), CensoringPatterns[:,1]))
+    allstates = sort(vcat(unique(data.stateto), unique(data.statefrom)))
+    if !all(allstates .∈ Ref(statespace))
+        @error "Data contains states that are not in the state space."
+    end
+
     # warning if tmat specifies an allowed transition for which no such transitions were observed in the data
     n_rs = compute_number_transitions(data, tmat)
     for r in 1:size(tmat)[1]

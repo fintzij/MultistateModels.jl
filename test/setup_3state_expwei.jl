@@ -1,6 +1,7 @@
 # set up a MultistateModel object
 using DataFrames
 using MultistateModels
+using StatsBase
 
 # Stan will initialize parameters by sampling from N(0,1) unless given explicit parameters
 # This isn't crazy because e.g. brms will center covariates first

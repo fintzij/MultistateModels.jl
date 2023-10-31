@@ -49,7 +49,7 @@ function compute_suff_stats(data, tmat)
 end
 
 """
-    compute_suff_stats(dat, tmat)
+    compute_number_transitions(data, tmat)
 
 Return a matrix in same format as tmat with observed transition counts, and a vector of time spent in each state. Used for checking data and calculating crude initialization rates.
 """
