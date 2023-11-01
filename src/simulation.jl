@@ -47,7 +47,7 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
 
             # observe path 
             if data == true
-                datasets[j, i] = observe_path(samplepath, model, j)
+                datasets[j, i] = observe_path(samplepath, model)
             end
         end
     end

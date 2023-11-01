@@ -1,9 +1,12 @@
 """
-    observe_path(samplepath::SamplePath, model::MultistateProcess, ind::Int64) 
+    observe_path(samplepath::SamplePath, model::MultistateProcess) 
 
 Return `statefrom` and `stateto` for a jump chain observed at `tstart` and `tstop`.
 """
-function observe_path(samplepath::SamplePath, model::MultistateProcess, subj::Int64) 
+function observe_path(samplepath::SamplePath, model::MultistateProcess) 
+
+    # get subjid
+    subj = samplepath.subj
 
     # grab the subject's data as a view
     subj_inds = model.subjectindices[subj]

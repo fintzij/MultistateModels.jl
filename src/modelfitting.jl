@@ -79,13 +79,6 @@ function fit(model::MultistateModel; constraints = nothing)
         vcov = nothing
     end
 
-    # get hessian
-    # ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
-    # diffres = DiffResults.HessianResult(sol)    
-    # diffres = ForwardDiff.hessian!(diffres, ll, sol)
-    # gradient = DiffResults.gradient(diffres)
-    # vcov = pinv(.-DiffResults.hessian(diffres))
-
     # wrap results
     return MultistateModelFitted(
         model.data,
@@ -253,37 +246,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
     # build surrogate
     if optimize_surrogate
-
-        # # initialize the surrogate
-        # surrogate_model = make_surrogate_model(model)
-
-        # # set parameters to supplied or crude inits
-        # if !isnothing(surrogate_parameters) 
-        #     set_parameters!(surrogate_model, surrogate_parameters)
-        # else
-        #     set_crude_init!(surrogate_model)
-        # end
-
-        # # generate the constraint function and test at initial values
-        # if !isnothing(surrogate_constraints)
-        #     # create the function
-        #     consfun_surrogate = parse_constraints(surrogate_constraints.cons, surrogate_model.hazards; consfun_name = :consfun_surrogate)
-
-        #     # test the initial values
-        #     initcons = consfun_surrogate(zeros(length(surrogate_constraints.cons)), flatview(surrogate_model.parameters), nothing)
-            
-        #     badcons = findall(initcons .< surrogate_constraints.lcons .|| initcons .> surrogate_constraints.ucons)
-
-        #     if length(badcons) > 0
-        #         @error "Constraints $badcons are violated at the initial parameter values for the Markov surrogate. Consider manually setting surrogate parameters."
-        #     end
-        # end
-
-        # # optimize the Markov surrogate
-        # if verbose
-        #     println("Obtaining the MLE for the Markov surrogate model ...\n")
-        # end
-        # surrogate_fitted = fit(surrogate_model; constraints = surrogate_constraints)
 
         surrogate_fitted = fit_surrogate(model; surrogate_parameters=surrogate_parameters, surrogate_constraints=surrogate_constraints, verbose=verbose)
 
