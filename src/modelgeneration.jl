@@ -195,8 +195,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                 
                 # parameter names
                 parnames = vcat(
-                        hazname * "_shape_Intercept",
-                        hazname * "_scale_Intercept",
+                        hazname * "_shape",
+                        hazname * "_scale",
                         hazname*"_".*coefnames(hazschema)[2][Not(1)])
 
                 haz_struct = 
@@ -237,8 +237,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                 
                 # parameter names
                 parnames = vcat(
-                        hazname * "_shape_Intercept",
-                        hazname * "_scale_Intercept",
+                        hazname * "_shape",
+                        hazname * "_scale",
                         hazname*"_".*coefnames(hazschema)[2][Not(1)])
 
                 haz_struct = 
