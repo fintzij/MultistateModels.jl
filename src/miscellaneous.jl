@@ -152,10 +152,6 @@ function parse_constraints(cons::Vector{Expr}, hazards; consfun_name = :consfun_
     consfun_name = Expr(:function, cons_call, cons_body)
 
     # evaluate to compile the function
-    # this leads to a world age problem
-    # consider whether generated functions would work (maybe not as requires macro)
-    # or use RuntimeGeneratedFunctions.jl ?
-
     @RuntimeGeneratedFunction(consfun_name)
 end
 
