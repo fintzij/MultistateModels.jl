@@ -48,7 +48,7 @@ simdat[1][!,:y] = randn(size(simdat[1], 1))
 
 # create multistate model object with the simulated data
 h12 = Hazard(@formula(0 ~ 1 + x), "wei", 1, 2) # healthy -> ill
-h13 = Hazard(@formula(0 ~ 1 + x), "wei", 1, 3) # healthy -> dead
+h13 = Hazard(@formula(0 ~ 1 + x), "exp", 1, 3) # healthy -> dead
 h21 = Hazard(@formula(0 ~ 1 + x), "exp", 2, 1) # ill -> healthy
 h23 = Hazard(@formula(0 ~ 1 + x + y), "exp", 2, 3) # ill -> dead
 
@@ -58,14 +58,14 @@ model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
 set_parameters!(
     model, 
     (h12 = [0.0, log(0.5), 0.1],
-     h13 = [0.0, log(0.5), 0.1],
-     h21 = [log(0.3), 0.1],
+     h13 = [log(0.5), 0.1],
+     h21 = [log(0.5), 0.1],
      h23 = [log(0.3), 0.1, 0.2]))
 
 constraints = make_constraints(
-    cons = [:(h12_x - h21_x), :(h12_x - h13_x), :(h12_x - h23_x)], 
-    lcons = [0.0, 0.0, 0.0],
-    ucons = [0.0, 0.0, 0.0])
+    cons = [:(h12_x - h21_x), :(h12_x - h13_x), :(h21_x - h23_x), :(h12_scale - h21_Intercept)], 
+    lcons = [0.0, 0.0, 0.0, 0.0],
+    ucons = [0.0, 0.0, 0.0, 0.0])
 hazards = model.hazards
 
 surrogate_constraints = make_constraints(cons = [:(h12_x - h13_x),], lcons = [0.0, ], ucons = [0.0,])

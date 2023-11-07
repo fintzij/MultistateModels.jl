@@ -62,7 +62,8 @@ function fit(model::MultistateModel; constraints = nothing)
         vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
     else
         # create constraint function and check that constraints are satisfied at the initial values
-        consfun_multistate = parse_constraints(constraints.cons, model.hazards; consfun_name = :consfun_multistate)
+        _constraints = copy(constraints)
+        consfun_multistate = parse_constraints(_constraints.cons, model.hazards; consfun_name = :consfun_multistate)
 
         initcons = consfun_multistate(zeros(length(constraints.cons)), parameters, nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
@@ -124,7 +125,8 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
     else
         # create constraint function and check that constraints are satisfied at the initial values
-        consfun_markov = parse_constraints(constraints.cons, model.hazards; consfun_name = :consfun_markov)
+        _constraints = copy(constraints)
+        consfun_markov = parse_constraints(_constraints.cons, model.hazards; consfun_name = :consfun_markov)
 
         initcons = consfun_markov(zeros(length(constraints.cons)), parameters, nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
@@ -195,7 +197,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
         # create constraint function and check that constraints are satisfied at the initial values
-        consfun_semimarkov = parse_constraints(constraints.cons, model.hazards; consfun_name = :consfun_semimarkov)
+        _constraints = copy(constraints)
+        consfun_semimarkov = parse_constraints(_constraints.cons, model.hazards; consfun_name = :consfun_semimarkov)
 
         initcons = consfun_semimarkov(zeros(length(constraints.cons)), flatview(model.parameters), nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
