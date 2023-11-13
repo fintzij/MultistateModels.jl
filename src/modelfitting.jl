@@ -158,7 +158,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
         # create constraint function and check that constraints are satisfied at the initial values
-        _constraints = copy(constraints)
+        _constraints = deepcopy(constraints)
         consfun_semimarkov = parse_constraints(_constraints.cons, model.hazards; consfun_name = :consfun_semimarkov)
 
         initcons = consfun_semimarkov(zeros(length(constraints.cons)), flatview(model.parameters), nothing)
@@ -323,21 +323,32 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         params_prop = params_prop_optim.u
 
-        # recalculate the log likelihoods
-        loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
-
-        # recalculate the marginal log likelihood
-        mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, TotImportanceWeights)
-
-        # change in mll
-        mll_change = mll_prop - mll_cur
-
-        # calculate the ASE for ΔQ
-        ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights)
-
-         # calculate the lower bound for ΔQ
-        ascent_lb = quantile(Normal(mll_change, ase), α)
-        ascent_ub = quantile(Normal(mll_change, ase), 1-γ)
+        # just make sure they're not equal
+        if params_prop != params_cur 
+            # recalculate the log likelihoods
+            loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
+    
+            # recalculate the marginal log likelihood
+            mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, TotImportanceWeights)
+    
+            # change in mll
+            mll_change = mll_prop - mll_cur
+    
+            # calculate the ASE for ΔQ
+            ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights)
+    
+             # calculate the lower bound for ΔQ
+            ascent_lb = quantile(Normal(mll_change, ase), α)
+            ascent_ub = quantile(Normal(mll_change, ase), 1-γ)
+        else
+            loglik_target_prop = loglik_target_cur
+            mll_prop = mll_cur
+            mll_change = 0
+            ase = 0
+            ascent_lb = 0
+            ascent_ub = 0
+            convergence_counter = 2
+        end
 
         if ascent_lb < 0
             # increase the target ess for the factor κ
@@ -409,7 +420,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # no hessian when there are constraints
         @warn "No covariance matrix is returned when constraints are provided."
         vcov = nothing
-    else
+    
+    elseif convergence
 
         if verbose
             println("Computing variance-covariance matrix at final estimates")
@@ -475,6 +487,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         # get the variance-covariance matrix
         vcov = pinv(reduce(+, fisher, dims = 3)[:,:,1])
+        vcov[isapprox.(vcov, 0.0; atol = min(tol, sqrt(eps(Float64))))] .= 0.0
+    else
+        @warn "MCEM did not converge."
+        vcov = nothing
     end
 
     # return convergence records
