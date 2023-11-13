@@ -288,6 +288,9 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         println("Starting Monte Carlo EM...\n")
     end
 
+    # counter for whether successive iterations of ascent UB below tol
+    convergence_counter = 0
+
     # start algorithm
     while keep_going
 
@@ -377,7 +380,14 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             end
 
             # check convergence
-            convergence = ascent_ub < tol
+            if ascent_ub < tol
+                convergence_counter += 1
+            else
+                convergence_counter = 0
+            end
+
+            # check if convergence in successive iterations
+            convergence = convergence_counter > 1
 
             # check whether to stop
             if convergence
