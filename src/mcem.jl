@@ -32,7 +32,7 @@ function var_ris(l, w, t)
 
     vris = (sum(l .* w) / t) ^ 2 * ((sum((w .* l).^2)) / sum(w .* l) ^2 - 2 * (sum(w.^2 .* l) / (sum(w .* l) * t)) + sum(w .^ 2) / t^2)
 
-    isapprox(vris, 0.0; atol = eps(Float64)) ? 0.0 : vris
+    isapprox(vris, 0.0; atol = sqrt(eps(Float64))) ? 0.0 : vris
 end
 
 
