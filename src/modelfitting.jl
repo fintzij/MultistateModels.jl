@@ -486,7 +486,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         end
 
         # get the variance-covariance matrix
-        vcov = pinv(reduce(+, fisher, dims = 3)[:,:,1])
+        vcov = pinv(Symmetric(reduce(+, fisher, dims = 3)[:,:,1]))
         vcov[isapprox.(vcov, 0.0; atol = min(tol, sqrt(eps(Float64))))] .= 0.0
     else
         @warn "MCEM did not converge."
