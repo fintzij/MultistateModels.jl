@@ -368,3 +368,35 @@ function build_tpm_mapping(data::DataFrame)
     # return objects
     return tpm_index, tpm_map
 end
+
+"""
+    collapse_data(data::DataFrame; SamplingWeights::Vector{Float64} = ones(unique(data.id)))
+
+Collapse subjects to create an internal representation of a dataset and optionally recompute a vector of sampling weights.
+"""
+function collapse_data(data::DataFrame; SamplingWeights::Vector{Float64} = ones(Float64, length(unique(data.id))))
+    
+    # find unique subjects
+    ids = unique(data.id)
+    _data = [DataFrame() for k in 1:length(ids)]
+    for k in ids
+        _data[k] = data[findall(data.id .== k),Not(:id)]
+    end
+    _DataCollapsed = unique(_data)
+
+    # find the collapsed dataset for each individual
+    inds = map(x -> findfirst(_DataCollapsed .== Ref(x)), _data)
+
+    # tabulate the SamplingWeights
+    SamplingWeightsCollapsed = map(x -> sum(SamplingWeights[findall(inds .== x)]), unique(inds))
+
+    # add a fake id variable to the collapsed datasets (for purchasing alcohol)
+    for k in 1:length(_DataCollapsed)
+        insertcols!(_DataCollapsed[k], :tstart, :id => fill(k, nrow(_DataCollapsed[k])))
+    end
+
+    # vcat
+    DataCollapsed = reduce(vcat, _DataCollapsed)
+       
+    return DataCollapsed, SamplingWeightsCollapsed
+end

@@ -1,6 +1,7 @@
 module MultistateModels
 
 using ArraysOfArrays
+using Chain
 using DataFrames
 using DiffResults
 using Distributions
@@ -38,15 +39,16 @@ export
     @formula,
     compute_hazard,
     compute_cumulative_hazard,
-    make_constraints,
+    collapse_data,
     cumulative_incidence,
     fit,
     fit_surrogate,
-    GetConvergenceRecords,
-    GetLoglik,
-    GetParameters,
-    GetVcov,
+    get_ConvergenceRecords,
+    get_loglik,
+    get_parameters,
+    get_vcov,
     Hazard,
+    make_constraints,
     multistatemodel,
     set_crude_init!,
     set_parameters!,
