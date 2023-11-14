@@ -23,7 +23,7 @@ function fit(model::MultistateModel; constraints = nothing)
         vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
     else
         # create constraint function and check that constraints are satisfied at the initial values
-        _constraints = copy(constraints)
+        _constraints = deepcopy(constraints)
         consfun_multistate = parse_constraints(_constraints.cons, model.hazards; consfun_name = :consfun_multistate)
 
         initcons = consfun_multistate(zeros(length(constraints.cons)), parameters, nothing)
@@ -86,7 +86,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
     else
         # create constraint function and check that constraints are satisfied at the initial values
-        _constraints = copy(constraints)
+        _constraints = deepcopy(constraints)
         consfun_markov = parse_constraints(_constraints.cons, model.hazards; consfun_name = :consfun_markov)
 
         initcons = consfun_markov(zeros(length(constraints.cons)), parameters, nothing)
