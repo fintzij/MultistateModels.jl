@@ -314,7 +314,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
 
         # optimize the monte carlo marginal likelihood
-        println("Optimizing...")
+        if verbose 
+            println("Optimizing...")
+        end
+
         if isnothing(constraints)
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
         else
@@ -424,7 +427,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     elseif convergence
 
         if verbose
-            println("Computing variance-covariance matrix at final estimates")
+            println("Computing variance-covariance matrix at final estimates.")
         end
 
         # initialize Fisher information matrix
