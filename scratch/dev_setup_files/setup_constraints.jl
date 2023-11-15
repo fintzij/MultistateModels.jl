@@ -43,21 +43,22 @@ set_parameters!(
 
 simdat, paths = simulate(model; paths = true, data = true);
 
-simdat[1][!,:x] = randn(size(simdat[1], 1))
-simdat[1][!,:y] = randn(size(simdat[1], 1))
+# simdat[1][!,:x] = randn(size(simdat[1], 1))
+# simdat[1][!,:y] = randn(size(simdat[1], 1))
 
 # create multistate model object with the simulated data
-h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2) # healthy -> ill
+h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2) # healthy -> ill
 h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1) # ill -> healthy
 h13 = Hazard(@formula(0 ~ 1), "exp", 1, 3) # healthy -> dead
 h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3) # ill -> dead
 
 hazards = (h12, h13, h21, h23); data = simdat[1]
-model = multistatemodel(h12, h13, h21, h23; data = simdat[1])
+datc, weights = collapse_data(simdat[1])
+model = multistatemodel(h12, h13, h21, h23; data = datc, SamplingWeights = weights)
 
 set_parameters!(
     model, 
-    (h12 = [log(0.5)],
+    (h12 = [0.1, log(0.5)],
      h13 = [log(0.5)],
      h21 = [log(0.5)],
      h23 = [log(0.3)]))

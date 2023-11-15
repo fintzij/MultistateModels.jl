@@ -119,8 +119,7 @@ function loglik(parameters, data::ExactData; neg = true)
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # send each element of samplepaths to loglik
-    ll = mapreduce(
-        (x, w) -> loglik(pars, x, data.model.hazards, data.model) * w,
+    ll = mapreduce((x, w) -> loglik(pars, x, data.model.hazards, data.model) * w,
         +, data.paths, data.model.SamplingWeights)
     
     neg ? -ll : ll
@@ -257,7 +256,7 @@ end
 
 Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data. 
 """
-function loglik(parameters, data::SMPanelData; neg = true)
+function loglik(parameters, data::SMPanelData; neg = true, use_sampling_weight = true)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
@@ -265,9 +264,14 @@ function loglik(parameters, data::SMPanelData; neg = true)
     # compute the semi-markov log-likelihoods
     ll = 0.0
     for i in eachindex(data.paths)
+        lls = 0.0
         for j in eachindex(data.paths[i])
-            ll += loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.ImportanceWeights[i][j] / data.TotImportanceWeights[i] * data.model.SamplingWeights[i]
+            lls += loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.ImportanceWeights[i][j] / data.TotImportanceWeights[i] 
         end
+        if use_sampling_weight
+            lls *= data.model.SamplingWeights[i]
+        end
+        ll += lls
     end
 
     # return the log-likelihood
@@ -279,14 +283,17 @@ end
 
 Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data. 
 """
-function loglik!(parameters, logliks::Vector{}, data::SMPanelData)
+function loglik!(parameters, logliks::Vector{}, data::SMPanelData; use_sampling_weight = false)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     for i in eachindex(data.paths)
         for j in eachindex(data.paths[i])
-            logliks[i][j] = loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.model.SamplingWeights[i]
+            logliks[i][j] = loglik(pars, data.paths[i][j], data.model.hazards, data.model)
+            if use_sampling_weight 
+                logliks[i][j] *= data.model.SamplingWeights[i]
+            end
         end
     end
 end
