@@ -1,15 +1,15 @@
 """
-    mcem_mll(logliks, ImportanceWeights, TotImportanceWeights)
+    mcem_mll(logliks, ImportanceWeights, TotImportanceWeights, SamplingWeights)
 
 Compute the marginal log likelihood for MCEM.
 """
-function mcem_mll(logliks, ImportanceWeights, TotImportanceWeights)
+function mcem_mll(logliks, ImportanceWeights, TotImportanceWeights, SamplingWeights)
 
     obj = 0.0
     
     for i in eachindex(logliks)
         for j in eachindex(logliks[i])
-            obj += logliks[i][j] * ImportanceWeights[i][j] / TotImportanceWeights[i]
+            obj += logliks[i][j] * ImportanceWeights[i][j] / TotImportanceWeights[i] * SamplingWeights[i]
         end
     end
 
@@ -37,15 +37,15 @@ end
 
 
 """
-    mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights)
+    mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, SamplingWeights)
 
 Asymptotic standard error of the change in the MCEM objective function.
 """
-function mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights)
+function mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, SamplingWeights)
 
     VarRis = 0.0
     for i in eachindex(TotImportanceWeights)
-        VarRis += var_ris(loglik_target_prop[i] - loglik_target_cur[i], ImportanceWeights[i], TotImportanceWeights[i]) / length(ImportanceWeights[i])
+        VarRis += var_ris(loglik_target_prop[i] - loglik_target_cur[i], ImportanceWeights[i], TotImportanceWeights[i]) / length(ImportanceWeights[i]) * SamplingWeights[i]
     end
 
     # return the asymptotic standard error

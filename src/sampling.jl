@@ -47,8 +47,8 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 
         for j in npaths.+(1:npaths_additional)
             samplepaths[i][j]       = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2])
-            loglik_surrog[i][j]     = loglik(surrogate.parameters, samplepaths[i][j], surrogate.hazards, model) * model.SamplingWeights[i]
-            loglik_target_cur[i][j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i][j], model.hazards, model) * model.SamplingWeights[i]
+            loglik_surrog[i][j]     = loglik(surrogate.parameters, samplepaths[i][j], surrogate.hazards, model)
+            loglik_target_cur[i][j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i][j], model.hazards, model) 
             ImportanceWeights[i][j] = exp(loglik_target_cur[i][j] - loglik_surrog[i][j])
         end
 

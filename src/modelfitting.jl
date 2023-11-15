@@ -268,7 +268,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         surrogate = surrogate)
     
     # get current estimate of marginal log likelihood
-    mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
+    mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights, model.SamplingWeights)
 
     # generate optimization problem
     if isnothing(constraints)
@@ -311,7 +311,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             surrogate = surrogate)
 
         # recalculate the marginal log likelihood 
-        mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights)
+        mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights, model.SamplingWeights)
 
         # optimize the monte carlo marginal likelihood
         if verbose 
@@ -329,16 +329,16 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # just make sure they're not equal
         if params_prop != params_cur 
             # recalculate the log likelihoods
-            loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
+            loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights); use_sampling_weight = false)
     
             # recalculate the marginal log likelihood
-            mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, TotImportanceWeights)
+            mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, TotImportanceWeights, model.SamplingWeights)
     
             # change in mll
             mll_change = mll_prop - mll_cur
     
             # calculate the ASE for ΔQ
-            ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights)
+            ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, model.SamplingWeights)
     
              # calculate the lower bound for ΔQ
             ascent_lb = quantile(Normal(mll_change, ase), α)
