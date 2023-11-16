@@ -1,13 +1,13 @@
 
 """
-GetLoglik(model::MultistateModelFitted) 
+get_loglik(model::MultistateModelFitted) 
 
-Return the maximum likelihood estimates. 
+Return the log likelihood at the maximum likelihood estimates. 
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
 """
-function GetLoglik(model::MultistateModelFitted) 
+function get_loglik(model::MultistateModelFitted) 
     model.loglik
 end
 
@@ -19,7 +19,7 @@ Return the maximum likelihood estimates.
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
 """
-function GetParameters(model::MultistateModelFitted)
+function get_parameters(model::MultistateModelFitted)
     model.parameters
 #    reduce(vcat, model.parameters)
 end
@@ -33,27 +33,27 @@ Return the variance covariance matrix at the maximum likelihood estimate.
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
 """
-function GetVcov(model::MultistateModelFitted) 
+function get_vcov(model::MultistateModelFitted) 
     model.vcov
 end
 
 
 """
-    optim(model::MultistateModelFitted) 
+    get_convergence_records(model::MultistateModelFitted) 
 
-Return the variance covariance matrix at the maximum likelihood estimate. 
+Return the convergence records for the fit. 
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
 """
-function GetConvergenceRecords(model::MultistateModelFitted) 
+function get_convergence_records(model::MultistateModelFitted) 
     model.ConvergenceRecords
 end
 
 """
     summary(model::MultistateModelFitted) 
 
-Return the variance covariance matrix at the maximum likelihood estimate. 
+Summary of model output. 
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
@@ -62,10 +62,10 @@ Return the variance covariance matrix at the maximum likelihood estimate.
 function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95) 
     
     # maximum likelihood estimates
-    mle=GetParameters(model)
+    mle=get_parameters(model)
     
     # standard error
-    vcov = GetVcov(model)
+    vcov = get_vcov(model)
     se = sqrt.(vcov[diagind(vcov)])
     se_vv = VectorOfVectors(se, model.parameters.elem_ptr)
 
@@ -88,7 +88,7 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95)
     summary_table = (;zip(haznames, summary_table)...)
     
     # log likelihood
-    ll = MultistateModels.GetLoglik(model)
+    ll = get_loglik(model)
 
     # information criteria
     p = length(reduce(vcat, mle))
