@@ -3,7 +3,7 @@
 
 Fit a multistate model given exactly observed sample paths.
 """
-function fit(model::MultistateModel; constraints = nothing)
+function fit(model::MultistateModel; constraints = nothing, verbose = true)
 
     # initialize array of sample paths
     samplepaths = extract_paths(model; self_transitions = false)
@@ -66,7 +66,7 @@ end
 
 Fit a multistate markov model to interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities), or a mix of panel data and exact jump times.
 """
-function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing)
+function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
