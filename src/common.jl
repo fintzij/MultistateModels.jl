@@ -389,7 +389,6 @@ end
     SMPanelData(model::MultistateProcess
     paths::Vector{Vector{SamplePath}}
     ImportanceWeights::Vector{Vector{Float64}}
-    TotImportanceWeights::Vector{Float64})
 
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate semi-Markov model to panel data via MCEM.
 """
@@ -397,6 +396,5 @@ struct SMPanelData
     model::MultistateProcess
     paths::Vector{Vector{SamplePath}}
     ImportanceWeights::Vector{Vector{Float64}}
-    TotImportanceWeights::Vector{Float64}
 end
 

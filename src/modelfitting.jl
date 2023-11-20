@@ -146,14 +146,14 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - α: standard normal quantile for asymptotic lower bound for ascent
 - γ: standard normal quantile for stopping the MCEM algorithm
 - κ: Inflation factor for target ESS per person, ESS_new = ESS_cur * κ
-- MaxSamplingEffort: factor of the ESS needed to trigger subsampling
+- MaxSamplingEffort: factor of the ESS at which to break the loop for sampling additional paths
 - npaths_additional: increment for number of additional paths when augmenting the pool of paths
 - verbose: print status
 - return_ConvergenceRecords: save history throughout the run
 - return_ProposedPaths: save latent paths and importance weights
 """
 function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
-    optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.01, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
+    optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.01, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 25, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -193,15 +193,18 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     ess_target = ess_target_initial
 
     # containers for latent sample paths, proposal and target log likelihoods, importance sampling weights
-    TotImportanceWeights = zeros(nsubj)
     ess_cur = zeros(nsubj)
 
     # initialize containers
     samplepaths     = [sizehint!(Vector{SamplePath}(), ess_target_initial * MaxSamplingEffort * 20) for i in 1:nsubj]
-    loglik_surrog   = [sizehint!(Vector{Float64}(undef, 0), ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
-    loglik_target_cur  = [sizehint!(Vector{Float64}(undef, 0), ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
-    loglik_target_prop = [sizehint!(Vector{Float64}(undef, 0), ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
-    ImportanceWeights  = [sizehint!(Vector{Float64}(undef, 0), ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+    loglik_surrog   = [sizehint!(Vector{Float64}(undef, 0), 
+        ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+    loglik_target_cur  = [sizehint!(Vector{Float64}(undef, 0), 
+        ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+    loglik_target_prop = [sizehint!(Vector{Float64}(undef, 0), 
+        ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+    ImportanceWeights  = [sizehint!(Vector{Float64}(undef, 0), 
+        ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
 
     # containers for traces
     mll_trace = Vector{Float64}() # marginal loglikelihood
@@ -261,22 +264,23 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         loglik_target_prop = loglik_target_prop, 
         loglik_target_cur = loglik_target_cur, 
         ImportanceWeights = ImportanceWeights, 
-        TotImportanceWeights = TotImportanceWeights, tpm_book_surrogate = tpm_book_surrogate, hazmat_book_surrogate = hazmat_book_surrogate, 
+        tpm_book_surrogate = tpm_book_surrogate, 
+        hazmat_book_surrogate = hazmat_book_surrogate, 
         books = books, 
         npaths_additional = npaths_additional, 
         params_cur = params_cur, 
         surrogate = surrogate)
     
     # get current estimate of marginal log likelihood
-    mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights, model.SamplingWeights)
+    mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
 
     # generate optimization problem
     if isnothing(constraints)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-        prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights))
+        prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights))
     else
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
-        prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
+        prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
     end
 
     # print output
@@ -294,24 +298,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # start algorithm
     while keep_going
 
-        # ensure that ess per person is sufficient
-        DrawSamplePaths!(model; 
-            ess_target = ess_target, 
-            ess_cur = ess_cur, 
-            MaxSamplingEffort = MaxSamplingEffort,
-            samplepaths = samplepaths, 
-            loglik_surrog = loglik_surrog, 
-            loglik_target_prop = loglik_target_prop, 
-            loglik_target_cur = loglik_target_cur, 
-            ImportanceWeights = ImportanceWeights, 
-            TotImportanceWeights = TotImportanceWeights,    tpm_book_surrogate = tpm_book_surrogate,   hazmat_book_surrogate = hazmat_book_surrogate, 
-            books = books, 
-            npaths_additional = npaths_additional, 
-            params_cur = params_cur, 
-            surrogate = surrogate)
-
         # recalculate the marginal log likelihood 
-        mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, TotImportanceWeights, model.SamplingWeights)
+        mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
 
         # optimize the monte carlo marginal likelihood
         if verbose 
@@ -319,9 +307,9 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         end
 
         if isnothing(constraints)
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), Newton()) # hessian-based
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Newton()) # hessian-based
         else
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights)), IPNewton())
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), IPNewton())
         end
 
         params_prop = params_prop_optim.u
@@ -329,16 +317,16 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # just make sure they're not equal
         if params_prop != params_cur 
             # recalculate the log likelihoods
-            loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights, TotImportanceWeights); use_sampling_weight = false)
+            loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights); use_sampling_weight = false)
     
             # recalculate the marginal log likelihood
-            mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, TotImportanceWeights, model.SamplingWeights)
+            mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, model.SamplingWeights)
     
             # change in mll
             mll_change = mll_prop - mll_cur
     
             # calculate the ASE for ΔQ
-            ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, TotImportanceWeights, model.SamplingWeights)
+            ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, model.SamplingWeights)
     
              # calculate the lower bound for ΔQ
             ascent_lb = quantile(Normal(mll_change, ase), α)
@@ -357,6 +345,20 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             # increase the target ess for the factor κ
             ess_target = ceil(κ*ess_target)
 
+            # ensure that ess per person is sufficient
+            DrawSamplePaths!(model; 
+                ess_target = ess_target, 
+                ess_cur = ess_cur, 
+                MaxSamplingEffort = MaxSamplingEffort,
+                samplepaths = samplepaths, 
+                loglik_surrog = loglik_surrog, 
+                loglik_target_prop = loglik_target_prop, 
+                loglik_target_cur = loglik_target_cur, 
+                ImportanceWeights = ImportanceWeights,   tpm_book_surrogate = tpm_book_surrogate,   hazmat_book_surrogate = hazmat_book_surrogate, 
+                books = books, 
+                npaths_additional = npaths_additional, 
+                params_cur = params_cur, 
+                surrogate = surrogate)
         else
             # increment the iteration
             iter += 1
@@ -370,9 +372,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             
             # recalculate the importance ImportanceWeights and ess
             for i in 1:nsubj
-                ImportanceWeights[i] = exp.(loglik_target_cur[i] .- loglik_surrog[i])
-                TotImportanceWeights[i] = sum(ImportanceWeights[i])
-                ess_cur[i] = 1 / sum((ImportanceWeights[i] ./ TotImportanceWeights[i]) .^ 2)
+                logweights = reshape(loglik_target_cur[i] - loglik_surrog[i], 1, length(loglik_target_cur[i]), 1) 
+                psiw = psis(logweights; source = "other");
+                # save importance weights and ess
+                copyto!(ImportanceWeights[i], psiw.weights)
+                ess_cur[i] = psiw.ess[1]
             end
 
             # save marginal log likelihood, parameters and effective sample size
@@ -476,14 +480,12 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             for j in 1:npaths
                 fisher_i1 .+= ImportanceWeights[i][j] * (-hesns[:,:,j] - grads[:,j] * transpose(grads[:,j]))
             end
-            fisher_i1 ./= TotImportanceWeights[i]
 
             for j in 1:npaths
                 for k in 1:npaths
                     fisher_i2 .+= ImportanceWeights[i][j] * ImportanceWeights[i][k] * grads[:,j] * transpose(grads[:,k])
                 end
             end
-            fisher_i2 ./= TotImportanceWeights[i]^2
 
             fisher[:,:,i] = fisher_i1 + fisher_i2
         end

@@ -266,7 +266,7 @@ function loglik(parameters, data::SMPanelData; neg = true, use_sampling_weight =
     for i in eachindex(data.paths)
         lls = 0.0
         for j in eachindex(data.paths[i])
-            lls += loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.ImportanceWeights[i][j] / data.TotImportanceWeights[i] 
+            lls += loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.ImportanceWeights[i][j] 
         end
         if use_sampling_weight
             lls *= data.model.SamplingWeights[i]
@@ -290,10 +290,7 @@ function loglik!(parameters, logliks::Vector{}, data::SMPanelData; use_sampling_
 
     for i in eachindex(data.paths)
         for j in eachindex(data.paths[i])
-            logliks[i][j] = loglik(pars, data.paths[i][j], data.model.hazards, data.model)
-            if use_sampling_weight 
-                logliks[i][j] *= data.model.SamplingWeights[i]
-            end
+            logliks[i][j] = use_sampling_weight ? loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.model.SamplingWeights[i] : loglik(pars, data.paths[i][j], data.model.hazards, data.model)
         end
     end
 end
