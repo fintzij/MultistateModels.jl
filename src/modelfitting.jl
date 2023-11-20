@@ -1,9 +1,9 @@
 """
-    fit(model::MultistateModel; constraints = nothing)
+    fit(model::MultistateModel; constraints = nothing, compute_vcov = true)
 
 Fit a multistate model given exactly observed sample paths.
 """
-function fit(model::MultistateModel; constraints = nothing, verbose = true)
+function fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true)
 
     # initialize array of sample paths
     samplepaths = extract_paths(model; self_transitions = false)
@@ -12,15 +12,20 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true)
     parameters = flatview(model.parameters)
 
     # parse constraints, or not, and solve
-    if isnothing(constraints)
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-        prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
-        sol  = solve(prob, Newton())
-
-        # get hessian
-        ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
-        gradient = ForwardDiff.gradient(ll, sol.u)
-        vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
+    if isnothing(constraints) 
+        if compute_vcov
+            optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+            prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
+            sol  = solve(prob, Newton())
+    
+            # get hessian
+            ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
+            gradient = ForwardDiff.gradient(ll, sol.u)
+            vcov = pinv(Symmetric(.-ForwardDiff.hessian(ll, sol.u)))
+            vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
+        else
+            vcov = nothing
+        end
     else
         # create constraint function and check that constraints are satisfied at the initial values
         _constraints = deepcopy(constraints)
@@ -62,11 +67,11 @@ end
 
 
 """
-    fit(model::MultistateMarkovModel; constraints = nothing)
+    fit(model::MultistateMarkovModel; constraints = nothing, verbose = true, compute_vcov = true)
 
 Fit a multistate markov model to interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities), or a mix of panel data and exact jump times.
 """
-function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true)
+function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, compute_vcov = true)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -76,14 +81,19 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
     # parse constraints, or not, and solve
     if isnothing(constraints)
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-        prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-        sol  = solve(prob, Newton())
+        if compute_vcov
+            optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+            prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
+            sol  = solve(prob, Newton())
 
-        # get the variance-covariance matrix
-        ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
-        gradient = ForwardDiff.gradient(ll, sol.u)
-        vcov = pinv(.-ForwardDiff.hessian(ll, sol.u))
+            # get the variance-covariance matrix
+            ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
+            gradient = ForwardDiff.gradient(ll, sol.u)
+            vcov = pinv(Symmetric(.-ForwardDiff.hessian(ll, sol.u)))
+            vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
+        else
+            vcov = nothing
+        end
     else
         # create constraint function and check that constraints are satisfied at the initial values
         _constraints = deepcopy(constraints)
@@ -125,11 +135,7 @@ end
 
 
 """
-fit(model::Union{MultistateSemiMarkovModel,MultistateSemiMarkovModelCensored};
-constraints = nothing, npaths_initial = 10, npaths_max = 500, maxiter = 100, tol = 1e-4, α = 0.1, γ = 0.05, κ = 3,
-    surrogate_parameter = nothing, ess_target_initial = 50,
-    MaxSamplingEffort = 10,
-    verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
+fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.01, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true)
 
 Fit a semi-Markov model to panel data via Monte Carlo EM.
 
@@ -151,9 +157,9 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - verbose: print status
 - return_ConvergenceRecords: save history throughout the run
 - return_ProposedPaths: save latent paths and importance weights
+- compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored};
-    optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.01, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 25, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = true)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.01, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -194,6 +200,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
     # containers for latent sample paths, proposal and target log likelihoods, importance sampling weights
     ess_cur = zeros(nsubj)
+    psis_pareto_k = zeros(nsubj)
 
     # initialize containers
     samplepaths     = [sizehint!(Vector{SamplePath}(), ess_target_initial * MaxSamplingEffort * 20) for i in 1:nsubj]
@@ -269,7 +276,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         books = books, 
         npaths_additional = npaths_additional, 
         params_cur = params_cur, 
-        surrogate = surrogate)
+        surrogate = surrogate, 
+        psis_pareto_k = psis_pareto_k)
     
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
@@ -286,7 +294,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # print output
     if verbose
         println("Initial target ESS: $(round(ess_target;digits=2)) per-subject")
-        println("Range of the number of sample paths per-subject: [$(min(length.(samplepaths)...)), $(max(length.(samplepaths)...))]")
+        println("Range of the number of sample paths per-subject: [$(round(ess_target;digits=2)), $(max(length.(samplepaths)...))]")
         println("Estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))\n")
 
         println("Starting Monte Carlo EM...\n")
@@ -358,7 +366,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                 books = books, 
                 npaths_additional = npaths_additional, 
                 params_cur = params_cur, 
-                surrogate = surrogate)
+                surrogate = surrogate,
+                psis_pareto_k = psis_pareto_k)
         else
             # increment the iteration
             iter += 1
@@ -372,11 +381,14 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             
             # recalculate the importance ImportanceWeights and ess
             for i in 1:nsubj
-                logweights = reshape(loglik_target_cur[i] - loglik_surrog[i], 1, length(loglik_target_cur[i]), 1) 
-                psiw = psis(logweights; source = "other");
+                if length(ImportanceWeights[i]) != 1
+                    logweights = reshape(loglik_target_cur[i] - loglik_surrog[i], 1, length(loglik_target_cur[i]), 1) 
+                    psiw = psis(logweights; source = "other");
                 # save importance weights and ess
-                copyto!(ImportanceWeights[i], psiw.weights)
-                ess_cur[i] = psiw.ess[1]
+                    copyto!(ImportanceWeights[i], psiw.weights)
+                    ess_cur[i] = psiw.ess[1]
+                    psis_pareto_k[i] = psiw.pareto_k[1]
+                end
             end
 
             # save marginal log likelihood, parameters and effective sample size
@@ -387,7 +399,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             if verbose
                 println("Iteration: $iter")
                 println("Current target ESS: $(round(ess_target;digits=2)) per-subject")
-                println("Range of the number of sample paths per-subject: [$(min(length.(samplepaths)...)), $(max(length.(samplepaths)...))]")
+                println("Range of the number of sample paths per-subject: [$(round(ess_target;digits=2)), $(max(length.(samplepaths)...))]")
                 println("Current estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))")
                 println("Reweighted prior estimate of the marginal log-likelihood: $(round(mll_prop;digits=3))")
                 println("Change in marginal log-likelihood: $(round(mll_change;sigdigits=3))")
@@ -430,76 +442,80 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     
     elseif convergence
 
-        if verbose
-            println("Computing variance-covariance matrix at final estimates.")
-        end
-
-        # initialize Fisher information matrix
-        fisher = zeros(Float64, length(params_cur), length(params_cur), nsubj)
+        if compute_vcov
+            if verbose
+                println("Computing variance-covariance matrix at final estimates.")
+            end
+    
+            # initialize Fisher information matrix
+            fisher = zeros(Float64, length(params_cur), length(params_cur), nsubj)
+            
+            # set up containers for path and sampling weight
+            path = Array{SamplePath}(undef, 1)
+            samplingweight = Vector{Float64}(undef, 1)
         
-        # set up containers for path and sampling weight
-        path = Array{SamplePath}(undef, 1)
-        samplingweight = Vector{Float64}(undef, 1)
+            # container for gradient and hessian
+            diffres = DiffResults.HessianResult(params_cur)
+            fisher_i1 = zeros(Float64, length(params_cur), length(params_cur))
+            fisher_i2 = similar(fisher_i1)
+        
+            # define objective
+            ll = pars -> (loglik(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
     
-        # container for gradient and hessian
-        diffres = DiffResults.HessianResult(params_cur)
-        fisher_i1 = zeros(Float64, length(params_cur), length(params_cur))
-        fisher_i2 = similar(fisher_i1)
+            # accumulate Fisher information
+            for i in 1:nsubj
     
-        # define objective
-        ll = pars -> (loglik(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
-
-        # accumulate Fisher information
-        for i in 1:nsubj
-
-            # set importance weight
-            samplingweight[1] = model.SamplingWeights[i]
-
-            # number of paths
-            npaths = length(samplepaths[i])
-
-            # for accumulating gradients and hessians
-            grads = Array{Float64}(undef, length(params_cur), length(samplepaths[i]))
-            hesns = Array{Float64}(undef, length(params_cur), length(params_cur), npaths)
-
-            # reset matrices for accumulating Fisher info contributions
-            fill!(fisher_i1, 0.0)
-            fill!(fisher_i2, 0.0)
-
-            # calculate gradient and hessian for paths
-            for j in 1:npaths
-                path[1] = samplepaths[i][j]
-                diffres = ForwardDiff.hessian!(diffres, ll, params_cur)
-
-                # grab hessian and gradient
-                hesns[:,:,j] = DiffResults.hessian(diffres)
-                grads[:,j] = DiffResults.gradient(diffres)
-            end
-
-            # accumulate
-            for j in 1:npaths
-                fisher_i1 .+= ImportanceWeights[i][j] * (-hesns[:,:,j] - grads[:,j] * transpose(grads[:,j]))
-            end
-
-            for j in 1:npaths
-                for k in 1:npaths
-                    fisher_i2 .+= ImportanceWeights[i][j] * ImportanceWeights[i][k] * grads[:,j] * transpose(grads[:,k])
+                # set importance weight
+                samplingweight[1] = model.SamplingWeights[i]
+    
+                # number of paths
+                npaths = length(samplepaths[i])
+    
+                # for accumulating gradients and hessians
+                grads = Array{Float64}(undef, length(params_cur), length(samplepaths[i]))
+                hesns = Array{Float64}(undef, length(params_cur), length(params_cur), npaths)
+    
+                # reset matrices for accumulating Fisher info contributions
+                fill!(fisher_i1, 0.0)
+                fill!(fisher_i2, 0.0)
+    
+                # calculate gradient and hessian for paths
+                for j in 1:npaths
+                    path[1] = samplepaths[i][j]
+                    diffres = ForwardDiff.hessian!(diffres, ll, params_cur)
+    
+                    # grab hessian and gradient
+                    hesns[:,:,j] = DiffResults.hessian(diffres)
+                    grads[:,j] = DiffResults.gradient(diffres)
                 end
+    
+                # accumulate
+                for j in 1:npaths
+                    fisher_i1 .+= ImportanceWeights[i][j] * (-hesns[:,:,j] - grads[:,j] * transpose(grads[:,j]))
+                end
+    
+                for j in 1:npaths
+                    for k in 1:npaths
+                        fisher_i2 .+= ImportanceWeights[i][j] * ImportanceWeights[i][k] * grads[:,j] * transpose(grads[:,k])
+                    end
+                end
+    
+                fisher[:,:,i] = fisher_i1 + fisher_i2
             end
-
-            fisher[:,:,i] = fisher_i1 + fisher_i2
+    
+            # get the variance-covariance matrix
+            vcov = pinv(Symmetric(reduce(+, fisher, dims = 3)[:,:,1]))
+            vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64))] .= 0.0
+        else
+            vcov = nothing
         end
-
-        # get the variance-covariance matrix
-        vcov = pinv(Symmetric(reduce(+, fisher, dims = 3)[:,:,1]))
-        vcov[isapprox.(vcov, 0.0; atol = min(tol, sqrt(eps(Float64))))] .= 0.0
     else
         @warn "MCEM did not converge."
         vcov = nothing
     end
 
     # return convergence records
-    ConvergenceRecords = return_ConvergenceRecords ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace) : nothing
+    ConvergenceRecords = return_ConvergenceRecords ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
 
     # return sampled paths and importance weights
     ProposedPaths = return_ProposedPaths ? (paths=samplepaths, weights=ImportanceWeights) : nothing
