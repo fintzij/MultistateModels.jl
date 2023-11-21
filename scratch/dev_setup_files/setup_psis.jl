@@ -45,7 +45,7 @@ dat = cens == 1 ? reduce(vcat, map(x -> observe_subjpath(x, model_sim), paths)) 
 
 ### set up model for fitting
 dat_collapsed, weights = collapse_data(dat)
-model = setup_model(; make_pars = false, data = dat_collapsed, SamplingWeights = weights, family = "exp")
+model = setup_model(; make_pars = false, data = dat_collapsed, SamplingWeights = weights, family = "wei")
 
 # try fitting
-runtime = @elapsed fitted = fit(model)
+t = @elapsed model_fitted = fit(model)
