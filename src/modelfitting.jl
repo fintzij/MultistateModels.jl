@@ -13,11 +13,12 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
 
     # parse constraints, or not, and solve
     if isnothing(constraints) 
+        # get estimates
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+        prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
+        sol  = solve(prob, Newton())
+        
         if compute_vcov
-            optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-            prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
-            sol  = solve(prob, Newton())
-    
             # get hessian
             ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
             gradient = ForwardDiff.gradient(ll, sol.u)
@@ -81,11 +82,12 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
     # parse constraints, or not, and solve
     if isnothing(constraints)
-        if compute_vcov
-            optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-            prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-            sol  = solve(prob, Newton())
+        # get estimates
+        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+        prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
+        sol  = solve(prob, Newton())
 
+        if compute_vcov
             # get the variance-covariance matrix
             ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
             gradient = ForwardDiff.gradient(ll, sol.u)
