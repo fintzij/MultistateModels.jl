@@ -130,7 +130,7 @@ function simulate_path(model::MultistateProcess, subj::Int64)
         if (u < (cuminc + interval_incid)) && (u >= cuminc)
 
             # update the current time
-            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false, newtime = true))) - log(u))^2), 0.0, tstop - tcur, rtol = eps(Float64))
+            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false, newtime = true))) - log(u))^2), 0.0, tstop - tcur)
 
             if Optim.converged(timeincrement)
                 timeinstate += timeincrement.minimizer
