@@ -512,6 +512,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         fisherinfo = Symmetric(reduce(+, fisher, dims = 3)[:,:,1])
         fisherinfo[findall(isapprox.(vcov, 0.0; atol = sqrt(eps(Float64))))] .= 0.0
         vcov = Symmetric(pinv(fisherinfo))
+        vcov[findall(isapprox.(vcov, 0.0; atol = sqrt(eps(Float64))))] .= 0.0
     else
         vcov = nothing
     end
