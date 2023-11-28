@@ -23,7 +23,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
             ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
             gradient = ForwardDiff.gradient(ll, sol.u)
             vcov = pinv(Symmetric(.-ForwardDiff.hessian(ll, sol.u)))
-            vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
+            vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
             vcov = Symmetric(vcov)
         else
             vcov = nothing
@@ -94,7 +94,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
             ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
             gradient = ForwardDiff.gradient(ll, sol.u)
             vcov = pinv(Symmetric(.-ForwardDiff.hessian(ll, sol.u)))
-            vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
+            vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
             vcov = Symmetric(vcov)
         else
             vcov = nothing
@@ -512,9 +512,9 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         # get the variance-covariance matrix
         fisherinfo = Symmetric(reduce(+, fisher, dims = 3)[:,:,1])
-        fisherinfo[findall(isapprox.(fisherinfo, 0.0; atol = sqrt(eps(Float64))))] .= 0.0
+        fisherinfo[findall(isapprox.(fisherinfo, 0.0; atol = eps(Float64)))] .= 0.0
         vcov = Symmetric(pinv(fisherinfo))
-        vcov[findall(isapprox.(vcov, 0.0; atol = sqrt(eps(Float64))))] .= 0.0
+        vcov[findall(isapprox.(vcov, 0.0; atol = eps(Float64)))] .= 0.0
     else
         vcov = nothing
     end
