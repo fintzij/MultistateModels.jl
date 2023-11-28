@@ -34,7 +34,6 @@ function var_ris(l, w)
     vris < eps(Float64) ? 0.0 : vris
 end
 
-
 """
     mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, SamplingWeights)
 
