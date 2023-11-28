@@ -299,7 +299,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # print output
     if verbose
         println("Initial target ESS: $(round(ess_target;digits=2)) per-subject")
-        println("Range of the number of sample paths per-subject: [$(round(ess_target;digits=2)), $(max(length.(samplepaths)...))]")
+        println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(max(length.(samplepaths)...))]")
         println("Estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))\n")
 
         println("Starting Monte Carlo EM...\n")
@@ -404,7 +404,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             if verbose
                 println("Iteration: $iter")
                 println("Current target ESS: $(round(ess_target;digits=2)) per-subject")
-                println("Range of the number of sample paths per-subject: [$(round(ess_target;digits=2)), $(max(length.(samplepaths)...))]")
+                println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(max(length.(samplepaths)...))]")
                 println("Current estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))")
                 println("Reweighted prior estimate of the marginal log-likelihood: $(round(mll_prop;digits=3))")
                 println("Change in marginal log-likelihood: $(round(mll_change;sigdigits=3))")
