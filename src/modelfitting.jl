@@ -24,6 +24,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
             gradient = ForwardDiff.gradient(ll, sol.u)
             vcov = pinv(Symmetric(.-ForwardDiff.hessian(ll, sol.u)))
             vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
+            vcov = Symmetric(vcov)
         else
             vcov = nothing
         end
@@ -52,7 +53,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
         -sol.minimum,
-        Symmetric(vcov),
+        vcov,
         model.hazards,
         model.totalhazards,
         model.tmat,
@@ -94,6 +95,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
             gradient = ForwardDiff.gradient(ll, sol.u)
             vcov = pinv(Symmetric(.-ForwardDiff.hessian(ll, sol.u)))
             vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
+            vcov = Symmetric(vcov)
         else
             vcov = nothing
         end
@@ -122,7 +124,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
         -sol.minimum,
-        Symmetric(vcov),
+        vcov,
         model.hazards,
         model.totalhazards,
         model.tmat,
@@ -528,7 +530,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         model.data,
         VectorOfVectors(params_cur, model.parameters.elem_ptr),
         mll_cur,
-        Symmetric(vcov),
+        vcov,
         model.hazards,
         model.totalhazards,
         model.tmat,
