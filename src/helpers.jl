@@ -23,7 +23,7 @@ function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVect
 
     for i in eachindex(model.parameters)
         if(length(model.parameters[i]) != length(newvalues[i]))
-            error("New values for hazard $i and model parameters for that hazard are not of the same length.")
+            @error "New values for hazard $i and model parameters for that hazard are not of the same length."
         end
         copyto!(model.parameters[i], newvalues[i])
     end
@@ -32,18 +32,18 @@ end
 """
     set_parameters!(model::MultistateProcess, newvalues::Tuple)
 
-Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assigns new values to `model.parameters[i]`, where `i` indexes the cause-specific hazards in the order they appear in the model object.
+Set model parameters given a tuple of vectors parameterizing transition intensities. Assigns new values to `model.parameters[i]`, where `i` indexes the transition intensities in the order they appear in the model object.
 """
 function set_parameters!(model::MultistateProcess, newvalues::Tuple)
     # check that there is a vector of parameters for each cause-specific hazard
     if(length(model.parameters) != length(newvalues))
-        error("Number of supplied parameter vectors not equal to number of cause-specific hazards.")
+        error("Number of supplied parameter vectors not equal to number of transition intensities.")
     end
 
     for i in eachindex(newvalues)
         # check that we have the right number of parameters
         if(length(model.parameters[i]) != length(newvalues[i]))
-            error("New values and parameters for cause-specific hazard $i are not of the same length.")
+            @error "New values and parameters for cause-specific hazard $i are not of the same length."
         end
 
         copyto!(model.parameters[i], newvalues[i])                   
@@ -53,7 +53,7 @@ end
 """
     set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
 
-Set model parameters given a tuple of vectors parameterizing cause-specific hazards. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  
+Set model parameters given a tuple of vectors parameterizing transition intensities. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  
 """
 function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
     

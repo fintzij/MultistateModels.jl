@@ -3,7 +3,6 @@ using ArraysOfArrays
 using Chain
 using DataFrames
 using Distributions
-using JLD2 # for saving files
 using LinearAlgebra
 using MultistateModels
 using ParetoSmooth
