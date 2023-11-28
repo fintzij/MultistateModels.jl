@@ -10,17 +10,17 @@ using ExponentialUtilities
 using ForwardDiff
 using LinearAlgebra
 using MacroTools
-using OrderedCollections
 using Optim # for simulation - keep
 using Optimization # for fitting - keep
+using OrderedCollections
 using OptimizationOptimJL
 using ParetoSmooth
 using QuadGK
 using RCall
 using RuntimeGeneratedFunctions
 using StatsBase
-using StatsModels
 using StatsFuns
+using StatsModels
 
 # need to import fit to overload and reexport it
 import StatsBase.fit
