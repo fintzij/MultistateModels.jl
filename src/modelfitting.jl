@@ -16,7 +16,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         # get estimates
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
-        sol  = solve(prob, NewtonTrustRegion())
+        sol  = solve(prob, Newton())
         
         # get vcov
         if compute_vcov
@@ -86,7 +86,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         # get estimates
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-        sol  = solve(prob, NewtonTrustRegion())
+        sol  = solve(prob, Newton())
 
         # get vcov
         if compute_vcov
@@ -320,7 +320,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         end
 
         if isnothing(constraints)
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), NewtonTrustRegion()) # hessian-based
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Newton()) # hessian-based
         else
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), IPNewton())
         end

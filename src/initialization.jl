@@ -8,8 +8,8 @@ function set_crude_init!(model::MultistateProcess)
     crude_par = calculate_crude(model)
 
     for i in model.hazards
-        set_par_to = isa(model.hazards[i], _Spline) ? init_par(i, crude_par[i.statefrom, i.stateto]) : init_par(i, log(crude_par[i.statefrom, i.stateto]))
-        
+        set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
+
         set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
     end
 end
