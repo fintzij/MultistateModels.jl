@@ -511,10 +511,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         end
 
         # get the variance-covariance matrix
-        fisherinfo = Symmetric(reduce(+, fisher, dims = 3)[:,:,1])
+        fisherinfo = reduce(+, fisher, dims = 3)[:,:,1]
         fisherinfo[findall(isapprox.(fisherinfo, 0.0; atol = eps(Float64)))] .= 0.0
-        vcov = Symmetric(pinv(fisherinfo))
+        vcov = pinv(Symmetric(fisherinfo))
         vcov[findall(isapprox.(vcov, 0.0; atol = eps(Float64)))] .= 0.0
+        vcov = Symmetric(vcov)
     else
         vcov = nothing
     end
