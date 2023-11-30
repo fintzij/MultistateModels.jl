@@ -360,6 +360,16 @@ function next_state_probs!(ns_probs, t, scur, ind, parameters, hazards, totalhaz
     # calculate log hazards for possible transitions + normalize
     ns_probs[trans_inds] = 
         softmax(map(x -> call_haz(t, parameters[x], ind, hazards[x]; newtime = newtime), totalhazards[scur].components))
+
+    # catch for numerical instabilities (weird edge case)
+    if any(isnan.(ns_probs))
+        pisnan = findall(isnan.(ns_probs))
+        if length(pisnan) == 1
+            ns_probs[pisnan] = 1 - sum(ns_probs[Not(pisnan)])
+        else
+            ns_probs[pisnan] .= 1 - sum(ns_probs[Not(pisnan)])/length(pisnan)
+        end        
+    end
 end
 
 """
@@ -392,6 +402,16 @@ function next_state_probs(t, scur, ind, parameters, hazards, totalhazards, tmat;
     # normalize ns_probs
     ns_probs[trans_inds] = 
         softmax(ns_probs[totalhazards[scur].components])
+
+    # catch for numerical instabilities (weird edge case)
+    if any(isnan.(ns_probs))
+        pisnan = findall(isnan.(ns_probs))
+        if length(pisnan) == 1
+            ns_probs[pisnan] = 1 - sum(ns_probs[Not(pisnan)])
+        else
+            ns_probs[pisnan] .= 1 - sum(ns_probs[Not(pisnan)])/length(pisnan)
+        end        
+    end
 
     # return the next state probabilities
     return ns_probs

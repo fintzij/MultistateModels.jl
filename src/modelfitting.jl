@@ -23,7 +23,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
             ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
             gradient = ForwardDiff.gradient(ll, sol.u)
             vcov = pinv(Symmetric(.-ForwardDiff.hessian(ll, sol.u)))
-            vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
+            vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
             vcov = Symmetric(vcov)
         else
             vcov = nothing
@@ -94,7 +94,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
             ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
             gradient = ForwardDiff.gradient(ll, sol.u)
             vcov = pinv(Symmetric(.-ForwardDiff.hessian(ll, sol.u)))
-            vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
+            vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
             vcov = Symmetric(vcov)
         else
             vcov = nothing
@@ -164,7 +164,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.01, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-3, α = 0.05, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -512,9 +512,9 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         # get the variance-covariance matrix
         fisherinfo = reduce(+, fisher, dims = 3)[:,:,1]
-        fisherinfo[findall(isapprox.(fisherinfo, 0.0; atol = eps(Float64)))] .= 0.0
+        fisherinfo[findall(isapprox.(fisherinfo, 0.0; atol = sqrt(eps(Float64))))] .= 0.0
         vcov = pinv(Symmetric(fisherinfo))
-        vcov[findall(isapprox.(vcov, 0.0; atol = eps(Float64)))] .= 0.0
+        vcov[findall(isapprox.(vcov, 0.0; atol = sqrt(eps(Float64))))] .= 0.0
         vcov = Symmetric(vcov)
     else
         vcov = nothing
