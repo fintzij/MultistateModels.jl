@@ -273,8 +273,11 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = 
     # indices
     lind = Int64(ceil((lb - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
     uind = Int64(ceil((ub - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
-    lind = lind == 0 ? 1 : lind
-    uind = uind == 0 ? 1 : uind
+
+    # make sure lind is between 1 and meshsize - 1
+    lind = lind == 0 ? 1 : 
+           lind == _hazard.meshsize ? _hazard.meshsize - 1 : lind
+    uind = uind == lind ? lind + 1 : uind
 
     # log cumulative hazard
     logchaz = log(dot(exp.(parameters), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind]))
