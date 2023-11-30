@@ -19,7 +19,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         sol  = solve(prob, Newton())
         
         # get vcov
-        if compute_vcov
+        if compute_vcov && (sol.retcode == ReturnCode.Success)
             ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
             gradient = ForwardDiff.gradient(ll, sol.u)
             vcov = pinv(Symmetric(.-ForwardDiff.hessian(ll, sol.u)))
@@ -89,7 +89,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         sol  = solve(prob, Newton())
 
         # get vcov
-        if compute_vcov
+        if compute_vcov && (sol.retcode == ReturnCode.Success)
             # get the variance-covariance matrix
             ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
             gradient = ForwardDiff.gradient(ll, sol.u)

@@ -119,8 +119,7 @@ function loglik(parameters, data::ExactData; neg = true)
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # send each element of samplepaths to loglik
-    ll = mapreduce((x, w) -> loglik(pars, x, data.model.hazards, data.model) * w,
-        +, data.paths, data.model.SamplingWeights)
+    ll = mapreduce((x, w) -> loglik(pars, x, data.model.hazards, data.model) * w, +, data.paths, data.model.SamplingWeights)
     
     neg ? -ll : ll
 end
