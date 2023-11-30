@@ -305,9 +305,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             end
 
             # add additional gap times
-            if samplepath_sojourns != samplepaths_full
-                compute_spline_basis!(haz_struct, data, samplepaths_full)
-            end
+            compute_spline_basis!(haz_struct, data, samplepaths_full)
         end
 
         # note: want a symbol that names the hazard + vector of symbols for parameters

@@ -15,7 +15,7 @@ function summarize_paths(paths)
     return ests
 end
 
-nsubj = 1000
+nsubj = 100
 ntimes = 10
 
 dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
@@ -23,7 +23,7 @@ dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
               tstop = repeat(collect(1:ntimes)/ntimes, outer  = nsubj),
               statefrom = ones(nsubj * ntimes),
               stateto = ones(nsubj * ntimes ),
-              obstype = 1)
+              obstype = 2)
 
 # create multistate model object with the simulated data
 h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0) # healthy -> ill
@@ -64,8 +64,8 @@ h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3; degree = 0) # ill -> dead
 modelexp = multistatemodel(h12, h13, h23; data = simdat[1])
 
 # try to fit
-set_crude_init!(model)
-fitted = fit(model; compute_vcov = false)
+set_crude_init!(modelsp)
+fitted = fit(modelsp; compute_vcov = true, verbose = true)
 
 using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra, OptimizationOptimisers, RCall, Plots, StatsFuns, MacroTools, FunctionWrappers, RuntimeGeneratedFunctions
 
@@ -80,7 +80,5 @@ ess_target_initial = 100; MaxSamplingEffort = 20; npaths_additional = 25; verbos
 CensoringPatterns = nothing; optimize_surrogate = true; SamplingWeights = nothing
 
 constraints = nothing; surrogate_constraints = nothing; surrogate_parameters = nothing; compute_vcov = true
-
-
 
 
