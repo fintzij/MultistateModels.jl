@@ -96,19 +96,6 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 end
 
 """
-    paretosmooth!(weights, loglik_target, loglik_surrog)
-
-Pareto smooth the importance weights for MCEM.
-"""
-function paretosmooth!(weights, ess, loglik_target, loglik_surrog)
-    
-
-    # pareto smoothing for importance weights
-    lograt = reshape(last(loglik_target_cur) - last(loglik_surrog), 1, length(last(loglik_target_cur)))
-    p = psis(lograt; source = "other")
-end
-
-"""
    sample_ecctmc(P, Q, a, b, t0, t1)
 
 Sample path for an endpoint conditioned CTMC whose states at times `t0` and `t1` are `a` and `b`. `P` is the transition probability matrix over the interval, `Q` is the transition intensity matrix. 

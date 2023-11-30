@@ -240,7 +240,17 @@ function extract_sojourns(hazard, data::DataFrame, samplepaths::Vector{SamplePat
                     append!(times, diff(samplepaths[s].times[i:(i+1)]))
                 else
                     # append the times at which the hazard and cumulative hazard are evaluated
-                    append!(times, unique([diff([samplepaths[s].times[i]; subj_dat.tstop[findall((subj_dat.tstop .> samplepaths[s].times[i]) .&& (subj_dat.tstop .< samplepaths[s].times[i+1]))]; samplepaths[s].times[i+1]]); diff(samplepaths[s].times[i:(i+1)])]))
+                    tdatinds = findall((subj_dat.tstop .>= samplepaths[s].times[i]) .& (subj_dat.tstop .<= samplepaths[s].times[i+1]))
+
+                    append!(times, 
+                        unique(round.([
+                            samplepaths[s].times[i];
+                            samplepaths[s].times[i+1];
+                            subj_dat.tstop[tdatinds];
+                            diff([samplepaths[s].times[i]; 
+                                  subj_dat.tstop[tdatinds]; 
+                                  samplepaths[s].times[i+1]]); 
+                            diff(samplepaths[s].times[i:(i+1)])]; sigdigits = 8)))
                 end
             end
         end

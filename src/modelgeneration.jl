@@ -16,13 +16,13 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 - `boundaryknots`: Length 2 vector of boundary knots.
 - `periodic`: Periodic spline basis, defaults to false.
 - `monotonic`: Assume that baseline hazard is monotonic, defaults to false. If true, use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
+- `meshsize`: number of intervals into which to discretize the spline basis, defaults to 10000. 
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, periodic::Bool = false, monotonic::Bool = false)
-    
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, periodic::Bool = false, monotonic::Bool = false, meshsize::Int64 = 10000)
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
-        h = SplineHazard(hazard, family, statefrom, stateto, df, degree, knots, boundaryknots, periodic, monotonic)
+        h = SplineHazard(hazard, family, statefrom, stateto, df, degree, knots, boundaryknots, periodic, monotonic, meshsize)
     end
 
     return h
@@ -103,11 +103,6 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
 
     # initialize a dictionary for indexing into the vector of hazards
     hazkeys = Dict{Symbol, Int64}()
-
-    if any(isa.(hazards, SplineHazard))
-        samplepath_sojourns = extract_paths(data; self_transitions = false)
-        samplepaths_full = extract_paths(data; self_transitions = true)
-    end
 
     # assign a hazard function
     for h in eachindex(hazards) 
@@ -252,7 +247,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
         elseif family == "sp" # m-splines
 
             # grab hazard object from splines2
-            (;hazard, cumulative_hazard, times) = spline_hazards(hazards[h], data, samplepath_sojourns)
+            hazard, cumulative_hazard = spline_hazards(hazards[h], data)
 
             # number of parameters
             npars = size(hazard)[1] + size(hazdat, 2) - 1
@@ -277,12 +272,10 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                     Symbol.(parnames),
                     hazards[h].statefrom,
                     hazards[h].stateto,
-                    Vector{Float64}(times),
-                    ElasticMatrix{Float64}(rcopy(hazard)),
-                    ElasticMatrix{Float64}(rcopy(cumulative_hazard)),
-                    hazard, 
-                    cumulative_hazard,
-                    rcopy(R"attributes($hazard)"))                
+                    hazards[h].meshsize,
+                    [minimum(data.tstart), maximum(data.tstop)],
+                    hazard,
+                    cumulative_hazard)                
             else
                 ### proportional hazards
                 # parameter names
@@ -296,17 +289,10 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                     Symbol.(parnames),
                     hazards[h].statefrom,
                     hazards[h].stateto,
-                    Vector{Float64}(times),
-                    ElasticMatrix{Float64}(rcopy(hazard)),
-                    ElasticMatrix{Float64}(rcopy(cumulative_hazard)),
+                    hazards[h].meshsize,
+                    [minimum(data.tstart), maximum(data.tstop)],
                     hazard, 
-                    cumulative_hazard,
-                    rcopy(R"attributes($hazard)")) 
-            end
-
-            # add additional gap times
-            if samplepath_sojourns != samplepaths_full
-                compute_spline_basis!(haz_struct, data, samplepaths_full)
+                    cumulative_hazard) 
             end
         end
 

@@ -55,14 +55,14 @@ function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model:
             if tstop <= time_R
                 # event happens in (time_L, time_R]
                 # accumulate log(Pr(T ≥ timeinstate | T ≥ timespent))
-                log_surv_prob += survprob(timespent, timeinstate, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true, newtime = false)
+                log_surv_prob += survprob(timespent, timeinstate, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true)
 
                 # increment log likelihood
                 ll += log_surv_prob
 
                 # if event happened, accrue hazard
                 if snext != scur
-                    ll += call_haz(timeinstate, parameters[model.tmat[scur, snext]], comp_dat_ind, hazards[model.tmat[scur, snext]]; give_log = true, newtime = false)
+                    ll += call_haz(timeinstate, parameters[model.tmat[scur, snext]], comp_dat_ind, hazards[model.tmat[scur, snext]]; give_log = true)
                 end
 
                 # increment row index in subj_dat
@@ -81,7 +81,7 @@ function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model:
                 # event doesn't hapen in (time_L, time_R]
                 # accumulate log-survival
                 # accumulate log(Pr(T ≥ time_R | T ≥ timespent))
-                log_surv_prob += survprob(timespent, timespent + time_R - tcur, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true, newtime = false)
+                log_surv_prob += survprob(timespent, timespent + time_R - tcur, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true)
                 
                 # increment timespent
                 timespent += time_R - tcur
@@ -119,8 +119,7 @@ function loglik(parameters, data::ExactData; neg = true)
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
     # send each element of samplepaths to loglik
-    ll = mapreduce((x, w) -> loglik(pars, x, data.model.hazards, data.model) * w,
-        +, data.paths, data.model.SamplingWeights)
+    ll = mapreduce((x, w) -> loglik(pars, x, data.model.hazards, data.model) * w, +, data.paths, data.model.SamplingWeights)
     
     neg ? -ll : ll
 end
@@ -194,9 +193,9 @@ function loglik(parameters, data::MPanelData; neg = true)
             # add the contribution of each observation
             for i in subj_inds
                 if data.model.data.obstype[i] == 1 # exact data
-                    subj_ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true, newtime = false)
+                    subj_ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true)
                     if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
-                        subj_ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true, newtime = false)
+                        subj_ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true)
                     end
                 else # panel data
                     subj_ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]])
@@ -228,9 +227,9 @@ function loglik(parameters, data::MPanelData; neg = true)
                     for sf in StatesFrom
                         # contribution from statefrom sf 
                         subj_lik_i_sf = 1.0
-                        subj_lik_i_sf *= survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[sf], data.model.hazards; give_log = false, newtime = false)
+                        subj_lik_i_sf *= survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[sf], data.model.hazards; give_log = false)
                         if sf != data.model.data.stateto[i] # if there is a transition, add hazard
-                            subj_lik_i_sf *= call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[sf, data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[sf, data.model.data.stateto[i]]]; give_log = false, newtime = false)
+                            subj_lik_i_sf *= call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[sf, data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[sf, data.model.data.stateto[i]]]; give_log = false)
                         end
                         subj_lik_i += subj_lik_i_sf
                     end
