@@ -56,6 +56,7 @@ h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0) # healthy -> ill
 h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 0) # ill -> dead
 
 modelsp = multistatemodel(h12, h13, h23; data = simdat[1])
+model = deepcopy(modelsp)
 
 h13 = Hazard(@formula(0 ~ 1), "exp", 1, 3; degree = 0) # healthy -> dead
 h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2; degree = 0) # healthy -> ill

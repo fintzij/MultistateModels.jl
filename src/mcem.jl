@@ -31,7 +31,7 @@ function var_ris(l, w)
 
     vris = (sum(l .* w)) ^ 2 * ((sum((w .* l).^2)) / sum(w .* l) ^2 - 2 * (sum(w.^2 .* l) / (sum(w .* l))) + sum(w .^ 2))
 
-    vris < eps()^0.75 ? eps()^0.75 : vris
+    vris < eps()^0.5 ? eps()^0.5 : vris
 end
 
 """

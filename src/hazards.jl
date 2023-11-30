@@ -362,12 +362,12 @@ function next_state_probs!(ns_probs, t, scur, ind, parameters, hazards, totalhaz
         softmax(map(x -> call_haz(t, parameters[x], ind, hazards[x]; newtime = newtime), totalhazards[scur].components))
 
     # catch for numerical instabilities (weird edge case)
-    if any(isnan.(ns_probs))
-        pisnan = findall(isnan.(ns_probs))
+    if any(isnan.(ns_probs[trans_inds]))
+        pisnan = findall(isnan.(ns_probs[trans_inds]))
         if length(pisnan) == 1
-            ns_probs[pisnan] = 1 - sum(ns_probs[Not(pisnan)])
+            ns_probs[trans_inds][pisnan] = 1 - sum(ns_probs[trans_inds][Not(pisnan)])
         else
-            ns_probs[pisnan] .= 1 - sum(ns_probs[Not(pisnan)])/length(pisnan)
+            ns_probs[trans_inds][pisnan] .= 1 - sum(ns_probs[trans_inds][Not(pisnan)])/length(pisnan)
         end        
     end
 end
@@ -404,12 +404,12 @@ function next_state_probs(t, scur, ind, parameters, hazards, totalhazards, tmat;
         softmax(ns_probs[totalhazards[scur].components])
 
     # catch for numerical instabilities (weird edge case)
-    if any(isnan.(ns_probs))
-        pisnan = findall(isnan.(ns_probs))
+    if any(isnan.(ns_probs[trans_inds]))
+        pisnan = findall(isnan.(ns_probs[trans_inds]))
         if length(pisnan) == 1
-            ns_probs[pisnan] = 1 - sum(ns_probs[Not(pisnan)])
+            ns_probs[trans_inds][pisnan] = 1 - sum(ns_probs[trans_inds][Not(pisnan)])
         else
-            ns_probs[pisnan] .= 1 - sum(ns_probs[Not(pisnan)])/length(pisnan)
+            ns_probs[trans_inds][pisnan] .= 1 - sum(ns_probs[trans_inds][Not(pisnan)])/length(pisnan)
         end        
     end
 
