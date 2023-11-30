@@ -124,13 +124,13 @@ function simulate_path(model::MultistateProcess, subj::Int64)
     while keep_going
         
         # calculate event probability over the next interval
-        interval_incid = (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + tstop - tcur, model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false, newtime = true))
+        interval_incid = (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + tstop - tcur, model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false))
 
         # check if event happened in the interval
         if (u < (cuminc + interval_incid)) && (u >= cuminc)
 
             # update the current time
-            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false, newtime = true))) - log(u))^2), 0.0, tstop - tcur)
+            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false))) - log(u))^2), 0.0, tstop - tcur)
 
             if Optim.converged(timeincrement)
                 timeinstate += timeincrement.minimizer
@@ -139,7 +139,7 @@ function simulate_path(model::MultistateProcess, subj::Int64)
             end            
 
             # calculate next state transition probabilities 
-            next_state_probs!(ns_probs, timeinstate, scur, ind, model.parameters, model.hazards, model.totalhazards, model.tmat; newtime = true)
+            next_state_probs!(ns_probs, timeinstate, scur, ind, model.parameters, model.hazards, model.totalhazards, model.tmat)
 
             # sample the next state
             scur = rand(Categorical(ns_probs))

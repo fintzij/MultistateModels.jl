@@ -23,7 +23,7 @@ dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
               tstop = repeat(collect(1:ntimes)/ntimes, outer  = nsubj),
               statefrom = ones(nsubj * ntimes),
               stateto = ones(nsubj * ntimes ),
-              obstype = 2)
+              obstype = 1)
 
 # create multistate model object with the simulated data
 h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0) # healthy -> ill

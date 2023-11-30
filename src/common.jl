@@ -72,6 +72,7 @@ Specify a cause-specific baseline hazard.
 - `boundaryknots`: Length 2 vector of boundary knots.
 - `periodic`: Periodic spline basis, defaults to false.
 - `monotonic`: Assume that baseline hazard is monotonic, defaults to false. If true, use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
+- `meshsize`: number of intervals into which to discretize the spline basis, defaults to 10000. 
 """
 struct SplineHazard <: HazardFunction
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
@@ -84,6 +85,7 @@ struct SplineHazard <: HazardFunction
     boundaryknots::Union{Nothing,Vector{Float64}}
     periodic::Bool
     monotonic::Bool
+    meshsize::Int64
 end
 
 """
@@ -121,7 +123,7 @@ end
 
 
 """
-Weibull cause-specific proportional hazard. The log baseline hazard is a linear function of log time and covariates have a multiplicative effect vis-a-vis the baseline hazard.
+Weibull cause-specific proportional hazard. The log baseline hazard is a linear function of log time and covariates have a multiplicative effect on the baseline hazard.
 """
 struct _WeibullPH <: _SemiMarkovHazard
     hazname::Symbol
@@ -144,7 +146,7 @@ end
 
 
 """
-Gompertz cause-specific proportional hazard. The log baseline hazard is a linear function of time and covariates have a multiplicative effect vis-a-vis the baseline hazard.
+Gompertz cause-specific proportional hazard. The log baseline hazard is a linear function of time and covariates have a multiplicative effect on the baseline hazard.
 """
 struct _GompertzPH <: _SemiMarkovHazard
     hazname::Symbol
@@ -163,16 +165,14 @@ struct _Spline <: _SemiMarkovHazard
     parnames::Vector{Symbol}
     statefrom::Int64
     stateto::Int64
-    times::Vector{Float64}
-    hazbasis::ElasticArray{Float64}
-    chazbasis::ElasticArray{Float64}
-    hazobj::RObject{RealSxp}
-    chazobj::RObject{RealSxp}
-    attr::OrderedDict{Symbol, Any}
+    meshsize::Int64
+    meshrange::Vector{Float64}
+    hazbasis::Array{Float64}
+    chazbasis::Array{Float64}
 end
 
 """
-Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect vis-a-vis the baseline hazard.
+Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect on the baseline hazard.
 """
 struct _SplinePH <: _SemiMarkovHazard
     hazname::Symbol
@@ -180,12 +180,10 @@ struct _SplinePH <: _SemiMarkovHazard
     parnames::Vector{Symbol}
     statefrom::Int64
     stateto::Int64
-    times::Vector{Float64}
-    hazbasis::ElasticArray{Float64}
-    chazbasis::ElasticArray{Float64}
-    hazobj::RObject{RealSxp}
-    chazobj::RObject{RealSxp}
-    attr::OrderedDict{Symbol, Any}
+    meshsize::Int64
+    meshrange::Vector{Float64}
+    hazbasis::Array{Float64}
+    chazbasis::Array{Float64}
 end
 
 """

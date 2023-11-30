@@ -55,13 +55,6 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
             loglik_target_cur[i][j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i][j], model.hazards, model) 
         end
 
-        # augment the spline basis if necessary
-        for h in eachindex(model.hazards)
-            if isa(model.hazards[h], _Spline) | isa(model.hazards[h], _SplinePH)
-                compute_spline_basis!(model.hazards[h], model.data, samplepaths[i][(npaths+1):(npaths + n_add)])
-            end
-        end
-
         # no need to keep all paths
         if allequal(loglik_target_cur[i])
             samplepaths[i]        = [first(samplepaths[i]),]
@@ -100,19 +93,6 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
             @warn "More than $n_path_max sample paths are required to obtain ess>$ess_target for individual $i."
         end
     end
-end
-
-"""
-    paretosmooth!(weights, loglik_target, loglik_surrog)
-
-Pareto smooth the importance weights for MCEM.
-"""
-function paretosmooth!(weights, ess, loglik_target, loglik_surrog)
-    
-
-    # pareto smoothing for importance weights
-    lograt = reshape(last(loglik_target_cur) - last(loglik_surrog), 1, length(last(loglik_target_cur)))
-    p = psis(lograt; source = "other")
 end
 
 """

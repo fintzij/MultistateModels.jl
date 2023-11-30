@@ -1,66 +1,58 @@
 """
-    spline_hazards(hazard::SplineHazard, data::DataFrame, samplepaths::Vector{SamplePath})
+    spline_hazards(hazard::SplineHazard, data::DataFrame)
 
 Get spline hazard objects via splines2. 
 """
-function spline_hazards(hazard::SplineHazard, data::DataFrame, samplepaths::Vector{SamplePath})
+function spline_hazards(hazard::SplineHazard, data::DataFrame)
 
     # observed times
-    sojourns = unique(sort([minimum(data.tstart); extract_sojourns(hazard, data, samplepaths; sojourns_only = true); maximum(data.tstop)]))
+    mesh = collect(LinRange(minimum(data.tstart), maximum(data.tstop), hazard.meshsize))
 
     ## unpack arguments
-    # degrees of freedom
-    df = isnothing(hazard.df) ? 0 : hazard.df
-
-    # boundary knots
-    boundaryknots = isnothing(hazard.boundaryknots) ? [minimum(data.tstart), maximum(data.tstop)] : hazard.boundaryknots
-
-    # interior knots
-    knots = isnothing(hazard.knots) ? Float64[] : hazard.knots
-
     # intercept, periodic, and degree
     intercept = true
     periodic = hazard.periodic
     degree = hazard.degree
 
+    # boundary knots
+    boundaryknots = isnothing(hazard.boundaryknots) ? [minimum(data.tstart), maximum(data.tstop)] : hazard.boundaryknots
+
+    # interior knots and df
+    if isnothing(hazard.knots)
+        # get degrees of freedom
+        df = isnothing(hazard.df) ? degree + 1 : hazard.df
+        nknots = df - degree - 1
+
+        # get knots
+        if nknots < 0
+            sfrom = hazard.statefrom; sto = hazard.stateto
+            @error "The spline for the transition from state $sfrom to $sto has too few degrees of freedom." 
+        elseif nknots == 0
+            knots = Float64[]
+        else
+            sojourns = unique(sort([minimum(data.tstart); extract_sojourns(hazard, data, samplepaths; sojourns_only = false); maximum(data.tstop)]))
+            knots = quantile(sojourns, collect(1:nknots) / (nknots + 1))
+        end
+
+    else
+        knots = hazard.knots
+        df = isnothing(hazard.df) ? length(knots) + degree + 1 : hazard.df
+    end
+
     # get spline objects from splines2
     if !hazard.monotonic
         # mSpline via splines2
-        sphaz = R"t(splines2::mSpline($sojourns, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))"
+        sphaz = rcopy(Array{Float64}, R"t(splines2::mSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
 
         # iSpline via splines2
-        spchaz = R"t(splines2::iSpline($sojourns, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))"
+        spchaz = rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
     else
         # mSpline via splines2
-        sphaz = R"t(splines2::iSpline($sojourns, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))"
+        sphaz = rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
 
         # iSpline via splines2
-        spchaz = R"t(splines2::cSpline($sojourns, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))"
+        spchaz = rcopy(Array{Float64}, R"t(splines2::cSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
     end
 
-    return (hazard = sphaz, cumulative_hazard = spchaz, times = sojourns)
-end
-
-"""
-    spline_setup!(hazard::_Spline, data::DataFrame, samplepaths::Vector{SamplePath})
-
-Set up the spline basis for a semi-parametric hazard function given a set of sample paths.
-"""
-function compute_spline_basis!(hazard::Union{_Spline, _SplinePH}, data::DataFrame, samplepaths::Vector{SamplePath})
-
-    # get new times
-    times = unique(setdiff(extract_sojourns(hazard, data, samplepaths; sojourns_only = false), hazard.times))
- 
-    # compute new basis and append 
-    if length(times) != 0
-        append!(hazard.times, times)
-        append!(hazard.hazbasis, rcopy(R"t(predict($(hazard.hazobj), newx = $times))"))
-        append!(hazard.chazbasis, rcopy(R"t(predict($(hazard.chazobj), newx = $times))"))
-
-        # sort
-        inds = sortperm(hazard.times)
-        permute!(hazard.times, inds)
-        Base.permutecols!!(hazard.hazbasis, copy(inds))
-        Base.permutecols!!(hazard.chazbasis, inds)
-    end
+    return (hazard = sphaz, cumulative_hazard = spchaz)
 end

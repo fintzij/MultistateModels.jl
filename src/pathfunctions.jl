@@ -250,7 +250,7 @@ function extract_sojourns(hazard, data::DataFrame, samplepaths::Vector{SamplePat
                             diff([samplepaths[s].times[i]; 
                                   subj_dat.tstop[tdatinds]; 
                                   samplepaths[s].times[i+1]]); 
-                            diff(samplepaths[s].times[i:(i+1)])]; sigdigits = 10)))
+                            diff(samplepaths[s].times[i:(i+1)])]; sigdigits = 8)))
                 end
             end
         end
