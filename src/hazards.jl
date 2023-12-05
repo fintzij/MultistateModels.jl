@@ -253,7 +253,7 @@ Return the spline cause-specific hazards.
 function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
 
     # get the index
-    ind = Int64(ceil((t - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
+    ind = Int64(floor((t - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
     ind = ind == 0 ? 1 : ind
 
     # compute the log hazard
@@ -271,7 +271,7 @@ Return the spline cause-specific cumulative hazards over the interval [lb,ub].
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true)
 
     # indices
-    lind = Int64(ceil((lb - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
+    lind = Int64(floor((lb - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
     uind = Int64(ceil((ub - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
 
     # make sure lind is between 1 and meshsize - 1
@@ -293,7 +293,7 @@ Return the spline cause-specific hazards.
 function call_haz(t, parameters, rowind, _hazard::_SplinePH; give_log = true)
 
     # get the index
-    ind = Int64(ceil((t - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
+    ind = Int64(floor((t - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
     ind = ind == 0 ? 1 : ind
 
     # compute the log hazard
@@ -311,7 +311,7 @@ Return the spline cause-specific cumulative hazards over the interval [lb,ub].
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log = true)
 
     # indices
-    lind = Int64(ceil((lb - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
+    lind = Int64(floor((lb - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
     uind = Int64(ceil((ub - _hazard.meshrange[1]) / _hazard.meshrange[2] * _hazard.meshsize))
     lind = lind == 0 ? 1 : lind
     uind = uind == 0 ? 1 : uind
