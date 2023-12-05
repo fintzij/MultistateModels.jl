@@ -274,9 +274,13 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = 
     lind = Int64(floor((lb - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
     uind = Int64(ceil((ub - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
 
-    # # make sure lind is between 1 and meshsize - 1
-    # lind = lind == 0 ? 1 : lind == _hazard.meshsize ? _hazard.meshsize - 1 : lind
-    # uind = uind == lind ? lind + 1 : uind
+    # make sure lind is between 1 and meshsize - 1
+    if lind == 0
+        lind += 1
+        if uind == lind
+            uind += 1
+        end
+    end
 
     # log cumulative hazard
     logchaz = log(dot(exp.(parameters), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind]))
@@ -315,8 +319,12 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log 
     uind = Int64(ceil((ub - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
 
     # # make sure lind is between 1 and meshsize - 1
-    # lind = lind == 0 ? 1 : lind == _hazard.meshsize ? _hazard.meshsize - 1 : lind
-    # uind = uind == lind ? lind + 1 : uind
+    if lind == 0
+        lind += 1
+        if uind == lind
+            uind += 1
+        end
+    end
 
     # log cumulative hazard
     logchaz = log(dot(exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
