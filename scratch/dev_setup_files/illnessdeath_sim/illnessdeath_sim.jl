@@ -14,8 +14,8 @@ using Random
 include(pwd()*"/scratch/dev_setup_files/illnessdeath_sim/sim_funs.jl");
 
 # run the simulation
-simnum = 2001; seed = 1; family = 3; sims_per_subj = 20; nboot = 10
-Debugger.@enter work_function(;simnum = simnum, seed = seed, family = family, sims_per_subj = sims_per_subj, nboot = nboot)
+simnum = 2936; seed = 936; family = 3; sims_per_subj = 20; nboot = 10
+work_function(;simnum = simnum, seed = seed, family = family, sims_per_subj = sims_per_subj, nboot = nboot)
 
 # save results
 # # CSV.write("/data/fintzijr/multistate/sim1_illnessdeath/illnessdeath_results_$simnum.csv", results)

@@ -160,7 +160,7 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
     model_fit = setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp"][family])
 
     # fit model
-    model_fitted = fit(model_fit; verbose = true, compute_vcov = false) 
+    model_fitted = fit(model_fit; verbose = true, compute_vcov = true) 
 
     ### simulate from the fitted model
     model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "wei", "sp"][family])

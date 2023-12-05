@@ -282,6 +282,13 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = 
         end
     end
 
+    if uind > _hazard.meshsize
+        uind = _hazard.meshsize
+        if lind == uind
+            lind -= 1
+        end
+    end
+
     # log cumulative hazard
     logchaz = log(dot(exp.(parameters), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind]))
 
@@ -323,6 +330,13 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log 
         lind += 1
         if uind == lind
             uind += 1
+        end
+    end
+
+    if uind > _hazard.meshsize
+        uind = _hazard.meshsize
+        if lind == uind
+            lind -= 1
         end
     end
 
