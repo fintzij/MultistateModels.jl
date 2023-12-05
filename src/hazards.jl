@@ -246,11 +246,11 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_lo
 end
 
 """
-    call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_MSpline; give_log = true)
 
 Return the spline cause-specific hazards.
 """
-function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_MSpline; give_log = true)
 
     # get the index
     ind = Int64(ceil((t - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
@@ -264,11 +264,11 @@ function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
 end
 
 """
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_MSpline; give_log = true)
 
 Return the spline cause-specific cumulative hazards over the interval [lb,ub].
 """
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_MSpline; give_log = true)
 
     # indices
     lind = Int64(floor((lb - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
@@ -297,11 +297,11 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = 
 end
 
 """
-    call_haz(t, parameters, rowind, _hazard::_SplinePH; give_log = true)
+    call_haz(t, parameters, rowind, _hazard::_MSplinePH; give_log = true)
 
 Return the spline cause-specific hazards.
 """
-function call_haz(t, parameters, rowind, _hazard::_SplinePH; give_log = true)
+function call_haz(t, parameters, rowind, _hazard::_MSplinePH; give_log = true)
 
     # get the index
     ind = Int64(ceil((t - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
@@ -315,11 +315,215 @@ function call_haz(t, parameters, rowind, _hazard::_SplinePH; give_log = true)
 end
 
 """
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log = true)
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_MSplinePH; give_log = true)
 
 Return the spline cause-specific cumulative hazards over the interval [lb,ub].
 """
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log = true)
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_MSplinePH; give_log = true)
+
+    # indices
+    lind = Int64(floor((lb - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+    uind = Int64(ceil((ub - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+
+    # # make sure lind is between 1 and meshsize - 1
+    if lind == 0
+        lind += 1
+        if uind == lind
+            uind += 1
+        end
+    end
+
+    if uind > _hazard.meshsize
+        uind = _hazard.meshsize
+        if lind == uind
+            lind -= 1
+        end
+    end
+
+    # log cumulative hazard
+    logchaz = log(dot(exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
+
+    # return the log hazard
+    give_log ? logchaz : exp(logchaz)
+end
+
+"""
+    call_haz(t, parameters, rowind, _hazard::_ISplineIncreasing; give_log = true)
+
+Return the spline cause-specific hazards.
+"""
+function call_haz(t, parameters, rowind, _hazard::_ISplineIncreasing; give_log = true)
+
+    # get the index
+    ind = Int64(ceil((t - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+    ind = ind == 0 ? 1 : ind
+
+    # compute the log hazard
+    loghaz = log(dot(exp.(parameters), _hazard.hazbasis[:,ind]))
+
+    # return the log hazard
+    give_log ? loghaz : exp(loghaz)
+end
+
+"""
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineIncreasing; give_log = true)
+
+Return the spline cause-specific cumulative hazards over the interval [lb,ub].
+"""
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineIncreasing; give_log = true)
+
+    # indices
+    lind = Int64(floor((lb - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+    uind = Int64(ceil((ub - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+
+    # make sure lind is between 1 and meshsize - 1
+    if lind == 0
+        lind += 1
+        if uind == lind
+            uind += 1
+        end
+    end
+
+    if uind > _hazard.meshsize
+        uind = _hazard.meshsize
+        if lind == uind
+            lind -= 1
+        end
+    end
+
+    # log cumulative hazard
+    logchaz = log(dot(exp.(parameters), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind]))
+
+    # return the log hazard
+    give_log ? logchaz : exp(logchaz)
+end
+
+"""
+    call_haz(t, parameters, rowind, _hazard::_ISplineIncreasingPH; give_log = true)
+
+Return the spline cause-specific hazards.
+"""
+function call_haz(t, parameters, rowind, _hazard::_ISplineIncreasingPH; give_log = true)
+
+    # get the index
+    ind = Int64(ceil((t - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+    ind = ind == 0 ? 1 : ind
+
+    # compute the log hazard
+    loghaz = log(dot(exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.hazbasis, 1))])
+
+    # return the log hazard
+    give_log ? loghaz : exp(loghaz)
+end
+
+"""
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineIncreasingPH; give_log = true)
+
+Return the spline cause-specific cumulative hazards over the interval [lb,ub].
+"""
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineIncreasingPH; give_log = true)
+
+    # indices
+    lind = Int64(floor((lb - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+    uind = Int64(ceil((ub - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+
+    # # make sure lind is between 1 and meshsize - 1
+    if lind == 0
+        lind += 1
+        if uind == lind
+            uind += 1
+        end
+    end
+
+    if uind > _hazard.meshsize
+        uind = _hazard.meshsize
+        if lind == uind
+            lind -= 1
+        end
+    end
+
+    # log cumulative hazard
+    logchaz = log(dot(exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
+
+    # return the log hazard
+    give_log ? logchaz : exp(logchaz)
+end
+
+"""
+    call_haz(t, parameters, rowind, _hazard::_ISplineDecreasing; give_log = true)
+
+Return the spline cause-specific hazards.
+"""
+function call_haz(t, parameters, rowind, _hazard::_ISplineDecreasing; give_log = true)
+
+    # get the index
+    ind = Int64(ceil((t - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+    ind = ind == 0 ? 1 : ind
+
+    # compute the log hazard
+    loghaz = log(dot(exp.(parameters), _hazard.hazbasis[:,ind]))
+
+    # return the log hazard
+    give_log ? loghaz : exp(loghaz)
+end
+
+"""
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineDecreasing; give_log = true)
+
+Return the spline cause-specific cumulative hazards over the interval [lb,ub].
+"""
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineDecreasing; give_log = true)
+
+    # indices
+    lind = Int64(floor((lb - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+    uind = Int64(ceil((ub - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+
+    # make sure lind is between 1 and meshsize - 1
+    if lind == 0
+        lind += 1
+        if uind == lind
+            uind += 1
+        end
+    end
+
+    if uind > _hazard.meshsize
+        uind = _hazard.meshsize
+        if lind == uind
+            lind -= 1
+        end
+    end
+
+    # log cumulative hazard
+    logchaz = log(dot(exp.(parameters), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind]))
+
+    # return the log hazard
+    give_log ? logchaz : exp(logchaz)
+end
+
+"""
+    call_haz(t, parameters, rowind, _hazard::_ISplineDecreasingPH; give_log = true)
+
+Return the spline cause-specific hazards.
+"""
+function call_haz(t, parameters, rowind, _hazard::_ISplineDecreasingPH; give_log = true)
+
+    # get the index
+    ind = Int64(ceil((t - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+    ind = ind == 0 ? 1 : ind
+
+    # compute the log hazard
+    loghaz = log(dot(exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.hazbasis, 1))])
+
+    # return the log hazard
+    give_log ? loghaz : exp(loghaz)
+end
+
+"""
+    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineDecreasingPH; give_log = true)
+
+Return the spline cause-specific cumulative hazards over the interval [lb,ub].
+"""
+function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineDecreasingPH; give_log = true)
 
     # indices
     lind = Int64(floor((lb - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))

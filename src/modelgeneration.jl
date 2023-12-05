@@ -15,10 +15,10 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 - `knots`: Vector of knots.
 - `boundaryknots`: Length 2 vector of boundary knots.
 - `periodic`: Periodic spline basis, defaults to false.
-- `monotonic`: Assume that baseline hazard is monotonic, defaults to false. If true, use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
+- `monotonic`: Assume that baseline hazard is monotonic, defaults to "nonmonotonic". If "increasing" or "decreasing", use an I-spline basis for the baseline intensity and a C-spline for the cumulative intensity.
 - `meshsize`: number of intervals into which to discretize the spline basis, defaults to 10000. 
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, periodic::Bool = false, monotonic::Bool = false, meshsize::Int64 = 10000)
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, periodic::Bool = false, monotonic::String = "nonmonotonic", meshsize::Int64 = 10000)
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
@@ -265,34 +265,76 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                 parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), "(Intercept)" => "Intercept")
                     
                 # hazard struct
-                haz_struct = 
-                _Spline(
-                    Symbol(hazname),
-                    hazdat, 
-                    Symbol.(parnames),
-                    hazards[h].statefrom,
-                    hazards[h].stateto,
-                    hazards[h].meshsize,
-                    [minimum(data.tstart), maximum(data.tstop)],
-                    hazard,
-                    cumulative_hazard)                
+                if hazards[h].monotonic == "nonmonotonic"
+                    haz_struct = _MSpline(Symbol(hazname),
+                                            hazdat, 
+                                            Symbol.(parnames),
+                                            hazards[h].statefrom,
+                                            hazards[h].stateto,
+                                            hazards[h].meshsize,
+                                            [minimum(data.tstart), maximum(data.tstop)],
+                                            hazard,
+                                            cumulative_hazard)
+                        
+                elseif hazards[h].monotonic == "increasing"
+                    haz_struct = _ISplineIncreasing(Symbol(hazname),
+                                            hazdat, 
+                                            Symbol.(parnames),
+                                            hazards[h].statefrom,
+                                            hazards[h].stateto,
+                                            hazards[h].meshsize,
+                                            [minimum(data.tstart), maximum(data.tstop)],
+                                            hazard,
+                                            cumulative_hazard)
+                else
+                    haz_struct = _ISplineDecreasing(Symbol(hazname),
+                                            hazdat, 
+                                            Symbol.(parnames),
+                                            hazards[h].statefrom,
+                                            hazards[h].stateto,
+                                            hazards[h].meshsize,
+                                            [minimum(data.tstart), maximum(data.tstop)],
+                                            hazard,
+                                            cumulative_hazard)
+                end          
             else
                 ### proportional hazards
                 # parameter names
                 parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), hazname*"_".*coefnames(hazschema)[2][Not(1)]), "(Intercept)" => "Intercept")
 
                 # hazard struct
-                haz_struct = 
-                _SplinePH(
-                    Symbol(hazname),
-                    hazdat[:,Not(1)], 
-                    Symbol.(parnames),
-                    hazards[h].statefrom,
-                    hazards[h].stateto,
-                    hazards[h].meshsize,
-                    [minimum(data.tstart), maximum(data.tstop)],
-                    hazard, 
-                    cumulative_hazard) 
+                if hazards[h].monotonic == "nonmonotonic"
+                    haz_struct = _MSplinePH(Symbol(hazname),
+                                           hazdat[:,Not(1)], 
+                                           Symbol.(parnames),
+                                           hazards[h].statefrom,
+                                           hazards[h].stateto,
+                                           hazards[h].meshsize,
+                                           [minimum(data.tstart), maximum(data.tstop)],
+                                           hazard, 
+                                           cumulative_hazard)                        
+                
+                elseif hazards[h].monotonic == "increasing"
+                    haz_struct = _ISplineIncreasingPH(Symbol(hazname),
+                                           hazdat[:,Not(1)], 
+                                           Symbol.(parnames),
+                                           hazards[h].statefrom,
+                                           hazards[h].stateto,
+                                           hazards[h].meshsize,
+                                           [minimum(data.tstart), maximum(data.tstop)],
+                                           hazard, 
+                                           cumulative_hazard) 
+                else
+                    haz_struct = _ISplineDecreasingPH(Symbol(hazname),
+                                           hazdat[:,Not(1)], 
+                                           Symbol.(parnames),
+                                           hazards[h].statefrom,
+                                           hazards[h].stateto,
+                                           hazards[h].meshsize,
+                                           [minimum(data.tstart), maximum(data.tstop)],
+                                           hazard, 
+                                           cumulative_hazard) 
+                end                
             end
         end
 
