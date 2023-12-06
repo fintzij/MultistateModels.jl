@@ -452,31 +452,31 @@ end
 
 # for parsing command line arguments
 # ARGS - setup table
-# function parse_commandline()
+function parse_commandline()
 
-#     s = ArgParseSettings()
+    s = ArgParseSettings()
 
-#     @add_arg_table! s begin
-#         "arg1"
-#             help = "seed"
-#             required = true
-#         "arg2"
-#             help = "cens"
-#             required = true
-#         "arg3"
-#             help = "nulleff"
-#             required = true
-#         "arg4"
-#             help = "jobid"
-#             required = true
-#         "arg5"
-#             help = "sims_per_job"
-#             required = true
-#         "arg6"
-#             help = "nboot"
-#             required = true
-#     end
+    @add_arg_table! s begin
+        "arg1"
+            help = "seed"
+            required = true
+        "arg2"
+            help = "cens"
+            required = true
+        "arg3"
+            help = "nulleff"
+            required = true
+        "arg4"
+            help = "jobid"
+            required = true
+        "arg5"
+            help = "sims_per_job"
+            required = true
+        "arg6"
+            help = "nboot"
+            required = true
+    end
 
-#     # parse arguments
-#     return parse_args(s)
-# end
+    # parse arguments
+    return parse_args(s)
+end

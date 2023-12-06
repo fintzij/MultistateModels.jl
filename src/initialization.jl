@@ -186,7 +186,7 @@ end
 
 spline without covariates
 """
-function init_par(_hazard::Union{_MSpline, _ISplineIncreasing, _ISplineDecreasing}, crude_log_rate=0)
+function init_par(_hazard::_Spline, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 
     # pass through crude exponential rate
     npars = length(_hazard.parnames)
@@ -197,7 +197,7 @@ end
 
 spline with covariates
 """
-function init_par(_hazard::Union{_MSplinePH, _ISplineIncreasingPH, _ISplineDecreasingPH}, crude_log_rate=0)
+function init_par(_hazard::_SplinePH, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 
     # pass through crude exponential rate 
     # set covariate coefficients to 0
