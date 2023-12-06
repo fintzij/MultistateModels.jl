@@ -19,6 +19,11 @@ Abstract struct for internal semi-Markov _Hazard types.
 abstract type _SemiMarkovHazard <: _Hazard end
 
 """
+Abstract struct for internal spline _Hazard types.
+"""
+abstract type _SplineHazard <: _SemiMarkovHazard end
+
+"""
 Abstract type for total hazards.
 """
 abstract type _TotalHazard end
@@ -159,7 +164,7 @@ end
 """
 Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. 
 """
-struct _Spline <: _SemiMarkovHazard
+struct _Spline <: _SplineHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
@@ -174,7 +179,7 @@ end
 """
 Spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions, or an I-spline if the hazard is monotonic. Hence, the cumulative hazard is an I-spline or C-spline, respectively. Covariates have a multiplicative effect on the baseline hazard.
 """
-struct _SplinePH <: _SemiMarkovHazard
+struct _SplinePH <: _SplineHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}

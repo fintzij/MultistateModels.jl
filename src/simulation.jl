@@ -111,6 +111,16 @@ function simulate_path(model::MultistateProcess, subj::Int64)
     times  = [tcur]; sizehint!(times, nstates * 2)
     states = [scur]; sizehint!(states, nstates * 2)
 
+    if any(typeof.(model.hazards) .<: _SplineHazard)
+        atol = maximum([maximum(map(x -> (isa(x, _SplineHazard) ? x.meshsize : 0), model.hazards))^-2, eps()])
+        rtol = sqrt(atol)
+        optmethod = GoldenSection()
+    else
+        atol = eps()
+        rtol = sqrt(eps())
+        optmethod = Brent()
+    end
+
     # flag for whether to stop simulation
     # obviously don't simulate if the initial state is absorbing
     keep_going = isa(model.totalhazards[scur], _TotalHazardTransient)
@@ -130,7 +140,7 @@ function simulate_path(model::MultistateProcess, subj::Int64)
         if (u < (cuminc + interval_incid)) && (u >= cuminc)
 
             # update the current time
-            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false))) - log(u))^2), 0.0, tstop - tcur)
+            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false))) - log(u))^2), 0.0, tstop - tcur, optmethod; rel_tol = rtol, abs_tol = atol)
 
             if Optim.converged(timeincrement)
                 timeinstate += timeincrement.minimizer
