@@ -40,7 +40,7 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
     end
 
     # get spline objects from splines2
-    if hazard.monotonic == "nonmonotonic"
+    if !hazard.monotonic
         # mSpline via splines2
         sphaz = rcopy(Array{Float64}, R"t(splines2::mSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
 
