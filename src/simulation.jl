@@ -105,13 +105,13 @@ function simulate_path(model::MultistateProcess, subj::Int64)
 
     # vector for next state transition probabilities
     nstates  = size(model.tmat, 2)
-    ns_probs = zeros(nstates)
+    # ns_probs = zeros(nstates)
 
     # initialize sample path
     times  = [tcur]; sizehint!(times, nstates * 2)
     states = [scur]; sizehint!(states, nstates * 2)
 
-    if any(typeof.(model.hazards) .<: _SplineHazard)
+    if any(isa.(model.hazards, _SplineHazard))
         atol = maximum([maximum(map(x -> (isa(x, _SplineHazard) ? x.meshsize : 0), model.hazards))^-2, eps()])
         rtol = sqrt(atol)
         optmethod = GoldenSection()
@@ -149,10 +149,10 @@ function simulate_path(model::MultistateProcess, subj::Int64)
             end            
 
             # calculate next state transition probabilities 
-            next_state_probs!(ns_probs, timeinstate, scur, ind, model.parameters, model.hazards, model.totalhazards, model.tmat)
+            # next_state_probs!(ns_probs, timeinstate, scur, ind, model.parameters, model.hazards, model.totalhazards, model.tmat)
 
             # sample the next state
-            scur = rand(Categorical(ns_probs))
+            scur = rand(Categorical(next_state_probs(timeinstate, scur, ind, model.parameters, model.hazards, model.totalhazards, model.tmat)))
             
             # increment time in state and cache the jump time and state
             tcur = times[end] + timeinstate

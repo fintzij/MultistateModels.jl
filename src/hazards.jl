@@ -350,44 +350,6 @@ end
 """
     next_state_probs!(ns_probs, scur, ind, model)
 
-Update ns_probs with probabilities of transitioning to each state based on hazards from current state. 
-
-# Arguments 
-- ns_probs: vector of probabilities corresponding to each state, modified in place
-- t: time at which hazards should be calculated
-- scur: current state
-- ind: index at complete dataset
-- parameters: vector of vectors of model parameters
-- hazards: vector of cause-specific hazards
-- totalhazards: vector of total hazards
-- tmat: transition matrix 
-"""
-function next_state_probs!(ns_probs, t, scur, ind, parameters, hazards, totalhazards, tmat)
-
-    # set ns_probs to zero for impossible transitions
-    ns_probs[findall(tmat[scur,:] .== 0.0)] .= 0.0
-
-    # indices for possible destination states
-    trans_inds = findall(tmat[scur,:] .!= 0.0)
-        
-    # calculate log hazards for possible transitions + normalize
-    ns_probs[trans_inds] = 
-        softmax(map(x -> call_haz(t, parameters[x], ind, hazards[x]), totalhazards[scur].components))
-
-    # catch for numerical instabilities (weird edge case)
-    if any(isnan.(ns_probs[trans_inds]))
-        pisnan = findall(isnan.(ns_probs[trans_inds]))
-        if length(pisnan) == 1
-            ns_probs[trans_inds][pisnan] = 1 - sum(ns_probs[trans_inds][Not(pisnan)])
-        else
-            ns_probs[trans_inds][pisnan] .= 1 - sum(ns_probs[trans_inds][Not(pisnan)])/length(pisnan)
-        end        
-    end
-end
-
-"""
-    next_state_probs!(ns_probs, scur, ind, model)
-
 Return a vector ns_probs with probabilities of transitioning to each state based on hazards from current state. 
 
 # Arguments 
@@ -402,21 +364,21 @@ Return a vector ns_probs with probabilities of transitioning to each state based
 function next_state_probs(t, scur, ind, parameters, hazards, totalhazards, tmat)
 
     # initialize vector of next state transition probabilities
-    ns_probs = zeros(size(model.tmat, 2))
+    ns_probs = zeros(size(tmat, 2))
 
     # indices for possible destination states
     trans_inds = findall(tmat[scur,:] .!= 0.0)
-        
-    # calculate log hazards for possible transitions
-    ns_probs[trans_inds] = 
-        map(x -> call_haz(t, parameters[x], ind, hazards[x]), totalhazards[scur].components)
 
-    # normalize ns_probs
-    ns_probs[trans_inds] = 
-        softmax(ns_probs[totalhazards[scur].components])
+    if length(trans_inds) == 1
+        ns_probs[trans_inds] .= 1.0
+    else
+        ns_probs[trans_inds] = softmax(map(x -> call_haz(t, parameters[x], ind, hazards[x]), totalhazards[scur].components))
+    end
 
     # catch for numerical instabilities (weird edge case)
-    if any(isnan.(ns_probs[trans_inds]))
+    if all(isnan.(ns_probs[trans_inds]))
+        ns_probs[trans_inds] .= 1 / length(trans_inds)
+    elseif any(isnan.(ns_probs[trans_inds]))
         pisnan = findall(isnan.(ns_probs[trans_inds]))
         if length(pisnan) == 1
             ns_probs[trans_inds][pisnan] = 1 - sum(ns_probs[trans_inds][Not(pisnan)])
@@ -491,8 +453,8 @@ function cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
     # identify transient states
     transients = findall(isa.(totalhazards, _TotalHazardTransient))
 
-    # identify which transient state to grab for each hazard (as transients[transinds[h]])
-    transinds  = reduce(vcat, [i * ones(Int64, length(totalhazards[transients[i]].components)) for i in eachindex(transients)])
+    # identify which transient state to grab for each hazard (as transients[trans_inds[h]])
+    trans_inds  = reduce(vcat, [i * ones(Int64, length(totalhazards[transients[i]].components)) for i in eachindex(transients)])
 
     # initialize cumulative incidence
     n_intervals = length(subj_times) - 1
@@ -520,12 +482,12 @@ function cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
     # compute the cumulative incidence for each transition type
     for h in eachindex(hazards)
         # identify origin state
-        statefrom = transients[transinds[h]]
+        statefrom = transients[trans_inds[h]]
 
         # compute incidences
         for r in 1:n_intervals
             incidences[r,h] = 
-                survprobs[r,transinds[h]] * 
+                survprobs[r,trans_inds[h]] * 
                 quadgk(t -> (
                         call_haz(t, parameters[h], subj_inds[interval_inds[r]], hazards[h]; give_log = false) * 
                         survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[statefrom], hazards; give_log = false)), 
@@ -684,3 +646,46 @@ function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, haza
     # return cumulative hazards
     return cumulative_hazards
 end
+
+
+
+
+
+########## DEPRECATED
+# """
+#     next_state_probs!(ns_probs, scur, ind, model)
+
+# Update ns_probs with probabilities of transitioning to each state based on hazards from current state. 
+
+# # Arguments 
+# - ns_probs: vector of probabilities corresponding to each state, modified in place
+# - t: time at which hazards should be calculated
+# - scur: current state
+# - ind: index at complete dataset
+# - parameters: vector of vectors of model parameters
+# - hazards: vector of cause-specific hazards
+# - totalhazards: vector of total hazards
+# - tmat: transition matrix 
+# """
+# function next_state_probs!(ns_probs, t, scur, ind, parameters, hazards, totalhazards, tmat)
+
+#     # set ns_probs to zero for impossible transitions
+#     ns_probs[findall(tmat[scur,:] .== 0.0)] .= 0.0
+
+#     # indices for possible destination states
+#     trans_inds = findall(tmat[scur,:] .!= 0.0)
+        
+#     # calculate log hazards for possible transitions + normalize
+#     ns_probs[trans_inds] = 
+#         softmax(map(x -> call_haz(t, parameters[x], ind, hazards[x]), totalhazards[scur].components))
+
+#     # catch for numerical instabilities (weird edge case)
+#     if any(isnan.(ns_probs[trans_inds]))
+#         pisnan = findall(isnan.(ns_probs[trans_inds]))
+#         if length(pisnan) == 1
+#             ns_probs[trans_inds][pisnan] = 1 - sum(ns_probs[trans_inds][Not(pisnan)])
+#         else
+#             ns_probs[trans_inds][pisnan] .= 1 - sum(ns_probs[trans_inds][Not(pisnan)])/length(pisnan)
+#         end        
+#     end
+# end
