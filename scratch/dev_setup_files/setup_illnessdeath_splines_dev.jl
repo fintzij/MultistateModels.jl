@@ -26,7 +26,7 @@ data = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
               obstype = 2)
 
 # create multistate model object with the simulated data
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0) # healthy -> ill
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, monotonic = "decreasing") # healthy -> ill
 h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 0) # healthy -> dead
 h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 0) # ill -> dead
 

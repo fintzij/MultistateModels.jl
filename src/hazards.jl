@@ -461,7 +461,7 @@ function call_haz(t, parameters, rowind, _hazard::_ISplineDecreasing; give_log =
     ind = ind == 0 ? 1 : ind
 
     # compute the log hazard
-    loghaz = log(dot(-exp.(parameters), _hazard.hazbasis[:,ind]))
+    loghaz = log(dot(exp.(parameters), _hazard.hazbasis[:,ind]))
 
     # return the log hazard
     give_log ? loghaz : exp(loghaz)
@@ -494,7 +494,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineDecreasing; 
     end
 
     # log cumulative hazard
-    logchaz = log(dot(-exp.(parameters), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind]))
+    logchaz = log(dot(exp.(parameters), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind]))
 
     # return the log hazard
     give_log ? logchaz : exp(logchaz)
@@ -512,7 +512,7 @@ function call_haz(t, parameters, rowind, _hazard::_ISplineDecreasingPH; give_log
     ind = ind == 0 ? 1 : ind
 
     # compute the log hazard
-    loghaz = log(dot(-exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.hazbasis, 1))])
+    loghaz = log(dot(exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.hazbasis, 1))])
 
     # return the log hazard
     give_log ? loghaz : exp(loghaz)
@@ -545,7 +545,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineDecreasingPH
     end
 
     # log cumulative hazard
-    logchaz = log(dot(-exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
+    logchaz = log(dot(exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
 
     # return the log hazard
     give_log ? logchaz : exp(logchaz)
