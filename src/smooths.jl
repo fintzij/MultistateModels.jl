@@ -54,9 +54,6 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
         spchaz = rcopy(Array{Float64}, R"t(splines2::cSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
 
     elseif hazard.monotonic == "decreasing"
-
-        @error "Monotone decreasing baseline hazards not implemented."
-
         # iSpline via splines2
         sphaz = 1 .- rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
 
