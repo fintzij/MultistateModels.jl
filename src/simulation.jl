@@ -13,8 +13,9 @@ Simulate `n` datasets or collections of sample paths from a multistate model. If
 - `nsim`: number of sample paths to simulate
 - `data`: boolean; if true then return discretely observed sample paths
 - `paths`: boolean; if false then continuous-time sample paths not returned
+- `deltamin`: minimum cumulative incidence increment per-jump
 """
-function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false)
+function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false, deltamin = 0.001)
 
     # throw an error if neither paths nor data are asked for
     if paths == false && data == false
@@ -38,7 +39,7 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
         for j in Base.OneTo(nsubj)
             
             # simulate a path for subject j
-            samplepath = simulate_path(model, j)
+            samplepath = simulate_path(model, j, deltamin)
 
             # save path if requested
             if paths == true
@@ -127,7 +128,7 @@ function simulate_path(model::MultistateProcess, subj::Int64)
     
     # sample the cumulative incidence if transient
     if keep_going
-        u = maximum([rand(1)[1], sqrt(sqrt(eps()))])
+        u = maximum([rand(1)[1], deltamin])
     end
 
     # simulate path
@@ -164,7 +165,7 @@ function simulate_path(model::MultistateProcess, subj::Int64)
 
             # draw new cumulative incidence, reset cuminc and time in state
             if keep_going
-                u           = maximum([rand(1)[1], sqrt(sqrt(eps()))]) # sample cumulative incidence
+                u           = maximum([rand(1)[1], deltamin]) # sample cumulative incidence
                 cuminc      = 0.0 # reset cuminc
                 timeinstate = 0.0 # reset time in state
             end
