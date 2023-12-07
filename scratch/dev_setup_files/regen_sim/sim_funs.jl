@@ -13,16 +13,16 @@ end
 # function to make the parameters
 function makepars(; nulleff = 1)
     te = 2 - nulleff == 1
-    parameters = (h12 = [log(0.4), log(0.165), log(0.565) * te],
-                  h23 = [log(2), log(0.1), log(0.3) * te],
-                  h24 = [log(2.5), log(0.31), log(1) * te],
-                  h35 = [log(2.5), log(0.31), log(1) * te],
-                  h45 = [log(2), log(0.22), log(0.3) * te],
-                  h26 = [log(0.4), log(0.9), log(0.55) * te],
-                  h67 = [log(2), log(0.2), log(0.25) * te],
-                  h68 = [log(2), log(0.31), log(1) * te],
-                  h79 = [log(2), log(0.35), log(1) * te],
-                  h89 = [log(2), log(0.55), log(0.25) * te])
+    parameters = (h12 = [log(0.4), log(0.2), log(0.65) * te],
+                 h23 = [log(2), log(0.2), log(0.5) * te],
+                 h24 = [log(2.5), log(0.3), log(1) * te],
+                 h35 = [log(2.5), log(0.3), log(1) * te],
+                 h45 = [log(2), log(0.25), log(0.5) * te],
+                 h26 = [log(0.4), log(1), log(0.66) * te],
+                 h67 = [log(2), log(0.2), log(0.35) * te],
+                 h68 = [log(2), log(0.3), log(1) * te],
+                 h79 = [log(2), log(0.3), log(1) * te],
+                 h89 = [log(2), log(0.55), log(0.35) * te])
     return parameters
 end
 
@@ -60,7 +60,7 @@ function setup_model(; make_pars, data = nothing, SamplingWeights = nothing, n_p
                     statefrom = fill(1, 2 * n_per_arm * ntimes),
                     stateto = fill(1, 2 * n_per_arm * ntimes),
                     obstype = fill(1, 2 * n_per_arm * ntimes),
-                    mab = repeat(sample([0.0, 1.0], 2 * n_per_arm), inner = ntimes))
+                    mab = repeat([0.0, 1.0], inner = n_per_arm * ntimes))
     end
 
     if isnothing(SamplingWeights)
@@ -174,8 +174,10 @@ function observe_subjdat(path, model; censor = false)
     # state sequence at observation times
     times  = [0.0; subj_dat.tstop]
     if any(path.states .== 6)
-        push!(times, path.times[findfirst(path.states .== 6)] - sqrt(eps(Float64)))
-        push!(times, path.times[findfirst(path.states .== 6)])
+        infecind = findfirst(path.states .== 6)
+        delta = (path.times[infecind] - path.times[infecind-1]) < sqrt(eps()) ? path.times[infecind] - path.times[infecind-1] : sqrt(eps())
+        push!(times, path.times[infecind] - delta)
+        push!(times, path.times[infecind])
         sort!(times)
     end
     states = observe_path(path, times)
@@ -282,12 +284,12 @@ function summarize_paths(paths, dat)
             n_as_m   = n_as_m / i_m,
             n_s_p    = n_s_p / i_p,
             n_as_p   = n_as_p / i_p,
-            ti_m     = mean(filter(x -> !ismissing(x), infectimes_mab)), 
-            ti_p     = mean(filter(x -> !ismissing(x), infectimes_plac)),
-            ts_m     = mean(filter(x -> !ismissing(x), symptimes_mab)),
-            ts_p     = mean(filter(x -> !ismissing(x), symptimes_plac)),
-            pcrdur_m = mean(filter(x -> !ismissing(x), view(pcrdurs, mabinds, :))),
-            pcrdur_p = mean(filter(x -> !ismissing(x), view(pcrdurs, placinds, :))))
+            ti_m     = !all(ismissing.(infectimes_mab)) ? mean(filter(x -> !ismissing(x), infectimes_mab)) : -1.0, 
+            ti_p     = !all(ismissing.(infectimes_plac)) ? mean(filter(x -> !ismissing(x), infectimes_plac)) : -1.0,
+            ts_m     = !all(ismissing.(symptimes_mab)) ? mean(filter(x -> !ismissing(x), symptimes_mab)) : -1.0,
+            ts_p     = !all(ismissing.(symptimes_plac)) ? mean(filter(x -> !ismissing(x), symptimes_plac)) : -1.0,
+            pcrdur_m = !all(ismissing.(view(pcrdurs, mabinds, :))) ? (mean(filter(x -> !ismissing(x), view(pcrdurs, mabinds, :)))) : -1.0,
+            pcrdur_p = !all(ismissing.(view(pcrdurs, placinds, :))) ? (mean(filter(x -> !ismissing(x), view(pcrdurs, placinds, :)))) : -1.0)
 
     return ests
 end
@@ -295,28 +297,41 @@ end
 # asymptotic bootstrap 
 function asymptotic_bootstrap(model, pars, vcov, sims_per_subj, nboot)
 
-    # make local copy of fitted model
-    _model = deepcopy(model)
-
     # draw parameters
-    pardraws = rand(MvNormal(flatview(pars), Symmetric(vcov)), nboot)
+    pars = flatview(pars)
+    npars = length(pars)
+    pardraws = zeros(Float64, npars)
+
+    # SVD
+    U = zeros(npars, npars) 
+    D = zeros(npars)
+    U,D = svd(vcov)
+
+    # replace small negative singular values with zeros
+    D[findall(D .< 0)] .= 0.0
+
+    # matrix square root
+    S = U * diagm(sqrt.(D))
     
     # initialize matrix of estimates
     ests = zeros(Float64, 14, nboot)
 
     # simulate paths under each set of parameters
-    for k in 1:size(pardraws, 2)
+    for k in 1:nboot
+        # draw parameters
+        pardraws[1:npars] = flatview(pars) .+ S * randn(npars)
+
         # set the parameters
-        set_parameters!(_model, VectorOfVectors(pardraws[:,k], model.parameters.elem_ptr))
+        set_parameters!(model, VectorOfVectors(pardraws, model.parameters.elem_ptr))
 
         # simulate paths
-        paths_sim = simulate(_model; nsim = sims_per_subj, paths = true, data = false)
+        paths_sim = simulate(model; nsim = sims_per_subj, paths = true, data = false)
 
         # summarize paths
-        ests[:,k] = collect(summarize_paths(paths_sim, _model.data))
+        ests[:,k] = collect(summarize_paths(paths_sim, model.data))
     end
 
-    return mapslices(x -> quantile(x, [0.025, 0.975]), ests, dims = [2,])
+    return mapslices(x -> quantile(x[findall(map(y -> (!ismissing(y) && (y != -1.0)), x))], [0.025, 0.975]), ests, dims = [2,])
 end
 
 # Bayesian bootstrap
@@ -362,7 +377,7 @@ function bayesian_bootstrap(dat, pars, sims_per_subj, nboot)
         # fit the model and get estimates
         ests_boot = try
             # fit model
-            fitted_boot = fit(model_fit_boot; verbose = false)
+            fitted_boot = fit(model_fit_boot; verbose = false, compute_vcov = false)
 
             # set the parameters for simulation
             set_parameters!(model_sim_boot, fitted_boot.parameters)
@@ -381,13 +396,13 @@ function bayesian_bootstrap(dat, pars, sims_per_subj, nboot)
     end
 
     # return CIs
-    return permutedims(mapslices(x -> quantile(x, [0.025, 0.975]), Matrix(boots), dims = [1,]))
+    return permutedims(mapslices(x -> quantile(x[Not(findall(ismissing.(x)))], [0.025, 0.975]), Matrix(boots), dims = [1,]))
 end
 
 # wrapper for one simulation
 # nsim is the number of simulated paths per subject
 # ndraws is the number of draws from the asymptotic normal distribution of the MLEs
-function work_function(seed, cens, nulleff, jobid, sims_per_subj, nboot)
+function work_function(;simnum, seed, cens, nulleff, sims_per_subj, nboot)
 
     Random.seed!(seed)
 
@@ -398,46 +413,29 @@ function work_function(seed, cens, nulleff, jobid, sims_per_subj, nboot)
     paths = simulate(model_sim; nsim = 1, paths = true, data = false)[:,1]
 
     # make dataset
-    dat = cens == 1 ? reduce(vcat, map(x -> observe_subjpath(x, model_sim), paths)) : 
-          cens == 2 ? reduce(vcat, map(x -> observe_subjdat(x, model_sim; censor = false), paths)) : reduce(vcat, map(x -> observe_subjdat(x, model_sim; censor = true), paths))
+    dat = cens == 1 ? reduce(vcat, map(x -> observe_subjpath(x, model_sim), paths)) : cens == 2 ? reduce(vcat, map(x -> observe_subjdat(x, model_sim; censor = false), paths)) : reduce(vcat, map(x -> observe_subjdat(x, model_sim; censor = true), paths))
 
     ### set up model for fitting
     dat_collapsed, weights = collapse_data(dat)
     model_fit = setup_model(; make_pars = false, data = dat_collapsed, SamplingWeights = weights, family = "wei")
 
-    ### fit the model
-    pars, vcov, ests = try
-        # fit model
-        @info "Fitting model for job $jobid."
-        fitted = fit(model_fit, verbose = true)
+    # fit model
+    model_fitted = cens == 1 ? fit(model_fit; verbose = true, compute_vcov = true) : fit(model_fit; verbose = true, compute_vcov = true, maxiter = 250)
 
-        # move the parameters over to the model for simulation
-        set_parameters!(model_sim, fitted.parameters)
+    # move the parameters over to the model for simulation
+    set_parameters!(model_sim, model_fitted.parameters)
 
-        ### simulate from the fitted model
-        paths_sim = simulate(model_sim; nsim = sims_per_subj, paths = true, data = false)
+    ### simulate from the fitted model
+    paths_sim = simulate(model_sim; nsim = sims_per_subj, paths = true, data = false)
 
-        ### process the results
-        estimates = summarize_paths(paths_sim, model_sim.data)
-        
-        # return for assignment
-        (fitted.parameters, fitted.vcov, estimates)
-    catch err
-        (missing, missing, missing)
-    end
+    ### process the results
+    ests = summarize_paths(paths_sim, model_sim.data)
 
     # get asymptotic bootstrap CIs
-    if !ismissing(ests)
-        asymp_cis = asymptotic_bootstrap(model_sim, pars, vcov, sims_per_subj, nboot)    
-
-        bboot_cis = bayesian_bootstrap(dat, pars, sims_per_subj, nboot)
-    else
-        asymp_cis = missing
-        bboot_cis = missing
-    end
+    asymp_cis = asymptotic_bootstrap(model_sim, model_fitted.parameters, model_fitted.vcov, sims_per_subj, nboot)    
     
     ### return results
-    return (ests = ests, asymp_cis = asymp_cis, bboot_cis = bboot_cis, cens = cens, nulleff = nulleff, jobid = jobid)
+    return DataFrame(simnum = simnum, cens = cens, nulleff = nulleff, var = string.(collect(keys(ests))), ests = collect(ests), lower = asymp_cis[:,1], upper = asymp_cis[:,2])
 end
 
 # wrapper for doing work
