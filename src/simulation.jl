@@ -13,10 +13,10 @@ Simulate `n` datasets or collections of sample paths from a multistate model. If
 - `nsim`: number of sample paths to simulate
 - `data`: boolean; if true then return discretely observed sample paths
 - `paths`: boolean; if false then continuous-time sample paths not returned
-- `delta_u`: minimum cumulative incidence increment per-jump
-- `delta_t`: minimum time increment per-jump
+- `delta_u`: minimum cumulative incidence increment per-jump, defaults to the larger of (1 / #subjects)^2 or sqrt(eps())
+- `delta_t`: minimum time increment per-jump, defaults to sqrt(eps())
 """
-function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false, delta_u = 0.001, delta_t = sqrt(sqrt(eps())))
+function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false, delta_u = nothing, delta_t = sqrt(eps()))
 
     # throw an error if neither paths nor data are asked for
     if paths == false && data == false
@@ -35,6 +35,10 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
     if data == true
         datasets = Array{DataFrame}(undef, nsubj, nsim)
     end 
+
+    if isnothing(delta_u)
+        delta_u = maximum([1/nsubj^2, sqrt(eps())])
+    end
 
     for i in Base.OneTo(nsim)
         for j in Base.OneTo(nsubj)
