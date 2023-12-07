@@ -13,8 +13,10 @@ Simulate `n` datasets or collections of sample paths from a multistate model. If
 - `nsim`: number of sample paths to simulate
 - `data`: boolean; if true then return discretely observed sample paths
 - `paths`: boolean; if false then continuous-time sample paths not returned
+- `delta_u`: minimum cumulative incidence increment per-jump, defaults to the larger of (1 / #subjects)^2 or sqrt(eps())
+- `delta_t`: minimum time increment per-jump, defaults to sqrt(eps())
 """
-function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false)
+function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false, delta_u = sqrt(eps()), delta_t = sqrt(eps()))
 
     # throw an error if neither paths nor data are asked for
     if paths == false && data == false
@@ -38,7 +40,7 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
         for j in Base.OneTo(nsubj)
             
             # simulate a path for subject j
-            samplepath = simulate_path(model, j)
+            samplepath = simulate_path(model, j, delta_u, delta_t)
 
             # save path if requested
             if paths == true
@@ -73,7 +75,7 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
 end
 
 """
-simulate_path(model::MultistateProcess, subj::Int64)
+simulate_path(model::MultistateProcess, subj::Int64, deltamin)
 
 Simulate a single sample path.
 
@@ -81,7 +83,7 @@ Simulate a single sample path.
 - model: multistate model object
 - subj: subject index
 """
-function simulate_path(model::MultistateProcess, subj::Int64)
+function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
 
     # subject data
     subj_inds = model.subjectindices[subj]
@@ -112,12 +114,12 @@ function simulate_path(model::MultistateProcess, subj::Int64)
     states = [scur]; sizehint!(states, nstates * 2)
 
     if any(isa.(model.hazards, _SplineHazard))
-        atol = maximum([maximum(map(x -> (isa(x, _SplineHazard) ? x.meshsize : 0), model.hazards))^-2, eps()])
+        atol = maximum([maximum(map(x -> (isa(x, _SplineHazard) ? x.meshsize : 0), model.hazards))^-2, sqrt(eps())])
         rtol = sqrt(atol)
         optmethod = GoldenSection()
     else
-        atol = eps()
-        rtol = sqrt(eps())
+        atol = sqrt(eps())
+        rtol = sqrt(atol)
         optmethod = Brent()
     end
 
@@ -127,7 +129,7 @@ function simulate_path(model::MultistateProcess, subj::Int64)
     
     # sample the cumulative incidence if transient
     if keep_going
-        u = rand(1)[1]
+        u = maximum([rand(1)[1], delta_u])
     end
 
     # simulate path
@@ -139,8 +141,8 @@ function simulate_path(model::MultistateProcess, subj::Int64)
         # check if event happened in the interval
         if (u < (cuminc + interval_incid)) && (u >= cuminc)
 
-            # update the current time
-            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false))) - log(u))^2), 0.0, tstop - tcur, optmethod; rel_tol = rtol, abs_tol = atol)
+            # update the current time - roughly 1 millisecond must pass if time is in minutes
+            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false))) - log(u))^2), delta_t, tstop - tcur, optmethod; rel_tol = rtol, abs_tol = atol)
 
             if Optim.converged(timeincrement)
                 timeinstate += timeincrement.minimizer
@@ -164,7 +166,7 @@ function simulate_path(model::MultistateProcess, subj::Int64)
 
             # draw new cumulative incidence, reset cuminc and time in state
             if keep_going
-                u           = rand(1)[1] # sample cumulative incidence
+                u           = maximum([rand(1)[1], delta_u]) # sample cumulative incidence
                 cuminc      = 0.0 # reset cuminc
                 timeinstate = 0.0 # reset time in state
             end
