@@ -40,25 +40,18 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
     end
 
     # get spline objects from splines2
-    if !hazard.monotonic
+    if hazard.monotonic == "nonmonotonic"
         # mSpline via splines2
         sphaz = rcopy(Array{Float64}, R"t(splines2::mSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
 
         # iSpline via splines2
         spchaz = rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
-    elseif hazard.monotonic == "increasing"
+    else 
         # mSpline via splines2
         sphaz = rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
 
         # iSpline via splines2
-        spchaz = rcopy(Array{Float64}, R"t(splines2::cSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
-
-    elseif hazard.monotonic == "decreasing"
-        # iSpline via splines2
-        sphaz = 1 .- rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
-
-        # cSpline via splines2
-        spchaz = 1 .-  rcopy(Array{Float64}, R"t(splines2::cSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
+        spchaz = rcopy(Array{Float64}, R"t(splines2::cSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic, scale = FALSE))")
     end
 
     return (hazard = sphaz, cumulative_hazard = spchaz)
