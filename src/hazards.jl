@@ -360,7 +360,7 @@ function call_haz(t, parameters, rowind, _hazard::_ISplineIncreasing; give_log =
 
     # compute the log hazard
     sdim = size(_hazard.hazbasis, 1)
-    loghaz = log(exp(parameters[1]) + dot(exp.(parameters[range(2, length = sdim)]), _hazard.hazbasis[:,ind]))
+    loghaz = log(exp(parameters[sdim + 1]) + dot(exp.(parameters[range(1, length = sdim)]), _hazard.hazbasis[:,ind]))
 
     # return the log hazard
     give_log ? loghaz : exp(loghaz)
@@ -394,7 +394,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineIncreasing; 
 
     # log cumulative hazard
     sdim = size(_hazard.hazbasis, 1)
-    logchaz = log(exp(parameters[1]) * (ub - lb) + dot(exp.(parameters[range(2, length = sdim)]), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind]))
+    logchaz = log(exp(parameters[sdim + 1]) * (ub - lb) + dot(exp.(parameters[range(1, length = sdim)]), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind]))
 
     # return the log hazard
     give_log ? logchaz : exp(logchaz)
@@ -413,7 +413,7 @@ function call_haz(t, parameters, rowind, _hazard::_ISplineIncreasingPH; give_log
 
     # compute the log hazard
     sdim = size(_hazard.hazbasis, 1)
-    loghaz = log(exp(parameters[1]) + dot(exp.(parameters[range(2, length = sdim)]), _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:(sdim + 1))])
+    loghaz = log(exp(parameters[sdim + 1]) + dot(exp.(parameters[range(1, length = sdim)]), _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:(sdim + 1))])
 
     # return the log hazard
     give_log ? loghaz : exp(loghaz)
@@ -447,7 +447,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineIncreasingPH
 
     # log cumulative hazard
     sdim = size(_hazard.hazbasis, 1)
-    logchaz = log(exp(parameters[1]) * (ub - lb) + dot(exp.(parameters[range(2, length = sdim)]), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind])) + dot(_hazard.data[rowind, :], parameters[Not(1:(sdim + 1))])
+    logchaz = log(exp(parameters[sdim + 1]) * (ub - lb) + dot(exp.(parameters[range(1, length = sdim)]), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind])) + dot(_hazard.data[rowind, :], parameters[Not(1:(sdim + 1))])
 
     # return the log hazard
     give_log ? logchaz : exp(logchaz)
@@ -466,7 +466,7 @@ function call_haz(t, parameters, rowind, _hazard::_ISplineDecreasing; give_log =
 
     # compute the log hazard
     sdim = size(_hazard.hazbasis, 1)
-    loghaz = log(exp(parameters[1]) + dot(exp.(parameters[range(2, length = sdim)]), 1 .- _hazard.hazbasis[:,ind]))
+    loghaz = log(exp(parameters[sdim + 1]) + dot(exp.(parameters[range(1, length = sdim)]), 1 .- _hazard.hazbasis[:,ind]))
 
     # return the log hazard
     give_log ? loghaz : exp(loghaz)
@@ -500,7 +500,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineDecreasing; 
 
     # log cumulative hazard
     sdim = size(_hazard.hazbasis, 1)
-    logchaz = log(exp(parameters[1]) * (ub - lb) + dot(exp.(parameters[range(2, length = sdim)]), (ub - lb) - _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind]))
+    logchaz = log(exp(parameters[sdim + 1]) * (ub - lb) + dot(exp.(parameters[range(1, length = sdim)]), (ub .- _hazard.chazbasis[:,uind]) .- (lb .-_hazard.chazbasis[:,lind])))
 
     # return the log hazard
     give_log ? logchaz : exp(logchaz)
@@ -519,7 +519,7 @@ function call_haz(t, parameters, rowind, _hazard::_ISplineDecreasingPH; give_log
 
     # compute the log hazard
     sdim = size(_hazard.hazbasis, 1)
-    loghaz = log(exp(parameters[1]) + dot(exp.(parameters[range(2, length = sdim)]), 1 .- _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:(sdim + 1))])
+    loghaz = log(exp(parameters[sdim + 1]) + dot(exp.(parameters[range(1, length = sdim)]), 1 .- _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:(sdim + 1))])
 
     # return the log hazard
     give_log ? loghaz : exp(loghaz)
@@ -553,14 +553,14 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ISplineDecreasingPH
 
     # log cumulative hazard
     sdim = size(_hazard.hazbasis, 1)
-    logchaz = log(exp(parameters[1]) * (ub - lb) + dot(exp.(parameters[range(2, length = sdim)]), (ub - lb) - _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind])) + dot(_hazard.data[rowind, :], parameters[Not(1:(sdim + 1))])
+    logchaz = log(exp(parameters[sdim + 1]) * (ub - lb) + dot(exp.(parameters[range(1, length = sdim)]), (ub .- _hazard.chazbasis[:,uind]) .- (lb .-_hazard.chazbasis[:,lind]))) + dot(_hazard.data[rowind, :], parameters[Not(1:(sdim + 1))])
 
     # return the log hazard
     give_log ? logchaz : exp(logchaz)
 end
 
 """
-    next_state_probs!(ns_probs, scur, ind, model)
+    next_state_probs(t, scur, ind, parameters, hazards, totalhazards, tmat)
 
 Return a vector ns_probs with probabilities of transitioning to each state based on hazards from current state. 
 

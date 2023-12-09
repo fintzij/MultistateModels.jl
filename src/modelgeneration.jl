@@ -250,13 +250,14 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             hazard, cumulative_hazard = spline_hazards(hazards[h], data)
 
             # generate hazard struct
+            ### no covariates
             if(size(hazdat, 2) == 1) 
-                ### no covariates
-                # parameter names
-                parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), "(Intercept)" => "Intercept")
                     
                 # hazard struct
                 if hazards[h].monotonic == "nonmonotonic"
+
+                    # parameter names
+                    parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), "(Intercept)" => "Intercept")
 
                     # number of parameters
                     npars = size(hazard)[1] + size(hazdat, 2) - 1
@@ -279,6 +280,9 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                         
                 elseif hazards[h].monotonic == "increasing"
 
+                    # parameter names
+                    parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*[string.(collect(1:size(hazard)[1]));"Intercept"]))
+
                     # number of parameters
                     npars = size(hazard)[1] + size(hazdat, 2)
 
@@ -298,9 +302,13 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                             [minimum(data.tstart), maximum(data.tstop)],
                                             hazard,
                                             cumulative_hazard)
-                else
+
+                else hazards[h].monotonic == "decreasing"
+
+                    parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*[string.(collect(1:size(hazard)[1]));"Intercept"]))
+                    
                     # number of parameters
-                    npars = size(hazard)[1] + size(hazdat, 2) 
+                    npars = size(hazard)[1] + size(hazdat, 2)
 
                     # vector for parameters
                     hazpars = zeros(Float64, npars)
@@ -321,11 +329,20 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                 end                  
             else
                 ### proportional hazards
-                # parameter names
-                parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), hazname*"_".*coefnames(hazschema)[2][Not(1)]), "(Intercept)" => "Intercept")
-
-                # hazard struct
                 if hazards[h].monotonic == "nonmonotonic"
+                    # parameter names
+                    parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
+
+                    # number of parameters
+                    npars = size(hazard, 1) + size(hazdat, 2) - 1
+
+                    # vector for parameters
+                    hazpars = zeros(Float64, npars)
+
+                    # append to model parameters
+                    push!(parameters, hazpars)
+
+                    # hazard struct
                     haz_struct = _MSplinePH(Symbol(hazname),
                                            hazdat[:,Not(1)], 
                                            Symbol.(parnames),
@@ -337,6 +354,19 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                            cumulative_hazard)                        
                 
                 elseif hazards[h].monotonic == "increasing"
+                    # parameter names
+                    parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*[string.(collect(1:size(hazard)[1]));"Intercept"]), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
+
+                    # number of parameters
+                    npars = size(hazard)[1] + size(hazdat, 2)
+
+                    # vector for parameters
+                    hazpars = zeros(Float64, npars)
+
+                    # append to model parameters
+                    push!(parameters, hazpars)
+
+                    # hazard struct
                     haz_struct = _ISplineIncreasingPH(Symbol(hazname),
                                            hazdat[:,Not(1)], 
                                            Symbol.(parnames),
@@ -347,6 +377,19 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                            hazard, 
                                            cumulative_hazard) 
                 else
+                    # parameter names
+                    parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*[string.(collect(1:size(hazard)[1]));"Intercept"]), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
+
+                    # number of parameters
+                    npars = size(hazard)[1] + size(hazdat, 2) 
+
+                    # vector for parameters
+                    hazpars = zeros(Float64, npars)
+
+                    # append to model parameters
+                    push!(parameters, hazpars)
+
+                    # hazard struct
                     haz_struct = _ISplineDecreasingPH(Symbol(hazname),
                                            hazdat[:,Not(1)], 
                                            Symbol.(parnames),

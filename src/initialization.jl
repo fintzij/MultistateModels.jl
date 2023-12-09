@@ -9,7 +9,6 @@ function set_crude_init!(model::MultistateProcess)
 
     for i in model.hazards
         set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
-
         set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
     end
 end
@@ -184,22 +183,46 @@ end
 
 """
 
-spline without covariates
+M-spline without covariates
 """
-function init_par(_hazard::Union{_MSpline, _ISplineIncreasing, _ISplineDecreasing}, crude_log_rate=0)
+function init_par(_hazard::_MSpline, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 
     # pass through crude exponential rate
     npars = length(_hazard.parnames)
-    return repeat([crude_log_rate], npars)
+    return fill(crude_log_rate, npars)
+end
+
+"""
+
+I-spline without covariates
+"""
+function init_par(_hazard::Union{_ISplineIncreasing, _ISplineDecreasing}, crude_log_rate=0)
+    # set shape to 0 (i.e. log(1)) 
+    # pass through crude exponential rate
+    npars = length(_hazard.parnames)
+    return [fill(crude_log_rate / (npars-1), npars-1); crude_log_rate]
+end
+
+
+"""
+
+M-spline with covariates
+"""
+function init_par(_hazard::_MSplinePH, crude_log_rate=0)
+    # set shape to 0 (i.e. log(1)) 
+    # pass through crude exponential rate 
+    # set covariate coefficients to 0
+    return vcat(fill(crude_log_rate, length(_hazard.parnames) - size(_hazard.data, 2)), zeros(size(_hazard.data, 2)))
 end
 
 """
 
 spline with covariates
 """
-function init_par(_hazard::Union{_MSplinePH, _ISplineIncreasingPH, _ISplineDecreasingPH}, crude_log_rate=0)
+function init_par(_hazard::Union{_ISplineIncreasingPH, _ISplineDecreasingPH}, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 
     # pass through crude exponential rate 
     # set covariate coefficients to 0
-    return vcat(repeat([crude_log_rate], length(_hazard.parnames) - size(_hazard.data, 2)), zeros(size(_hazard.data, 2) - 1))
+    nhazpars = length(_hazard.parnames) - size(_hazard.data, 2)
+    return vcat(fill(crude_log_rate / (nhazpars-1), nhazpars - 1), crude_log_rate, zeros(size(_hazard.data, 2)))
 end
