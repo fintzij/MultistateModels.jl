@@ -162,4 +162,95 @@ end
             @test MultistateModels.total_cumulhaz(lb, ub, msm_expwei.parameters, h, msm_expwei.totalhazards[s], msm_expwei.hazards; give_log = true) ≈ log(total_cumulhaz)
         end
     end
+
+@testset "test_msplines" begin
+    # test that crudely integrated hazard and cumulative hazard are rougly the same
+    cumul_haz_crude = 0.0
+    hazind = 1
+    haz = splinemod.hazards[hazind]
+    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
+        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+    end
+    cumul_haz_crude /= haz.meshsize
+
+    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+
+    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
+end
+
+@testset "test_msplinesPH" begin
+    # test that crudely integrated hazard and cumulative hazard are rougly the same
+    cumul_haz_crude = 0.0
+    hazind = 4
+    haz = splinemod.hazards[hazind]
+    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
+        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+    end
+    cumul_haz_crude /= haz.meshsize
+
+    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+
+    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
+end
+
+@testset "test_isplines_increasing" begin
+    # test that crudely integrated hazard and cumulative hazard are rougly the same
+    cumul_haz_crude = 0.0
+    hazind = 2
+    haz = splinemod.hazards[hazind]
+    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
+        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+    end
+    cumul_haz_crude /= haz.meshsize
+
+    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+
+    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
+end
+
+@testset "test_isplines_increasingPH" begin
+    # test that crudely integrated hazard and cumulative hazard are rougly the same
+    cumul_haz_crude = 0.0
+    hazind = 5
+    haz = splinemod.hazards[hazind]
+    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
+        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+    end
+    cumul_haz_crude /= haz.meshsize
+
+    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+
+    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
+end
+
+@testset "test_isplines_decreasing" begin
+    # test that crudely integrated hazard and cumulative hazard are rougly the same
+    cumul_haz_crude = 0.0
+    hazind = 3
+    haz = splinemod.hazards[hazind]
+    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
+        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+    end
+    cumul_haz_crude /= haz.meshsize
+
+    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+
+    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
+end
+
+@testset "test_isplines_decreasingPH" begin
+    # test that crudely integrated hazard and cumulative hazard are rougly the same
+    cumul_haz_crude = 0.0
+    hazind = 6
+    haz = splinemod.hazards[hazind]
+    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
+        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+    end
+    cumul_haz_crude /= haz.meshsize
+
+    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+
+    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
+end
+
 end
