@@ -129,7 +129,7 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
     # look to see if any of the absorbing states are in statefrom
     if any(absorbing)
         which_absorbing = findall(absorbing .== true)
-        abs_warn = map(x -> any(data.statefrom .== x), which_absorbing)
+        abs_warn = any(map(x -> any(data.statefrom .== x), which_absorbing))
 
         if verbose && abs_warn
             @warn "The data contains contains observations where a subject originates in an absorbing state."
