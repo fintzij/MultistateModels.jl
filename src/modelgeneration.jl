@@ -22,7 +22,7 @@ function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int6
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
-        h = SplineHazard(hazard, family, statefrom, stateto, df, degree, knots, boundaryknots, periodic, monotonic, meshsize)
+        h = SplineHazard(hazard, family, statefrom, stateto, df, degree, knots, boundaryknots, monotonic, meshsize)
     end
 
     return h

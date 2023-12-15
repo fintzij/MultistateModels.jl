@@ -71,7 +71,7 @@ end
 """
     fit(model::MultistateMarkovModel; constraints = nothing, verbose = true, compute_vcov = true)
 
-Fit a multistate markov model to interval censored data (i.e. model.data.obstype .== 2 and all hazards are exponential with possibly piecewise homogeneous transition intensities), or a mix of panel data and exact jump times.
+Fit a multistate markov model to interval censored data or a mix of panel data and exact jump times.
 """
 function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, compute_vcov = true)
 
