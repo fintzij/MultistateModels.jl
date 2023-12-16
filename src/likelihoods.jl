@@ -206,53 +206,81 @@ function loglik(parameters, data::MPanelData; neg = true)
             end
 
         else
-            # at least one state is censored            
-            # subject contribution to the likelihood
-            subj_lik = 1.0
+            # at least one state is censored
+            # use Steven Scott (2002), Equation 4 for forward filtering
 
-            # add the contribution of each observation
-            for i in subj_inds
-                
-                # get the state(s) of origin - Raphael to confirm this is correct
-                StatesFrom = data.model.data.statefrom[i] > 0 ? [data.model.data.statefrom[i]] : findall(data.model.emat[i-1,:] .== 1)
+            # number of states
+            S = size(tpm_book[data.books[2][1, 1]][data.books[2][1, 2]], 1)
 
-                # get the state(s) of destination
-                StatesTo = data.model.data.stateto[i] > 0 ? [data.model.data.stateto[i]] : findall(data.model.emat[i,:] .== 1)
-
-                # forward filtering
-                if data.model.data.obstype[i] == 1 # exact data 
-                    # verify that, when we have an exact observation, there is a single state to which the subject transitions.
-                    if size(StatesTo,1)>1
-                        error("Observation $subj_inds is exact")
-                    end
-
-                    # contribution of observation i
-                    subj_lik_i = 0.0 # should this be a 0.0?
-                    
-                    # add the contribution of each possible statefrom
-                    for sf in StatesFrom
-                        
-                        subj_lik_i_sf = 1.0 # should this be 1.0?
-
-                        if (data.model.data.tstop[i] - data.model.data.tstart[i]) < eps()
-                            subj_lik_i_sf *= survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[sf], data.model.hazards; give_log = false)                        
-                        end
-
-                        if sf != data.model.data.stateto[i] # if there is a transition, add hazard
-                            subj_lik_i_sf *= call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[sf, data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[sf, data.model.data.stateto[i]]]; give_log = false)
-                        end
-
-                        subj_lik_i += subj_lik_i_sf # is this right?
-                    end
-
-                    subj_lik *= subj_lik_i
-
-                else # panel data
-                    subj_lik *= tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][StatesFrom, StatesTo]
+            # get the statefrom at time 0
+            StatesFrom = data.model.data.statefrom[subj_inds[1]] > 0 ? [data.model.data.stateto[subj_inds[1]]] : findall(data.model.emat[subj_inds[1],:] .== 1)
+            
+            # initialize l_0
+            l = zeros(S)
+            for s in 1:S
+                if s ∈ StatesFrom
+                    l[s] = 1.0
+                else 
+                    l[s] = 0.0
                 end
             end
-            
-            subj_ll = log(subj_lik)
+
+            # update the vector l
+            for i in subj_inds
+
+                # compute q, the transition probability matrix
+                if data.model.data.obstype[i] != 1
+                    # if panel data, simply grab q from tpm_book
+                    q = tpm_book[data.books[2][i, 1]][data.books[2][i, 2]] # is tpm_book on the log scale?
+                else
+                    # if exact data (obstype = 1), compute q by hand
+
+                    # verify that, when we have an exact observation, stateto is not censored
+                    if size(StatesTo,1)>1
+                        error("Observation $subj_inds is exact, but its `stateto` is censored.")
+                    end
+                    # initialize q
+                    q = zeros(S,S)
+                    # compute q(r,s)
+                    for s in 1:S
+                        for r in 1:S
+                            # initialize q(r,s)
+                            q[r,s] = 1.0
+                            # multiply q(r,s) by the survival probability from state r
+                            if (data.model.data.tstop[i] - data.model.data.tstart[i]) > eps()
+                                q[r,s] *= survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[r], data.model.hazards; give_log = false)                        
+                            end
+                            # multiply q(r,s) by the hazard rate of the transition r->s when r!=s
+                            if r!=s
+                                q[r,s] *= call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[r, s]], i, data.model.hazards[data.model.tmat[r, s]]; give_log = false)
+                            end
+                        end
+                    end
+                end # end-compute q
+
+                # compute the set of possible "states to"
+                StatesTo = data.model.data.stateto[i] > 0 ? [data.model.data.stateto[i]] : findall(data.model.emat[i,:] .== 1)
+
+                # temporary vector l
+                l_tmp = zeros(S)
+
+                for s in 1:S
+                    # compute P_s (I am being super pedantic here)
+                    if s ∈ StatesTo
+                        P_s = 1.0
+                    else
+                        P_s = 0.0
+                    end
+                    
+                    l_tmp[s] = P_s * sum(q[:,s] .* l) # Equation 4
+                end
+                # update the vector l
+                l=l_tmp
+            end
+            # sum over the states to obtain the marginal likelihood of the subject
+            subj_l=sum(l) 
+            # log likelihood
+            subj_ll=log(subj_l)
         end
         
         # weighted loglikelihood
@@ -261,6 +289,52 @@ function loglik(parameters, data::MPanelData; neg = true)
 
     neg ? -ll : ll
 end
+
+
+                
+                # # get the state(s) of origin - Raphael to confirm this is correct
+                # StatesFrom = data.model.data.statefrom[i] > 0 ? [data.model.data.statefrom[i]] : findall(data.model.emat[i-1,:] .== 1)
+
+                # # get the state(s) of destination
+                # StatesTo = data.model.data.stateto[i] > 0 ? [data.model.data.stateto[i]] : findall(data.model.emat[i,:] .== 1)
+
+                # # forward filtering
+                # if data.model.data.obstype[i] == 1 # exact data 
+
+                #     # verify that, when we have an exact observation, there is a single state to which the subject transitions.
+                #     if size(StatesTo,1)>1
+                #         error("Observation $subj_inds is exact")
+                #     end
+
+                #     # contribution of observation i
+                #     subj_lik_i = 0.0 # should this be a 0.0?
+                    
+                #     # add the contribution of each possible statefrom
+                #     for sf in StatesFrom
+                        
+                #         subj_lik_i_sf = 1.0 # should this be 1.0?
+
+                #         if (data.model.data.tstop[i] - data.model.data.tstart[i]) < eps()
+                #             subj_lik_i_sf *= survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[sf], data.model.hazards; give_log = false)                        
+                #         end
+
+                #         if sf != data.model.data.stateto[i] # if there is a transition, add hazard
+                #             subj_lik_i_sf *= call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[sf, data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[sf, data.model.data.stateto[i]]]; give_log = false)
+                #         end
+
+                #         subj_lik_i += subj_lik_i_sf # is this right?
+                #     end
+
+                #     subj_lik *= subj_lik_i
+
+                # else # panel data
+                #     subj_lik *= tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][StatesFrom, StatesTo]
+                # end
+            # end
+            
+            # subj_ll = log(subj_lik)
+        # end
+# end
 
 """
     loglik(parameters, data::SMPanelData; neg = true)
