@@ -104,3 +104,24 @@ paths_sim = simulate(model_sim; data = false, paths = true, nsim = 20)
 
 mean(map(x -> any(x.states .== 4), paths_sim))
 mean(map(x -> any(x.states .== 4), paths))
+
+
+
+
+
+
+# input to the function `likelihood``
+model=model_fit
+books = MultistateModels.build_tpm_mapping(model.data)
+parameters = MultistateModels.flatview(model.parameters)
+data = MultistateModels.MPanelData(model, books)
+
+# the function `likelihood` works
+MultistateModels.loglik(parameters, data)
+
+
+# but the optimizer does not work
+optf = OptimizationFunction(MultistateModels.loglik, Optimization.AutoForwardDiff())
+prob = OptimizationProblem(optf, parameters, MultistateModels.MPanelData(model, books))
+sol  = solve(prob, Newton())
+
