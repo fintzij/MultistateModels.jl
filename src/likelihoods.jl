@@ -176,13 +176,26 @@ function loglik(parameters, data::MPanelData; neg = true)
 
     # accumulate the log likelihood
     ll = 0.0
+
+    # number of states
+    S = size(data.model.tmat, 1)
+
+    # initialize Q
+    q = zeros(S,S)
+
+    # initialize l_t0 and l_t1
+    l_t0 = zeros(S)
+    l_t1 = zeros(S)
     
     # for each subject, compute the likelihood contribution
     for subj in Base.OneTo(length(data.model.subjectindices))
 
+        # reset q
+        fill!(q, 0.0)
+
         # subject data
         subj_inds = data.model.subjectindices[subj]
-        #subj_dat  = view(data.model.data, subj_inds, :)
+        # subj_dat  = view(data.model.data, subj_inds, :)
 
         # no state is censored
         if all(data.model.data.obstype[subj_inds] .∈ Ref([1,2]))
@@ -207,87 +220,78 @@ function loglik(parameters, data::MPanelData; neg = true)
 
         else
             # at least one state is censored
-            # use Steven Scott (2002), Equation 4 for forward filtering
-
-            # number of states
-            S = size(tpm_book[data.books[2][1, 1]][data.books[2][1, 2]], 1)
-
-            # get the statefrom at time 0
-            StatesFrom_t0 = data.model.data.statefrom[subj_inds[1]] > 0 ? [data.model.data.statefrom[subj_inds[1]]] : findall(data.model.emat[subj_inds[1],:] .== 1)
+            StatesFrom = data.model.data.statefrom[subj_inds[1]] > 0 ? [data.model.data.statefrom[subj_inds[1]]] : findall(data.model.emat[subj_inds[1],:] .== 1)
             
             # initialize l_0
-            l = zeros(S)
             for s in 1:S
-                if s ∈ StatesFrom_t0
-                    l[s] = 1.0
-                else 
-                    l[s] = 0.0
-                end
+                l_t0[s] = s ∈ StatesFrom ? 1.0 : 0.0
             end
+
+            # initialize Q
+            if any(data.model.data.obstype[subj_inds] .!= 1)
+                fill!(q, 0.0)
+            end
+
+            n_inds = length(subj_inds)
+            ind = 0
 
             # update the vector l
             for i in subj_inds
 
+                # increment counter
+                ind += 1
+
                 # compute q, the transition probability matrix
                 if data.model.data.obstype[i] != 1
                     # if panel data, simply grab q from tpm_book
-                    q = tpm_book[data.books[2][i, 1]][data.books[2][i, 2]] # is tpm_book on the log scale?
+                    copyto!(q, tpm_book[data.books[2][i, 1]][data.books[2][i, 2]])
+                    
                 else
                     # if exact data (obstype = 1), compute q by hand
+                    # reset Q
+                    fill!(q, -Inf)
                     
-                    # initialize q
-                    q = zeros(S,S)
                     # compute q(r,s)
-                    for s in 1:S
-                        for r in 1:S
-                            # initialize q(r,s)
-                            q[r,s] = 1.0
-                            # multiply q(r,s) by the survival probability from state r
-                            if (data.model.data.tstop[i] - data.model.data.tstart[i]) > eps()
-                                # if r is absorbing, the survival probability is 1
-                                if typeof(data.model.totalhazards[r]) == _TotalHazardAbsorbing
-                                    q[r,s] *= 1.0
-                                else
-                                    q[r,s] *= survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[r], data.model.hazards; give_log = false) 
-                                end                       
-                            end
-                            # multiply q(r,s) by the hazard rate of the transition r->s when r!=s
-                            if r != s
-                                haz_id = data.model.tmat[r, s]
-                                # if no transition from r to s, then hazard is 0
-                                if haz_id == 0
-                                    q[r,s] *= 0.0
-                                else
-                                    q[r,s] *= call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[haz_id], i, data.model.hazards[haz_id]; give_log = false)
+                    for r in 1:S
+                        if isa(data.model.totalhazards[r], _TotalHazardAbsorbing)
+                            q[r,r] = 0.0
+                        else
+                            # survival probability
+                            q[r, findall(data.model.tmat[r,:] .!= 0)] .= survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[r], data.model.hazards; give_log = true) 
+                            
+                            # hazard
+                            for s in 1:S
+                                if (s != r) & (data.model.tmat[r,s] != 0)
+                                    q[r, s] += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[r, s]], i, data.model.hazards[data.model.tmat[r, s]]; give_log = true)
                                 end
                             end
                         end
+                        q[r,:] = softmax(q[r,:])
                     end
                 end # end-compute q
 
                 # compute the set of possible "states to"
                 StatesTo = data.model.data.stateto[i] > 0 ? [data.model.data.stateto[i]] : findall(data.model.emat[i,:] .== 1)
 
-                # temporary vector l
-                l_tmp = zeros(S)
+                # reset l_t1
+                fill!(l_t1, 0.0)
 
                 for s in 1:S
-                    # compute P_s (I am being super pedantic here)
                     if s ∈ StatesTo
-                        P_s = 1.0
-                    else
-                        P_s = 0.0
+                        for r in 1:S
+                            l_t1[s] += q[r,s] * l_t0[r]
+                        end
                     end
-                    
-                    l_tmp[s] = P_s * sum(q[:,s] .* l) # Equation 4
                 end
-                # update the vector l
-                l=l_tmp
+
+                # swap l_0t and l_t1
+                if ind != n_inds
+                    l_t0, l_t1 = l_t1, l_t0
+                end
             end
-            # sum over the states to obtain the marginal likelihood of the subject
-            subj_l=sum(l) 
+
             # log likelihood
-            subj_ll=log(subj_l)
+            subj_ll=log(sum(l_t1))
         end
         
         # weighted loglikelihood
