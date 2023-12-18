@@ -184,8 +184,8 @@ function loglik(parameters, data::MPanelData; neg = true)
     q = zeros(S,S)
 
     # initialize l_t0 and l_t1
-    l_t0 = zeros(S)
-    l_t1 = zeros(S)
+    l_t0 = zeros(typeof(parameters[1]), S)
+    l_t1 = zeros(typeof(parameters[1]), S)
     
     # for each subject, compute the likelihood contribution
     for subj in Base.OneTo(length(data.model.subjectindices))
@@ -244,7 +244,7 @@ function loglik(parameters, data::MPanelData; neg = true)
                 # compute q, the transition probability matrix
                 if data.model.data.obstype[i] != 1
                     # if panel data, simply grab q from tpm_book
-                    copyto!(q, tpm_book[data.books[2][i, 1]][data.books[2][i, 2]])
+                    q = copy(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]])
                     
                 else
                     # if exact data (obstype = 1), compute q by hand

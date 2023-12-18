@@ -66,7 +66,7 @@ h24 = Hazard(@formula(0 ~ 1), "exp", 2, 4)
 h34 = Hazard(@formula(0 ~ 1), "exp", 3, 4)
 
 # set up dataset
-nsubj = 1000
+nsubj = 10000
 
 dat_sim = DataFrame(id = collect(1:nsubj),
                     tstart = 0.0,
@@ -104,10 +104,6 @@ paths_sim = simulate(model_sim; data = false, paths = true, nsim = 20)
 
 mean(map(x -> any(x.states .== 4), paths_sim))
 mean(map(x -> any(x.states .== 4), paths))
-
-
-
-
 
 
 # input to the function `likelihood``
