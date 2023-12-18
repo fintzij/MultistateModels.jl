@@ -150,13 +150,12 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - optimize_surrogate: should the parameters Markov surrogate for proposing paths be set to the MLE? defaults to true
 - constraints: tuple for specifying parameter constraints
 - surrogate_constraints: tuple for specifying parameter constraints for the Markov surrogate
-- nparticles: initial number of particles per participant for MCEM
-- npaths_initial: initial number of sample paths per participant for MCEM
 - maxiter: maximum number of MCEM iterations
 - tol: tolerance for the change in the MLL, i.e., upper bound of the stopping rule to be ruled out
 - α: standard normal quantile for asymptotic lower bound for ascent
 - γ: standard normal quantile for stopping the MCEM algorithm
 - κ: Inflation factor for target ESS per person, ESS_new = ESS_cur * κ
+- ess_target_initial: initial number of particles per participant for MCEM
 - MaxSamplingEffort: factor of the ESS at which to break the loop for sampling additional paths
 - npaths_additional: increment for number of additional paths when augmenting the pool of paths
 - verbose: print status
