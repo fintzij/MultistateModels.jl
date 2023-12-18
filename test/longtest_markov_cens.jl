@@ -114,8 +114,8 @@ end
 # set up model
 h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
 h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
-# h24 = Hazard(@formula(0 ~ 1), "exp", 2, 4)
-# h34 = Hazard(@formula(0 ~ 1), "exp", 3, 4)
+h24 = Hazard(@formula(0 ~ 1), "exp", 2, 4)
+h34 = Hazard(@formula(0 ~ 1), "exp", 3, 4)
 
 # set up dataset
 nsubj = 1000
@@ -128,12 +128,12 @@ dat_sim = DataFrame(id = collect(1:nsubj),
                     obstype = 1)
 
 # make model and set parameters
-# model_sim = multistatemodel(h12, h13, h24, h34; data = dat_sim)
-model_sim = multistatemodel(h12, h23; data = dat_sim)
+model_sim = multistatemodel(h12, h13, h24, h34; data = dat_sim)
+# model_sim = multistatemodel(h12, h23; data = dat_sim)
 
 set_parameters!(model_sim,
                (h12 = [log(0.5),],
-                h23 = [log(0.5),],
+                h13 = [log(0.5),],
                 h24 = [log(0.5),],
                 h34 = [log(0.5),]))
 
@@ -141,7 +141,7 @@ set_parameters!(model_sim,
 paths = simulate(model_sim; data = false, paths = true, nsim = 1)
 
 # observe subject data
-dat = reduce(vcat, [observe_subjdat2(p; censor = true) for p in paths])
+dat = reduce(vcat, [observe_subjdat(p; censor = true) for p in paths])
 
 # remake model object
 censoring_patterns = [3 1 1 1 0;]

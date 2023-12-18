@@ -195,7 +195,6 @@ function loglik(parameters, data::MPanelData; neg = true)
 
         # subject data
         subj_inds = data.model.subjectindices[subj]
-        # subj_dat  = view(data.model.data, subj_inds, :)
 
         # no state is censored
         if all(data.model.data.obstype[subj_inds] .∈ Ref([1,2]))
@@ -263,9 +262,10 @@ function loglik(parameters, data::MPanelData; neg = true)
                             for s in 1:S
                                 if (s != r) & (data.model.tmat[r,s] != 0)
                                     q[r, s] += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[r, s]], i, data.model.hazards[data.model.tmat[r, s]]; give_log = true)
+                                end
                             end
                         end
-                        q[r,:] = softmax(q[r,:])
+                        q[r,:] = exp.(q[r,:])
                     end
                 end # end-compute q
 
