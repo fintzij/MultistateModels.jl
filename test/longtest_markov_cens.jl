@@ -113,7 +113,7 @@ end
 
 # set up model
 h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
-h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
+h13 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
 h24 = Hazard(@formula(0 ~ 1), "exp", 2, 4)
 h34 = Hazard(@formula(0 ~ 1), "exp", 3, 4)
 
