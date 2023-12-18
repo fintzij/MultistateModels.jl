@@ -184,8 +184,8 @@ function loglik(parameters, data::MPanelData; neg = true)
     q = zeros(S,S)
 
     # initialize l_t0 and l_t1
-    l_t0 = zeros(typeof(parameters[1]), S)
-    l_t1 = zeros(typeof(parameters[1]), S)
+    l_t0 = zeros(eltype(parameters), S)
+    l_t1 = zeros(eltype(parameters), S)
     
     # for each subject, compute the likelihood contribution
     for subj in Base.OneTo(length(data.model.subjectindices))
