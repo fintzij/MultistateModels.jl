@@ -133,9 +133,9 @@ model_sim = multistatemodel(h12, h23; data = dat_sim)
 
 set_parameters!(model_sim,
                (h12 = [log(0.5),],
-                h23 = [log(0.5),]))
-                # h24 = [log(0.5),],
-                # h34 = [log(0.5),]))
+                h23 = [log(0.5),],
+                h24 = [log(0.5),],
+                h34 = [log(0.5),]))
 
 # simulate
 paths = simulate(model_sim; data = false, paths = true, nsim = 1)
@@ -144,9 +144,9 @@ paths = simulate(model_sim; data = false, paths = true, nsim = 1)
 dat = reduce(vcat, [observe_subjdat2(p; censor = true) for p in paths])
 
 # remake model object
-# censoring_patterns = [3 1 1 1 0;]
-# model_fit = multistatemodel(h12, h13, h24, h34; data = dat, CensoringPatterns = censoring_patterns)
-model_fit = multistatemodel(h12, h23; data = dat)
+censoring_patterns = [3 1 1 1 0;]
+model_fit = multistatemodel(h12, h13, h24, h34; data = dat, CensoringPatterns = censoring_patterns)
+# model_fit = multistatemodel(h12, h23; data = dat)
 
 # fit model
 set_crude_init!(model_fit)

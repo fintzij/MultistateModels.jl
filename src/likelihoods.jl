@@ -263,7 +263,6 @@ function loglik(parameters, data::MPanelData; neg = true)
                             for s in 1:S
                                 if (s != r) & (data.model.tmat[r,s] != 0)
                                     q[r, s] += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[r, s]], i, data.model.hazards[data.model.tmat[r, s]]; give_log = true)
-                                end
                             end
                         end
                         q[r,:] = softmax(q[r,:])
