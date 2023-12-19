@@ -55,15 +55,15 @@ function observe_subjdat(path; censor = true)
 
         sdat.obstype[findall(sdat.stateto .== 0)] .= 3
         sdat.obstype[findall(sdat.stateto .== 4)] .= 1
+
+        # make states 0
+        sdat
     end
 
     return sdat
 end
 
-function observe_subjdat2(path; censor = true)
-
-    # censor?
-    cens = (rand()[1] > 0.3 ? false : true) & censor
+function observe_subjdat2(path)
     
     # draw obstimes
     obstimes = [0.0; [1.0, 2.0] .+ round.(0.9 .* rand(2), sigdigits = 1)]
@@ -77,35 +77,37 @@ function observe_subjdat2(path; censor = true)
                          obstype = 1)
     else
         # census path
-        times_obs = sort(unique([obstimes; path.times[findall((path.states .== 3) .& (path.times .<= maximum(obstimes)))]]))
+        times_obs = sort(unique([obstimes; path.times[findall((path.states .== 4) .& (path.times .<= maximum(obstimes)))]]))
         obsinds  = searchsortedlast.(Ref(path.times), times_obs)
         states_obs = path.states[obsinds]
 
-        if any(states_obs .== 3)
-            inds = collect(1:findfirst(states_obs .== 3))
+        if any(states_obs .== 4)
+            inds = collect(1:findfirst(states_obs .== 4))
             times_obs = times_obs[inds]
             states_obs = states_obs[inds] 
         end
-
+        
         sdat = DataFrame(id = path.subj,
                          tstart = times_obs[Not(end)],
                          tstop = times_obs[Not(begin)],
                          statefrom = states_obs[Not(end)],
                          stateto = states_obs[Not(begin)],
-                         obstype = 2)
+                         obstype = states_obs[Not(begin)] .+ 2)
 
         # censor
-        # if any(sdat.stateto .== 3)
-        #     insert!(sdat, nrow(sdat), sdat[nrow(sdat),:])
-        #     sdat.tstop[nrow(sdat)-1] = sdat.tstop[nrow(sdat)-1] - sqrt(eps())
-        #     sdat.tstart[nrow(sdat)] = sdat.tstop[nrow(sdat)-1]
-        #     sdat.stateto[nrow(sdat)-1] = cens ? 0 : path.states[2]
-        #     sdat.statefrom[nrow(sdat)] = cens ? 0 : path.states[2]
-        #     sdat.obstype[nrow(sdat) - 1] = cens ? 3 : 2
-        #     sdat.obstype[nrow(sdat)] = 1
-        # end
+        if any(sdat.stateto .== 4)
+            insert!(sdat, nrow(sdat), sdat[nrow(sdat),:])
+            sdat.tstop[nrow(sdat)-1] = sdat.tstop[nrow(sdat)-1] - sqrt(eps())
+            sdat.tstart[nrow(sdat)] = sdat.tstop[nrow(sdat)-1]
+            sdat.stateto[nrow(sdat)-1] = path.states[2]
+            sdat.statefrom[nrow(sdat)] = path.states[2]
+            sdat.obstype[nrow(sdat) - 1] = path.states[2] + 2
+            sdat.obstype[nrow(sdat)] = 1
+        end
 
-        sdat.obstype[findall(sdat.stateto .== 3)] .= 1
+        # "censor"
+        sdat.stateto[(sdat.obstype .> 2)] .= 0
+        sdat.statefrom[Not(1)] .= sdat.stateto[Not(end)]
     end
 
     return sdat
@@ -118,7 +120,7 @@ h24 = Hazard(@formula(0 ~ 1), "exp", 2, 4)
 h34 = Hazard(@formula(0 ~ 1), "exp", 3, 4)
 
 # set up dataset
-nsubj = 1000
+nsubj = 100000
 
 dat_sim = DataFrame(id = collect(1:nsubj),
                     tstart = 0.0,
@@ -141,10 +143,14 @@ set_parameters!(model_sim,
 paths = simulate(model_sim; data = false, paths = true, nsim = 1)
 
 # observe subject data
-dat = reduce(vcat, [observe_subjdat(p; censor = true) for p in paths])
+dat = reduce(vcat, [observe_subjdat(p) for p in paths])
 
 # remake model object
-censoring_patterns = [3 1 1 1 0;]
+censoring_patterns = [3 0 1 1 0;]
+censoring_patterns2 = [3 1 0 0 0;
+                      4 0 1 0 0;
+                      5 0 0 1 0]
+
 model_fit = multistatemodel(h12, h13, h24, h34; data = dat, CensoringPatterns = censoring_patterns)
 # model_fit = multistatemodel(h12, h23; data = dat)
 
@@ -154,7 +160,7 @@ fitted = fit(model_fit)
 
 # simulate from fitted model
 set_parameters!(model_sim, fitted.parameters)
-paths_sim = simulate(model_sim; data = false, paths = true, nsim = 20)
+paths_sim = simulate(model_sim; data = false, paths = true, nsim = 1)
 
 mean(map(x -> any(x.states .== 4), paths_sim))
 mean(map(x -> any(x.states .== 4), paths))

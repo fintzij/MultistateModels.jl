@@ -180,13 +180,9 @@ function loglik(parameters, data::MPanelData; neg = true)
     # number of states
     S = size(data.model.tmat, 1)
 
-    # initialize Q
+    # initialize Q 
     q = zeros(eltype(parameters), S, S)
 
-    # initialize l_t0 and l_t1
-    l_t0 = zeros(eltype(parameters), S)
-    l_t1 = zeros(eltype(parameters), S)
-    
     # for each subject, compute the likelihood contribution
     for subj in Base.OneTo(length(data.model.subjectindices))
 
@@ -216,25 +212,17 @@ function loglik(parameters, data::MPanelData; neg = true)
             end
 
         else
-            # at least one state is censored
-            StatesFrom = data.model.data.statefrom[subj_inds[1]] > 0 ? [data.model.data.statefrom[subj_inds[1]]] : findall(data.model.emat[subj_inds[1],:] .== 1)
-            
-            # initialize l_0
-            for s in 1:S
-                l_t0[s] = s ∈ StatesFrom ? 1.0 : 0.0
-            end
+            # initialize likelihood matrix
+            lmat = zeros(eltype(parameters), S, length(subj_inds) + 1)
+            lmat[data.model.data.statefrom[subj_inds[1]], 1] = 1
 
-            # normalize
-            normalize!(l_t0)
-
-            # counters
-            n_inds = length(subj_inds)
-            ind = 0
+            # initialize counter for likelihood matrix
+            ind = 1
 
             # update the vector l
             for i in subj_inds
 
-                # increment counter
+                # increment counter for likelihood matrix
                 ind += 1
 
                 # compute q, the transition probability matrix
@@ -262,32 +250,27 @@ function loglik(parameters, data::MPanelData; neg = true)
                                 end
                             end
                         end
-                        q[r,:] = softmax(q[r,:])
+
+                        # pedantic b/c of numerical error
+                        q[r,r] = maximum([1 - exp(logsumexp(q[r, Not(r)])), eps()])
+                        q[r,Not(r)] = exp.(q[r, Not(r)])               
                     end
                 end # end-compute q
 
                 # compute the set of possible "states to"
                 StatesTo = data.model.data.stateto[i] > 0 ? [data.model.data.stateto[i]] : findall(data.model.emat[i,:] .== 1)
 
-                # reset l_t1
-                fill!(l_t1, 0.0)
-
                 for s in 1:S
                     if s ∈ StatesTo
                         for r in 1:S
-                            l_t1[s] += q[r,s] * l_t0[r]
+                            lmat[s, ind] += q[r,s] * lmat[r, ind - 1]
                         end
                     end
-                end
-
-                # swap l_0t and l_t1
-                if ind != n_inds
-                    l_t0, l_t1 = l_t1, l_t0
                 end
             end
 
             # log likelihood
-            subj_ll=log(sum(l_t1))
+            subj_ll=log(sum(lmat[:,size(lmat, 2)]))
         end
         
         # weighted loglikelihood
@@ -434,8 +417,6 @@ function loglik!(parameters, logliks::Vector{}, data::SMPanelData; use_sampling_
 end
 
 
-
-
 # """
 #     loglik(parameters, data::MPanelData; neg = true)
 
@@ -490,11 +471,11 @@ end
 #         # subject data
 #         subj_inds = data.model.subjectindices[subj]
 
+#         # subject contribution to the loglikelihood
+#         subj_ll = 0.0
+
 #         # no state is censored
 #         if all(data.model.data.obstype[subj_inds] .∈ Ref([1,2]))
-            
-#             # subject contribution to the loglikelihood
-#             subj_ll = 0.0
 
 #             # add the contribution of each observation
 #             for i in subj_inds
@@ -516,10 +497,7 @@ end
 #             fill!(P_0, 0.0)
 #             fill!(P_1, 0.0)
 
-#             # initialize P_0
-#             P_0[data.model.data.statefrom[subj_inds[1]], :] .= 1
-#             normalize!(P_0, 1)
-
+#             # counter
 #             n_inds = length(subj_inds)
 #             ind = 0
 
@@ -528,6 +506,14 @@ end
 
 #                 # increment counter
 #                 ind += 1
+
+#                 # marginal probabilities
+#                 if ind == 1
+#                     marg_probs = zeros(eltype(parameters), S); 
+#                     marg_probs[data.model.data.statefrom[subj_inds[1]]] = 1.0
+#                 else
+#                     marg_probs = sum(P_0, dims = 1)
+#                 end
 
 #                 # compute q, the transition probability matrix
 #                 if data.model.data.obstype[i] != 1
@@ -559,7 +545,10 @@ end
 #                 end # end-compute q
 
 #                 # recursion
-#                 P_1 = normalize(transpose(sum(P_0, dims = 1)) * transpose(data.model.emat[i,:]) .* q, 1)
+#                 P_1 = normalize(transpose(marg_probs) * transpose(data.model.emat[i,:]) .* q, 1)
+
+#                 # accumulate likelihood
+
 
 #                 # swap P_0 and P_1
 #                 if ind != n_inds
@@ -568,7 +557,7 @@ end
 #             end
 
 #             # log likelihood
-#             subj_ll=log(sum(P_1))
+#             # subj_ll=log(subj_lik)
 #         end
         
 #         # weighted loglikelihood
