@@ -68,27 +68,25 @@ Specify a cause-specific baseline hazard.
 
 # Arguments
 - `hazard`: regression formula for the (log) hazard, parsed using StatsModels.jl.
-- `family`: "ms" for M-spline for the baseline hazard.
+- `family`: "sp" for splines for the baseline hazard.
 - `statefrom`: state number for the origin state.
 - `stateto`: state number for the destination state.
 - `df`: Degrees of freedom.
 - `degree`: Degree of the spline polynomial basis.
 - `knots`: Vector of knots.
 - `boundaryknots`: Length 2 vector of boundary knots.
-- `periodic`: Periodic spline basis, defaults to false.
 - `monotonic`: Assume that baseline hazard is monotonic, defaults to "nonmonotonic". If "increasing" or "decreasing", use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
 - `meshsize`: number of intervals into which to discretize the spline basis, defaults to 10000. 
 """
 struct SplineHazard <: HazardFunction
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
-    family::String     # "ms" for M-Splines
+    family::String     # "sp" for splines
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
     df::Union{Nothing,Int64}
     degree::Int64
     knots::Union{Nothing,Vector{Float64}}
     boundaryknots::Union{Nothing,Vector{Float64}}
-    periodic::Bool
     monotonic::String
     meshsize::Int64
 end

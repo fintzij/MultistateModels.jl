@@ -18,7 +18,7 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 - `monotonic`: Assume that baseline hazard is monotonic, defaults "nonmonotonic". If "increasing" or "decreasing", use an I-spline basis for the baseline intensity and a C-spline for the cumulative intensity.
 - `meshsize`: number of intervals into which to discretize the spline basis, defaults to 10000. 
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, periodic::Bool = false, monotonic::String = "nonmonotonic", meshsize::Int64 = 10000)
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, monotonic::String = "nonmonotonic", meshsize::Int64 = 10000)
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 

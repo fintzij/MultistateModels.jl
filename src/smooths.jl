@@ -9,9 +9,8 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
     mesh = collect(LinRange(minimum(data.tstart), maximum(data.tstop), hazard.meshsize))
 
     ## unpack arguments
-    # intercept, periodic, and degree
+    # intercept, and degree
     intercept = true
-    periodic = hazard.periodic
     degree = hazard.degree
 
     # boundary knots
@@ -42,16 +41,16 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
     # get spline objects from splines2
     if hazard.monotonic == "nonmonotonic"
         # mSpline via splines2
-        sphaz = rcopy(Array{Float64}, R"t(splines2::mSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
+        sphaz = rcopy(Array{Float64}, R"t(splines2::mSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots))")
 
         # iSpline via splines2
-        spchaz = rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
+        spchaz = rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots))")
     else 
         # mSpline via splines2
-        sphaz = rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic))")
+        sphaz = rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots))")
 
         # iSpline via splines2
-        spchaz = rcopy(Array{Float64}, R"t(splines2::cSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, periodic = $periodic, scale = FALSE))")
+        spchaz = rcopy(Array{Float64}, R"t(splines2::cSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, scale = FALSE))")
     end
 
     return (hazard = sphaz, cumulative_hazard = spchaz)
