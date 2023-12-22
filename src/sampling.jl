@@ -3,7 +3,7 @@
 
 Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
 """
-function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k)
+function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats)
 
     for i in eachindex(model.subjectindices)
         DrawSamplePaths!(i, model; 
@@ -21,7 +21,8 @@ function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamp
             npaths_additional = npaths_additional, 
             params_cur = params_cur, 
             surrogate = surrogate, 
-            psis_pareto_k = psis_pareto_k)
+            psis_pareto_k = psis_pareto_k,
+            fbmats = fbmats)
     end
 end
 
@@ -30,10 +31,22 @@ end
 
 Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
 """
-function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k)
+function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats)
 
     n_path_max = MaxSamplingEffort*ess_target
     keep_sampling = ess_cur[i] < ess_target
+
+    # compute fbmats here
+    if any(subj_dat.obstype .∉ Ref([1,2]))
+        # subject data
+        subj_inds = model.subjectindices[subj]
+        subj_dat     = view(model.data, subj_inds, :)
+        subj_tpm_map = view(tpm_map, subj_inds, :)
+        subj_emat = view(model.emat, subj_inds, :)
+        subj_fbmats = view(fbmats, subj, :, :)
+        # subj_fbmats = fbmats[i]
+        ForwardFiltering!(subj_fbmats, subj_dat, tpm_book_surrogate, subj_tpm_map, subj_emat)
+    end
 
     while keep_sampling
 
@@ -50,7 +63,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 
         # sample new paths and compute log likelihoods
         for j in npaths.+(1:n_add)
-            samplepaths[i][j]       = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2])
+            samplepaths[i][j]       = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2], fbmats)
             loglik_surrog[i][j]     = loglik(surrogate.parameters, samplepaths[i][j], surrogate.hazards, model)
             loglik_target_cur[i][j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i][j], model.hazards, model) 
         end
@@ -282,17 +295,17 @@ end
 
 Draw sample paths from a Markov surrogate process conditional on panel data.
 """
-function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map)
+function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map, fbmats)
 
     # subject data
     subj_inds = model.subjectindices[subj] # rows in the dataset corresponding to the subject
     subj_dat     = view(model.data, subj_inds, :) # subject's data - no shallow copy, just pointer
     subj_tpm_map = view(tpm_map, subj_inds, :)
+    subj_fbmats = view(fbmats, subj, :, :)
 
     # sample any censored observation
     if any(subj_dat.obstype .∉ Ref([1,2]))
-        subj_emat = view(model.emat, subj_inds, :)
-        SampleSkeleton!(subj_dat, tpm_book, subj_tpm_map, subj_emat) # ffbs
+        BackwardSampling!(subj_dat, subj_fbmats)
     end
 
     # initialize sample path
@@ -319,58 +332,53 @@ function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat
 end
 
 """
-    sample_skeleton!(subj_dat, tpm_book, subj_tpm_map, subj_emat) 
+    ForwardFiltering!(subj_fbmats, subj_dat, tpm_book, subj_tpm_map, subj_emat)
 
-Sample the value of censored states using the FFBS algorithm
+Computes the forward recursion matrices for the FFBS algorithm. Writes into subj_fbmats.
 """
+function ForwardFiltering!(subj_fbmats, subj_dat, tpm_book, subj_tpm_map, subj_emat)
 
-function SampleSkeleton!(subj_dat, tpm_book, subj_tpm_map, subj_emat)
+    n_times  = length(subj_fbmats)
+    n_states = size(subj_fbmats[1], 2)
 
-    # ffbs
-    m, p = ForwardFiltering(subj_dat, tpm_book, subj_tpm_map, subj_emat) 
-    h    = BackwardSampling(m, p)
-    
-    # update subj_dat
-    subj_dat.stateto = h
-    subj_dat.statefrom[Not(begin)] = h[Not(end)] 
+    # initialize
+    p0 = zeros(Float64, n_states)
+    p0[subj_dat.statefrom[1]] = 1.0
+    subj_fbmats[1][1:n_states, 1:nstates] = p0 * subj_emat[1,:]
 
+    # recurse
+    if n_times > 1
+        for s in 2:n_times
+            subj_fbmats[s][1:nstates, 1:nstates] = sum(subj_fbmats[s-1], dims = 1) * subj_emat[s,:] .* tpm_book[subj_tpm_map[t,1]][subj_tpm_map[t,2]]
+            normalize!(subj_fbmats[s], 1)
+        end
+    end    
 end
 
 
-function ForwardFiltering(subj_dat, tpm_book, subj_tpm_map, subj_emat) 
+"""
+    BackwardSampling!(subj_dat, subj_fbmats)
 
-    n_obs    = size(subj_emat, 1) # number of states visited
-    n_states = size(subj_emat, 2) # number of states
-    m = zeros(n_obs+1, n_states)  # matrix of marginal probabilities
-    p = zeros(n_obs, n_states, n_states)  # joint distribution Pr(h_{t-1}=r,h_t=s|d_{1:t})
-    
-    # # forward filtering
-    m[1, subj_dat.statefrom[1]] = 1 # first state is assumed to be known
-    
-    for t in 1:n_obs # loop over each interval for the subject
-        q_t = tpm_book[subj_tpm_map[t,1]][subj_tpm_map[t,2]]
-        #q_t = view(tpm_book[subj_tpm_map[t,1], subj_tpm_map[t,2]], :, :)
-        # joint p_t
-        p_trs = Array{Float64}(undef, n_states, n_states) # unnormalized p_t
-        for r in 1:n_states, s in 1:n_states
-            p_trs[r,s] = m[t,r] * q_t[r,s] * subj_emat[t,s] # marginal * transition * emission [Eq. 6]
+Samples a path and writes it in to subj_dat.
+"""
+function BackwardSampling!(subj_dat, subj_fbmats)
+
+    # initialize
+    n_times  = length(subj_fbmats)
+    n_states = size(subj_fbmats[1], 2)
+    p = normalize(sum(last(subj_fbmats), 1), 1)
+
+    subj_dat.stateto[end] = rand(Categorical(p))
+
+    # recurse
+    if n_times > 1
+        for t in (n_times - 1):-1:1
+            subj_dat.stateto[t] = rand(Categorical(Normalize(subj_fbmats[s][:, subj_dat.stateto[t + 1]], 1)))
         end
-        normalizing_constant = sum(p_trs)
-        if normalizing_constant == 0
-            id = subj_dat.id[1]
-            error("No trajectory satisfies the censoring patterns for subject $id.")
-            #error("test error.")
-        end
-        p[t,:,:] = p_trs ./ normalizing_constant # normalize p_t [Eq. 6]
-        # posterior
-        for s in 1:n_states
-            m[t+1,s] = sum(p[t,:,s]) # marginalize the joint distribution p_t
-        end
+        subj_dat.statefrom[Not(1)] .= subj_dat.stateto[Not(end)]
     end
-
-    return m, p
-
 end
+
 
 function BackwardSampling(m, p) 
     
@@ -389,3 +397,39 @@ function BackwardSampling(m, p)
     return h
 
 end
+
+
+# function ForwardFiltering(subj_dat, tpm_book, subj_tpm_map, subj_emat) 
+
+#     n_obs    = size(subj_emat, 1) # number of states visited
+#     n_states = size(subj_emat, 2) # number of states
+#     m = zeros(n_obs+1, n_states)  # matrix of marginal probabilities
+#     p = zeros(n_obs, n_states, n_states)  # joint distribution Pr(h_{t-1}=r,h_t=s|d_{1:t})
+    
+#     # # forward filtering
+#     m[1, subj_dat.statefrom[1]] = 1 # first state is assumed to be known
+    
+#     for t in 1:n_obs # loop over each interval for the subject
+#         q_t = tpm_book[subj_tpm_map[t,1]][subj_tpm_map[t,2]]
+#         #q_t = view(tpm_book[subj_tpm_map[t,1], subj_tpm_map[t,2]], :, :)
+#         # joint p_t
+#         p_trs = Array{Float64}(undef, n_states, n_states) # unnormalized p_t
+#         for r in 1:n_states, s in 1:n_states
+#             p_trs[r,s] = m[t,r] * q_t[r,s] * subj_emat[t,s] # marginal * transition * emission [Eq. 6]
+#         end
+#         normalizing_constant = sum(p_trs)
+#         if normalizing_constant == 0
+#             id = subj_dat.id[1]
+#             error("No trajectory satisfies the censoring patterns for subject $id.")
+#             #error("test error.")
+#         end
+#         p[t,:,:] = p_trs ./ normalizing_constant # normalize p_t [Eq. 6]
+#         # posterior
+#         for s in 1:n_states
+#             m[t+1,s] = sum(p[t,:,s]) # marginalize the joint distribution p_t
+#         end
+#     end
+
+#     return m, p
+
+# end

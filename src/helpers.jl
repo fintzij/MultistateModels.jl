@@ -370,6 +370,22 @@ function build_tpm_mapping(data::DataFrame)
 end
 
 """
+    build_fbmats(model)
+
+Build the forward recursion matrices.
+"""
+function build_fbmats(model)
+
+    # get sizes of stuff
+    n_states = size(model.tmat, 1)
+    n_subj = length(unique(model.data.id))
+    n_times = [sum(model.data.id .== s) for s in unique(model.data.id)]
+
+    # create the forward matrices
+    fbmats = [VectorOfSimilarArrays for s in 1:n_subj]
+end
+
+"""
     collapse_data(data::DataFrame; SamplingWeights::Vector{Float64} = ones(unique(data.id)))
 
 Collapse subjects to create an internal representation of a dataset and optionally recompute a vector of sampling weights.

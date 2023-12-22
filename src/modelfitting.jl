@@ -217,6 +217,13 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     ImportanceWeights  = [sizehint!(Vector{Float64}(undef, 0), 
         ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
 
+    # make fbmats if necessary
+    if any(model.data.obstype .> 2)
+        fbmats = build_fbmats(model)
+    else
+        fbmats = nothing
+    end
+
     # containers for traces
     mll_trace = Vector{Float64}() # marginal loglikelihood
     ess_trace = ElasticArray{Float64, 2}(undef, nsubj, 0) # effective sample size (one per subject)
@@ -258,6 +265,12 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
     end
 
+
+
+    if any(data.model.data.obstype[subj_inds] .> 2)
+
+    end
+
     # target ess
     ess_target = ess_target_initial
 
@@ -281,7 +294,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         npaths_additional = npaths_additional, 
         params_cur = params_cur, 
         surrogate = surrogate, 
-        psis_pareto_k = psis_pareto_k)
+        psis_pareto_k = psis_pareto_k,
+        fbmats = fbmats)
     
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
@@ -371,7 +385,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                 npaths_additional = npaths_additional, 
                 params_cur = params_cur, 
                 surrogate = surrogate,
-                psis_pareto_k = psis_pareto_k)
+                psis_pareto_k = psis_pareto_k,
+                fbmats = fbmats)
         else
             # increment the iteration
             iter += 1
