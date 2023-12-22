@@ -382,7 +382,9 @@ function build_fbmats(model)
     n_times = [sum(model.data.id .== s) for s in unique(model.data.id)]
 
     # create the forward matrices
-    fbmats = [VectorOfSimilarArrays for s in 1:n_subj]
+    fbmats = [zeros(Float64, n_times[s], n_states, n_states) for s in eachindex(n_times)]
+
+    return fbmats
 end
 
 """
