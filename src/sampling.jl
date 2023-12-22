@@ -6,6 +6,7 @@ Draw additional sample paths until sufficient ess or until the maximum number of
 function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats)
 
     for i in eachindex(model.subjectindices)
+        println(i)
         DrawSamplePaths!(i, model; 
             ess_target = ess_target,
             ess_cur = ess_cur, 
@@ -36,16 +37,17 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
     n_path_max = MaxSamplingEffort*ess_target
     keep_sampling = ess_cur[i] < ess_target
 
+    # subject data
+    subj_inds = model.subjectindices[i]
+    subj_dat  = view(model.data, subj_inds, :)
+
     # compute fbmats here
     if any(subj_dat.obstype .∉ Ref([1,2]))
         # subject data
-        subj_inds = model.subjectindices[subj]
-        subj_dat     = view(model.data, subj_inds, :)
-        subj_tpm_map = view(tpm_map, subj_inds, :)
-        subj_emat = view(model.emat, subj_inds, :)
-        subj_fbmats = view(fbmats, subj, :, :)
-        # subj_fbmats = fbmats[i]
-        ForwardFiltering!(subj_fbmats, subj_dat, tpm_book_surrogate, subj_tpm_map, subj_emat)
+        subj_tpm_map = view(books[2], subj_inds, :)
+        subj_emat    = view(model.emat, subj_inds, :)
+        #subj_fbmats  = view(fbmats, i)
+        ForwardFiltering!(fbmats[i], subj_dat, tpm_book_surrogate, subj_tpm_map, subj_emat)
     end
 
     while keep_sampling
@@ -301,11 +303,10 @@ function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat
     subj_inds = model.subjectindices[subj] # rows in the dataset corresponding to the subject
     subj_dat     = view(model.data, subj_inds, :) # subject's data - no shallow copy, just pointer
     subj_tpm_map = view(tpm_map, subj_inds, :)
-    subj_fbmats = view(fbmats, subj, :, :)
 
     # sample any censored observation
     if any(subj_dat.obstype .∉ Ref([1,2]))
-        BackwardSampling!(subj_dat, subj_fbmats)
+        BackwardSampling!(subj_dat, fbmats[subj])
     end
 
     # initialize sample path
@@ -338,21 +339,21 @@ Computes the forward recursion matrices for the FFBS algorithm. Writes into subj
 """
 function ForwardFiltering!(subj_fbmats, subj_dat, tpm_book, subj_tpm_map, subj_emat)
 
-    n_times  = length(subj_fbmats)
-    n_states = size(subj_fbmats[1], 2)
+    n_times  = size(subj_fbmats, 1)
+    n_states = size(subj_fbmats, 2)
 
     # initialize
     p0 = zeros(Float64, n_states)
     p0[subj_dat.statefrom[1]] = 1.0
-    subj_fbmats[1][1:n_states, 1:nstates] = p0 * subj_emat[1,:]
+    subj_fbmats[1, :, :] = p0 * subj_emat[1,:]'
 
     # recurse
     if n_times > 1
         for s in 2:n_times
-            subj_fbmats[s][1:nstates, 1:nstates] = sum(subj_fbmats[s-1], dims = 1) * subj_emat[s,:] .* tpm_book[subj_tpm_map[t,1]][subj_tpm_map[t,2]]
-            normalize!(subj_fbmats[s], 1)
+            subj_fbmats[s, 1:n_states, 1:n_states] = (sum(subj_fbmats[s-1,:,:], dims = 1)' * subj_emat[s,:]') .* tpm_book[subj_tpm_map[s,1]][subj_tpm_map[s,2]]
+            normalize!(subj_fbmats[s,:,:], 1)
         end
-    end    
+    end
 end
 
 
@@ -364,16 +365,18 @@ Samples a path and writes it in to subj_dat.
 function BackwardSampling!(subj_dat, subj_fbmats)
 
     # initialize
-    n_times  = length(subj_fbmats)
-    n_states = size(subj_fbmats[1], 2)
-    p = normalize(sum(last(subj_fbmats), 1), 1)
+    n_times  = size(subj_fbmats, 1)
+    n_states = size(subj_fbmats, 2)
 
-    subj_dat.stateto[end] = rand(Categorical(p))
+    p = normalize(sum(subj_fbmats[n_times,:,:], dims=1), 1) #  dims=1 or  dims=2 ?
+
+    subj_dat.stateto[end] = rand(Categorical(vec(p)))
 
     # recurse
     if n_times > 1
         for t in (n_times - 1):-1:1
-            subj_dat.stateto[t] = rand(Categorical(Normalize(subj_fbmats[s][:, subj_dat.stateto[t + 1]], 1)))
+            subj_dat.stateto[t] = rand(Categorical(normalize(subj_fbmats[t+1, :, subj_dat.stateto[t + 1]], 1)))
+            #subj_dat.stateto[t] = rand(Categorical(normalize(subj_fbmats[t, :, subj_dat.stateto[t + 1]], 1))) 
         end
         subj_dat.statefrom[Not(1)] .= subj_dat.stateto[Not(end)]
     end

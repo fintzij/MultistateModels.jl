@@ -265,12 +265,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
     end
 
-
-
-    if any(data.model.data.obstype[subj_inds] .> 2)
-
-    end
-
     # target ess
     ess_target = ess_target_initial
 
