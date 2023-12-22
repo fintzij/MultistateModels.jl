@@ -378,7 +378,6 @@ function build_fbmats(model)
 
     # get sizes of stuff
     n_states = size(model.tmat, 1)
-    n_subj = length(unique(model.data.id))
     n_times = [sum(model.data.id .== s) for s in unique(model.data.id)]
 
     # create the forward matrices
