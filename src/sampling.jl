@@ -376,7 +376,6 @@ function BackwardSampling!(subj_dat, subj_fbmats)
     if n_times > 1
         for t in (n_times - 1):-1:1
             subj_dat.stateto[t] = rand(Categorical(normalize(subj_fbmats[t+1, :, subj_dat.stateto[t + 1]], 1)))
-            #subj_dat.stateto[t] = rand(Categorical(normalize(subj_fbmats[t, :, subj_dat.stateto[t + 1]], 1))) 
         end
         subj_dat.statefrom[Not(1)] .= subj_dat.stateto[Not(end)]
     end
