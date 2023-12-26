@@ -20,9 +20,18 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success)
+            # preallocate the hessian matrix
+            diffres = DiffResults.HessianResult(sol.u)
+
+            # single argument function for log-likelihood            
             ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
-            gradient = ForwardDiff.gradient(ll, sol.u)
-            vcov = pinv(Symmetric(.-ForwardDiff.hessian(ll, sol.u)))
+
+            # compute gradient and hessian
+            diffres = ForwardDiff.hessian!(diffres, ll, sol.u)
+
+            # grab results
+            gradient = DiffResults.gradient(diffres)
+            vcov = pinv(Symmetric(.-DiffResults.hessian(diffres)))
             vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
             vcov = Symmetric(vcov)
         else
@@ -90,10 +99,18 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success)
-            # get the variance-covariance matrix
+            # preallocate the hessian matrix
+            diffres = DiffResults.HessianResult(sol.u)
+
+            # single argument function for log-likelihood            
             ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
-            gradient = ForwardDiff.gradient(ll, sol.u)
-            vcov = pinv(Symmetric(.-ForwardDiff.hessian(ll, sol.u)))
+
+            # compute gradient and hessian
+            diffres = ForwardDiff.hessian!(diffres, ll, sol.u)
+
+            # grab results
+            gradient = DiffResults.gradient(diffres)
+            vcov = pinv(Symmetric(.-DiffResults.hessian(diffres)))
             vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
             vcov = Symmetric(vcov)
         else
@@ -439,6 +456,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                     println("The MCEM algorithm has converged.\n")
                 end
             end
+
             if iter >= maxiter
                 keep_going = false
                 @warn "The maximum number of iterations ($maxiter) has been reached.\n"
