@@ -1,4 +1,15 @@
-### Functions
+# packages
+using ArraysOfArrays
+using Chain
+using CSV
+using DataFrames
+using Distributions
+using LinearAlgebra
+using MultistateModels
+using StatsBase
+using Random
+
+# functions
 function make_censorings()
     censoring_patterns = zeros(Int64, 5,10)
     censoring_patterns[:,1]        .= 3:7 
@@ -11,28 +22,40 @@ function make_censorings()
 end
 
 # function to make the parameters
-function makepars(; nulleff = 1)
+function makepars(; family = "wei", nulleff = 1)
     te = 2 - nulleff == 1
-    parameters = (h12 = [log(0.4), log(0.2), log(0.65) * te],
-                 h23 = [log(2), log(0.2), log(0.5) * te],
-                 h24 = [log(2.5), log(0.3), log(1) * te],
-                 h35 = [log(2.5), log(0.3), log(1) * te],
-                 h45 = [log(2), log(0.25), log(0.5) * te],
-                 h26 = [log(0.4), log(1), log(0.66) * te],
-                 h67 = [log(2), log(0.2), log(0.35) * te],
-                 h68 = [log(2), log(0.3), log(1) * te],
-                 h79 = [log(2), log(0.3), log(1) * te],
-                 h89 = [log(2), log(0.55), log(0.35) * te])
+
+    if family == "wei"
+        parameters = (h12 = [log(0.5), log(0.7), log(0.66) * te],
+                        h23 = [log(2), log(0.2), log(0.5) * te],
+                        h24 = [log(2.5), log(0.3), log(1) * te],
+                        h35 = [log(2.5), log(0.3), log(1) * te],
+                        h45 = [log(2), log(0.25), log(0.5) * te],
+                        h26 = [log(1.5), log(1), log(0.66) * te],
+                        h67 = [log(2), log(0.2), log(0.35) * te],
+                        h68 = [log(2), log(0.3), log(1) * te],
+                        h79 = [log(2), log(0.3), log(1) * te],
+                        h89 = [log(2), log(0.55), log(0.35) * te])
+    elseif family == "exp"
+        parameters = (h12 = [log(0.7), log(0.66) * te],
+                        h23 = [log(0.2), log(0.5) * te],
+                        h24 = [log(0.3), log(1) * te],
+                        h35 = [log(0.3), log(1) * te],
+                        h45 = [log(0.25), log(0.5) * te],
+                        h26 = [log(1), log(0.66) * te],
+                        h67 = [log(0.2), log(0.35) * te],
+                        h68 = [log(0.3), log(1) * te],
+                        h79 = [log(0.3), log(1) * te],
+                        h89 = [log(0.55), log(0.35) * te])
+    end
     return parameters
 end
 
 # function to make the PCR assessment times
-function makepcrs(;ntimes=1)
-    if ntimes == 4
-        times = [0.0, 1.0, 2.0, 3.0, 4.0] .+ [0.0; sample(collect(-2.0:2.0)/7, Weights([0.075, 0.2, 0.55, 0.1, 0.075]), 4)]
-    elseif ntimes == 1
-        times = [0.0, 4.0] .+ [0.0; sample(collect(-2.0:2.0)/7, Weights([0.075, 0.2, 0.55, 0.1, 0.075]), 1)]
-    end
+function makepcrs(;ntimes=4)
+
+    times = (range(0.0, 1.0, length = ntimes + 1) .+ vcat([0.0; (rand(Beta(5,5), ntimes) / (ntimes + 1) .- 0.5/(ntimes + 1))])) .* 4
+    
     return times
 end
 
@@ -72,7 +95,7 @@ function setup_model(; make_pars, data = nothing, SamplingWeights = nothing, n_p
 
     # set parameters
     if make_pars
-        parameters = makepars(; nulleff = nulleff)
+        parameters = makepars(; family = family, nulleff = nulleff)
         set_parameters!(model, parameters) 
     else
         set_crude_init!(model)
@@ -420,7 +443,8 @@ function work_function(;simnum, seed, cens, nulleff, sims_per_subj, nboot)
     model_fit = setup_model(; make_pars = false, data = dat_collapsed, SamplingWeights = weights, family = "wei")
 
     # fit model
-    model_fitted = cens == 1 ? fit(model_fit; verbose = true, compute_vcov = true) : fit(model_fit; verbose = true, compute_vcov = true, maxiter = 250)
+    init_ess = cens <= 2 ? 100 : 300
+    model_fitted = cens == 1 ? fit(model_fit; verbose = true, compute_vcov = true) : fit(model_fit; verbose = true, compute_vcov = true, maxiter = 500, ess_target_initial = init_ess)
 
     # move the parameters over to the model for simulation
     set_parameters!(model_sim, model_fitted.parameters)

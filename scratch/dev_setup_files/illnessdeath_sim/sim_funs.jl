@@ -40,7 +40,7 @@ function setup_model(; make_pars, data = nothing, nsubj = 1000, family = "wei", 
     end
 
     # create model
-    model = multistatemodel(h12, h13, h23; data = data)
+    model = multistatemodel(h12, h13, h23; data = data, CensoringPatterns = [3 1 1 0;])
 
     # set parameters
     if make_pars
@@ -52,6 +52,46 @@ function setup_model(; make_pars, data = nothing, nsubj = 1000, family = "wei", 
 
     # return model
     return model
+end
+
+# observe data
+function observe_dat(dat_raw, paths)
+    
+    # initialize
+    dat = similar(dat_raw, 0)
+
+    # group dat_raw
+    gdat = groupby(dat_raw, :id)
+    
+    # observe dat
+    for p in eachindex(paths)
+        if !(3 ∈ paths[p].states)
+            append!(dat, gdat[p])
+
+        else
+            # change the time of death to exact
+            subjdat = copy(gdat[p])
+            subjdat.tstop[end] = last(paths[p].times)
+            subjdat.obstype[end] = 1
+            
+            # add a ghost state b/c death occurs prior to the first censoring time
+            deathind = findfirst(paths[p].states .== 3)
+            if paths[p].states[deathind - 1] == 1
+                nr = nrow(subjdat)
+                insert!(subjdat, nr, subjdat[nr,:])
+                subjdat.tstop[nr]        -= sqrt(eps())
+                subjdat.tstart[nr + 1]    = subjdat.tstop[nr]
+                subjdat.obstype[nr]       = 3
+                subjdat.stateto[nr]       = 0
+                subjdat.statefrom[nr + 1] = 0
+            end
+
+            # append
+            append!(dat, subjdat)
+        end
+    end
+
+    return dat
 end
 
 # calculate restricted mean progression free survival time
@@ -154,7 +194,8 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
     model_sim = setup_model(; make_pars = true, data = nothing, family = "wei", nsubj = 1000)
         
     # simulate paths
-    dat = simulate(model_sim; nsim = 1, paths = false, data = true)[1]
+    dat_raw, paths = simulate(model_sim; nsim = 1, paths = true, data = true)
+    dat = observe_dat(dat_raw[1], paths)
 
     ### set up model for fitting
     model_fit = setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp"][family])

@@ -520,6 +520,15 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                 # grab hessian and gradient
                 hesns[:,:,j] = DiffResults.hessian(diffres)
                 grads[:,j] = DiffResults.gradient(diffres)
+
+                # just to be safe wrt nans or infs
+                if !all(isfinite, hesns[:,:,j])
+                    hesns[:,:,j] .= 0.0
+                end
+
+                if all(isfinite, grads[:,j])
+                    grads[:,j] .= 0.0
+                end
             end
 
             # accumulate

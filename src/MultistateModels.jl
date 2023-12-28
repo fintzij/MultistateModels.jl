@@ -15,12 +15,16 @@ using Optimization # for fitting - keep
 using OrderedCollections
 using OptimizationOptimJL
 using ParetoSmooth
+using Preferences
 using QuadGK
 using RCall
 using RuntimeGeneratedFunctions
 using StatsBase
 using StatsFuns
 using StatsModels
+
+# make sure ForwardDiff is nan safe
+Preferences.set_preferences!(ForwardDiff, "nansafe_mode" => true, export_prefs=true)
 
 # need to import fit to overload and reexport it
 import StatsBase.fit
