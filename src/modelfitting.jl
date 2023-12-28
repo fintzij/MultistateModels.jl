@@ -480,17 +480,17 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             println("Computing variance-covariance matrix at final estimates.")
         end
 
-        # initialize Fisher information matrix
-        fisher = zeros(Float64, length(params_cur), length(params_cur), nsubj)
-        
         # set up containers for path and sampling weight
         path = Array{SamplePath}(undef, 1)
         samplingweight = Vector{Float64}(undef, 1)
-    
+        
+        # initialize Fisher information matrix containers
+        fishinf = zeros(Float64, length(params_cur), length(params_cur))
+        fish_i1 = zeros(Float64, length(params_cur), length(params_cur))
+        fish_i2 = similar(fish_i1)
+        
         # container for gradient and hessian
         diffres = DiffResults.HessianResult(params_cur)
-        fisher_i1 = zeros(Float64, length(params_cur), length(params_cur))
-        fisher_i2 = similar(fisher_i1)
     
         # define objective
         ll = pars -> (loglik(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
@@ -506,11 +506,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
             # for accumulating gradients and hessians
             grads = Array{Float64}(undef, length(params_cur), length(samplepaths[i]))
-            hesns = Array{Float64}(undef, length(params_cur), length(params_cur), npaths)
 
             # reset matrices for accumulating Fisher info contributions
-            fill!(fisher_i1, 0.0)
-            fill!(fisher_i2, 0.0)
+            fill!(fish_i1, 0.0)
+            fill!(fish_i2, 0.0)
 
             # calculate gradient and hessian for paths
             for j in 1:npaths
@@ -518,36 +517,32 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                 diffres = ForwardDiff.hessian!(diffres, ll, params_cur)
 
                 # grab hessian and gradient
-                hesns[:,:,j] = DiffResults.hessian(diffres)
                 grads[:,j] = DiffResults.gradient(diffres)
 
                 # just to be safe wrt nans or infs
-                if !all(isfinite, hesns[:,:,j])
-                    hesns[:,:,j] .= 0.0
+                if !all(isfinite, DiffResults.hessian(diffres))
+                    fill!(DiffResults.hessian(diffres), 0.0)
                 end
 
-                if all(isfinite, grads[:,j])
-                    grads[:,j] .= 0.0
+                if !all(isfinite, DiffResults.gradient(diffres))
+                    fill!(DiffResults.gradient(diffres), 0.0)
                 end
+
+                fish_i1 .+= ImportanceWeights[i][j] * (-DiffResults.hessian(diffres) - DiffResults.gradient(diffres) * transpose(DiffResults.gradient(diffres)))
             end
 
-            # accumulate
-            for j in 1:npaths
-                fisher_i1 .+= ImportanceWeights[i][j] * (-hesns[:,:,j] - grads[:,j] * transpose(grads[:,j]))
-            end
-
+            # sum of outer products of gradients
             for j in 1:npaths
                 for k in 1:npaths
-                    fisher_i2 .+= ImportanceWeights[i][j] * ImportanceWeights[i][k] * grads[:,j] * transpose(grads[:,k])
+                    fish_i2 .+= ImportanceWeights[i][j] * ImportanceWeights[i][k] * grads[:,j] * transpose(grads[:,k])
                 end
             end
 
-            fisher[:,:,i] = fisher_i1 + fisher_i2
+            fishinf += fish_i1 + fish_i2
         end
 
         # get the variance-covariance matrix
-        fisherinfo = reduce(+, fisher, dims = 3)[:,:,1]
-        fisherinfo[findall(isapprox.(fisherinfo, 0.0; atol = eps(Float64)))] .= 0.0
+        fishinf[findall(isapprox.(fishinf, 0.0; atol = eps(Float64)))] .= 0.0
         vcov = pinv(Symmetric(fisherinfo))
         vcov[findall(isapprox.(vcov, 0.0; atol = eps(Float64)))] .= 0.0
         vcov = Symmetric(vcov)
