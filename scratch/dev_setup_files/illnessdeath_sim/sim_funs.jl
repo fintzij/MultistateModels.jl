@@ -75,16 +75,17 @@ function observe_dat(dat_raw, paths)
             subjdat.obstype[end] = 1
             
             # add a ghost state b/c death occurs prior to the first censoring time
-            deathind = findfirst(paths[p].states .== 3)
-            if paths[p].states[deathind - 1] == 1
-                nr = nrow(subjdat)
-                insert!(subjdat, nr, subjdat[nr,:])
-                subjdat.tstop[nr]        -= sqrt(eps())
-                subjdat.tstart[nr + 1]    = subjdat.tstop[nr]
-                subjdat.obstype[nr]       = 3
-                subjdat.stateto[nr]       = 0
-                subjdat.statefrom[nr + 1] = 0
-            end
+            
+            # deathind = findfirst(paths[p].states .== 3)
+            # if paths[p].states[deathind - 1] == 1
+            #     nr = nrow(subjdat)
+            #     insert!(subjdat, nr, subjdat[nr,:])
+            #     subjdat.tstop[nr]        -= sqrt(eps())
+            #     subjdat.tstart[nr + 1]    = subjdat.tstop[nr]
+            #     subjdat.obstype[nr]       = 3
+            #     subjdat.stateto[nr]       = 0
+            #     subjdat.statefrom[nr + 1] = 0
+            # end
 
             # append
             append!(dat, subjdat)

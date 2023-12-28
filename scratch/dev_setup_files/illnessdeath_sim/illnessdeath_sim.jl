@@ -17,25 +17,6 @@ include(pwd()*"/scratch/dev_setup_files/illnessdeath_sim/sim_funs.jl");
 simnum = 1; seed = 1; family = 2; sims_per_subj = 20; nboot = 10
 work_function(;simnum = simnum, seed = seed, family = family, sims_per_subj = 1, nboot = 1)
 
-# save results
-# # CSV.write("/data/fintzijr/multistate/sim1_illnessdeath/illnessdeath_results_$simnum.csv", results)
-# CSV.write("/data/liangcj/illnessdeath/illnessdeath_results_$simnum.csv", results)
-
-
-# meshrange = [0.0, 2.3]
-# meshsize = 100
-# mesh = collect(LinRange(meshrange[1], meshrange[2], meshsize))
-
-# lb = 2.29998
-# ub = 2.29999
-
-# lind = Int64(ceil((lb - meshrange[1]) / meshrange[2] * meshsize))
-
-# uind = Int64(ceil((ub - meshrange[1]) / meshrange[2] * meshsize))
-
-# lind = lind == 0 ? 1 : lind == meshsize ? meshsize - 1 : lind
-# uind = uind == lind ? lind + 1 : uind
-
 
 using ArraysOfArrays, Optimization, OptimizationOptimJL, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra, OptimizationOptimisers, RCall, Plots, StatsFuns, MacroTools, FunctionWrappers, RuntimeGeneratedFunctions, ParetoSmooth, LinearAlgebra
 
@@ -50,5 +31,3 @@ ess_target_initial = 100; MaxSamplingEffort = 20; npaths_additional = 25; verbos
 CensoringPatterns = nothing; optimize_surrogate = true; SamplingWeights = nothing
 
 constraints = nothing; surrogate_constraints = nothing; surrogate_parameters = nothing; compute_vcov = true
-
-
