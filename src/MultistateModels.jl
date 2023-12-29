@@ -24,7 +24,7 @@ using StatsFuns
 using StatsModels
 
 # make sure ForwardDiff is nan safe
-Preferences.set_preferences!(ForwardDiff, "nansafe_mode" => true)
+@set_preferences!("nansafe_mode" => true)
 
 # need to import fit to overload and reexport it
 import StatsBase.fit
