@@ -21,9 +21,17 @@ Return the maximum likelihood estimates.
 """
 function get_parameters(model::MultistateModelFitted)
     model.parameters
-#    reduce(vcat, model.parameters)
 end
 
+"""
+    Return the parameter names.
+
+# Arguments
+- `model`
+"""
+function get_parnames(model)
+    [x.parnames for x in model.hazards]
+end
 
 """
 GetVcov(model::MultistateModelFitted) 
@@ -39,14 +47,14 @@ end
 
 
 """
-    get_convergence_records(model::MultistateModelFitted) 
+    get_ConvergenceRecords(model::MultistateModelFitted) 
 
 Return the convergence records for the fit. 
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
 """
-function get_convergence_records(model::MultistateModelFitted) 
+function get_ConvergenceRecords(model::MultistateModelFitted) 
     model.ConvergenceRecords
 end
 

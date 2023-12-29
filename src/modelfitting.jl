@@ -71,7 +71,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        nothing, # ConvergenceRecords::Union{Nothing, NamedTuple}
+        sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall)
 end
@@ -150,7 +150,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        nothing, # ConvergenceRecords::Union{Nothing, NamedTuple}
+        sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall)
 end

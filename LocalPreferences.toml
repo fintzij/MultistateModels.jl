@@ -1,2 +1,5 @@
+[ForwardDiff]
+nansafe_mode = true
+
 [MultistateModels]
 nansafe_mode = true

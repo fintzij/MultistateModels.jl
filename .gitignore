@@ -10,3 +10,4 @@
 .vscode/
 .github/
 scratch/data/*
+LocalPreferences.toml
