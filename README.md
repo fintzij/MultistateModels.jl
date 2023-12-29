@@ -1,7 +1,7 @@
 # MultistateModels
 
 Monte-Carlo expectation-maximization algorithm for fitting multi-state semi-Markov models to panel data in `Julia`.
-The algorithm can fit parametric and semi-parametric cause-specific hazards, possibly with covariates.
+The algorithm can fit parametric and semi-parametric transition intensities with a proportional intensity parameterization for covariate effects.
 
 ## Installation
 
