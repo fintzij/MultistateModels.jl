@@ -9,6 +9,6 @@ You can install the development version of `MultistateModels` from
 [GitHub](https://github.com/) with:
 
 ```
-# using Pkg
+using Pkg
 Pkg.add(url="https://github.com/fintzij/MultistateModels.jl.git")
 ```
