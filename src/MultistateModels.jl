@@ -51,6 +51,7 @@ export
     get_ConvergenceRecords,
     get_loglik,
     get_parameters,
+    get_parnames,
     get_vcov,
     Hazard,
     make_constraints,

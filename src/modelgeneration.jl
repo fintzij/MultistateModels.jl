@@ -176,7 +176,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             if npars == 1
                 
                 # parameter names
-                parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "(Intercept)" => "Intercept")
+                parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "_(Intercept)" => "")
 
                 haz_struct = 
                     _Weibull(
@@ -218,7 +218,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             if npars == 1
                 
                 # parameter names
-                parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "(Intercept)" => "Intercept")
+                parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "_(Intercept)" => "")
 
                 haz_struct = 
                     _Gompertz(

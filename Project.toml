@@ -1,10 +1,7 @@
-authors = ["Jon Fintzi <fintzijr@nih.gov>", "and Raphael Morsomme <raphael.morsomme@nih.gov>", "and Jason Liang <cjliang@nih.gov>"]
 name = "MultistateModels"
 uuid = "534e5a79-9002-43e8-8020-86faf45474d0"
+authors = ["Jon Fintzi <fintzijr@nih.gov>", "and Raphael Morsomme <raphael.morsomme@nih.gov>", "and Jason Liang <cjliang@nih.gov>"]
 version = "0.1.0"
-
-[compat]
-julia = "1"
 
 [deps]
 ArraysOfArrays = "65a8f2f4-9b39-5baf-92e2-a9cc46fdf018"
@@ -29,6 +26,9 @@ RuntimeGeneratedFunctions = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 StatsFuns = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
 StatsModels = "3eaba693-59b7-5ba5-a881-562e759f1c8d"
+
+[compat]
+julia = "1"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

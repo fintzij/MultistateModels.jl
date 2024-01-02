@@ -398,7 +398,7 @@ struct MultistateModelFitted <: MultistateProcess
     SamplingWeights::Vector{Float64}
     CensoringPatterns::Matrix{Int64}
     markovsurrogate::MarkovSurrogate
-    ConvergenceRecords::Union{Nothing, NamedTuple}
+    ConvergenceRecords::Union{Nothing, NamedTuple, Optim.OptimizationResults}
     ProposedPaths::Union{Nothing, NamedTuple}
     modelcall::NamedTuple
 end

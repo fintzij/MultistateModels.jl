@@ -71,7 +71,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        nothing, # ConvergenceRecords::Union{Nothing, NamedTuple}
+        sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall)
 end
@@ -150,7 +150,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        nothing, # ConvergenceRecords::Union{Nothing, NamedTuple}
+        sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall)
 end
@@ -543,7 +543,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         # get the variance-covariance matrix
         fishinf[findall(isapprox.(fishinf, 0.0; atol = eps(Float64)))] .= 0.0
-        vcov = pinv(Symmetric(fisherinfo))
+        vcov = pinv(Symmetric(fishinf))
         vcov[findall(isapprox.(vcov, 0.0; atol = eps(Float64)))] .= 0.0
         vcov = Symmetric(vcov)
     else
