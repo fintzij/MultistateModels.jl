@@ -53,7 +53,9 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         sol  = solve(prob, IPNewton())
 
         # no hessian when there are constraints
-        @warn "No covariance matrix is returned when constraints are provided."
+        if compute_vcov == true
+            @warn "No covariance matrix is returned when constraints are provided."
+        end
         vcov = nothing
     end
 
@@ -132,7 +134,9 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         sol  = solve(prob, IPNewton())
 
         # no hessian when there are constraints
-        @warn "No covariance matrix is returned when constraints are provided."
+        if compute_vcov == true
+            @warn "No covariance matrix is returned when constraints are provided."
+        end
         vcov = nothing
     end
 
@@ -472,7 +476,9 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     if !isnothing(constraints)
 
         # no hessian when there are constraints
-        @warn "No covariance matrix is returned when constraints are provided."
+        if compute_vcov == true
+            @warn "No covariance matrix is returned when constraints are provided."
+        end
         vcov = nothing
     
     elseif convergence && compute_vcov
