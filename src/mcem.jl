@@ -26,11 +26,8 @@ function mcem_mll_subj(logliks, ImportanceWeights, SamplingWeights)
     mll_subj = zeros(length(logliks))
     
     for i in eachindex(logliks)
-        # obj = 0.0
-        # for j in eachindex(logliks[i])
-        #     obj += logliks[i][j] * ImportanceWeights[i][j] * SamplingWeights[i]
-        # end
-        mll_subj[i] = sum(logliks[i] .* ImportanceWeights[i]) * SamplingWeights[i]
+        mll_subj[i] = log(sum(exp.(logliks[i]) .* ImportanceWeights[i]) * SamplingWeights[i])
+        # mll_subj[i] = quantile(logliks[i], AnalyticWeights(ImportanceWeights[i]), 0.5) * SamplingWeights[i]
     end
 
     return mll_subj
