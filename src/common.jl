@@ -400,6 +400,7 @@ struct MultistateModelFitted <: MultistateProcess
     markovsurrogate::MarkovSurrogate
     ConvergenceRecords::Union{Nothing, NamedTuple, Optim.OptimizationResults}
     ProposedPaths::Union{Nothing, NamedTuple}
+    subj_ll::Union{Nothing, Vector{Float64}}
     modelcall::NamedTuple
 end
 

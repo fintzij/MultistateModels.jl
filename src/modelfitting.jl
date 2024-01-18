@@ -59,6 +59,9 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         vcov = nothing
     end
 
+    # compute subject-level likelihood at the estimate
+    ll_subj = loglik(sol.u, ExactData(model, samplepaths); return_ll_subj = true)
+
     # wrap results
     return MultistateModelFitted(
         model.data,
@@ -75,6 +78,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         model.markovsurrogate,
         sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
+        ll_subj,
         model.modelcall)
 end
 
@@ -140,6 +144,9 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         vcov = nothing
     end
 
+    # compute subject-level likelihood at the estimate
+    ll_subj = loglik(sol.u, MPanelData(model, books); return_ll_subj = true)
+
     # wrap results
     return MultistateModelFitted(
         model.data,
@@ -156,6 +163,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         model.markovsurrogate,
         sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
+        ll_subj,
         model.modelcall)
 end
 
@@ -578,5 +586,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         surrogate,
         ConvergenceRecords,
         ProposedPaths,
+        nothing, # subject likelihood
         model.modelcall)
 end

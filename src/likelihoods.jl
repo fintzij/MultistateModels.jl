@@ -101,7 +101,7 @@ function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model:
         end
     end
 
-    # weighted loglikelihood
+    # unweighted loglikelihood
     return ll
 end
 
@@ -114,14 +114,17 @@ end
 
 Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. 
 """
-function loglik(parameters, data::ExactData; neg = true)
+function loglik(parameters, data::ExactData; neg=true, return_ll_subj=false)
 
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
-    # send each element of samplepaths to loglik
-    ll = mapreduce((x, w) -> loglik(pars, x, data.model.hazards, data.model) * w, +, data.paths, data.model.SamplingWeights)
-    
-    neg ? -ll : ll
+    if return_ll_subj
+        # send each element of samplepaths to loglik
+        map((x, w) -> loglik(pars, x, data.model.hazards, data.model) * w, data.paths, data.model.SamplingWeights) # weighted
+    else
+        ll = mapreduce((x, w) -> loglik(pars, x, data.model.hazards, data.model) * w, +, data.paths, data.model.SamplingWeights)    
+        neg ? -ll : ll
+    end
 end
 
 """
@@ -144,7 +147,7 @@ end
 
 Return sum of (negative) log likelihood for a Markov model fit to panel and/or exact and/or censored data. 
 """
-function loglik(parameters, data::MPanelData; neg = true)
+function loglik(parameters, data::MPanelData; neg = true, return_ll_subj = false)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
@@ -174,8 +177,15 @@ function loglik(parameters, data::MPanelData; neg = true)
             cache)
     end
 
+    # number of subjects
+    nsubj = length(data.model.subjectindices)
+
     # accumulate the log likelihood
     ll = 0.0
+
+    # container for subject-level loglikelihood
+    ll_subj = zeros(Float64, nsubj)
+    println(ll_subj)
 
     # number of states
     S = size(data.model.tmat, 1)
@@ -184,7 +194,7 @@ function loglik(parameters, data::MPanelData; neg = true)
     q = zeros(eltype(parameters), S, S)
 
     # for each subject, compute the likelihood contribution
-    for subj in Base.OneTo(length(data.model.subjectindices))
+    for subj in Base.OneTo(nsubj)
 
         # subject data
         subj_inds = data.model.subjectindices[subj]
@@ -272,12 +282,21 @@ function loglik(parameters, data::MPanelData; neg = true)
             # log likelihood
             subj_ll=log(sum(lmat[:,size(lmat, 2)]))
         end
-        
-        # weighted loglikelihood
-        ll += subj_ll * data.model.SamplingWeights[subj]
+
+        if return_ll_subj
+            # weighted subject loglikelihood
+            ll_subj[subj] = subj_ll * data.model.SamplingWeights[subj]
+        else
+            # weighted loglikelihood
+            ll += subj_ll * data.model.SamplingWeights[subj]
+        end        
     end
 
-    neg ? -ll : ll
+    if return_ll_subj
+        ll_subj
+    else
+        neg ? -ll : ll
+    end
 end
 
 """
