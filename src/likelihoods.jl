@@ -185,7 +185,6 @@ function loglik(parameters, data::MPanelData; neg = true, return_ll_subj = false
 
     # container for subject-level loglikelihood
     ll_subj = zeros(Float64, nsubj)
-    println(ll_subj)
 
     # number of states
     S = size(data.model.tmat, 1)

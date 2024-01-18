@@ -16,6 +16,25 @@ function mcem_mll(logliks, ImportanceWeights, SamplingWeights)
     return obj
 end
 
+"""
+    mcem_mll(logliks, ImportanceWeights, SamplingWeights)
+
+Compute the marginal log likelihood of each subject for MCEM.
+"""
+function mcem_mll_subj(logliks, ImportanceWeights, SamplingWeights)
+
+    mll_subj = zeros(length(logliks))
+    
+    for i in eachindex(logliks)
+        # obj = 0.0
+        # for j in eachindex(logliks[i])
+        #     obj += logliks[i][j] * ImportanceWeights[i][j] * SamplingWeights[i]
+        # end
+        mll_subj[i] = sum(logliks[i] .* ImportanceWeights[i]) * SamplingWeights[i]
+    end
+
+    return mll_subj
+end
 
 """
     var_ris(l, w)

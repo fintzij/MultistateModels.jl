@@ -564,6 +564,9 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         vcov = nothing
     end
 
+    # subject marginal likelihood
+    mll_subj = mcem_mll_subj(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
+
     # return convergence records
     ConvergenceRecords = return_ConvergenceRecords ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
 
@@ -586,6 +589,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         surrogate,
         ConvergenceRecords,
         ProposedPaths,
-        nothing, # subject likelihood
+        mll_subj,
         model.modelcall)
 end

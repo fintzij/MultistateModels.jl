@@ -100,3 +100,9 @@ model_wei = multistatemodel(h12_wei, h13_wei, h23_wei; data = dat_raw[1])
 # fit - CHECKS OUT
 fit_exp = fit(model_exp)
 fit_wei = fit(model_wei; constraints = constraints)
+
+
+
+# compare subj_ll
+# sort(abs.(fit_exp.subj_ll .- fit_wei.subj_ll))
+# mean(abs.(fit_exp.subj_ll .- fit_wei.subj_ll))
