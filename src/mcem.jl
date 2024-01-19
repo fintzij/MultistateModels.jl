@@ -16,24 +16,50 @@ function mcem_mll(logliks, ImportanceWeights, SamplingWeights)
     return obj
 end
 
-"""
-    mcem_mll(logliks, ImportanceWeights, SamplingWeights)
+# """
+#     mcem_mll_subj(logliks, ImportanceWeights, SamplingWeights)
 
-Compute the marginal log likelihood of each subject for MCEM.
-"""
-function mcem_mll_subj(logliks, ImportanceWeights, SamplingWeights)
+# Compute the marginal log likelihood of each subject for MCEM.
+# """
+# function mcem_mll_subj(logliks, ImportanceWeights, SamplingWeights)
 
-    mll_subj = zeros(length(logliks))
+#     subj_mll = zeros(length(logliks))
+    
+#     for i in eachindex(logliks)
+#         # subj_mll[i] = sum(logliks[i] .* ImportanceWeights[i] .* SamplingWeights[i])
+#     end
+
+#     return subj_mll
+# end
+
+"""
+    lml_subj(logliks, ImportanceWeights, SamplingWeights)
+
+Compute the log marginal likelihood of each subject for MCEM.
+"""
+function lml_subj(logliks, ImportanceWeights, SamplingWeights)
+
+    subj_lml = zeros(length(logliks))
     
     for i in eachindex(logliks)
-        for j in eachindex(logliks[i])
-            mll_subj[i] += logliks[i][j] * ImportanceWeights[i][j] * SamplingWeights[i]
-        end
-        # mll_subj[i] = quantile(logliks[i], AnalyticWeights(ImportanceWeights[i]), 0.5) * SamplingWeights[i]
+        subj_lml[i] = log(sum(exp.(logliks[i]) .* ImportanceWeights[i] * SamplingWeights[i]))
+        # bad idea to use the median, the distribution could be multimodal
     end
 
-    return mll_subj
+    return subj_lml
 end
+
+# using the unsmoothed weights doesn't make a difference
+# function lml_subj2(logliks_target, logliks_surrog, ImportanceWeights, SamplingWeights)
+
+#     subj_lml = zeros(length(logliks_target))
+    
+#     for i in eachindex(logliks)
+#         subj_lml[i] = log(sum(exp.(logliks_target[i]) .* normalize(exp.(logliks_target[i] .- logliks_surrog[i]), 1) * SamplingWeights[i]))
+#     end
+
+#     return subj_lml
+# end
 
 """
     var_ris(l, w)

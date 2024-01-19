@@ -108,17 +108,17 @@ model_wei = multistatemodel(h12_wei, h13_wei, h23_wei; data = dat_raw[1])
 fit_exp = fit(model_exp)
 fit_wei = fit(model_wei; constraints = constraints, ess_target_initial = 100)
 
-paths_exp = simulate(fit_exp; paths = true, data = false, nsim = 1000)
-paths_wei = simulate(fit_wei; paths = true, data = false, nsim = 1000)
+paths_exp = simulate(fit_exp; paths = true, data = false, nsim = 500)
+paths_wei = simulate(fit_wei; paths = true, data = false, nsim = 500)
 
 # compute log like
-subj_ll_exp = zeros(size(paths_exp, 1))
-subj_ll_wei = zeros(size(paths_wei, 1))
+subj_ll_exp = zeros(size(paths_exp, 2))
+subj_ll_wei = zeros(size(paths_wei, 2))
 
-for k in 1:size(paths_exp, 1)
-    for j in 1:size(paths_exp, 2)
-        subj_ll_exp[k] += loglik(fit_exp.parameters, paths_exp[k,j], fit_exp.hazards, fit_exp)
-        subj_ll_wei[k] += loglik(fit_wei.parameters, paths_exp[k,j], fit_wei.hazards, fit_wei)
+for k in 1:size(paths_exp, 2)
+    for j in 1:size(paths_exp, 1)
+        subj_ll_exp[k] += loglik(fit_exp.parameters, paths_exp[j,k], fit_exp.hazards, fit_exp)
+        subj_ll_wei[k] += loglik(fit_wei.parameters, paths_exp[j,k], fit_wei.hazards, fit_wei)
     end
 end
 
