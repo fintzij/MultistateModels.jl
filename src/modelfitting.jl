@@ -449,7 +449,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                 println("Change in marginal log-likelihood: $(round(mll_change;sigdigits=3))")
                 println("MCEM Asymptotic SE: $(round(ase;sigdigits=3))")
                 println("Ascent lower bound: $(round(ascent_lb; sigdigits=3))")
-                println("Ascent upper bound: $(round(ascent_ub; sigdigits=3))\n")
+                println("Ascent upper bound: $(round(ascent_ub; sigdigits=3))")
+                println("Current estimate of the log marginal likelihood: $(round(mcem_lml(loglik_target_cur, ImportanceWeights, model.SamplingWeights);digits=3))\n")
                 #println("Time: $(Dates.format(now(), "HH:MM"))\n")
             end
 
@@ -567,7 +568,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     end
 
     # subject marginal likelihood
-    subj_ll = lml_subj(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
+    subj_ll = mcem_lml_subj(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
+    data_ll = sum(subj_ll)
 
     # return convergence records
     ConvergenceRecords = return_ConvergenceRecords ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
@@ -579,7 +581,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     return MultistateModelFitted(
         model.data,
         VectorOfVectors(params_cur, model.parameters.elem_ptr),
-        mll_cur,
+        data_ll,
         vcov,
         model.hazards,
         model.totalhazards,

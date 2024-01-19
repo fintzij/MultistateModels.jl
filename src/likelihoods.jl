@@ -199,7 +199,6 @@ function loglik(parameters, data::MPanelData; neg = true, return_ll_subj = false
 
         # subject data
         subj_inds = data.model.subjectindices[subj]
-        # subj_dat  = view(data.model.data, subj_inds, :)
 
         # no state is censored
         if all(data.model.data.obstype[subj_inds] .∈ Ref([1,2]))

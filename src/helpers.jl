@@ -160,7 +160,7 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
     end
 
     # error if data includes states not in the unique states
-    statespace = sort(vcat(unique(tmat), CensoringPatterns[:,1]))
+    statespace = sort(vcat(0, collect(1:size(tmat,1)), CensoringPatterns[:,1]))
     allstates = sort(vcat(unique(data.stateto), unique(data.statefrom)))
     if !all(allstates .∈ Ref(statespace))
         @error "Data contains states that are not in the state space."

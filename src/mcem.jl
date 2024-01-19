@@ -8,58 +8,43 @@ function mcem_mll(logliks, ImportanceWeights, SamplingWeights)
     obj = 0.0
     
     for i in eachindex(logliks)
-        for j in eachindex(logliks[i])
-            obj += logliks[i][j] * ImportanceWeights[i][j] * SamplingWeights[i]
-        end
+        obj += dot(logliks[i], ImportanceWeights[i]) * SamplingWeights[i]
     end
 
     return obj
 end
 
-# """
-#     mcem_mll_subj(logliks, ImportanceWeights, SamplingWeights)
+"""
+    mcem_mll(logliks, ImportanceWeights, SamplingWeights)
 
-# Compute the marginal log likelihood of each subject for MCEM.
-# """
-# function mcem_mll_subj(logliks, ImportanceWeights, SamplingWeights)
+Compute the log marginal likelihood for MCEM.
+"""
+function mcem_lml(logliks, ImportanceWeights, SamplingWeights)
 
-#     subj_mll = zeros(length(logliks))
+    obj = 0.0
     
-#     for i in eachindex(logliks)
-#         # subj_mll[i] = sum(logliks[i] .* ImportanceWeights[i] .* SamplingWeights[i])
-#     end
+    for i in eachindex(logliks)
+        obj += log(dot(exp.(logliks[i]), ImportanceWeights[i])) * SamplingWeights[i]
+    end
 
-#     return subj_mll
-# end
+    return obj
+end
 
 """
-    lml_subj(logliks, ImportanceWeights, SamplingWeights)
+    mcem_lml_subj(logliks, ImportanceWeights, SamplingWeights)
 
 Compute the log marginal likelihood of each subject for MCEM.
 """
-function lml_subj(logliks, ImportanceWeights, SamplingWeights)
+function mcem_lml_subj(logliks, ImportanceWeights, SamplingWeights)
 
     subj_lml = zeros(length(logliks))
     
     for i in eachindex(logliks)
-        subj_lml[i] = log(sum(exp.(logliks[i]) .* ImportanceWeights[i] * SamplingWeights[i]))
-        # bad idea to use the median, the distribution could be multimodal
+        subj_lml[i] = log(sum(exp.(logliks[i]) .* ImportanceWeights[i])) * SamplingWeights[i]
     end
 
     return subj_lml
 end
-
-# using the unsmoothed weights doesn't make a difference
-# function lml_subj2(logliks_target, logliks_surrog, ImportanceWeights, SamplingWeights)
-
-#     subj_lml = zeros(length(logliks_target))
-    
-#     for i in eachindex(logliks)
-#         subj_lml[i] = log(sum(exp.(logliks_target[i]) .* normalize(exp.(logliks_target[i] .- logliks_surrog[i]), 1) * SamplingWeights[i]))
-#     end
-
-#     return subj_lml
-# end
 
 """
     var_ris(l, w)

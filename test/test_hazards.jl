@@ -143,7 +143,6 @@ end
     # test total cumulative hazard for each origin state    
     for h in axes(msm_expwei.data, 1) 
         for s in axes(msm_expwei.tmat, 1) 
-
             if s == 1
                 total_cumulhaz = 
                     MultistateModels.call_cumulhaz(lb, ub, msm_expwei.parameters[1], h, msm_expwei.hazards[1]; give_log = false) +
@@ -162,6 +161,7 @@ end
             @test MultistateModels.total_cumulhaz(lb, ub, msm_expwei.parameters, h, msm_expwei.totalhazards[s], msm_expwei.hazards; give_log = true) ≈ log(total_cumulhaz)
         end
     end
+end
 
 @testset "test_msplines" begin
     # test that crudely integrated hazard and cumulative hazard are rougly the same
@@ -169,11 +169,11 @@ end
     hazind = 1
     haz = splinemod.hazards[hazind]
     for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
     end
     cumul_haz_crude /= haz.meshsize
 
-    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
 
     @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
 end
@@ -184,11 +184,11 @@ end
     hazind = 4
     haz = splinemod.hazards[hazind]
     for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
     end
     cumul_haz_crude /= haz.meshsize
 
-    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
 
     @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
 end
@@ -199,11 +199,11 @@ end
     hazind = 2
     haz = splinemod.hazards[hazind]
     for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
     end
     cumul_haz_crude /= haz.meshsize
 
-    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
 
     @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
 end
@@ -214,11 +214,11 @@ end
     hazind = 5
     haz = splinemod.hazards[hazind]
     for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
     end
     cumul_haz_crude /= haz.meshsize
 
-    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
 
     @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
 end
@@ -229,11 +229,11 @@ end
     hazind = 3
     haz = splinemod.hazards[hazind]
     for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
     end
     cumul_haz_crude /= haz.meshsize
 
-    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
 
     @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
 end
@@ -244,13 +244,12 @@ end
     hazind = 6
     haz = splinemod.hazards[hazind]
     for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
     end
     cumul_haz_crude /= haz.meshsize
 
-    cumul_haz = call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
+    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
 
     @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
 end
 
-end
