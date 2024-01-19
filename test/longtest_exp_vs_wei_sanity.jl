@@ -123,8 +123,8 @@ for k in 1:size(paths_exp, 2)
 end
 
 # pretty close
-sum(subj_ll_exp)
-sum(subj_ll_wei)
+mean(subj_ll_exp)
+mean(subj_ll_wei)
 
 
 # compare subj_ll
