@@ -225,6 +225,9 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # number of subjects
     nsubj = length(model.subjectindices)
 
+    # identify absorbing states
+    absorbingstates = findall(map(x -> all(x .== 0), eachrow(model.tmat)))
+
     # extract and initialize model parameters
     params_cur = flatview(model.parameters)
 
@@ -318,7 +321,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         params_cur = params_cur, 
         surrogate = surrogate, 
         psis_pareto_k = psis_pareto_k,
-        fbmats = fbmats)
+        fbmats = fbmats,
+        absorbingstates = absorbingstates)
     
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
@@ -411,7 +415,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                 params_cur = params_cur, 
                 surrogate = surrogate,
                 psis_pareto_k = psis_pareto_k,
-                fbmats = fbmats)
+                fbmats = fbmats,
+                absorbingstates = absorbingstates)
         else
             # increment the iteration
             iter += 1

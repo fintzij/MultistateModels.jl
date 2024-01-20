@@ -3,7 +3,7 @@
 
 Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
 """
-function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats)
+function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates)
 
     for i in eachindex(model.subjectindices)
         DrawSamplePaths!(i, model; 
@@ -22,7 +22,8 @@ function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamp
             params_cur = params_cur, 
             surrogate = surrogate, 
             psis_pareto_k = psis_pareto_k,
-            fbmats = fbmats)
+            fbmats = fbmats,
+            absorbingstates = absorbingstates)
     end
 end
 
@@ -31,7 +32,7 @@ end
 
 Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
 """
-function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats)
+function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates)
 
     n_path_max = MaxSamplingEffort*ess_target
     keep_sampling = ess_cur[i] < ess_target
@@ -64,7 +65,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 
         # sample new paths and compute log likelihoods
         for j in npaths.+(1:n_add)
-            samplepaths[i][j]       = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2], fbmats)
+            samplepaths[i][j]       = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2], fbmats, absorbingstates)
             loglik_surrog[i][j]     = loglik(surrogate.parameters, samplepaths[i][j], surrogate.hazards, model)
             loglik_target_cur[i][j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i][j], model.hazards, model) 
         end
@@ -296,7 +297,7 @@ end
 
 Draw sample paths from a Markov surrogate process conditional on panel data.
 """
-function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map, fbmats)
+function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map, fbmats, absorbingstates)
 
     # subject data
     subj_inds = model.subjectindices[subj] # rows in the dataset corresponding to the subject
@@ -328,6 +329,14 @@ function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat
         push!(states, subj_dat.stateto[end])
     end
 
+    # truncate at entry to absorbing states
+    truncind = findfirst(states .∈ Ref(absorbingstates))
+    if !isnothing(truncind)
+        times = first(times, truncind)
+        states = first(states, truncind)
+    end
+
+    # return path
     return SamplePath(subj, times, states)
 end
 

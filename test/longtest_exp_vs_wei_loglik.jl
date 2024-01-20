@@ -1,6 +1,5 @@
 using Chain
 using DataFrames
-using DataFramesMeta
 using Distributions
 using MultistateModels
 using MultistateModels: loglik
@@ -12,7 +11,7 @@ function make_obstimes()
 end
 
 # set up dataset
-nsubj = 500
+nsubj = 100
 ntimes = 4
 visitdays = [make_obstimes() for i in 1:nsubj]
 data = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
@@ -41,7 +40,6 @@ constraints = make_constraints(
     lcons = [0.0,],
     ucons =[0.0,])
 model_wei = multistatemodel(h12_wei; data = dat_raw[1])
-
 
 # fit 
 fit_exp = fit(model_exp)
