@@ -99,9 +99,9 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95)
             summary_table[s] = DataFrame(
                 estimate = reduce(vcat, mle[s]),
                 se = reduce(vcat, se_vv[s]))
-            summary_table[s].upper = summary_table[s].estimate .+ z_critical .* summary_table[s].se
-            summary_table[s].lower = summary_table[s].estimate .- z_critical .* summary_table[s].se
-        end
+                summary_table[s].lower = summary_table[s].estimate .- z_critical .* summary_table[s].se
+                summary_table[s].upper = summary_table[s].estimate .+ z_critical .* summary_table[s].se
+            end
     end
 
     # add hazard names to the table
@@ -117,5 +117,5 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95)
     AIC = - 2 * ll + 2      * p
     BIC = - 2 * ll + log(n) * p
 
-    return summary_table, ll, AIC, BIC
+    return (summary = summary_table, loglik = ll, AIC = AIC, BIC = BIC)
 end

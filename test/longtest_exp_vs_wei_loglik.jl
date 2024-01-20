@@ -4,7 +4,6 @@ using DataFramesMeta
 using Distributions
 using MultistateModels
 using MultistateModels: loglik
-using Plots
 
 # helpers
 function make_obstimes()    
@@ -13,7 +12,7 @@ function make_obstimes()
 end
 
 # set up dataset
-nsubj = 100
+nsubj = 500
 ntimes = 4
 visitdays = [make_obstimes() for i in 1:nsubj]
 data = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
@@ -65,3 +64,12 @@ end
 # pretty close
 mean(subj_ll_exp)
 mean(subj_ll_wei)
+
+
+# sanity check - matches exponential, not weibull via mcem
+obj = 0.0
+dat1 = dat_raw[1]
+scale = 1 / exp(fit_exp.parameters[1][1])
+for k in 1:nrow(dat_raw[1])
+    obj += dat1.stateto[k] == 1 ? logccdf(Exponential(scale), dat1.tstop[k] - dat1.tstart[k]) : logcdf(Exponential(scale), dat1.tstop[k] - dat1.tstart[k])
+end
