@@ -314,7 +314,10 @@ function loglik(parameters, data::SMPanelData; neg = true, use_sampling_weight =
     for i in eachindex(data.paths)
         lls = 0.0
         for j in eachindex(data.paths[i])
+            # mlm: function Q in the EM
             lls += loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.ImportanceWeights[i][j] 
+            # lmm: loglik (AIC, WAIC, etc)
+            # lls += log(exp(loglik(pars, data.paths[i][j], data.model.hazards, data.model)) * data.ImportanceWeights[i][j])
         end
         if use_sampling_weight
             lls *= data.model.SamplingWeights[i]
