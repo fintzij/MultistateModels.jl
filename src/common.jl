@@ -380,6 +380,22 @@ struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     modelcall::NamedTuple
 end
 
+
+"""
+    loglikelihoods(loglik,subj_lml, loglik_est, mcse)
+
+Struct containing various log-likelihoods.
+
+- loglik: observed data log marginal likelihood
+- subj_lml: log marginal likelihood for each subject.
+- loglik_est: nothing, or in the case of a fitted Markov model a named tuple with the unnormalized log marginal likelihoods for each subject and overall.
+- stderrs: named tuple with standard errors for the above quantities.
+"""
+@kwdef struct likelihoods
+    loglik::Union{Nothing,Float64} = nothing # log marginal likelihood
+    subj_lml::Union{Nothing,Vector{Float64}} = nothing
+end
+
 """
     MultistateModelFitted(data::DataFrame, parameters::VectorOfVectors, gradient::Vector{Float64}, hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
@@ -388,7 +404,7 @@ Struct that fully specifies a fitted multistate model.
 struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
     parameters::VectorOfVectors 
-    loglik::Float64
+    loglik::likelihoods
     vcov::Union{Nothing,Matrix{Float64}}
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
@@ -400,7 +416,6 @@ struct MultistateModelFitted <: MultistateProcess
     markovsurrogate::MarkovSurrogate
     ConvergenceRecords::Union{Nothing, NamedTuple, Optim.OptimizationResults}
     ProposedPaths::Union{Nothing, NamedTuple}
-    subj_ll::Union{Nothing, Vector{Float64}}
     modelcall::NamedTuple
 end
 

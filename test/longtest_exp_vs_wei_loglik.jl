@@ -71,3 +71,13 @@ scale = 1 / exp(fit_exp.parameters[1][1])
 for k in 1:nrow(dat_raw[1])
     obj += dat1.stateto[k] == 1 ? logccdf(Exponential(scale), dat1.tstop[k] - dat1.tstart[k]) : logcdf(Exponential(scale), dat1.tstop[k] - dat1.tstart[k])
 end
+
+
+### for dev
+using ArraysOfArrays, Optimization, OptimizationOptimJL, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra, RCall, StatsBase, StatsFuns, MacroTools, RuntimeGeneratedFunctions, ParetoSmooth, LinearAlgebra
+
+using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book, _TotalHazardTransient, SamplePath, sample_ecctmc, compute_hazmat!, compute_tmat!, sample_ecctmc!, _MSpline, _ISplineIncreasing, _ISplineDecreasing, _MSplinePH, _ISplineIncreasingPH, _ISplineDecreasingPH, check_SamplingWeights, draw_samplepath, mcem_mll, mcem_ase, loglik!, ExactData, SamplePath, get_subjinds, enumerate_hazards, create_tmat, check_data!, _Hazard, SplineHazard, build_hazards, survprob, call_haz, call_cumulhaz, total_cumulhaz, next_state_probs, extract_paths, MarkovSurrogate, extract_paths, get_subjinds, extract_sojourns, spline_hazards, check_SamplingWeights, parse_constraints, MPanelData, make_surrogate_model, DrawSamplePaths!, get_subjinds, enumerate_hazards, MarkovSurrogate, extract_paths, loglik, ExactData, ExactDataAD, check_data!, check_SamplingWeights, spline_hazards, check_CensoringPatterns, build_emat, _TotalHazardAbsorbing, build_fbmats, mcem_lml, mcem_lml_subj, _MarkovHazard, _SemiMarkovHazard, SamplePath
+
+min_ess = 100
+paretosmooth = true
+npaths = 5

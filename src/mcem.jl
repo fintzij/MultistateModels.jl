@@ -31,16 +31,16 @@ function mcem_lml(logliks, ImportanceWeights, SamplingWeights)
 end
 
 """
-    mcem_lml_subj(logliks, ImportanceWeights, SamplingWeights)
+    mcem_lml_subj(logliks, ImportanceWeights)
 
 Compute the log marginal likelihood of each subject for MCEM.
 """
-function mcem_lml_subj(logliks, ImportanceWeights, SamplingWeights)
+function mcem_lml_subj(logliks, ImportanceWeights)
 
     subj_lml = zeros(length(logliks))
     
     for i in eachindex(logliks)
-        subj_lml[i] = log(sum(exp.(logliks[i]) .* ImportanceWeights[i])) * SamplingWeights[i]
+        subj_lml[i] = log(sum(exp.(logliks[i]) .* ImportanceWeights[i])) 
     end
 
     return subj_lml

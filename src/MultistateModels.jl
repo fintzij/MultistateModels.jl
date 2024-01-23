@@ -46,6 +46,7 @@ export
     compute_cumulative_hazard,
     collapse_data,
     cumulative_incidence,
+    draw_paths,
     fit,
     fit_surrogate,
     get_ConvergenceRecords,
