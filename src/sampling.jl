@@ -93,7 +93,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
                 psis_pareto_k[i] = psiw.pareto_k[1]
 
             catch err
-                ess_cur[i] = 0.0
+                ess_cur[i] = ParetoSmooth.relative_eff(logweights)[1] * length(loglik_target_cur[i])
                 psis_pareto_k[i] = 0.0
             end
         end
@@ -108,6 +108,326 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
             @warn "More than $n_path_max sample paths are required to obtain ess>$ess_target for individual $i."
         end
     end
+end
+
+"""
+    draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = true)
+
+Draw sample paths conditional on the data. Require that the minimum effective sample size is greater than min_ess.
+
+Arguments
+- model: fitted multistate model
+- min_ess: minimum effective sample size, defaults to 100.
+- paretosmooth: pareto smooth importance weights, defaults to true unless min_ess < 25. 
+"""
+function draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = true)
+
+    # if exact data just return the loglik and subj_lml from the model fit
+    if all(model.data.obstype .== 1)
+        return (loglik = model.loglik.loglik,
+                subj_lml = model.loglik.subj_lml)
+    end
+
+    nsubj = length(model.subjectindices)
+
+    # containers for bookkeeping TPMs
+    books = build_tpm_mapping(model.data)
+
+    # build containers for transition intensity and prob mtcs
+    hazmat_book = build_hazmat_book(Float64, model.tmat, books[1])
+    tpm_book = build_tpm_book(Float64, model.tmat, books[1])
+
+    # allocate memory for matrix exponential
+    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
+
+    # Solve Kolmogorov equations for TPMs
+    for t in eachindex(books[1])
+
+        # compute the transition intensity matrix
+        compute_hazmat!(
+            hazmat_book[t],
+            model.parameters,
+            model.hazards,
+            books[1][t])
+
+        # compute transition probability matrices
+        compute_tmat!(
+            tpm_book[t],
+            hazmat_book[t],
+            books[1][t],
+            cache)
+    end
+
+    # set up objects for simulation
+    samplepaths     = [sizehint!(Vector{SamplePath}(), ceil(Int64, 4 * min_ess)) for i in 1:nsubj]
+    loglik_target   = [sizehint!(Vector{Float64}(), ceil(Int64, 4 * min_ess)) for i in 1:nsubj]
+    
+    loglik_surrog = [sizehint!(Vector{Float64}(), ceil(Int64, 4 * min_ess)) for i in 1:nsubj]
+    ImportanceWeights = [sizehint!(Vector{Float64}(), ceil(Int64, 4 * min_ess)) for i in 1:nsubj]
+
+    # for ess 
+    subj_ll   = Vector{Float64}(undef, nsubj)
+    subj_ess  = Vector{Float64}(undef, nsubj)
+    
+    # make fbmats if necessary
+    fbmats = build_fbmats(model)
+    
+    # identify absorbing states
+    absorbingstates = findall(map(x -> all(x .== 0), eachrow(model.tmat)))
+
+    # is the model markov?
+    semimarkov = !all(isa.(model.hazards, _MarkovHazard))
+
+    # get parameters
+    params_target = model.parameters
+    params_surrog = semimarkov ? model.markovsurrogate.parameters : model.parameters
+
+    # get hazards
+    hazards_target = model.hazards
+    hazards_surrog = semimarkov ? model.markovsurrogate.hazards : model.hazards
+
+    for i in eachindex(model.subjectindices) 
+
+        keep_sampling = true
+
+        # subject data
+        subj_inds = model.subjectindices[i]
+        subj_dat  = view(model.data, subj_inds, :)
+
+        # compute fbmats here
+        if any(subj_dat.obstype .∉ Ref([1,2]))
+            # subject data
+            subj_tpm_map = view(books[2], subj_inds, :)
+            subj_emat    = view(model.emat, subj_inds, :)
+            ForwardFiltering!(fbmats[i], subj_dat, tpm_book_surrogate, subj_tpm_map, subj_emat)
+        end
+
+        # sampling
+        while keep_sampling
+
+            # make sure there are at least 25 paths in order to fit pareto
+            npaths = length(samplepaths[i])
+            n_add  = npaths == 0 ? min_ess : ceil(Int64, npaths * 1.4)
+    
+            # augment the number of paths
+            append!(samplepaths[i], Vector{SamplePath}(undef, n_add))
+            append!(loglik_target[i], zeros(n_add))
+
+            if semimarkov
+                append!(loglik_surrog[i], zeros(n_add))
+                append!(ImportanceWeights[i], zeros(n_add))
+            end
+    
+            # sample new paths and compute log likelihoods
+            for j in npaths.+(1:n_add)
+                # draw path
+                samplepaths[i][j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2], fbmats, absorbingstates)
+
+                # compute log likelihood
+                loglik_target[i][j] = loglik(params_target, samplepaths[i][j], hazards_target, model)
+
+                if semimarkov
+                    loglik_surrog[i][j] = loglik(params_surrog, samplepaths[i][j], hazards_surrog, model) 
+                end
+            end
+    
+            # no need to keep all paths if redundant
+            if allequal(loglik_target[i])
+                samplepaths[i]   = [first(samplepaths[i]),]
+                loglik_target[i] = [first(loglik_target[i]),]
+                subj_ess[i]      = min_ess
+
+                if semimarkov
+                    ImportanceWeights[i]  = [1.0,]
+                    loglik_surrog[i]      = [first(loglik_surrog[i]),]
+                end
+            else
+                if !semimarkov
+                    subj_ess[i] = length(samplepaths[i])
+                else
+                    # raw log importance weights
+                    logweights = reshape(loglik_target[i] - loglik_surrog[i], 1, length(loglik_target[i]), 1) 
+        
+                    # might fail if not enough samples to fit pareto
+                    if paretosmooth 
+                        try
+                            # pareto smoothed importance weights
+                            psiw = psis(logweights; source = "other");
+            
+                            # save importance weights and ess
+                            copyto!(ImportanceWeights[i], psiw.weights)
+                            subj_ess[i] = psiw.ess[1]            
+                        catch err
+                            subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
+                        end
+                    else
+                        subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
+                    end
+                end
+            end
+            
+            # check whether to stop
+            if subj_ess[i] >= min_ess
+                keep_sampling = false
+            end
+        end
+    end
+
+    if !semimarkov
+        loglik_surrog = nothing
+        ImportanceWeights = nothing
+    end
+
+    return (samplepaths = samplepaths, loglik_target = loglik_target, subj_ess = subj_ess, loglik_surrog = loglik_surrog, ImportanceWeights = ImportanceWeights)
+end
+
+"""
+    draw_paths(model::MultistateModelFitted, npaths)
+
+Draw sample paths conditional on the data. Require that the minimum effective sample size is greater than min_ess.
+
+Arguments
+- model: fitted multistate model.
+- npaths: number of paths to sample.
+- paretosmooth: pareto smooth importance weights, defaults to true. 
+"""
+function draw_paths(model::MultistateModelFitted, npaths)
+
+    # if exact data just return the loglik and subj_lml from the model fit
+    if all(model.data.obstype .== 1)
+        return (loglik = model.loglik.loglik,
+                subj_lml = model.loglik.subj_lml)
+    end
+
+    nsubj = length(model.subjectindices)
+
+    # containers for bookkeeping TPMs
+    books = build_tpm_mapping(model.data)
+
+    # build containers for transition intensity and prob mtcs
+    hazmat_book = build_hazmat_book(Float64, model.tmat, books[1])
+    tpm_book = build_tpm_book(Float64, model.tmat, books[1])
+
+    # allocate memory for matrix exponential
+    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
+
+    # Solve Kolmogorov equations for TPMs
+    for t in eachindex(books[1])
+
+        # compute the transition intensity matrix
+        compute_hazmat!(
+            hazmat_book[t],
+            model.parameters,
+            model.hazards,
+            books[1][t])
+
+        # compute transition probability matrices
+        compute_tmat!(
+            tpm_book[t],
+            hazmat_book[t],
+            books[1][t],
+            cache)
+    end
+
+    # set up objects for simulation
+    samplepaths     = [Vector{SamplePath}(undef, npaths) for i in 1:nsubj]
+    loglik_target   = [Vector{Float64}(undef, npaths) for i in 1:nsubj]
+    
+    loglik_surrog = [Vector{Float64}(undef, npaths) for i in 1:nsubj]
+    ImportanceWeights = [Vector{Float64}(undef, npaths) for i in 1:nsubj]
+
+    # for ess 
+    subj_ll   = Vector{Float64}(undef, nsubj)
+    subj_ess  = Vector{Float64}(undef, nsubj)
+    
+    # make fbmats if necessary
+    fbmats = build_fbmats(model)
+    
+    # identify absorbing states
+    absorbingstates = findall(map(x -> all(x .== 0), eachrow(model.tmat)))
+
+    # is the model markov?
+    semimarkov = !all(isa.(model.hazards, _MarkovHazard))
+
+    # get parameters
+    params_target = model.parameters
+    params_surrog = semimarkov ? model.markovsurrogate.parameters : model.parameters
+
+    # get hazards
+    hazards_target = model.hazards
+    hazards_surrog = semimarkov ? model.markovsurrogate.hazards : model.hazards
+
+    for i in eachindex(model.subjectindices) 
+
+        keep_sampling = true
+
+        # subject data
+        subj_inds = model.subjectindices[i]
+        subj_dat  = view(model.data, subj_inds, :)
+
+        # compute fbmats here
+        if any(subj_dat.obstype .∉ Ref([1,2]))
+            # subject data
+            subj_tpm_map = view(books[2], subj_inds, :)
+            subj_emat    = view(model.emat, subj_inds, :)
+            ForwardFiltering!(fbmats[i], subj_dat, tpm_book_surrogate, subj_tpm_map, subj_emat)
+        end
+
+        # sample new paths and compute log likelihoods
+        for j in 1:npaths
+            # draw path
+            samplepaths[i][j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2], fbmats, absorbingstates)
+
+            # compute log likelihood
+            loglik_target[i][j] = loglik(params_target, samplepaths[i][j], hazards_target, model)
+
+            if semimarkov
+                loglik_surrog[i][j] = loglik(params_surrog, samplepaths[i][j], hazards_surrog, model) 
+            end
+        end
+
+        # no need to keep all paths if redundant
+        if allequal(loglik_target[i])
+            samplepaths[i]   = [first(samplepaths[i]),]
+            loglik_target[i] = [first(loglik_target[i]),]
+            subj_ess[i]      = min_ess
+
+            if semimarkov
+                ImportanceWeights[i]  = [1.0,]
+                loglik_surrog[i]      = [first(loglik_surrog[i]),]
+            end
+        else
+            if !semimarkov
+                subj_ess[i] = length(samplepaths[i])
+            else
+                # raw log importance weights
+                logweights = reshape(loglik_target[i] - loglik_surrog[i], 1, length(loglik_target[i]), 1) 
+    
+                # might fail if not enough samples to fit pareto
+                if paretosmooth 
+                    try
+                        # pareto smoothed importance weights
+                        psiw = psis(logweights; source = "other");
+        
+                        # save importance weights and ess
+                        copyto!(ImportanceWeights[i], psiw.weights)
+                        subj_ess[i] = psiw.ess[1]            
+                    catch err
+                        subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
+                    end
+                else
+                    subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
+                end
+            end
+        end
+    end
+
+    if !semimarkov
+        loglik_surrog = nothing
+        ImportanceWeights = nothing
+    end
+
+    return (samplepaths = samplepaths, loglik_target = loglik_target, subj_ess = subj_ess, loglik_surrog = loglik_surrog, ImportanceWeights = ImportanceWeights)
 end
 
 """
@@ -407,39 +727,3 @@ function BackwardSampling(m, p)
     return h
 
 end
-
-
-# function ForwardFiltering(subj_dat, tpm_book, subj_tpm_map, subj_emat) 
-
-#     n_obs    = size(subj_emat, 1) # number of states visited
-#     n_states = size(subj_emat, 2) # number of states
-#     m = zeros(n_obs+1, n_states)  # matrix of marginal probabilities
-#     p = zeros(n_obs, n_states, n_states)  # joint distribution Pr(h_{t-1}=r,h_t=s|d_{1:t})
-    
-#     # # forward filtering
-#     m[1, subj_dat.statefrom[1]] = 1 # first state is assumed to be known
-    
-#     for t in 1:n_obs # loop over each interval for the subject
-#         q_t = tpm_book[subj_tpm_map[t,1]][subj_tpm_map[t,2]]
-#         #q_t = view(tpm_book[subj_tpm_map[t,1], subj_tpm_map[t,2]], :, :)
-#         # joint p_t
-#         p_trs = Array{Float64}(undef, n_states, n_states) # unnormalized p_t
-#         for r in 1:n_states, s in 1:n_states
-#             p_trs[r,s] = m[t,r] * q_t[r,s] * subj_emat[t,s] # marginal * transition * emission [Eq. 6]
-#         end
-#         normalizing_constant = sum(p_trs)
-#         if normalizing_constant == 0
-#             id = subj_dat.id[1]
-#             error("No trajectory satisfies the censoring patterns for subject $id.")
-#             #error("test error.")
-#         end
-#         p[t,:,:] = p_trs ./ normalizing_constant # normalize p_t [Eq. 6]
-#         # posterior
-#         for s in 1:n_states
-#             m[t+1,s] = sum(p[t,:,s]) # marginalize the joint distribution p_t
-#         end
-#     end
-
-#     return m, p
-
-# end

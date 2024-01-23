@@ -66,7 +66,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
     return MultistateModelFitted(
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
-        -sol.minimum,
+        likelihoods(loglik = -sol.minimum, subj_lml = ll_subj),
         vcov,
         model.hazards,
         model.totalhazards,
@@ -78,7 +78,6 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         model.markovsurrogate,
         sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
-        ll_subj,
         model.modelcall)
 end
 
@@ -87,6 +86,11 @@ end
     fit(model::MultistateMarkovModel; constraints = nothing, verbose = true, compute_vcov = true)
 
 Fit a multistate markov model to interval censored data or a mix of panel data and exact jump times.
+
+- model: multistate Markov model, possibly with censoring.
+- constraints: constraints on model parameters.
+- verbose: print messages, defaults to true.
+- compute_vcov: compute variance-covariance matrix, defaults to true if no constraints or false otherwise.
 """
 function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, compute_vcov = true)
 
@@ -144,14 +148,15 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         vcov = nothing
     end
 
-    # compute subject-level likelihood at the estimate
-    ll_subj = loglik(sol.u, MPanelData(model, books); return_ll_subj = true)
+    # compute loglikelihood at the estimate
+    logliks = likelihoods(loglik = -sol.minimum, 
+                subj_lml = loglik(sol.u, MPanelData(model, books); return_ll_subj = true))
 
     # wrap results
     return MultistateModelFitted(
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
-        -sol.minimum,
+        logliks,
         vcov,
         model.hazards,
         model.totalhazards,
@@ -163,7 +168,6 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         model.markovsurrogate,
         sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
-        ll_subj,
         model.modelcall)
 end
 
@@ -573,8 +577,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     end
 
     # subject marginal likelihood
-    subj_ll = mcem_lml_subj(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
-    data_ll = sum(subj_ll)
+    subj_ll = mcem_lml_subj(loglik_target_cur, ImportanceWeights)
+    data_ll = sum(subj_ll .* model.SamplingWeights)
+
+    logliks = likelihoods(loglik = data_ll,
+                          subj_lml = subj_ll)
 
     # return convergence records
     ConvergenceRecords = return_ConvergenceRecords ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
@@ -586,7 +593,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     return MultistateModelFitted(
         model.data,
         VectorOfVectors(params_cur, model.parameters.elem_ptr),
-        data_ll,
+        logliks,
         vcov,
         model.hazards,
         model.totalhazards,
@@ -598,6 +605,5 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         surrogate,
         ConvergenceRecords,
         ProposedPaths,
-        subj_ll,
         model.modelcall)
 end
