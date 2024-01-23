@@ -42,6 +42,8 @@ RuntimeGeneratedFunctions.init(@__MODULE__)
 # Write your package code here.
 export
     @formula,
+    aic, 
+    bic
     compute_hazard,
     compute_cumulative_hazard,
     collapse_data,
@@ -49,6 +51,7 @@ export
     draw_paths,
     fit,
     fit_surrogate,
+    estimate_loglik,
     get_ConvergenceRecords,
     get_loglik,
     get_parameters,

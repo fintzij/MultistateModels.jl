@@ -120,7 +120,7 @@ Arguments
 - min_ess: minimum effective sample size, defaults to 100.
 - paretosmooth: pareto smooth importance weights, defaults to true unless min_ess < 25. 
 """
-function draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = true)
+function draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = true, return_logliks = false)
 
     # if exact data just return the loglik and subj_lml from the model fit
     if all(model.data.obstype .== 1)
@@ -128,7 +128,19 @@ function draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = 
                 subj_lml = model.loglik.subj_lml)
     end
 
+    # number of subjects
     nsubj = length(model.subjectindices)
+
+    # is the model markov?
+    semimarkov = !all(isa.(model.hazards, _MarkovHazard))
+
+    # get parameters
+    params_target = model.parameters
+    params_surrog = semimarkov ? model.markovsurrogate.parameters : model.parameters
+
+    # get hazards
+    hazards_target = model.hazards
+    hazards_surrog = semimarkov ? model.markovsurrogate.hazards : model.hazards
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -146,8 +158,8 @@ function draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = 
         # compute the transition intensity matrix
         compute_hazmat!(
             hazmat_book[t],
-            model.parameters,
-            model.hazards,
+            params_surrog,
+            hazards_surrog,
             books[1][t])
 
         # compute transition probability matrices
@@ -175,17 +187,6 @@ function draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = 
     # identify absorbing states
     absorbingstates = findall(map(x -> all(x .== 0), eachrow(model.tmat)))
 
-    # is the model markov?
-    semimarkov = !all(isa.(model.hazards, _MarkovHazard))
-
-    # get parameters
-    params_target = model.parameters
-    params_surrog = semimarkov ? model.markovsurrogate.parameters : model.parameters
-
-    # get hazards
-    hazards_target = model.hazards
-    hazards_surrog = semimarkov ? model.markovsurrogate.hazards : model.hazards
-
     for i in eachindex(model.subjectindices) 
 
         keep_sampling = true
@@ -212,11 +213,8 @@ function draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = 
             # augment the number of paths
             append!(samplepaths[i], Vector{SamplePath}(undef, n_add))
             append!(loglik_target[i], zeros(n_add))
-
-            if semimarkov
-                append!(loglik_surrog[i], zeros(n_add))
-                append!(ImportanceWeights[i], zeros(n_add))
-            end
+            append!(loglik_surrog[i], zeros(n_add))
+            append!(ImportanceWeights[i], zeros(n_add))
     
             # sample new paths and compute log likelihoods
             for j in npaths.+(1:n_add)
@@ -226,42 +224,51 @@ function draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = 
                 # compute log likelihood
                 loglik_target[i][j] = loglik(params_target, samplepaths[i][j], hazards_target, model)
 
+                # log likelihood of the surrogate
                 if semimarkov
                     loglik_surrog[i][j] = loglik(params_surrog, samplepaths[i][j], hazards_surrog, model) 
+                else
+                    loglik_surrog[i][j] = loglik_target[i][j]
                 end
+
+                # compute the unsmoothed importance weight
+                ImportanceWeights[i][j] = exp(loglik_target[i][j] - loglik_surrog[i][j])
             end
     
             # no need to keep all paths if redundant
             if allequal(loglik_target[i])
-                samplepaths[i]   = [first(samplepaths[i]),]
-                loglik_target[i] = [first(loglik_target[i]),]
-                subj_ess[i]      = min_ess
+                samplepaths[i]       = [first(samplepaths[i]),]
+                loglik_target[i]     = [first(loglik_target[i]),]
+                loglik_surrog[i]     = [first(loglik_surrog[i]),]
+                ImportanceWeights[i] = [1.0,]
+                subj_ess[i]          = min_ess
 
-                if semimarkov
-                    ImportanceWeights[i]  = [1.0,]
-                    loglik_surrog[i]      = [first(loglik_surrog[i]),]
-                end
             else
                 if !semimarkov
                     subj_ess[i] = length(samplepaths[i])
                 else
                     # raw log importance weights
                     logweights = reshape(loglik_target[i] - loglik_surrog[i], 1, length(loglik_target[i]), 1) 
-        
-                    # might fail if not enough samples to fit pareto
-                    if paretosmooth 
-                        try
-                            # pareto smoothed importance weights
-                            psiw = psis(logweights; source = "other");
-            
-                            # save importance weights and ess
-                            copyto!(ImportanceWeights[i], psiw.weights)
-                            subj_ess[i] = psiw.ess[1]            
-                        catch err
+
+                     # might fail if not enough samples to fit pareto
+                    if any(logweights .!= 0.0)
+                        if paretosmooth 
+                            try
+                                # pareto smoothed importance weights
+                                psiw = psis(logweights; source = "other");
+                
+                                # save importance weights and ess
+                                copyto!(ImportanceWeights[i], psiw.weights)
+                                subj_ess[i] = psiw.ess[1]            
+
+                            catch err
+                                subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
+                            end
+                        else
                             subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
                         end
                     else
-                        subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
+                        subj_ess[i] = length(samplepaths[i])
                     end
                 end
             end
@@ -273,12 +280,14 @@ function draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = 
         end
     end
 
-    if !semimarkov
-        loglik_surrog = nothing
-        ImportanceWeights = nothing
-    end
+    # normalize importance weights
+    normalize!.(ImportanceWeights, 1)
 
-    return (samplepaths = samplepaths, loglik_target = loglik_target, subj_ess = subj_ess, loglik_surrog = loglik_surrog, ImportanceWeights = ImportanceWeights)
+    if return_logliks
+        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeights)
+    else
+        return samplepaths
+    end
 end
 
 """
@@ -291,7 +300,7 @@ Arguments
 - npaths: number of paths to sample.
 - paretosmooth: pareto smooth importance weights, defaults to true. 
 """
-function draw_paths(model::MultistateModelFitted, npaths)
+function draw_paths(model::MultistateModelFitted, npaths; paretosmooth = true, return_logliks = false)
 
     # if exact data just return the loglik and subj_lml from the model fit
     if all(model.data.obstype .== 1)
@@ -299,7 +308,19 @@ function draw_paths(model::MultistateModelFitted, npaths)
                 subj_lml = model.loglik.subj_lml)
     end
 
+    # number of subjects
     nsubj = length(model.subjectindices)
+
+    # is the model markov?
+    semimarkov = !all(isa.(model.hazards, _MarkovHazard))
+
+    # get parameters
+    params_target = model.parameters
+    params_surrog = semimarkov ? model.markovsurrogate.parameters : model.parameters
+
+    # get hazards
+    hazards_target = model.hazards
+    hazards_surrog = semimarkov ? model.markovsurrogate.hazards : model.hazards
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -317,8 +338,8 @@ function draw_paths(model::MultistateModelFitted, npaths)
         # compute the transition intensity matrix
         compute_hazmat!(
             hazmat_book[t],
-            model.parameters,
-            model.hazards,
+            params_surrog,
+            hazards_surrog,
             books[1][t])
 
         # compute transition probability matrices
@@ -346,17 +367,6 @@ function draw_paths(model::MultistateModelFitted, npaths)
     # identify absorbing states
     absorbingstates = findall(map(x -> all(x .== 0), eachrow(model.tmat)))
 
-    # is the model markov?
-    semimarkov = !all(isa.(model.hazards, _MarkovHazard))
-
-    # get parameters
-    params_target = model.parameters
-    params_surrog = semimarkov ? model.markovsurrogate.parameters : model.parameters
-
-    # get hazards
-    hazards_target = model.hazards
-    hazards_surrog = semimarkov ? model.markovsurrogate.hazards : model.hazards
-
     for i in eachindex(model.subjectindices) 
 
         keep_sampling = true
@@ -378,56 +388,67 @@ function draw_paths(model::MultistateModelFitted, npaths)
             # draw path
             samplepaths[i][j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2], fbmats, absorbingstates)
 
-            # compute log likelihood
+            # log likelihood of the target
             loglik_target[i][j] = loglik(params_target, samplepaths[i][j], hazards_target, model)
 
+            # log likelihood of the surrogate
             if semimarkov
                 loglik_surrog[i][j] = loglik(params_surrog, samplepaths[i][j], hazards_surrog, model) 
+            else
+                loglik_surrog[i][j] = loglik_target[i][j]
             end
+
+            # compute the unsmoothed importance weight
+            ImportanceWeights[i][j] = exp(loglik_target[i][j] - loglik_surrog[i][j])
         end
 
         # no need to keep all paths if redundant
         if allequal(loglik_target[i])
-            samplepaths[i]   = [first(samplepaths[i]),]
-            loglik_target[i] = [first(loglik_target[i]),]
-            subj_ess[i]      = min_ess
+            samplepaths[i]       = [first(samplepaths[i]),]
+            loglik_target[i]     = [first(loglik_target[i]),]
+            loglik_surrog[i]     = [first(loglik_surrog[i]),]
+            ImportanceWeights[i] = [1.0,]
+            subj_ess[i]          = npaths
 
-            if semimarkov
-                ImportanceWeights[i]  = [1.0,]
-                loglik_surrog[i]      = [first(loglik_surrog[i]),]
-            end
         else
             if !semimarkov
                 subj_ess[i] = length(samplepaths[i])
             else
                 # raw log importance weights
-                logweights = reshape(loglik_target[i] - loglik_surrog[i], 1, length(loglik_target[i]), 1) 
-    
+                logweights = reshape(ImportanceWeights[i], 1, length(loglik_target[i]), 1) 
+
                 # might fail if not enough samples to fit pareto
-                if paretosmooth 
-                    try
-                        # pareto smoothed importance weights
-                        psiw = psis(logweights; source = "other");
-        
-                        # save importance weights and ess
-                        copyto!(ImportanceWeights[i], psiw.weights)
-                        subj_ess[i] = psiw.ess[1]            
-                    catch err
+                if any(logweights .!= 0.0)
+                    if paretosmooth 
+                        try
+                            # pareto smoothed importance weights
+                            psiw = psis(logweights; source = "other");
+            
+                            # save importance weights and ess
+                            copyto!(ImportanceWeights[i], psiw.weights)
+                            subj_ess[i] = psiw.ess[1]            
+
+                        catch err
+                            subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
+                        end
+                    else
                         subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
                     end
                 else
-                    subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
+                    subj_ess[i] = length(samplepaths[i])
                 end
             end
         end
     end
 
-    if !semimarkov
-        loglik_surrog = nothing
-        ImportanceWeights = nothing
-    end
+    # normalize importance weights
+    normalize!.(ImportanceWeights, 1)
 
-    return (samplepaths = samplepaths, loglik_target = loglik_target, subj_ess = subj_ess, loglik_surrog = loglik_surrog, ImportanceWeights = ImportanceWeights)
+    if return_logliks
+        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeights)
+    else
+        return samplepaths
+    end
 end
 
 """
