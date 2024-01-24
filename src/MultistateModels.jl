@@ -43,7 +43,7 @@ RuntimeGeneratedFunctions.init(@__MODULE__)
 export
     @formula,
     aic, 
-    bic
+    bic,
     compute_hazard,
     compute_cumulative_hazard,
     collapse_data,
