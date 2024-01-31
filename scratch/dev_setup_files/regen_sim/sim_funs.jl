@@ -1,7 +1,6 @@
 # packages
 using ArraysOfArrays
 using Chain
-using CSV
 using DataFrames
 using Distributions
 using LinearAlgebra
@@ -357,70 +356,6 @@ function asymptotic_bootstrap(model, pars, vcov, sims_per_subj, nboot)
     return mapslices(x -> quantile(x[findall(map(y -> (!ismissing(y) && (y != -1.0)), x))], [0.025, 0.975]), ests, dims = [2,])
 end
 
-# Bayesian bootstrap
-function bayesian_bootstrap(dat, pars, sims_per_subj, nboot)
-
-    # get mab assignments
-    mab = @chain dat begin
-        groupby(:id)
-        combine(:mab => unique)
-        rename([2 => :mab])
-    end
-
-    # prepare to sample weights
-    nsubj = nrow(mab)
-    nmab  = sum(mab.mab)
-    nplac = nsubj - nmab
-
-    mabinds  = findall(mab.mab .== 1)
-    placinds = findall(mab.mab .== 0)
-
-    # initialize matrix for results
-    boots = Array{Union{Missing, Float64}}(missing, 14, nboot)
-
-    # fit lots and lots of models
-    Threads.@threads for k in 1:nboot
-
-        @info "Bootstrap iteration $k of $nboot"
-
-        # reweight
-        weights = ones(Float64, nsubj)
-        weights[mabinds]  .= nmab .* rand(Dirichlet(ones(Int64(nmab))), 1)[:,1]
-        weights[placinds] .= nplac .* rand(Dirichlet(ones(Int64(nplac))), 1)[:,1]
-
-        dat_boot, weights_boot = collapse_data(dat; SamplingWeights = weights)
-
-        # remake the model
-        model_fit_boot = setup_model(; make_pars = false, data = dat_boot, SamplingWeights = weights_boot)
-        model_sim_boot = setup_model(; make_pars = false, data = dat)
-
-        # set parameters
-        set_parameters!(model_fit_boot, pars)
-
-        # fit the model and get estimates
-        ests_boot = try
-            # fit model
-            fitted_boot = fit(model_fit_boot; verbose = false, compute_vcov = false)
-
-            # set the parameters for simulation
-            set_parameters!(model_sim_boot, fitted_boot.parameters)
-
-            # simulate paths
-            paths_boot = simulate(model_sim_boot; nsim = sims_per_subj, paths = true, data = false)
-
-            # summarize paths
-            summarize_paths(paths_boot, model_sim_boot.data)
-        catch err
-            fill(missing, 14)
-        end
-
-        # assign to boots
-        boots[:,k] = collect(ests_boot)
-    end
-
-    # return CIs
-    return permutedims(mapslices(x -> quantile(x[Not(findall(ismissing.(x)))], [0.025, 0.975]), Matrix(boots), dims = [1,]))
-end
 
 # wrapper for one simulation
 # nsim is the number of simulated paths per subject
@@ -441,6 +376,8 @@ function work_function(;simnum, seed, cens, nulleff, sims_per_subj, nboot)
     ### set up model for fitting
     dat_collapsed, weights = collapse_data(dat)
     model_fit = setup_model(; make_pars = false, data = dat_collapsed, SamplingWeights = weights, family = "wei")
+
+    # initialize parameters'
 
     # fit model
     init_ess = cens <= 2 ? 100 : 300

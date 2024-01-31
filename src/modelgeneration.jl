@@ -150,7 +150,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                         hazdat,
                         [Symbol.(parnames)],
                         hazards[h].statefrom,
-                        hazards[h].stateto) # make sure this is a vector
+                        hazards[h].stateto,
+                        size(hazdat, 2) - 1) # make sure this is a vector
             else
                 haz_struct = 
                     _ExponentialPH(
@@ -158,7 +159,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                         hazdat,
                         Symbol.(parnames),
                         hazards[h].statefrom,
-                        hazards[h].stateto)
+                        hazards[h].stateto,
+                        size(hazdat, 2) - 1)
             end
 
         elseif family == "wei" 
@@ -184,7 +186,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                         hazdat, 
                         Symbol.(parnames),
                         hazards[h].statefrom,
-                        hazards[h].stateto)
+                        hazards[h].stateto,
+                        size(hazdat, 2) - 1)
                         
             else
                 
@@ -200,7 +203,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                         hazdat,
                         Symbol.(parnames),
                         hazards[h].statefrom,
-                        hazards[h].stateto)
+                        hazards[h].stateto,
+                        size(hazdat, 2) - 1)
             end
 
         elseif family == "gom"
@@ -226,7 +230,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                         hazdat, 
                         Symbol.(parnames),
                         hazards[h].statefrom,
-                        hazards[h].stateto)
+                        hazards[h].stateto,
+                        size(hazdat, 2) - 1)
                         
             else
                 
@@ -242,7 +247,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                         hazdat,
                         Symbol.(parnames),
                         hazards[h].statefrom,
-                        hazards[h].stateto)
+                        hazards[h].stateto,
+                        size(hazdat, 2) - 1)
             end
         elseif family == "sp" # m-splines
 
@@ -276,7 +282,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                             hazards[h].meshsize,
                                             [minimum(data.tstart), maximum(data.tstop)],
                                             hazard,
-                                            cumulative_hazard)
+                                            cumulative_hazard,
+                                            size(hazdat, 2) - 1)
                         
                 elseif hazards[h].monotonic == "increasing"
 
@@ -301,7 +308,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                             hazards[h].meshsize,
                                             [minimum(data.tstart), maximum(data.tstop)],
                                             hazard,
-                                            cumulative_hazard)
+                                            cumulative_hazard,
+                                            size(hazdat, 2) - 1)
 
                 else hazards[h].monotonic == "decreasing"
 
@@ -325,7 +333,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                             hazards[h].meshsize,
                                             [minimum(data.tstart), maximum(data.tstop)],
                                             hazard,
-                                            cumulative_hazard)
+                                            cumulative_hazard,
+                                            size(hazdat, 2) - 1)
                 end                  
             else
                 ### proportional hazards
@@ -351,7 +360,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                            hazards[h].meshsize,
                                            [minimum(data.tstart), maximum(data.tstop)],
                                            hazard, 
-                                           cumulative_hazard)                        
+                                           cumulative_hazard,
+                                           size(hazdat, 2) - 1)                        
                 
                 elseif hazards[h].monotonic == "increasing"
                     # parameter names
@@ -375,7 +385,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                            hazards[h].meshsize,
                                            [minimum(data.tstart), maximum(data.tstop)],
                                            hazard, 
-                                           cumulative_hazard) 
+                                           cumulative_hazard,
+                                           size(hazdat, 2) - 1) 
                 else
                     # parameter names
                     parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*[string.(collect(1:size(hazard)[1]));"Intercept"]), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
@@ -398,7 +409,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                            hazards[h].meshsize,
                                            [minimum(data.tstart), maximum(data.tstop)],
                                            hazard, 
-                                           cumulative_hazard) 
+                                           cumulative_hazard,
+                                           size(hazdat, 2) - 1) 
                 end                 
             end
         end

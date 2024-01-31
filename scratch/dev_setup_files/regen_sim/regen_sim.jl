@@ -1,7 +1,6 @@
 using ArraysOfArrays
 using Base.Threads
 using Chain
-using CSV
 using DataFrames
 using Distributions
 using LinearAlgebra
@@ -16,14 +15,11 @@ simnum = 4989; seed = 989; cens = 3; nulleff = 1; sims_per_subj = 20; nboot = 10
 include(pwd()*"/scratch/dev_setup_files/regen_sim/sim_funs.jl");
 
 # run the simulation
-jobtime = @elapsed results = work_function(;simnum = simnum, seed = seed, cens = cens, nulleff = nulleff, sims_per_subj = sims_per_subj, nboot = nboot)
-
-# save results
-CSV.write("/data/fintzijr/multistate/sim2_regen/regen_sim_results_$simnum.csv", results)
+# jobtime = @elapsed results = work_function(;simnum = simnum, seed = seed, cens = cens, nulleff = nulleff, sims_per_subj = sims_per_subj, nboot = nboot)
 
 
 
-using ArraysOfArrays, Optimization, OptimizationOptimJL, DifferentialEquations, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra, OptimizationOptimisers, RCall, Plots, StatsFuns, MacroTools, FunctionWrappers, RuntimeGeneratedFunctions, ParetoSmooth
+using ArraysOfArrays, Optimization, OptimizationOptimJL, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra,  RCall, StatsFuns, MacroTools, RuntimeGeneratedFunctions, ParetoSmooth
 
 RCall.@rlibrary splines2
 

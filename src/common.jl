@@ -100,6 +100,7 @@ struct _Exponential <: _MarkovHazard
     parnames::Vector{Symbol}
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
+    ncovar::Int64
 end
 
 """
@@ -111,6 +112,7 @@ struct _ExponentialPH <: _MarkovHazard
     parnames::Vector{Symbol}
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
+    ncovar::Int64
 end
 
 """
@@ -122,6 +124,7 @@ struct _Weibull <: _SemiMarkovHazard
     parnames::Vector{Symbol}
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
+    ncovar::Int64
 end
 
 
@@ -134,6 +137,7 @@ struct _WeibullPH <: _SemiMarkovHazard
     parnames::Vector{Symbol}
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
+    ncovar::Int64
 end
 
 """
@@ -145,6 +149,7 @@ struct _Gompertz <: _SemiMarkovHazard
     parnames::Vector{Symbol}
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
+    ncovar::Int64
 end
 
 
@@ -157,6 +162,7 @@ struct _GompertzPH <: _SemiMarkovHazard
     parnames::Vector{Symbol}
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
+    ncovar::Int64
 end
 
 """
@@ -172,6 +178,7 @@ struct _MSpline <: _SplineHazard
     meshrange::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
+    ncovar::Int64
 end
 
 """
@@ -187,6 +194,7 @@ struct _MSplinePH <: _SplineHazard
     meshrange::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
+    ncovar::Int64
 end
 
 """
@@ -202,6 +210,7 @@ struct _ISplineIncreasing <: _SplineHazard
     meshrange::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
+    ncovar::Int64
 end
 
 """
@@ -217,6 +226,7 @@ struct _ISplineIncreasingPH <: _SplineHazard
     meshrange::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
+    ncovar::Int64
 end
 
 """
@@ -232,6 +242,7 @@ struct _ISplineDecreasing <: _SplineHazard
     meshrange::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
+    ncovar::Int64
 end
 
 """
@@ -247,6 +258,7 @@ struct _ISplineDecreasingPH <: _SplineHazard
     meshrange::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
+    ncovar::Int64
 end
 
 """

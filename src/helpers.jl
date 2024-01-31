@@ -1,15 +1,4 @@
 """
-    initialize_parameters!(model::MultistateProcess)
-
-Set initial values for the model parameters. Description of how this happens...
-"""
-function initialize_parameters!(model::MultistateProcess)
-    transmat = statetable(model)
-    q_crude_init = crudeinit(transmat, model.tmat)
-    # set_parameters!(model, q_crude_init)
-end
-
-"""
     set_parameters!(model::MultistateProcess, newvalues::Vector{Float64})
 
 Set model parameters given a vector of values. Copies `newvalues`` to `model.parameters`.

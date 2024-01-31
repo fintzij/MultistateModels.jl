@@ -3,36 +3,47 @@
 
 Modify the parameter values in a MultistateProcess object
 """
-function set_crude_init!(model::MultistateProcess)
+function set_crude_init!(model::MultistateProcess; constraints = nothing)
 
-    crude_par = calculate_crude(model)
-
-    for i in model.hazards
-        set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
-        set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
+    if !isnothing(constraints)
+        @error "Cannot initialize parameters to crude estimates when there are parameter constraints."    
+    elseif isnothing(constraints)
+        crude_par = calculate_crude(model)
+        for i in model.hazards
+            set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
+            set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
+        end
     end
 end
 
 """
-    initialize_parameters!(model::MultistateProcess; constraints = nothing)
+    initialize_parameters!(model::MultistateProcess; constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, crude = false)
 
 Modify the parameter values in a MultistateProcess object, calibrate to the MLE of a Markov surrogate.
 """
-function initialize_parameters!(model::MultistateProcess; constraints = nothing)
+function initialize_parameters!(model::MultistateProcess; constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, crude = false)
 
-    # fit Markov surrogate
-    surrog = fit_surrogate(model; surrogate_constraints = constraints, verbose = false)
-
-    for i in eachindex(model.hazards)
-        set_par_to = init_par(model.hazards[i], surrog.parameters[i])[1]
-
-        # copy covariate effects if there are any
-        if typeof(model.hazards[i]) ∈ [_ExponentialPH, _WeibullPH, _GompertzPH, _MSplinePH, _ISplineIncreasingPH, _ISplineDecreasingPH]
-            ncovar = findfirst(reverse(set_par_to) .!= 0) - 1
-            seq_par_to[reverse(range(length(set_par_to); step = -1, length = ncovar))] .= surrog.parameters[i][Not(1)]
+    if crude
+        set_crude_init!(model; constraints = constraints)
+    else
+        # check that surrogate constraints are supplied if there are other constraints
+        if !isnothing(constraints) & isnothing(surrogate_constraints)
+            @error "Constraints for the Markov surrogate must be provided if there are constraints on the model parameters."
         end
 
-        set_parameters!(model, NamedTuple{(model.hazards[i].hazname,)}((set_par_to,)))
+        # fit Markov surrogate
+        surrog = fit_surrogate(model; surrogate_constraints = surrogate_constraints, surrogate_parameters, verbose = false)
+
+        for i in eachindex(model.hazards)
+            set_par_to = init_par(model.hazards[i], surrog.parameters[i][1])
+
+            # copy covariate effects if there are any
+            if typeof(model.hazards[i]) ∈ [_ExponentialPH, _WeibullPH, _GompertzPH, _MSplinePH, _ISplineIncreasingPH, _ISplineDecreasingPH]
+                set_par_to[reverse(range(length(set_par_to); step = -1, length = model.hazards[i].ncovar))] .= surrog.parameters[i][Not(1)]
+            end
+
+            set_parameters!(model, NamedTuple{(model.hazards[i].hazname,)}((set_par_to,)))
+        end
     end
 end
 
@@ -156,7 +167,7 @@ end
 Pass-through the crude exponential rate and zero out the coefficients for covariates. Method for exponential hazard with covariates.
 """
 function init_par(_hazard::_ExponentialPH, crude_log_rate=0)
-    return vcat(crude_log_rate, zeros(size(_hazard.data, 2) - 1))
+    return vcat(crude_log_rate, zeros(_hazard.ncovar))
 end
 
 
@@ -167,7 +178,7 @@ Weibull without covariates
 function init_par(_hazard::_Weibull, crude_log_rate=0)
     # set shape parameter to 0 (i.e. log(1)) so it's exponential
     # pass through crude log exponential rate
-    return [0, crude_log_rate]
+    return [0; crude_log_rate]
 end
 
 """
@@ -178,7 +189,7 @@ function init_par(_hazard::_WeibullPH, crude_log_rate=0)
     # set shape parameter to 0 (i.e. log(1)) so it's exponential
     # pass through crude exponential rate
     # set covariate coefficients to 0
-    return vcat([0, crude_log_rate], zeros(size(_hazard.data, 2) - 1))
+    return vcat([0; crude_log_rate], zeros(_hazard.ncovar))
 end
 
 
@@ -189,7 +200,7 @@ Gompertz without covariates
 function init_par(_hazard::_Gompertz, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 
     # pass through crude exponential rate 
-    return [0, crude_log_rate]
+    return [0; crude_log_rate]
 end
 
 """
@@ -200,7 +211,7 @@ function init_par(_hazard::_GompertzPH, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 
     # pass through crude exponential rate 
     # set covariate coefficients to 0
-    return vcat([0, crude_log_rate], zeros(size(_hazard.data, 2) - 1))
+    return vcat([0; crude_log_rate], zeros(_hazard.ncovar))
 end
 
 
@@ -235,7 +246,7 @@ function init_par(_hazard::_MSplinePH, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 
     # pass through crude exponential rate 
     # set covariate coefficients to 0
-    return vcat(fill(crude_log_rate, length(_hazard.parnames) - size(_hazard.data, 2)), zeros(size(_hazard.data, 2)))
+    return vcat(fill(crude_log_rate, length(_hazard.parnames) - size(_hazard.data, 2)), zeros(_hazard.ncovar))
 end
 
 """
@@ -247,5 +258,5 @@ function init_par(_hazard::Union{_ISplineIncreasingPH, _ISplineDecreasingPH}, cr
     # pass through crude exponential rate 
     # set covariate coefficients to 0
     nhazpars = length(_hazard.parnames) - size(_hazard.data, 2)
-    return vcat(fill(crude_log_rate / (nhazpars-1), nhazpars - 1), crude_log_rate, zeros(size(_hazard.data, 2)))
+    return vcat(fill(crude_log_rate / (nhazpars-1), nhazpars - 1), crude_log_rate, zeros(_hazard.ncovar))
 end
