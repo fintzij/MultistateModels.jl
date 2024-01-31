@@ -14,6 +14,29 @@ function set_crude_init!(model::MultistateProcess)
 end
 
 """
+    initialize_parameters!(model::MultistateProcess; constraints = nothing)
+
+Modify the parameter values in a MultistateProcess object, calibrate to the MLE of a Markov surrogate.
+"""
+function initialize_parameters!(model::MultistateProcess; constraints = nothing, crude = false)
+
+    # fit Markov surrogate
+    surrog = fit_surrogate(model; surrogate_constraints = constraints, verbose = false)
+
+    for i in eachindex(model.hazards)
+        set_par_to = init_par(model.hazards[i], surrog.parameters[i])
+
+        # copy covariate effects if there are any
+        if typeof(model.hazards[i]) ∈ [_ExponentialPH, _WeibullPH, _GompertzPH, _MSplinePH, _ISplineIncreasingPH, _ISplineDecreasingPH]
+            ncovar = findfirst(reverse(set_par_to) .!= 0) - 1
+            seq_par_to[reverse(range(length(set_par_to); step = -1, length = ncovar))] .= surrog.parameters[i][Not(1)]
+        end
+
+        set_parameters!(model, NamedTuple{(model.hazards[i].hazname,)}((set_par_to,)))
+    end
+end
+
+"""
     compute_suff_stats(dat, tmat, SamplingWeights)
 
 Return a matrix in same format as tmat with observed transition counts, and a vector of time spent in each state. Used for checking data and calculating crude initialization rates.
