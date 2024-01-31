@@ -167,9 +167,9 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95,
     ll = get_loglik(model; ll = "loglik")
 
     # information criteria
-    AIC = MultistateModels.aic(model; estimate_liklihood = estimate_likelihood, min_ess = min_ess, paretosmooth = paretosmooth)
+    AIC = MultistateModels.aic(model; estimate_likelihood = estimate_likelihood, min_ess = min_ess, paretosmooth = paretosmooth)
 
-    BIC = MultistateModels.bic(model; estimate_liklihood = estimate_likelihood, min_ess = min_ess, paretosmooth = paretosmooth)
+    BIC = MultistateModels.bic(model; estimate_likelihood = estimate_likelihood, min_ess = min_ess, paretosmooth = paretosmooth)
 
     return (summary = summary_table, loglik = ll, AIC = AIC, BIC = BIC)
 end
