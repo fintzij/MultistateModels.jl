@@ -18,13 +18,13 @@ end
 
 Modify the parameter values in a MultistateProcess object, calibrate to the MLE of a Markov surrogate.
 """
-function initialize_parameters!(model::MultistateProcess; constraints = nothing, crude = false)
+function initialize_parameters!(model::MultistateProcess; constraints = nothing)
 
     # fit Markov surrogate
     surrog = fit_surrogate(model; surrogate_constraints = constraints, verbose = false)
 
     for i in eachindex(model.hazards)
-        set_par_to = init_par(model.hazards[i], surrog.parameters[i])
+        set_par_to = init_par(model.hazards[i], surrog.parameters[i])[1]
 
         # copy covariate effects if there are any
         if typeof(model.hazards[i]) ∈ [_ExponentialPH, _WeibullPH, _GompertzPH, _MSplinePH, _ISplineIncreasingPH, _ISplineDecreasingPH]
