@@ -17,14 +17,14 @@ function get_loglik(model::MultistateModelFitted; ll = "loglik")
 end
 
 """
-get_parameters(model::MultistateModelFitted; transformed::Bool = true) 
+get_parameters(model::MultistateProcess) 
 
 Return the maximum likelihood estimates. 
 
 # Arguments 
 - model: fitted model
 """
-function get_parameters(model::MultistateModelFitted)
+function get_parameters(model::MultistateProcess)
     model.parameters
 end
 
@@ -36,7 +36,7 @@ Return the parameter names.
 # Arguments
 - `model`
 """
-function get_parnames(model)
+function get_parnames(model::MultistateProcess)
     [x.parnames for x in model.hazards]
 end
 
