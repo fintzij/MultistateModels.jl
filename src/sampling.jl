@@ -111,16 +111,16 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 end
 
 """
-    draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = true)
+    draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true)
 
 Draw sample paths conditional on the data. Require that the minimum effective sample size is greater than min_ess.
 
 Arguments
-- model: fitted multistate model
+- model: multistate model
 - min_ess: minimum effective sample size, defaults to 100.
 - paretosmooth: pareto smooth importance weights, defaults to true unless min_ess < 25. 
 """
-function draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = true, return_logliks = false)
+function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true, return_logliks = false)
 
     # if exact data just return the loglik and subj_lml from the model fit
     if all(model.data.obstype .== 1)
@@ -291,16 +291,16 @@ function draw_paths(model::MultistateModelFitted; min_ess = 100, paretosmooth = 
 end
 
 """
-    draw_paths(model::MultistateModelFitted, npaths)
+    draw_paths(model::MultistateProcess, npaths)
 
 Draw sample paths conditional on the data. Require that the minimum effective sample size is greater than min_ess.
 
 Arguments
-- model: fitted multistate model.
+- model: multistate model.
 - npaths: number of paths to sample.
 - paretosmooth: pareto smooth importance weights, defaults to true. 
 """
-function draw_paths(model::MultistateModelFitted, npaths; paretosmooth = true, return_logliks = false)
+function draw_paths(model::MultistateProcess, npaths; paretosmooth = true, return_logliks = false)
 
     # if exact data just return the loglik and subj_lml from the model fit
     if all(model.data.obstype .== 1)
