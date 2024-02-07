@@ -175,7 +175,7 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95,
 end
 
 """
-    estimate_loglik(model::MultistateModelFitted; min_ess = 100, paretosmooth = true)
+    estimate_loglik(model::MultistateProcess; min_ess = 100, paretosmooth = true)
     
 Estimate the log marginal likelihood for a fitted multistate model. Require that the minimum effective sample size per subject is greater than min_ess.  
 
@@ -183,7 +183,7 @@ Estimate the log marginal likelihood for a fitted multistate model. Require that
 - min_ess: minimum effective sample size, defaults to 100.
 - paretosmooth: pareto smooth importance weights, defaults to true. 
 """
-function estimate_loglik(model::MultistateModelFitted; min_ess = 100, paretosmooth = true)
+function estimate_loglik(model::MultistateProcess; min_ess = 100, paretosmooth = true)
 
     # sample paths and grab logliks
     samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeights = draw_paths(model; min_ess = min_ess, paretosmooth = paretosmooth, return_logliks = true)
