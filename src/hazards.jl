@@ -206,11 +206,10 @@ Cumulative hazard for Gompertz hazards over the interval [lb, ub].
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log = true)
 
     # scale and shape
-    shape = parameters[1]
-    log_scale = parameters[2]
+    shape = exp(parameters[1])
 
     # cumulative hazard
-    log_cumul_haz = log(exp(ub * shape) - exp(lb * shape)) + log_scale - parameters[1] 
+    log_cumul_haz = log(exp(ub * shape) - exp(lb * shape)) - parameters[1] + parameters[2]  
 
     give_log ? log_cumul_haz : exp(log_cumul_haz)
 end
@@ -236,11 +235,11 @@ Cumulative hazard for Gompertz proportional hazards over the interval [lb, ub].
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_log = true)
 
     # scale and shape
-    shape = parameters[1]
+    shape = exp(parameters[1])
 
     # cumulative hazard
     log_cumul_haz = 
-        log(ub ^ shape - lb ^ shape) + dot(parameters[2:end], _hazard.data[rowind,:])
+        log(ub ^ shape - lb ^ shape) - parameters[1] + dot(parameters[2:end], _hazard.data[rowind,:])
 
     give_log ? log_cumul_haz : exp(log_cumul_haz)
 end
