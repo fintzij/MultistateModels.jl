@@ -188,12 +188,8 @@ Return the Gompertz cause-specific hazards. No covariate adjustement.
 """
 function call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true)
 
-    # scale and shape
-    log_shape = parameters[1]
-    log_scale = parameters[2]
-
     # compute hazard 
-    log_haz = log_scale + log_shape * t 
+    log_haz = parameters[2] + parameters[1] + parameters[1] * t 
 
     give_log ? log_haz : exp(log_haz)
 end
@@ -209,7 +205,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log 
     shape = exp(parameters[1])
 
     # cumulative hazard
-    log_cumul_haz = log(exp(ub * shape) - exp(lb * shape)) - parameters[1] + parameters[2]  
+    log_cumul_haz = log(exp(ub * shape) - exp(lb * shape)) + parameters[2]  
 
     give_log ? log_cumul_haz : exp(log_cumul_haz)
 end
@@ -239,7 +235,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_lo
 
     # cumulative hazard
     log_cumul_haz = 
-        log(ub ^ shape - lb ^ shape) - parameters[1] + dot(parameters[2:end], _hazard.data[rowind,:])
+        log(ub ^ shape - lb ^ shape) + dot(parameters[2:end], _hazard.data[rowind,:])
 
     give_log ? log_cumul_haz : exp(log_cumul_haz)
 end
