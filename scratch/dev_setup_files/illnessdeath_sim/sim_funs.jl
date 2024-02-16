@@ -1,18 +1,19 @@
 using ArraysOfArrays
 using Chain
+# using CSV
 using DataFrames
 using Distributions
 using LinearAlgebra
 using MultistateModels
 using StatsBase
-using Random
+# using Random
 using RCall
 
 # function to make the parameters
 function makepars()
-    parameters = (h12 = [log(1.5), log(1.5)],
-                  h13 = [log(2/3), log(2/3)],
-                  h23 = [log(2), log(3)])
+    parameters = (h12 = [log(1.5), log(0.75)],
+                  h13 = [log(2/3), log(1)],
+                  h23 = [log(1), log(1)])
     return parameters
 end
 
@@ -21,11 +22,11 @@ function make_obstimes()
     # observation times
     times = [0.0; [1.0, 2.0, 3.0] .+ (rand(Beta(3, 3), 3) .- 0.5) .* 0.5; 4.0]
     
-    return times / 4
+    return times / 4.0
 end
 
 # function to set up the model
-function setup_model(; make_pars, data = nothing, nsubj = 1000, family = "wei", ntimes = 4)
+function setup_model(; make_pars, data = nothing, nsubj = 1000, family = "gom", ntimes = 4)
     
     # create hazards
     if family != "sp"
@@ -33,9 +34,9 @@ function setup_model(; make_pars, data = nothing, nsubj = 1000, family = "wei", 
         h13 = Hazard(@formula(0 ~ 1), family, 1, 3)
         h23 = Hazard(@formula(0 ~ 1), family, 2, 3)
     else
-        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = [0.2, 0.5,])
-        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = [0.2, 0.5,])
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = [0.2, 0.5,])
+        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = [0.2, 0.5])
+        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = [0.2, 0.5])
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = [0.2, 0.5])
     end
     
     # data for simulation parameters
@@ -50,7 +51,7 @@ function setup_model(; make_pars, data = nothing, nsubj = 1000, family = "wei", 
     end
 
     # create model
-    model = multistatemodel(h12, h13, h23; data = data, CensoringPatterns = [3 1 1 0;])
+    model = multistatemodel(h12, h13, h23; data = data)
 
     # set parameters
     if make_pars
@@ -71,27 +72,28 @@ function observe_subjdat(path, model)
 
     # times and states
     obstimes = unique(sort([0.0; subj_dat_raw.tstop; path.times[findall(path.states .== 3)]]))
-    obsinds  = searchsortedlast.(Ref(path.times), obstimes)
-    obsstates = path.states[obsinds]
 
     # if path is 1->2->3 and !2 ∈ obsstates, include it
-    if all([2,3] .∈ Ref(path.states)) & !(2 ∈ obsstates)
-        push!(obstimes, path.times[findfirst(path.states .== 3)] - sqrt(eps()))
-        sort!(obstimes)
-        obsinds  = searchsortedlast.(Ref(path.times), obstimes)
-        obsstates = path.states[obsinds]
+    if all([2,3] .∈ Ref(path.states)) && (last(path.times) < first(subj_dat_raw.tstop))
+        push!(obstimes, path.times[findfirst(path.states .== 3)] - 0.0001)
     end
+    
+    sort!(obstimes)
+    obsinds  = searchsortedlast.(Ref(path.times), obstimes)
+    obsstates = path.states[obsinds]
 
     # make dataset
     subjdat = DataFrame(id = path.subj,
                         tstart = obstimes[Not(end)],
                         tstop = obstimes[Not(1)],
                         statefrom = obsstates[Not(end)],
-                        stateto = obsstates[Not(1)],
-                        obstype = ifelse.(obsstates[Not(1)] .== 3, 1, 2))
+                        stateto = obsstates[Not(1)])
 
     # cull redundatnt rows
     subjdat = subjdat[Not((subjdat.stateto .== 3) .& (subjdat.statefrom .== 3)), :]
+
+    # obstype
+    subjdat[:,:obstype] .= [x == 3 ? 1 : 2 for x in subjdat[:,:stateto]]
 
     # return subjdat
     return subjdat
@@ -165,28 +167,28 @@ end
 # ndraws is the number of draws from the asymptotic normal distribution of the MLEs
 # family:
 #   1: "exp"
-#   2: "wei"
+#   2: "gom"
 #   3: "sp"
 function work_function(;simnum, seed, family, sims_per_subj, nboot)
 
     Random.seed!(seed)
 
     # set up model for simulation
-    model_sim = setup_model(; make_pars = true, data = nothing, family = "wei", nsubj = 1000)
+    model_sim = setup_model(; make_pars = true, data = nothing, family = "gom", nsubj = 1000)
         
     # simulate paths
-    dat_raw, paths = simulate(model_sim; nsim = 1, paths = true, data = true)
+    paths = simulate(model_sim; nsim = 1, paths = true, data = false)
     dat = reduce(vcat, map(x -> observe_subjdat(x, model_sim), paths))
 
     ### set up model for fitting
-    model_fit = setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp"][family])
+    model_fit = setup_model(; make_pars = false, data = dat, family = ["exp", "gom", "sp"][family])
 
     # fit model
     initialize_parameters!(model_fit)
     model_fitted = fit(model_fit; verbose = true, compute_vcov = true) 
 
     ### simulate from the fitted model
-    model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "wei", "sp"][family])
+    model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "gom", "sp"][family])
 
     set_parameters!(model_sim2, model_fitted.parameters)
     paths_sim = simulate(model_sim2; nsim = sims_per_subj, paths = true, data = false)
@@ -232,10 +234,10 @@ end
 # function for getting crude estimates
 function crude_ests(;seed)
 
-    Random.seed!(seed)
+    # Random.seed!(seed)
 
     # set up model for simulation
-    model_sim = setup_model(; make_pars = true, data = nothing, family = "wei", nsubj = 1000)
+    model_sim = setup_model(; make_pars = true, data = nothing, family = "gom", nsubj = 1000)
         
     # simulate paths
     dat = simulate(model_sim; nsim = 1, paths = false, data = true)[1]

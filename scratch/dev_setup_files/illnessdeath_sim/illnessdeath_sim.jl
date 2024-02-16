@@ -1,25 +1,24 @@
 
 # get functions
-include(pwd()*"/scratch/dev_setup_files/illnessdeath_sim/sim_funs.jl");
+include(pwd()*"/scratch/dev_setup_files/illnessdeath_sim/sim_funs.jl")
 
 # run the simulation
 simnum = 2098;
 seed = 98;
-family = 3; 
+family = 2; 
 sims_per_subj = 20
 nboot = 1000
 # work_function(;simnum = simnum, seed = seed, family = family, sims_per_subj = 1, nboot = 1)
-Random.seed!(seed)
 
 # set up model for simulation
-model_sim = setup_model(; make_pars = true, data = nothing, family = "wei", nsubj = 1000)
+model_sim = setup_model(; make_pars = true, data = nothing, family = "gom", nsubj = 1000)
     
 # simulate paths
-dat_raw, paths = simulate(model_sim; nsim = 1, paths = true, data = true)
+paths = simulate(model_sim; nsim = 1, paths = true, data = false)
 dat = reduce(vcat, map(x -> observe_subjdat(x, model_sim), paths))
 
 ### set up model for fitting
-model= setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp"][family])
+model= setup_model(; make_pars = false, data = dat, family = ["exp", "gom", "sp"][family])
 
 # fit model
 initialize_parameters!(model)

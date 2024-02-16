@@ -189,7 +189,7 @@ Return the Gompertz cause-specific hazards. No covariate adjustement.
 function call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true)
 
     # compute hazard 
-    log_haz = parameters[2] + parameters[1] * t 
+    log_haz = parameters[2] + exp(parameters[1]) * t 
 
     give_log ? log_haz : exp(log_haz)
 end
@@ -201,15 +201,11 @@ Cumulative hazard for Gompertz hazards over the interval [lb, ub].
 """
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log = true)
 
+    shape = exp(parameters[1])
+    
     # cumulative hazard
-    if parameters[1] == 0.0
-        log_cumul_haz = parameters[2]
-    elseif parameters[1] > 0.0
-        log_cumul_haz = parameters[2] - log(parameters[1]) + log(exp(ub * parameters[1]) - exp(lb * parameters[1]))
-    elseif parameters[1] < 0.0
-        log_cumul_haz = parameters[2] - log(-parameters[1]) + log(exp(lb * parameters[1]) - exp(ub * parameters[1]))
-    end
-
+    log_cumul_haz = parameters[2] - log(parameters[1]) + log(exp(ub * shape) - exp(lb * shape))
+    
     give_log ? log_cumul_haz : exp(log_cumul_haz)
 end
 
@@ -221,7 +217,7 @@ Return the Gompertz cause-specific proportional hazards.
 function call_haz(t, parameters, rowind, _hazard::_GompertzPH; give_log = true)
 
     # compute hazard
-    log_haz = dot(parameters[2:end], _hazard.data[rowind,:]) + parameters[1] * t 
+    log_haz = dot(parameters[2:end], _hazard.data[rowind,:]) + exp(parameters[1]) * t 
 
     give_log ? log_haz : exp(log_haz)
 end
@@ -233,15 +229,10 @@ Cumulative hazard for Gompertz proportional hazards over the interval [lb, ub].
 """
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_log = true)
 
+    shape = exp(parameters[1])
+    
     # cumulative hazard
-    # cumulative hazard
-    if parameters[1] == 0.0
-        log_cumul_haz = dot(parameters[2:end], _hazard.data[rowind,:])
-    elseif parameters[1] > 0.0
-        log_cumul_haz = dot(parameters[2:end], _hazard.data[rowind,:]) - log(parameters[1]) + log(exp(ub * parameters[1]) - exp(lb * parameters[1]))
-    elseif parameters[1] < 0.0
-        log_cumul_haz = dot(parameters[2:end], _hazard.data[rowind,:]) - log(-parameters[1]) + log(exp(lb * parameters[1]) - exp(ub * parameters[1]))
-    end
+    log_cumul_haz = dot(parameters[2:end], _hazard.data[rowind,:]) - log(parameters[1]) + log(exp(ub * shape) - exp(lb * shape))
 
     give_log ? log_cumul_haz : exp(log_cumul_haz)
 end
