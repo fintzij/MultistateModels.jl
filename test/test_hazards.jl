@@ -165,8 +165,7 @@ end
 @testset "test_hazards_gompertz" begin
 
     # set parameters, log(shape, scale), no covariate adjustment
-    MultistateModels.set_parameters!(msm_gom, (h12 = [log(1.5), log(0.5)], h13 = [log(0.5), log(0.5), 1.5]))
-    
+    MultistateModels.set_parameters!(msm_gom, (h12 = [log(1.5), log(0.5)], h13 = [log(0.5), log(0.5), 1.5], h23 = [log(1), log(2/3)]))    
 
     # h(t) = scale * exp(shape * t)
     @test MultistateModels.call_haz(1.0, msm_gom.parameters[1], 1, msm_gom.hazards[1]; give_log = true) == log(0.5) + log(1.5)
@@ -182,7 +181,7 @@ end
 @testset "test_cumulativehazards_gompertz" begin
 
     # set up log parameters, lower bound, and upper bound
-    MultistateModels.set_parameters!(msm_gom, (h12 = [log(1.5), log(0.5)], h13 = [log(0.5), log(0.5), 1.5]))
+    MultistateModels.set_parameters!(msm_gom, (h12 = [log(1.5), log(0.5)], h13 = [log(0.5), log(0.5), 1.5], h23 = [log(1), log(2/3)]))
     lb = 0.0
     ub = 5.0
 

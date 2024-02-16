@@ -7,6 +7,7 @@ using StatsBase
 # This isn't crazy because e.g. brms will center covariates first
 h12 = Hazard(@formula(0 ~ 1), "gom", 1, 2);
 h13 = Hazard(@formula(0 ~ 1 + trt), "gom", 1, 3);
+h23 = Hazard(@formula(0 ~ 1), "gom", 2, 3);
 
 nsubj = 2
 dat = DataFrame(id = collect(1:nsubj),
@@ -18,4 +19,4 @@ dat = DataFrame(id = collect(1:nsubj),
               trt = [0, 1])
 
 # create multistate model object
-msm_gom = multistatemodel(h12, h13; data = dat)
+msm_gom = multistatemodel(h12, h13, h23; data = dat)
