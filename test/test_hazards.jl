@@ -168,14 +168,14 @@ end
     MultistateModels.set_parameters!(msm_gom, (h12 = [log(1.5), log(0.5)], h13 = [log(0.5), log(0.5), 1.5], h23 = [log(1), log(2/3)]))    
 
     # h(t) = scale * exp(shape * t)
-    @test MultistateModels.call_haz(1.0, msm_gom.parameters[1], 1, msm_gom.hazards[1]; give_log = true) == log(0.5) + log(1.5)
+    @test MultistateModels.call_haz(1.0, msm_gom.parameters[1], 1, msm_gom.hazards[1]; give_log = true) == log(0.5) + log(1.5) + 1.5
 
-    @test MultistateModels.call_haz(1.0, msm_gom.parameters[1], 1, msm_gom.hazards[1]; give_log = false) == 0.5 * 1.5
+    @test MultistateModels.call_haz(1.0, msm_gom.parameters[1], 1, msm_gom.hazards[1]; give_log = false) ≈ 0.5 * 1.5 * exp(1.5)
 
    # now with covariate adjustment
-   @test MultistateModels.call_haz(1.0, msm_gom.parameters[2], 2, msm_gom.hazards[2]; give_log = true) == log(0.5) + log(0.5) + 1.5
+   @test MultistateModels.call_haz(1.0, msm_gom.parameters[2], 2, msm_gom.hazards[2]; give_log = true) == log(0.5) + log(0.5) + exp(log(0.5)) + 1.5
 
-    @test MultistateModels.call_haz(1.0, msm_gom.parameters[2], 2, msm_gom.hazards[2]; give_log = false) == exp(log(0.5) + log(0.5) + 1.5)
+    @test MultistateModels.call_haz(1.0, msm_gom.parameters[2], 2, msm_gom.hazards[2]; give_log = false) == exp(log(0.5) + log(0.5) + exp(log(0.5)) + 1.5)
 end
 
 @testset "test_cumulativehazards_gompertz" begin
@@ -186,14 +186,14 @@ end
     ub = 5.0
 
     # test
-    @test MultistateModels.call_cumulhaz(lb, ub, msm_gom.parameters[1], 1, msm_gom.hazards[1]; give_log = true) == log(0.5 / log(1.5) * (exp(log(1.5) * ub) - exp(log(1.5) * lb)))
-
-    @test MultistateModels.call_cumulhaz(lb, ub, msm_gom.parameters[1], 1, msm_gom.hazards[1]; give_log = false) == 0.5 / log(1.5) * (exp(log(1.5) * ub) - exp(log(1.5) * lb))
+    @test MultistateModels.call_cumulhaz(lb, ub, msm_gom.parameters[1], 1, msm_gom.hazards[1]; give_log = true) == log(0.5) + log(exp(1.5 * ub) - exp(1.5 * lb))
+    
+    @test MultistateModels.call_cumulhaz(lb, ub, msm_gom.parameters[1], 1, msm_gom.hazards[1]; give_log = false) == exp(log(0.5) + log(exp(1.5 * ub) - exp(1.5 * lb)))
 
    # now with covariate adjustment
-   @test MultistateModels.call_cumulhaz(lb, ub, msm_gom.parameters[2], 2, msm_gom.hazards[2]; give_log = true) ≈ log(exp(log(0.5) + 1.5) / log(0.5) * (exp(log(0.5) * ub) - exp(log(0.5) * lb)))
+   @test MultistateModels.call_cumulhaz(lb, ub, msm_gom.parameters[2], 2, msm_gom.hazards[2]; give_log = true) ≈ log(0.5) + 1.5 + log(exp(0.5 * ub) - exp(0.5 * lb))
 
-    @test MultistateModels.call_cumulhaz(lb, ub, msm_gom.parameters[2], 2, msm_gom.hazards[2]; give_log = false) ≈ exp(log(0.5) + 1.5) / log(0.5) * (exp(log(0.5) * ub) - exp(log(0.5) * lb))
+    @test MultistateModels.call_cumulhaz(lb, ub, msm_gom.parameters[2], 2, msm_gom.hazards[2]; give_log = false) ≈ exp(log(0.5) + 1.5 + log(exp(0.5 * ub) - exp(0.5 * lb)))
 end
 
 @testset "test_msplines" begin
