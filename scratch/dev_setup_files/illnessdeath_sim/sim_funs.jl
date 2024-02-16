@@ -1,3 +1,13 @@
+using ArraysOfArrays
+using Chain
+using DataFrames
+using Distributions
+using LinearAlgebra
+using MultistateModels
+using StatsBase
+using Random
+using RCall
+
 # function to make the parameters
 function makepars()
     parameters = (h12 = [log(1.5), log(1.5)],
@@ -9,9 +19,9 @@ end
 # function to make the assessment times
 function make_obstimes()    
     # observation times
-    times = collect(0:0.25:1) .+ vcat([0.0; (rand(Beta(5,5), 4) * 0.2 .- 0.1)])
+    times = [0.0; [1.0, 2.0, 3.0] .+ (rand(Beta(3, 3), 3) .- 0.5) .* 0.5; 4.0]
     
-    return times
+    return times / 4
 end
 
 # function to set up the model
@@ -23,9 +33,9 @@ function setup_model(; make_pars, data = nothing, nsubj = 1000, family = "wei", 
         h13 = Hazard(@formula(0 ~ 1), family, 1, 3)
         h23 = Hazard(@formula(0 ~ 1), family, 2, 3)
     else
-        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0)
-        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 0)
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 0)
+        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = [0.2, 0.5,])
+        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = [0.2, 0.5,])
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = [0.2, 0.5,])
     end
     
     # data for simulation parameters
@@ -46,8 +56,6 @@ function setup_model(; make_pars, data = nothing, nsubj = 1000, family = "wei", 
     if make_pars
         parameters = makepars()
         set_parameters!(model, parameters) 
-    else
-        set_crude_init!(model)
     end
 
     # return model
@@ -55,66 +63,38 @@ function setup_model(; make_pars, data = nothing, nsubj = 1000, family = "wei", 
 end
 
 # observe data
-function observe_dat(dat_raw, paths)
-    
-    # initialize
-    dat = similar(dat_raw, 0)
+function observe_subjdat(path, model)
 
-    # group dat_raw
-    gdat = groupby(dat_raw, :id)
-    
-    # observe dat
-    for p in eachindex(paths)
-        if !(3 ∈ paths[p].states)
-            append!(dat, gdat[p])
+    # grab subject's data
+    i = path.subj
+    subj_dat_raw = model.data[model.subjectindices[i], :]
 
-        else
-            # change the time of death to exact
-            subjdat = copy(gdat[p])
-            subjdat.tstop[end] = last(paths[p].times)
-            subjdat.obstype[end] = 1
-            
-            # add a ghost state b/c death occurs prior to the first censoring time
-            
-            # deathind = findfirst(paths[p].states .== 3)
-            # if paths[p].states[deathind - 1] == 1
-            #     nr = nrow(subjdat)
-            #     insert!(subjdat, nr, subjdat[nr,:])
-            #     subjdat.tstop[nr]        -= sqrt(eps())
-            #     subjdat.tstart[nr + 1]    = subjdat.tstop[nr]
-            #     subjdat.obstype[nr]       = 3
-            #     subjdat.stateto[nr]       = 0
-            #     subjdat.statefrom[nr + 1] = 0
-            # end
+    # times and states
+    obstimes = unique(sort([0.0; subj_dat_raw.tstop; path.times[findall(path.states .== 3)]]))
+    obsinds  = searchsortedlast.(Ref(path.times), obstimes)
+    obsstates = path.states[obsinds]
 
-            # append
-            append!(dat, subjdat)
-        end
+    # if path is 1->2->3 and !2 ∈ obsstates, include it
+    if all([2,3] .∈ Ref(path.states)) & !(2 ∈ obsstates)
+        push!(obstimes, path.times[findfirst(path.states .== 3)] - sqrt(eps()))
+        sort!(obstimes)
+        obsinds  = searchsortedlast.(Ref(path.times), obstimes)
+        obsstates = path.states[obsinds]
     end
 
-    return dat
-end
+    # make dataset
+    subjdat = DataFrame(id = path.subj,
+                        tstart = obstimes[Not(end)],
+                        tstop = obstimes[Not(1)],
+                        statefrom = obsstates[Not(end)],
+                        stateto = obsstates[Not(1)],
+                        obstype = ifelse.(obsstates[Not(1)] .== 3, 1, 2))
 
-# calculate restricted mean progression free survival time
-function calc_rmpfst(paths)
-    # get event times
-    died = map(x -> x.states[2] != 1, paths)
-    gaptimes = diff([0.0; sort(map(x -> x.times[2], paths[findall(died)])); maximum(map(x -> x.times[2], paths))])
+    # cull redundatnt rows
+    subjdat = subjdat[Not((subjdat.stateto .== 3) .& (subjdat.statefrom .== 3)), :]
 
-    # counters
-    rmpfst = 0.0
-    nsurv  = length(paths)
-
-    for k in 1:(length(gaptimes)-1)
-        rmpfst += (nsurv - 0.5) * gaptimes[k] 
-        nsurv -= 1
-    end
-
-    # add final increment
-    rmpfst += nsurv * last(gaptimes)
-
-    # return restricted mean PFS time
-    return rmpfst / length(paths)
+    # return subjdat
+    return subjdat
 end
 
 # summarize paths
@@ -130,7 +110,7 @@ function summarize_paths(paths)
     die_noprog = mean(map(x -> (3 ∈ x.states) & !(2 ∈ x.states), paths))
 
     # restricted mean progression-free survival time
-    rmpfst = calc_rmpfst(paths)
+    rmpfst = mean(map(x -> x.times[2], paths))
 
     ests = (pfs = pfs, 
             prog = prog,
@@ -196,12 +176,13 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
         
     # simulate paths
     dat_raw, paths = simulate(model_sim; nsim = 1, paths = true, data = true)
-    dat = observe_dat(dat_raw[1], paths)
+    dat = reduce(vcat, map(x -> observe_subjdat(x, model_sim), paths))
 
     ### set up model for fitting
     model_fit = setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp"][family])
 
     # fit model
+    initialize_parameters!(model_fit)
     model_fitted = fit(model_fit; verbose = true, compute_vcov = true) 
 
     ### simulate from the fitted model
@@ -215,9 +196,17 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
 
     # get asymptotic bootstrap CIs
     asymp_cis = asymptotic_bootstrap(model_sim2, flatview(model_fitted.parameters), model_fitted.vcov,  sims_per_subj, nboot)    
-    
+
+    # estimate and CI for parameters
+    parests = DataFrame(simnum = simnum, 
+                        ests = reduce(vcat, model_fitted.parameters),
+                        lower = reduce(vcat, model_fitted.parameters) - 1.96 * sqrt.(diag(model_fitted.vcov)),
+                        upper = reduce(vcat, model_fitted.parameters) + 1.96 * sqrt.(diag(model_fitted.vcov)))
+
+    results = DataFrame(simnum = simnum, family = family, var = string.(collect(keys(ests))), ests = collect(ests), lower = asymp_cis[:,1], upper = asymp_cis[:,2])
+
     ### return results
-    return DataFrame(simnum = simnum, family = family, var = string.(collect(keys(ests))), ests = collect(ests), lower = asymp_cis[:,1], upper = asymp_cis[:,2])
+    return results, parests
 end
 
 # function for summarizing the crude estimates and paths
@@ -226,7 +215,7 @@ function summarize_crude(paths, dat)
     # get crude estimates for event probabilities
     nsubj = size(paths, 1)
     probs = collect(summarize_paths(paths))[Not(end)]
-    cis = rcopy(R"binom.confint($probs*$nsubj, $nsubj, method = 'wilson')[,c('lower', 'upper')]")
+    cis = rcopy(R"binom::binom.confint($probs*$nsubj, $nsubj, method = 'wilson')[,c('lower', 'upper')]")
 
     # prepare dataset for restricted mean survival time
     times = map(p -> p.times[2], paths)

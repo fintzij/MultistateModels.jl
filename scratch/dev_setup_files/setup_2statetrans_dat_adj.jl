@@ -4,8 +4,8 @@ using Distributions
 using MultistateModels
 using StatsBase
 
-h12 = Hazard(@formula(0 ~ 1 + trt), "wei", 1, 2)
-h21 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 1)
+h12 = Hazard(@formula(0 ~ 1 + trt), "gom", 1, 2)
+h21 = Hazard(@formula(0 ~ 1 + trt), "gom", 2, 1)
 
 nsubj = Int64(200)
 
@@ -26,8 +26,8 @@ msm_2state_transadj = multistatemodel(h12, h21; data = dat)
 # treatment speeds 1->2 and slows 2->1
 set_parameters!(
     msm_2state_transadj, 
-    (h12 = [log(0.9), log(0.2), 0.5],
-     h21 = [log(1.1), log(0.2), 0.5]))
+    (h12 = [log(10), log(0.01), 0.5],
+     h21 = [log(10), log(0.01), 0.5]))
 
 simdat, paths = simulate(msm_2state_transadj; paths = true, data = true);
 

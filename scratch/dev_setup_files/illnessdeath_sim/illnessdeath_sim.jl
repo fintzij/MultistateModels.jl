@@ -1,24 +1,31 @@
-using ArraysOfArrays
-using Chain
-using CSV
-using DataFrames
-using Distributions
-using LinearAlgebra
-using MultistateModels
-using RCall
-using StatsBase
-using Random
-
 
 # get functions
 include(pwd()*"/scratch/dev_setup_files/illnessdeath_sim/sim_funs.jl");
 
 # run the simulation
-simnum = 1; seed = 1; family = 2; sims_per_subj = 20; nboot = 10
-work_function(;simnum = simnum, seed = seed, family = family, sims_per_subj = 1, nboot = 1)
+simnum = 2098;
+seed = 98;
+family = 3; 
+sims_per_subj = 20
+nboot = 1000
+# work_function(;simnum = simnum, seed = seed, family = family, sims_per_subj = 1, nboot = 1)
+Random.seed!(seed)
 
+# set up model for simulation
+model_sim = setup_model(; make_pars = true, data = nothing, family = "wei", nsubj = 1000)
+    
+# simulate paths
+dat_raw, paths = simulate(model_sim; nsim = 1, paths = true, data = true)
+dat = reduce(vcat, map(x -> observe_subjdat(x, model_sim), paths))
 
-using ArraysOfArrays, Optimization, OptimizationOptimJL, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra, OptimizationOptimisers, RCall, Plots, StatsFuns, MacroTools, FunctionWrappers, RuntimeGeneratedFunctions, ParetoSmooth, LinearAlgebra
+### set up model for fitting
+model= setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp"][family])
+
+# fit model
+initialize_parameters!(model)
+fitted = fit(model; verbose = true, compute_vcov = true) 
+
+using ArraysOfArrays, Optimization, Optim, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra,  RCall, StatsFuns, MacroTools,  RuntimeGeneratedFunctions, ParetoSmooth, LinearAlgebra
 
 RCall.@rlibrary splines2
 

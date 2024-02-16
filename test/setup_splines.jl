@@ -24,4 +24,4 @@ h41 = Hazard(@formula(0 ~ 1 + x), "sp", 4, 1; monotonic = "decreasing", degree =
 hazards = (h12, h13, h14, h21, h31, h41)
 splinemod = multistatemodel(h12, h13, h14, h21, h31, h41; data = dat)
 
-set_crude_init!(splinemod)
+initialize_parameters!(splinemod; crude = true)
