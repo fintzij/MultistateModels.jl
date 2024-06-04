@@ -13,7 +13,7 @@ dat =
               x = repeat(rand(1), 5))
 
 # create multistate model object with the simulated data
-meshsize = 1000000
+meshsize = 100000
 h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; monotonic = "nonmonotonic", degree = 3, knots = [0.25, 0.5, 0.75], meshsize = meshsize) # healthy -> ill
 h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; monotonic = "increasing", degree = 3, knots = [0.25, 0.5, 0.75], meshsize = meshsize) # healthy -> dead
 h14 = Hazard(@formula(0 ~ 1), "sp", 1, 4; monotonic = "decreasing", degree = 3, knots = [0.25, 0.5, 0.75], meshsize = meshsize)

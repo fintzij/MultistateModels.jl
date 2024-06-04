@@ -58,7 +58,6 @@ export
     get_parnames,
     get_vcov,
     Hazard,
-    # initialize_parameters,
     initialize_parameters!,
     make_constraints,
     multistatemodel,

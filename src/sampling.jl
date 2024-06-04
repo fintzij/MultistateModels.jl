@@ -286,7 +286,7 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
     if return_logliks
         return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeights)
     else
-        return samplepaths
+        return (; samplepaths, ImportanceWeights)
     end
 end
 

@@ -68,6 +68,8 @@ modelexp = multistatemodel(h12, h13, h23; data = simdat[1])
 set_crude_init!(modelsp)
 fitted = fit(modelsp; compute_vcov = true, verbose = true)
 
+
+
 using ArraysOfArrays, Optimization, OptimizationOptimJL, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra, RCall, Plots, StatsFuns, MacroTools, RuntimeGeneratedFunctions, ParetoSmooth, LinearAlgebra
 
 RCall.@rlibrary splines2
