@@ -28,12 +28,27 @@ simdat, paths = simulate(msm_expwei; paths = true, data = true)
 function getdat(i)
     inds = findall(simdat[1].id .== i)
     n = length(inds)
-    DataFrame(id = fill(i, n),
+    
+    df = DataFrame(id = fill(i, n),
             tstart = simdat[1].tstart[inds],
             tstop = [simdat[1].tstop[inds[Not(end)]]; paths[i].times[end]],
             statefrom = simdat[1].statefrom[inds],
             stateto = [simdat[1].stateto[inds[Not(end)]]; 3],
             obstype = [fill(2, n - 1); 1])
+    
+    if (df.statefrom[end] == 1) & (df.stateto[end] == 3)
+        push!(df, last(df))
+
+        df.tstop[end - 1] -= eps()
+        df.stateto[end - 1] = 2
+
+        df.tstart[end] = df.tstop[end-1] 
+        df.statefrom[end] = 2
+        
+        df.obstype[end-1] = 2
+    end
+
+    return df
 end
 
 dat2 = reduce(vcat, [getdat(i) for i in 1:nsubj])
