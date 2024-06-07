@@ -16,6 +16,7 @@ function make_surrogate_model(model::Union{MultistateModel, MultistateMarkovMode
         model.markovsurrogate.hazards,
         model.totalhazards,
         model.tmat,
+        model.emat,
         model.hazkeys,
         model.subjectindices,
         model.SamplingWeights,

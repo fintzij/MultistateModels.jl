@@ -454,11 +454,11 @@ end
 
 Generate a matrix enumerating instantaneous transitions. Origin states correspond to rows, destination states to columns, and zero entries indicate that an instantaneous state transition is not possible. Transitions are enumerated in non-zero elements of the matrix. `hazinfo` is the output of a call to `enumerate_hazards`.
 """
-function build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64})
+function build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64}, tmat::Matrix{Int64})
     
     # initialize the emission matrix
     n_obs = nrow(data)
-    n_states = size(CensoringPatterns, 2) - 1
+    n_states = size(tmat, 1)
     emat = zeros(Int64, n_obs, n_states)
 
     for i in 1:n_obs
@@ -468,7 +468,6 @@ function build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64})
             emat[i,:] = ones(n_states)
         else
             emat[i,:] .= CensoringPatterns[data.obstype[i] - 2, 2:n_states+1]
-            CensoringPatterns[CensoringPatterns[:,1] .== data.obstype[i], 2:size(CensoringPatterns,2)]
         end 
     end
 
@@ -517,8 +516,10 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
     # check CensoringPatterns and build emission matrix
     if any(data.obstype .∉ Ref([1,2]))
         check_CensoringPatterns(CensoringPatterns, tmat)
-        emat = build_emat(data, CensoringPatterns)
     end
+
+    # build emission matrix
+    emat = build_emat(data, CensoringPatterns, tmat)
 
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
@@ -539,6 +540,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
         _hazards,
         _totalhazards,
         tmat,
+        emat,
         hazkeys,
         subjinds,
         SamplingWeights,
@@ -556,6 +558,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
                 _hazards,
                 _totalhazards,
                 tmat,
+                emat,
                 hazkeys,
                 subjinds,
                 SamplingWeights,
@@ -570,6 +573,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
                 _hazards,
                 _totalhazards,
                 tmat,
+                emat,
                 hazkeys,
                 subjinds,
                 SamplingWeights,
