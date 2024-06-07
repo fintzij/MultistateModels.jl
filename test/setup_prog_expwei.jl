@@ -23,11 +23,26 @@ hazards = (h12, h23)
 msm_expwei = multistatemodel(h12, h23; data = dat)
 
 # simulate data for msm_expwei3 and put it in the model
-simdat = simulate(msm_expwei; paths = false, data = true)[1]
-model_fit = multistatemodel(h12, h23; data = simdat)
+simdat, paths = simulate(msm_expwei; paths = true, data = true)
+
+function getdat(i)
+    inds = findall(simdat[1].id .== i)
+    n = length(inds)
+    DataFrame(id = fill(i, n),
+            tstart = simdat[1].tstart[inds],
+            tstop = [simdat[1].tstop[inds[Not(end)]]; paths[i].times[end]],
+            statefrom = simdat[1].statefrom[inds],
+            stateto = [simdat[1].stateto[inds[Not(end)]]; 3],
+            obstype = [fill(2, n - 1); 1])
+end
+
+dat2 = reduce(vcat, [getdat(i) for i in 1:nsubj])
+model_fit = multistatemodel(h12, h23; data = dat2)
 
 # set model parameters
 initialize_parameters!(model_fit)
 
 # fit
-fitted = fit(model_fit)
+model_fitted = fit(model_fit)
+get_loglik(model_fitted)
+estimate_loglik(model_fitted; min_ess = 1000, paretosmooth = false)
