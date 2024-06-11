@@ -155,7 +155,7 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
     # Solve Kolmogorov equations for TPMs
     for t in eachindex(books[1])
         # compute the transition intensity matrix
-        compute_hazmat!(hazmat_book_surrogate[t], params_surrog, surrogate.hazards, books[1][t])
+        compute_hazmat!(hazmat_book_surrogate[t], params_surrog, hazards_surrog, books[1][t])
         # compute transition probability matrices
         compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
     end
