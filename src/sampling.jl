@@ -145,29 +145,19 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
 
-    # build containers for transition intensity and prob mtcs
-    hazmat_book = build_hazmat_book(Float64, model.tmat, books[1])
-    tpm_book = build_tpm_book(Float64, model.tmat, books[1])
+    # build containers for transition intensity and prob mtcs for Markov surrogate
+    hazmat_book_surrogate = build_hazmat_book(Float64, model.tmat, books[1])
+    tpm_book_surrogate = build_tpm_book(Float64, model.tmat, books[1])
 
     # allocate memory for matrix exponential
-    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
+    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book_surrogate[1]), ExpMethodGeneric())
 
     # Solve Kolmogorov equations for TPMs
     for t in eachindex(books[1])
-
         # compute the transition intensity matrix
-        compute_hazmat!(
-            hazmat_book[t],
-            params_surrog,
-            hazards_surrog,
-            books[1][t])
-
+        compute_hazmat!(hazmat_book_surrogate[t], params_surrog, hazards_surrog, books[1][t])
         # compute transition probability matrices
-        compute_tmat!(
-            tpm_book[t],
-            hazmat_book[t],
-            books[1][t],
-            cache)
+        compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
     end
 
     # set up objects for simulation
@@ -219,7 +209,7 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
             # sample new paths and compute log likelihoods
             for j in npaths.+(1:n_add)
                 # draw path
-                samplepaths[i][j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2], fbmats, absorbingstates)
+                samplepaths[i][j] = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2], fbmats, absorbingstates)
 
                 # compute log likelihood
                 loglik_target[i][j] = loglik(params_target, samplepaths[i][j], hazards_target, model)
