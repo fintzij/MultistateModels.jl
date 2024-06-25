@@ -53,5 +53,5 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
         spchaz = rcopy(Array{Float64}, R"t(splines2::cSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, scale = FALSE))")
     end
 
-    return (hazard = sphaz, cumulative_hazard = spchaz)
+    return (hazard = sphaz, cumulative_hazard = spchaz, knots = knots)
 end
