@@ -253,7 +253,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
         elseif family == "sp" # m-splines
 
             # grab hazard object from splines2
-            hazard, cumulative_hazard = spline_hazards(hazards[h], data)
+            hazard, cumulative_hazard, knots = spline_hazards(hazards[h], data)
 
             # generate hazard struct
             ### no covariates
@@ -281,6 +281,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                             hazards[h].stateto,
                                             hazards[h].meshsize,
                                             [minimum(data.tstart), maximum(data.tstop)],
+                                            knots,
                                             hazard,
                                             cumulative_hazard,
                                             size(hazdat, 2) - 1)
@@ -307,6 +308,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                             hazards[h].stateto,
                                             hazards[h].meshsize,
                                             [minimum(data.tstart), maximum(data.tstop)],
+                                            knots,
                                             hazard,
                                             cumulative_hazard,
                                             size(hazdat, 2) - 1)
@@ -332,6 +334,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                             hazards[h].stateto,
                                             hazards[h].meshsize,
                                             [minimum(data.tstart), maximum(data.tstop)],
+                                            knots,
                                             hazard,
                                             cumulative_hazard,
                                             size(hazdat, 2) - 1)
@@ -359,6 +362,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                            hazards[h].stateto,
                                            hazards[h].meshsize,
                                            [minimum(data.tstart), maximum(data.tstop)],
+                                           knots,
                                            hazard, 
                                            cumulative_hazard,
                                            size(hazdat, 2) - 1)                        
@@ -384,6 +388,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                            hazards[h].stateto,
                                            hazards[h].meshsize,
                                            [minimum(data.tstart), maximum(data.tstop)],
+                                           knots,
                                            hazard, 
                                            cumulative_hazard,
                                            size(hazdat, 2) - 1) 
@@ -408,6 +413,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                            hazards[h].stateto,
                                            hazards[h].meshsize,
                                            [minimum(data.tstart), maximum(data.tstop)],
+                                           knots,
                                            hazard, 
                                            cumulative_hazard,
                                            size(hazdat, 2) - 1) 

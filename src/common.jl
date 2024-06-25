@@ -176,6 +176,7 @@ struct _MSpline <: _SplineHazard
     stateto::Int64
     meshsize::Int64
     meshrange::Vector{Float64}
+    knots::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
     ncovar::Int64
@@ -192,6 +193,7 @@ struct _MSplinePH <: _SplineHazard
     stateto::Int64
     meshsize::Int64
     meshrange::Vector{Float64}
+    knots::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
     ncovar::Int64
@@ -208,6 +210,7 @@ struct _ISplineIncreasing <: _SplineHazard
     stateto::Int64
     meshsize::Int64
     meshrange::Vector{Float64}
+    knots::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
     ncovar::Int64
@@ -224,6 +227,7 @@ struct _ISplineIncreasingPH <: _SplineHazard
     stateto::Int64
     meshsize::Int64
     meshrange::Vector{Float64}
+    knots::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
     ncovar::Int64
@@ -240,6 +244,7 @@ struct _ISplineDecreasing <: _SplineHazard
     stateto::Int64
     meshsize::Int64
     meshrange::Vector{Float64}
+    knots::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
     ncovar::Int64
@@ -256,6 +261,7 @@ struct _ISplineDecreasingPH <: _SplineHazard
     stateto::Int64
     meshsize::Int64
     meshrange::Vector{Float64}
+    knots::Vector{Float64}
     hazbasis::Array{Float64}
     chazbasis::Array{Float64}
     ncovar::Int64

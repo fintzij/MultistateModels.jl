@@ -1,9 +1,9 @@
 """
-    fit(model::MultistateModel; constraints = nothing, compute_vcov = true)
+    fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
 
 Fit a multistate model given exactly observed sample paths.
 """
-function fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true)
+function fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
 
     # initialize array of sample paths
     samplepaths = extract_paths(model; self_transitions = false)
@@ -84,7 +84,7 @@ end
 
 
 """
-    fit(model::MultistateMarkovModel; constraints = nothing, verbose = true, compute_vcov = true)
+    fit(model::MultistateMarkovModel; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
 
 Fit a multistate markov model to interval censored data or a mix of panel data and exact jump times.
 
@@ -93,7 +93,7 @@ Fit a multistate markov model to interval censored data or a mix of panel data a
 - verbose: print messages, defaults to true.
 - compute_vcov: compute variance-covariance matrix, defaults to true if no constraints or false otherwise.
 """
-function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, compute_vcov = true)
+function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -175,7 +175,7 @@ end
 
 
 """
-fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.01, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true)
+fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.01, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
 
 Fit a semi-Markov model to panel data via Monte Carlo EM.
 
@@ -198,7 +198,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-3, α = 0.05, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-3, α = 0.05, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
