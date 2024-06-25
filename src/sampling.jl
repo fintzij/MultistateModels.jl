@@ -168,8 +168,9 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
     ImportanceWeights = [sizehint!(Vector{Float64}(), ceil(Int64, 4 * min_ess)) for i in 1:nsubj]
 
     # for ess 
-    subj_ll   = Vector{Float64}(undef, nsubj)
-    subj_ess  = Vector{Float64}(undef, nsubj)
+    subj_ll        = Vector{Float64}(undef, nsubj)
+    subj_ess       = Vector{Float64}(undef, nsubj)
+    subj_pareto_k  = zeros(nsubj)
     
     # make fbmats if necessary
     fbmats = build_fbmats(model)
@@ -240,7 +241,7 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
                     # raw log importance weights
                     logweights = reshape(loglik_target[i] - loglik_surrog[i], 1, length(loglik_target[i]), 1) 
 
-                     # might fail if not enough samples to fit pareto
+                     # might fail if not enough samples to fit pareto, e.g. a single sample if only one path is possible.
                     if any(logweights .!= 0.0)
                         if paretosmooth 
                             try
@@ -249,7 +250,8 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
                 
                                 # save importance weights and ess
                                 copyto!(ImportanceWeights[i], psiw.weights)
-                                subj_ess[i] = psiw.ess[1]            
+                                subj_ess[i] = psiw.ess[1]
+                                subj_pareto_k[i] = psiw.pareto_k[1]
 
                             catch err
                                 subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
@@ -274,7 +276,7 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
     normalize!.(ImportanceWeights, 1)
 
     if return_logliks
-        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeights)
+        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeights, subj_pareto_k)
     else
         return (; samplepaths, ImportanceWeights)
     end

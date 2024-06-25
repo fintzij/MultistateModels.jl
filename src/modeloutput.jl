@@ -186,7 +186,7 @@ Estimate the log marginal likelihood for a fitted multistate model. Require that
 function estimate_loglik(model::MultistateProcess; min_ess = 100, paretosmooth = true)
 
     # sample paths and grab logliks
-    samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeights = draw_paths(model; min_ess = min_ess, paretosmooth = paretosmooth, return_logliks = true)
+    samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeights, subj_pareto_k = draw_paths(model; min_ess = min_ess, paretosmooth = paretosmooth, return_logliks = true)
 
     # calculate the log marginal likelihood
     liks_target = map(x -> exp.(x), loglik_target)
@@ -202,6 +202,5 @@ function estimate_loglik(model::MultistateProcess; min_ess = 100, paretosmooth =
     observed_lml_var = sum(subj_lml_var .* model.SamplingWeights.^2)
 
     # return log likelihoods
-    return (loglik = observed_lml, loglik_subj = subj_lml, mcse_loglik = sqrt(observed_lml_var), mcse_loglik_subj = sqrt.(subj_lml_var))
+    return (loglik = observed_lml, loglik_subj = subj_lml, mcse_loglik = sqrt(observed_lml_var), mcse_loglik_subj = sqrt.(subj_lml_var), subj_pareto_k=subj_pareto_k)
 end
-
