@@ -21,18 +21,18 @@ end
 
 Modify the parameter values in a MultistateProcess object, calibrate to the MLE of a Markov surrogate.
 """
-function initialize_parameters!(model::MultistateProcess; constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, crude = false)
+function initialize_parameters!(model::MultistateProcess; constraints = nothing, parameters = nothing, crude = false)
 
     if crude
         set_crude_init!(model; constraints = constraints)
     else
         # check that surrogate constraints are supplied if there are other constraints
-        if !isnothing(constraints) & isnothing(surrogate_constraints)
+        if !isnothing(constraints)
             @error "Constraints for the Markov surrogate must be provided if there are constraints on the model parameters."
         end
 
         # fit Markov surrogate
-        surrog = fit_surrogate(model; surrogate_constraints = surrogate_constraints, surrogate_parameters, verbose = false)
+        surrog = fit_surrogate(model; surrogate_constraints = constraints, surrogate_parameters = parameters, verbose = false)
 
         for i in eachindex(model.hazards)
             set_par_to = init_par(model.hazards[i], surrog.parameters[i][1])
