@@ -273,12 +273,13 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
     end
 
     # normalize importance weights
-    normalize!.(ImportanceWeights, 1)
+    # normalize!.(ImportanceWeights, 1)
+    ImportanceWeightsNormalized = normalize.(ImportanceWeights, 1)
 
     if return_logliks
-        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeights, subj_pareto_k)
+        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights, subj_pareto_k)
     else
-        return (; samplepaths, ImportanceWeights)
+        return (; samplepaths, ImportanceWeightsNormalized)
     end
 end
 
