@@ -207,14 +207,3 @@ function estimate_loglik(model::MultistateProcess; min_ess = 100, paretosmooth =
     # return log likelihoods
     return (loglik = observed_lml, loglik_subj = subj_lml, mcse_loglik = sqrt(observed_lml_var), mcse_loglik_subj = sqrt.(subj_lml_var), subj_pareto_k=subj_pareto_k)
 end
-
-
-    # normalize importance weights
-    # normalize!.(ImportanceWeights, 1)
-    ImportanceWeightsNormalized = normalize.(ImportanceWeights, 1)
-
-    if return_logliks
-        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights, subj_pareto_k)
-    else
-        return (; samplepaths, ImportanceWeightsNormalized)
-    end
