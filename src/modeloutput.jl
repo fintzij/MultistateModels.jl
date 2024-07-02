@@ -191,6 +191,8 @@ function estimate_loglik(model::MultistateProcess; min_ess = 100, paretosmooth =
     # calculate the log marginal likelihood
     liks_target = map(x -> exp.(x), loglik_target)
     subj_ml = map((l,w) -> mean(l, ProbabilityWeights(w)), liks_target, ImportanceWeights)
+    # subj_ml = map(w -> mean(w), ImportanceWeights_unnormalized) # need to use the *un-normalized* weights
+    
     subj_lml = log.(subj_ml)
     observed_lml = sum(subj_lml .* model.SamplingWeights)
 
