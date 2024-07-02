@@ -186,19 +186,20 @@ Estimate the log marginal likelihood for a fitted multistate model. Require that
 function estimate_loglik(model::MultistateProcess; min_ess = 100, paretosmooth = true)
 
     # sample paths and grab logliks
-    samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeights, subj_pareto_k = draw_paths(model; min_ess = min_ess, paretosmooth = paretosmooth, return_logliks = true)
+    samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights, subj_pareto_k = draw_paths(model; min_ess = min_ess, paretosmooth = paretosmooth, return_logliks = true)
 
     # calculate the log marginal likelihood
-    liks_target = map(x -> exp.(x), loglik_target)
-    subj_ml = map((l,w) -> mean(l, ProbabilityWeights(w)), liks_target, ImportanceWeights)
-    # subj_ml = map(w -> mean(w), ImportanceWeights_unnormalized) # need to use the *un-normalized* weights
+    # liks_target = map(x -> exp.(x), loglik_target)
+    # subj_ml = map((l,w) -> mean(l, ProbabilityWeights(w)), liks_target, ImportanceWeights)
+    subj_ml = map(w -> mean(w), ImportanceWeights) # need to use the *un-normalized* weights
     
     subj_lml = log.(subj_ml)
     observed_lml = sum(subj_lml .* model.SamplingWeights)
 
     # calculate MCSEs
     # at the subject level, use Delta method for the variance of the log weighted mean
-    subj_lml_var = map((l,w,m,g) -> (g == 1 ? 0.0 : sem(l, ProbabilityWeights(w); mean = m)^2 / m^2), liks_target, ImportanceWeights, subj_ml, length.(liks_target)) 
+    # subj_lml_var = map((l,w,m,g) -> (g == 1 ? 0.0 : sem(l, ProbabilityWeights(w); mean = m)^2 / m^2), liks_target, ImportanceWeights, subj_ml, length.(liks_target)) 
+    subj_lml_var = map((w,g) -> (g == 1 ? 0.0 : var(w)), ImportanceWeights, length.(liks_target)) 
 
     # sum and include sampling weights
     observed_lml_var = sum(subj_lml_var .* model.SamplingWeights.^2)
@@ -206,3 +207,14 @@ function estimate_loglik(model::MultistateProcess; min_ess = 100, paretosmooth =
     # return log likelihoods
     return (loglik = observed_lml, loglik_subj = subj_lml, mcse_loglik = sqrt(observed_lml_var), mcse_loglik_subj = sqrt.(subj_lml_var), subj_pareto_k=subj_pareto_k)
 end
+
+
+    # normalize importance weights
+    # normalize!.(ImportanceWeights, 1)
+    ImportanceWeightsNormalized = normalize.(ImportanceWeights, 1)
+
+    if return_logliks
+        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights, subj_pareto_k)
+    else
+        return (; samplepaths, ImportanceWeightsNormalized)
+    end
