@@ -199,7 +199,7 @@ function estimate_loglik(model::MultistateProcess; min_ess = 100, paretosmooth =
     # calculate MCSEs
     # at the subject level, use Delta method for the variance of the log weighted mean
     # subj_lml_var = map((l,w,m,g) -> (g == 1 ? 0.0 : sem(l, ProbabilityWeights(w); mean = m)^2 / m^2), liks_target, ImportanceWeights, subj_ml, length.(liks_target)) 
-    subj_lml_var = map((w,g) -> (g == 1 ? 0.0 : var(w)), ImportanceWeights, length.(liks_target)) 
+    subj_lml_var = map(w -> length(w) == 1 ? 0.0 : var(w), ImportanceWeights)
 
     # sum and include sampling weights
     observed_lml_var = sum(subj_lml_var .* model.SamplingWeights.^2)
