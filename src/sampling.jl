@@ -167,16 +167,19 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
     loglik_surrog = [sizehint!(Vector{Float64}(), ceil(Int64, 4 * min_ess)) for i in 1:nsubj]
     ImportanceWeights = [sizehint!(Vector{Float64}(), ceil(Int64, 4 * min_ess)) for i in 1:nsubj]
 
-    # for ess 
-    subj_ll        = Vector{Float64}(undef, nsubj)
-    subj_ess       = Vector{Float64}(undef, nsubj)
-    subj_pareto_k  = zeros(nsubj)
+    # continers
+    subj_ll                   = Vector{Float64}(undef, nsubj)
+    subj_ess                  = Vector{Float64}(undef, nsubj)
+    subj_pareto_k             = zeros(nsubj)
     
     # make fbmats if necessary
     fbmats = build_fbmats(model)
     
     # identify absorbing states
     absorbingstates = findall(map(x -> all(x .== 0), eachrow(model.tmat)))
+
+    # compute the normalizing constant of the proposal density
+    # subj_normalizing_constant = loglik(parameters, data::MPanelData; neg = true, return_ll_subj = true)
 
     for i in eachindex(model.subjectindices) 
 
@@ -277,7 +280,7 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
     ImportanceWeightsNormalized = normalize.(ImportanceWeights, 1)
 
     if return_logliks
-        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights, subj_pareto_k)
+        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights)
     else
         return (; samplepaths, ImportanceWeightsNormalized)
     end

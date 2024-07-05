@@ -69,54 +69,6 @@ function get_ConvergenceRecords(model::MultistateModelFitted)
 end
 
 """
-    aic(model::MultistateModelFitted; estimate_likelihood = false, min_ess = 100, paretosmooth = true)
-
-Akaike's Information Criterion, defined as -2*log(L) + 2*k, where L is the likelihood and k is the number of consumed degrees of freedom. 
-
-# Arguments
-- min_ess: minimum effective sample size, defaults to 100.
-- paretosmooth: pareto smooth importance weights, defaults to true.
-"""
-function aic(model::MultistateModelFitted; estimate_likelihood = false, min_ess = 100, paretosmooth = true)
-
-    if !estimate_likelihood & all(isa.(model.hazards, _MarkovHazard))
-        @warn "The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models."
-    end
-
-    if !estimate_likelihood
-        return - 2 * get_loglik(model; ll = "loglik") + 2 * length(flatview(model.parameters))
-    else
-        ll = estimate_loglik(model; min_ess = min_ess, paretosmooth = paretosmooth)
-        return (AIC = -2 * ll.loglik + 2 * length(flatview(model.parameters)),
-                MCSE = 4 * ll.mcse_loglik)
-    end
-end
-
-"""
-    bic(model::MultistateModelFitted; estimate_likelihood = false, min_ess = 100, paretosmooth = true)
-
-Bayesian Information Criterion, defined as -2*log(L) + k*log(n), where L is the likelihood and k is the number of consumed degrees of freedom.
-
-# Arguments
-- min_ess: minimum effective sample size, defaults to 100.
-- paretosmooth: pareto smooth importance weights, defaults to true.
-"""
-function bic(model::MultistateModelFitted; estimate_likelihood = false, min_ess = 100, paretosmooth = true)
-
-    if !estimate_likelihood & all(isa.(model.hazards, _MarkovHazard))
-        @warn "The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models."
-    end
-
-    if !estimate_likelihood
-        return - 2 * get_loglik(model; ll = "loglik") + log(sum(model.SamplingWeights)) * length(flatview(model.parameters))
-    else
-        ll = estimate_loglik(model; min_ess = min_ess, paretosmooth = paretosmooth)
-        return (BIC = -2 * ll.loglik + log(sum(model.SamplingWeights)) * length(flatview(model.parameters)),
-                MCSE = 4 * ll.mcse_loglik)
-    end
-end
-
-"""
     summary(model::MultistateModelFitted) 
 
 Summary of model output. 
@@ -164,46 +116,115 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95,
     summary_table = (;zip(haznames, summary_table)...)
     
     # log likelihood
-    ll = get_loglik(model; ll = "loglik")
+    ll = estimate_likelihood ? estimate_loglik(model; min_ess = min_ess) : get_loglik(model; ll = "loglik")
 
     # information criteria
-    AIC = MultistateModels.aic(model; estimate_likelihood = estimate_likelihood, min_ess = min_ess, paretosmooth = paretosmooth)
+    AIC = MultistateModels.aic(model; loglik = ll, estimate_likelihood = estimate_likelihood, min_ess = min_ess)
 
-    BIC = MultistateModels.bic(model; estimate_likelihood = estimate_likelihood, min_ess = min_ess, paretosmooth = paretosmooth)
+    BIC = MultistateModels.bic(model; loglik = ll, estimate_likelihood = estimate_likelihood, min_ess = min_ess)
 
     return (summary = summary_table, loglik = ll, AIC = AIC, BIC = BIC)
 end
 
 """
-    estimate_loglik(model::MultistateProcess; min_ess = 100, paretosmooth = true)
+    estimate_loglik(model::MultistateProcess; min_ess = 100)
     
 Estimate the log marginal likelihood for a fitted multistate model. Require that the minimum effective sample size per subject is greater than min_ess.  
 
 # Arguments
 - min_ess: minimum effective sample size, defaults to 100.
-- paretosmooth: pareto smooth importance weights, defaults to true. 
 """
-function estimate_loglik(model::MultistateProcess; min_ess = 100, paretosmooth = true)
+function estimate_loglik(model::MultistateProcess; min_ess = 100)
 
     # sample paths and grab logliks
-    samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights, subj_pareto_k = draw_paths(model; min_ess = min_ess, paretosmooth = paretosmooth, return_logliks = true)
+    samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights = draw_paths(model; min_ess = min_ess, paretosmooth = false, return_logliks = true)
 
     # calculate the log marginal likelihood
-    # liks_target = map(x -> exp.(x), loglik_target)
-    # subj_ml = map((l,w) -> mean(l, ProbabilityWeights(w)), liks_target, ImportanceWeights)
     subj_ml = map(w -> mean(w), ImportanceWeights) # need to use the *un-normalized* weights
-    
     subj_lml = log.(subj_ml)
     observed_lml = sum(subj_lml .* model.SamplingWeights)
 
     # calculate MCSEs
-    # at the subject level, use Delta method for the variance of the log weighted mean
-    # subj_lml_var = map((l,w,m,g) -> (g == 1 ? 0.0 : sem(l, ProbabilityWeights(w); mean = m)^2 / m^2), liks_target, ImportanceWeights, subj_ml, length.(liks_target)) 
-    subj_lml_var = map(w -> length(w) == 1 ? 0.0 : var(w), ImportanceWeights)
+    subj_lml_var = map(w -> length(w) == 1 ? 0.0 : var(w) / length(w), ImportanceWeights)
 
     # sum and include sampling weights
     observed_lml_var = sum(subj_lml_var .* model.SamplingWeights.^2)
 
     # return log likelihoods
-    return (loglik = observed_lml, loglik_subj = subj_lml, mcse_loglik = sqrt(observed_lml_var), mcse_loglik_subj = sqrt.(subj_lml_var), subj_pareto_k=subj_pareto_k)
+    return (loglik = observed_lml, loglik_subj = subj_lml, mcse_loglik = sqrt(observed_lml_var), mcse_loglik_subj = sqrt.(subj_lml_var))
+end
+
+"""
+    aic(model::MultistateModelFitted; estimate_likelihood = false, min_ess = 100)
+
+Akaike's Information Criterion, defined as -2*log(L) + 2*k, where L is the likelihood and k is the number of consumed degrees of freedom. 
+
+# Arguments
+- loglik: value of the loglikelihood to use, if provided.
+- estimate_likelihood: logical; whether to estimate the loglikelihood, defaults to true.  
+- min_ess: minimum effective sample size per subject, defaults to 100.
+"""
+function aic(model::MultistateModelFitted; loglik = nothing, estimate_likelihood = true, min_ess = 100)
+
+    if !estimate_likelihood & all(isa.(model.hazards, _MarkovHazard))
+        @warn "The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models."
+    end
+
+    # number of parameters
+    p = length(flatview(model.parameters))
+
+    # loglik
+    ll = if !isnothing(loglik)
+        loglik
+    elseif !estimate_likelihood
+        get_loglik(model; ll = "loglik")
+    else
+        estimate_loglik(model; min_ess = min_ess).loglik
+    end
+
+    # AIC
+    AIC = - 2 * ll + 2 * p
+
+    return AIC
+
+    # MCSE = 4 * ll.mcse_loglik
+end
+
+"""
+    bic(model::MultistateModelFitted; estimate_likelihood = false, min_ess = 100, paretosmooth = true)
+
+Bayesian Information Criterion, defined as -2*log(L) + k*log(n), where L is the likelihood and k is the number of consumed degrees of freedom.
+
+# Arguments
+- loglik: value of the loglikelihood to use, if provided.
+- estimate_likelihood: logical; whether to estimate the loglikelihood, defaults to true.  
+- min_ess: minimum effective sample size per subject, defaults to 100.
+"""
+function bic(model::MultistateModelFitted; loglik = nothing, estimate_likelihood = true, min_ess = 100)
+
+    if !estimate_likelihood & all(isa.(model.hazards, _MarkovHazard))
+        @warn "The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models."
+    end
+
+    # number of parameters
+    p = length(flatview(model.parameters))
+
+    # number of individuals
+    n = sum(model.SamplingWeights)
+
+    # loglik
+    ll = if !isnothing(loglik)
+        loglik
+    elseif !estimate_likelihood
+        get_loglik(model; ll = "loglik")
+    else
+        estimate_loglik(model; min_ess = min_ess).loglik
+    end
+
+    # BIC
+    BIC = - 2 * ll + log(n) * p
+
+    return BIC
+
+    # MCSE = 4 * ll.mcse_loglik
 end
