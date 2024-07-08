@@ -1,7 +1,7 @@
 """
     spline_hazards(hazard::SplineHazard, data::DataFrame)
 
-Get spline hazard objects via splines2. 
+Spline hazard object generated via BSplineKit.jl. 
 """
 function spline_hazards(hazard::SplineHazard, data::DataFrame)
 

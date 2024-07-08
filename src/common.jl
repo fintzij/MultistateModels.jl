@@ -75,7 +75,6 @@ Specify a cause-specific baseline hazard.
 - `degree`: Degree of the spline polynomial basis.
 - `knots`: Vector of knots.
 - `boundaryknots`: Length 2 vector of boundary knots.
-- `monotonic`: Assume that baseline hazard is monotonic, defaults to "nonmonotonic". If "increasing" or "decreasing", use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
 - `meshsize`: number of intervals into which to discretize the spline basis, defaults to 10000. 
 """
 struct SplineHazard <: HazardFunction
@@ -87,7 +86,6 @@ struct SplineHazard <: HazardFunction
     degree::Int64
     knots::Union{Nothing,Vector{Float64}}
     boundaryknots::Union{Nothing,Vector{Float64}}
-    monotonic::String
     meshsize::Int64
 end
 
@@ -166,104 +164,38 @@ struct _GompertzPH <: _SemiMarkovHazard
 end
 
 """
-M-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions. The cumulative hazard is an I-spline. 
+B-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of B-spline basis functions. 
 """
-struct _MSpline <: _SplineHazard
+struct _Spline <: _SplineHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
     statefrom::Int64
     stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
+    degree::Float64
     knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
+    hazsp::SplineExtrapolation
+    chazsp::SplineExtrapolation
+    rmat::RecombineMatrix
+    riskperiod::Vector{Float64}
     ncovar::Int64
 end
 
 """
-M-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions. The cumulative hazard is an I-spline. Covariates have a multiplicative effect on the baseline hazard.
+B-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of B-spline basis functions. Covariates have a multiplicative effect on the baseline hazard.
 """
-struct _MSplinePH <: _SplineHazard
+struct _SplinePH <: _SplineHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
     statefrom::Int64
     stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
+    degree::Float64
     knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
-    ncovar::Int64
-end
-
-"""
-Monotone increasing I-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of I-spline basis functions. The cumulative hazard is an C-spline. 
-"""
-struct _ISplineIncreasing <: _SplineHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
-    knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
-    ncovar::Int64
-end
-
-"""
-Monotone increasing I-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of I-spline basis functions. The cumulative hazard is an C-spline. Covariates have a multiplicative effect on the baseline hazard.
-"""
-struct _ISplineIncreasingPH <: _SplineHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
-    knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
-    ncovar::Int64
-end
-
-"""
-Monotone decreasing I-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of I-spline basis functions. The cumulative hazard is an C-spline. 
-"""
-struct _ISplineDecreasing <: _SplineHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
-    knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
-    ncovar::Int64
-end
-
-"""
-Monotone decreasing I-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of I-spline basis functions. The cumulative hazard is an C-spline. Covariates have a multiplicative effect on the baseline hazard.
-"""
-struct _ISplineDecreasingPH <: _SplineHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
-    knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
+    hazsp::SplineExtrapolation
+    chazsp::SplineExtrapolation
+    rmat::RecombineMatrix
+    riskperiod::Vector{Float64}
     ncovar::Int64
 end
 

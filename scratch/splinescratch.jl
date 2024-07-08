@@ -1,34 +1,71 @@
-using StatsModels
-using Plots
-using DataFrames
-using RCall
+using BenchmarkTools
+using BSplineKit
+using Distributions
 using LinearAlgebra
-using ArraysOfArrays
-using ElasticArrays
+using Plots
+using Random
 
-# simulate data
-x = collect(range(0.0, length=10001, stop=2.0*pi));
-x2 = collect(0.0:0.001:2.0*pi)
-y = exp.(sin.(x)+randn(length(x))) 
+# set up basis
+# x = sort(rand(Uniform(0.25, 0.75), 20))
+# breaks = sort(rand(Uniform(0.3, 0.7), 2))
+x = [0.1, 0.5, 0.9]
+z = collect(0.1:0.01:0.9)
 
-# using Rcall - oh shit.
-using RCall
-@rimport splines2 as rsplines2
-@rimport stats as rstats
-
-# two ways to do this - could import splines2
-@benchmark begin
-s = rsplines2.mSpline(x, df = 6)
-convert(Array{Float64}, rstats.predict(s, var"newx"=x2))
+function makebasis(Bb)
+    M = zeros(maximum(map(x -> x[1],Bb)), length(Bb))
+    n = length(Bb[1][2])
+    for k in 1:length(Bb)
+        M[range(Bb[k][1], step = -1, length = n), k] = [Bb[k][2]...]
+    end
+    return transpose(M)
 end
 
-# or do it all in R and copy back only when needed. seems faster
-@benchmark begin
-    R"r = splines2::mSpline($x, df = 6)"
-    convert(Array{Float64}, R"predict(msr, $x2)")
-end 
-
-rs = convert(ElasticArray, rcopy(R"t(splines2::mSpline($x, degree = 4, intercept = TRUE))"))
-push!(rs, rand(5))
+# generate the basis object
+B = BSplineBasis(BSplineOrder(4), copy(x))
+Bb = B.(z)
+bsp_basis = makebasis(Bb)
 
 
+# so for the baseline hazard
+# Steps 1 and 2 only need to be done once
+# 1. generate BSpline basis (B),  
+# 2. generate recombined basis (BN) and get recombination matrix (RM).
+# The following happens for each new value of recombined coefficients
+# 3. B-spline coefficients = RM * recombined coefficients
+
+
+# example
+x = [0.1, 0.3, 0.45, 0.6, 0.9]
+B = BSplineBasis(BSplineOrder(4), x)
+R = RecombinedBSplineBasis(B, Derivative(2))
+R2 = RecombinedBSplineBasis(B, Natural())
+M = R.M      
+
+Bs = SplineExtrapolation(Spline(undef, B), Linear())
+Rs = SplineExtrapolation(Spline(undef, R), Linear())
+
+coefs_R = rand(length(R))
+coefs_B = M * coefs_R
+
+copyto!(Bs.spline.coefs, coefs_B)
+copyto!(Rs.spline.coefs, coefs_R)
+
+
+# plot
+z1 = collect(0.1:0.01:0.9)
+z2 = collect(-0.1:0.01:0.1)
+z3 = collect(0.9:0.01:1.1)
+
+p = plot(z1, Bs.(z1))
+plot!(p, z2, Bs.(z2); linestyle = :dash, color = :red)
+plot!(p, z3, Bs.(z3); linestyle = :dash, color = :red)
+
+# how to make integral?
+Bi = integral(Bs)
+Ri = SplineExtrapolation(Bi, Linear())
+Ri(-0.01)
+
+# notes
+# the splines go in the spline hazard object
+# spline extrapolations have a coefs field
+# need to compute the risk period where the hazard is nonzero when setting parameters
