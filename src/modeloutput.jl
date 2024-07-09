@@ -145,7 +145,8 @@ function estimate_loglik(model::MultistateProcess; min_ess = 100)
     observed_lml = sum(subj_lml .* model.SamplingWeights)
 
     # calculate MCSEs
-    subj_lml_var = map(w -> length(w) == 1 ? 0.0 : var(w) / length(w), ImportanceWeights)
+    subj_ml_var = map(w -> length(w) == 1 ? 0.0 : var(w) / length(w), ImportanceWeights)
+    subj_lml_var = subj_ml_var ./ (subj_ml.^2) # delta method
 
     # sum and include sampling weights
     observed_lml_var = sum(subj_lml_var .* model.SamplingWeights.^2)
@@ -186,8 +187,6 @@ function aic(model::MultistateModelFitted; loglik = nothing, estimate_likelihood
     AIC = - 2 * ll + 2 * p
 
     return AIC
-
-    # MCSE = 4 * ll.mcse_loglik
 end
 
 """
@@ -225,6 +224,4 @@ function bic(model::MultistateModelFitted; loglik = nothing, estimate_likelihood
     BIC = - 2 * ll + log(n) * p
 
     return BIC
-
-    # MCSE = 4 * ll.mcse_loglik
 end
