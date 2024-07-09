@@ -217,9 +217,9 @@ end
 
 """
 
-M-spline without covariates
+Spline without covariates
 """
-function init_par(_hazard::_MSpline, crude_log_rate=0)
+function init_par(_hazard::_Spline, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 
     # pass through crude exponential rate
     npars = length(_hazard.parnames)
@@ -228,35 +228,11 @@ end
 
 """
 
-I-spline without covariates
-"""
-function init_par(_hazard::Union{_ISplineIncreasing, _ISplineDecreasing}, crude_log_rate=0)
-    # set shape to 0 (i.e. log(1)) 
-    # pass through crude exponential rate
-    npars = length(_hazard.parnames)
-    return [fill(crude_log_rate / (npars-1), npars-1); crude_log_rate]
-end
-
-
-"""
-
 M-spline with covariates
 """
-function init_par(_hazard::_MSplinePH, crude_log_rate=0)
+function init_par(_hazard::_SplinePH, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 
     # pass through crude exponential rate 
     # set covariate coefficients to 0
     return vcat(fill(crude_log_rate, length(_hazard.parnames) - size(_hazard.data, 2)), zeros(_hazard.ncovar))
-end
-
-"""
-
-spline with covariates
-"""
-function init_par(_hazard::Union{_ISplineIncreasingPH, _ISplineDecreasingPH}, crude_log_rate=0)
-    # set shape to 0 (i.e. log(1)) 
-    # pass through crude exponential rate 
-    # set covariate coefficients to 0
-    nhazpars = length(_hazard.parnames) - size(_hazard.data, 2)
-    return vcat(fill(crude_log_rate / (nhazpars-1), nhazpars - 1), crude_log_rate, zeros(_hazard.ncovar))
 end

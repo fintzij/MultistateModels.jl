@@ -12,16 +12,15 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 # Additional arguments for semiparametric baseline hazards. Splines up to degree 3 (cubic polynomials) are supported . Spline bases are constructed via a call to the BSplineKit.jl. See [the BSplineKit.jl documentation](https://jipolanco.github.io/BSplineKit.jl/stable/) for additional details. 
 - `degree`: Degree of the spline polynomial basis, defaults to 3 for a cubic polynomial basis.
 - `knots`: Optional vector of knots, including boundary knots. Defaults to the range of sojourns in the data with no interior knots if not supplied.
-- `meshsize`: number of intervals into which to discretize the spline basis, defaults to 10000. 
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, meshsize::Int64 = 10000)
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing)
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
-        if degree > 3
-            @error "Spline degree must be 3 or less"
+        if !(degree ∈ [0,1,2,3])
+            @error "Spline degree must be 0, 1, 2, or 3."
         end
-        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots, meshsize)
+        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots)
     end
 
     return h
@@ -252,171 +251,60 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
         elseif family == "sp" # m-splines
 
             # grab hazard object from splines2
-            hazard, cumulative_hazard, knots = spline_hazards(hazards[h], data)
+            hazard, cumulative_hazard, knots, boundaries = spline_hazards(hazards[h], data)
 
             # generate hazard struct
             ### no covariates
             if(size(hazdat, 2) == 1) 
-                    
-                # hazard struct
-                if hazards[h].monotonic == "nonmonotonic"
+                # parameter names
+                parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), "(Intercept)" => "Intercept")
 
-                    # parameter names
-                    parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), "(Intercept)" => "Intercept")
+                # number of parameters
+                npars = size(hazard)[1] + size(hazdat, 2) - 1
 
-                    # number of parameters
-                    npars = size(hazard)[1] + size(hazdat, 2) - 1
+                # vector for parameters
+                hazpars = zeros(Float64, npars)
 
-                    # vector for parameters
-                    hazpars = zeros(Float64, npars)
+                # append to model parameters
+                push!(parameters, hazpars)
 
-                    # append to model parameters
-                    push!(parameters, hazpars)
-
-                    haz_struct = _MSpline(Symbol(hazname),
-                                            hazdat, 
-                                            Symbol.(parnames),
-                                            hazards[h].statefrom,
-                                            hazards[h].stateto,
-                                            hazards[h].meshsize,
-                                            [minimum(data.tstart), maximum(data.tstop)],
-                                            knots,
-                                            hazard,
-                                            cumulative_hazard,
-                                            size(hazdat, 2) - 1)
-                        
-                elseif hazards[h].monotonic == "increasing"
-
-                    # parameter names
-                    parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*[string.(collect(1:size(hazard)[1]));"Intercept"]))
-
-                    # number of parameters
-                    npars = size(hazard)[1] + size(hazdat, 2)
-
-                    # vector for parameters
-                    hazpars = zeros(Float64, npars)
-
-                    # append to model parameters
-                    push!(parameters, hazpars)
-
-                    # hazard struct
-                    haz_struct = _ISplineIncreasing(Symbol(hazname),
-                                            hazdat, 
-                                            Symbol.(parnames),
-                                            hazards[h].statefrom,
-                                            hazards[h].stateto,
-                                            hazards[h].meshsize,
-                                            [minimum(data.tstart), maximum(data.tstop)],
-                                            knots,
-                                            hazard,
-                                            cumulative_hazard,
-                                            size(hazdat, 2) - 1)
-
-                else hazards[h].monotonic == "decreasing"
-
-                    parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*[string.(collect(1:size(hazard)[1]));"Intercept"]))
-                    
-                    # number of parameters
-                    npars = size(hazard)[1] + size(hazdat, 2)
-
-                    # vector for parameters
-                    hazpars = zeros(Float64, npars)
-
-                    # append to model parameters
-                    push!(parameters, hazpars)
-
-                    # hazard struct
-                    haz_struct = _ISplineDecreasing(Symbol(hazname),
-                                            hazdat, 
-                                            Symbol.(parnames),
-                                            hazards[h].statefrom,
-                                            hazards[h].stateto,
-                                            hazards[h].meshsize,
-                                            [minimum(data.tstart), maximum(data.tstop)],
-                                            knots,
-                                            hazard,
-                                            cumulative_hazard,
-                                            size(hazdat, 2) - 1)
-                end                  
+                haz_struct = _MSpline(Symbol(hazname),
+                                        hazdat, 
+                                        Symbol.(parnames),
+                                        hazards[h].statefrom,
+                                        hazards[h].stateto,
+                                        hazards[h].meshsize,
+                                        [minimum(data.tstart), maximum(data.tstop)],
+                                        knots,
+                                        hazard,
+                                        cumulative_hazard,
+                                        size(hazdat, 2) - 1)            
             else
                 ### proportional hazards
-                if hazards[h].monotonic == "nonmonotonic"
-                    # parameter names
-                    parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
+                # parameter names
+                parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
 
-                    # number of parameters
-                    npars = size(hazard, 1) + size(hazdat, 2) - 1
+                # number of parameters
+                npars = size(hazard, 1) + size(hazdat, 2) - 1
 
-                    # vector for parameters
-                    hazpars = zeros(Float64, npars)
+                # vector for parameters
+                hazpars = zeros(Float64, npars)
 
-                    # append to model parameters
-                    push!(parameters, hazpars)
+                # append to model parameters
+                push!(parameters, hazpars)
 
-                    # hazard struct
-                    haz_struct = _MSplinePH(Symbol(hazname),
-                                           hazdat[:,Not(1)], 
-                                           Symbol.(parnames),
-                                           hazards[h].statefrom,
-                                           hazards[h].stateto,
-                                           hazards[h].meshsize,
-                                           [minimum(data.tstart), maximum(data.tstop)],
-                                           knots,
-                                           hazard, 
-                                           cumulative_hazard,
-                                           size(hazdat, 2) - 1)                        
-                
-                elseif hazards[h].monotonic == "increasing"
-                    # parameter names
-                    parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*[string.(collect(1:size(hazard)[1]));"Intercept"]), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
-
-                    # number of parameters
-                    npars = size(hazard)[1] + size(hazdat, 2)
-
-                    # vector for parameters
-                    hazpars = zeros(Float64, npars)
-
-                    # append to model parameters
-                    push!(parameters, hazpars)
-
-                    # hazard struct
-                    haz_struct = _ISplineIncreasingPH(Symbol(hazname),
-                                           hazdat[:,Not(1)], 
-                                           Symbol.(parnames),
-                                           hazards[h].statefrom,
-                                           hazards[h].stateto,
-                                           hazards[h].meshsize,
-                                           [minimum(data.tstart), maximum(data.tstop)],
-                                           knots,
-                                           hazard, 
-                                           cumulative_hazard,
-                                           size(hazdat, 2) - 1) 
-                else
-                    # parameter names
-                    parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*[string.(collect(1:size(hazard)[1]));"Intercept"]), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
-
-                    # number of parameters
-                    npars = size(hazard)[1] + size(hazdat, 2) 
-
-                    # vector for parameters
-                    hazpars = zeros(Float64, npars)
-
-                    # append to model parameters
-                    push!(parameters, hazpars)
-
-                    # hazard struct
-                    haz_struct = _ISplineDecreasingPH(Symbol(hazname),
-                                           hazdat[:,Not(1)], 
-                                           Symbol.(parnames),
-                                           hazards[h].statefrom,
-                                           hazards[h].stateto,
-                                           hazards[h].meshsize,
-                                           [minimum(data.tstart), maximum(data.tstop)],
-                                           knots,
-                                           hazard, 
-                                           cumulative_hazard,
-                                           size(hazdat, 2) - 1) 
-                end                 
+                # hazard struct
+                haz_struct = _MSplinePH(Symbol(hazname),
+                                        hazdat[:,Not(1)], 
+                                        Symbol.(parnames),
+                                        hazards[h].statefrom,
+                                        hazards[h].stateto,
+                                        hazards[h].meshsize,
+                                        [minimum(data.tstart), maximum(data.tstop)],
+                                        knots,
+                                        hazard, 
+                                        cumulative_hazard,
+                                        size(hazdat, 2) - 1)                               
             end
         end
 

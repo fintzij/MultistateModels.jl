@@ -5,53 +5,35 @@ Spline hazard object generated via BSplineKit.jl.
 """
 function spline_hazards(hazard::SplineHazard, data::DataFrame)
 
-    # observed times
-    mesh = collect(LinRange(minimum(data.tstart), maximum(data.tstop), hazard.meshsize))
-
-    ## unpack arguments
-    # intercept, and degree
-    intercept = true
-    degree = hazard.degree
-
     # boundary knots
-    boundaryknots = isnothing(hazard.boundaryknots) ? [minimum(data.tstart), maximum(data.tstop)] : hazard.boundaryknots
+    timespan = [minimum(data.tstart), maximum(data.tstop)]
+    riskperiod = copy(timespan)
 
     # interior knots and df
     if isnothing(hazard.knots)
-        # get degrees of freedom
-        df = isnothing(hazard.df) ? degree + 1 : hazard.df
-        nknots = df - degree - 1
-
-        # get knots
-        if nknots < 0
-            sfrom = hazard.statefrom; sto = hazard.stateto
-            @error "The spline for the transition from state $sfrom to $sto has too few degrees of freedom." 
-        elseif nknots == 0
-            knots = Float64[]
+        if !any((data.statefrom .== hazard.statefrom) .& (data.stateto .== hazard.stateto))
+            knots = copy(timespan)
         else
-            sojourns = unique(sort([minimum(data.tstart); extract_sojourns(hazard, data, samplepaths; sojourns_only = false); maximum(data.tstop)]))
-            knots = quantile(sojourns, collect(1:nknots) / (nknots + 1))
+            knots = [0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]
         end
-
     else
         knots = hazard.knots
-        df = isnothing(hazard.df) ? length(knots) + degree + 1 : hazard.df
     end
 
-    # get spline objects from splines2
-    if hazard.monotonic == "nonmonotonic"
-        # mSpline via splines2
-        sphaz = rcopy(Array{Float64}, R"t(splines2::mSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots))")
+    # generate Splines
+    B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(knots))
 
-        # iSpline via splines2
-        spchaz = rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots))")
-    else 
-        # mSpline via splines2
-        sphaz = rcopy(Array{Float64}, R"t(splines2::iSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots))")
-
-        # iSpline via splines2
-        spchaz = rcopy(Array{Float64}, R"t(splines2::cSpline($mesh, df = $df, knots = $knots, degree = $degree, intercept = $intercept, Boundary.knots = $boundaryknots, scale = FALSE))")
+    if hazard.degree > 1
+        # recombine
+        R = RecombinedBSplineBasis(B, Derivative(2))
+        M = Matrix{Float64}(R.M)
+    else
+        M = diagm(ones(Float64, length(B)))
     end
+    
+    # generate splines with extrapolations
+    sphaz = SplineExtrapolation(Spline(undef, B), Linear())
+    spchaz = SplineExtrapolation(integral(sphaz), Linear())
 
-    return (hazard = sphaz, cumulative_hazard = spchaz, knots = knots)
+    return (sphaz = sphaz, spchaz = spchaz, rmat = M, knots = knots, riskperiod, timespan = timespan)
 end

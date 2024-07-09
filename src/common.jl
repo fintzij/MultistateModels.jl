@@ -82,11 +82,8 @@ struct SplineHazard <: HazardFunction
     family::String     # "sp" for splines
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
-    df::Union{Nothing,Int64}
     degree::Int64
     knots::Union{Nothing,Vector{Float64}}
-    boundaryknots::Union{Nothing,Vector{Float64}}
-    meshsize::Int64
 end
 
 """
@@ -178,6 +175,7 @@ struct _Spline <: _SplineHazard
     chazsp::SplineExtrapolation
     rmat::RecombineMatrix
     riskperiod::Vector{Float64}
+    timespan::Vector{Float64}
     ncovar::Int64
 end
 
@@ -196,6 +194,7 @@ struct _SplinePH <: _SplineHazard
     chazsp::SplineExtrapolation
     rmat::RecombineMatrix
     riskperiod::Vector{Float64}
+    timespan::Vector{Float64}
     ncovar::Int64
 end
 
