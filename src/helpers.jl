@@ -15,6 +15,11 @@ function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVect
             @error "New values for hazard $i and model parameters for that hazard are not of the same length."
         end
         copyto!(model.parameters[i], newvalues[i])
+
+        # recombine if a spline hazard
+        if isa(model.hazards[i], _SplineHazard) 
+            recombine_parameters!(model.hazards[i], newvalues[i])
+        end
     end
 end
 
@@ -35,7 +40,12 @@ function set_parameters!(model::MultistateProcess, newvalues::Tuple)
             @error "New values and parameters for cause-specific hazard $i are not of the same length."
         end
 
-        copyto!(model.parameters[i], newvalues[i])                   
+        copyto!(model.parameters[i], newvalues[i])    
+        
+        # recombine if a spline hazard
+        if isa(model.hazards[i], _SplineHazard)
+            recombine_parameters!(model.hazards[i], newvalues[i])
+        end
     end
 end
 
@@ -51,13 +61,21 @@ function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
 
     for i in eachindex(value_keys)
 
+        vind = value_keys[i]
+        mind = model.hazkeys[vind]
+
         # check length of supplied parameters
-        if length(newvalues[value_keys[i]]) != 
-                length(model.parameters[model.hazkeys[value_keys[i]]])
-            error("The new parameter values for $value_keys[i] are not the expected length.")
+        if length(newvalues[vind]) != 
+                length(model.parameters[mind])
+            error("The new parameter values for $vind are not the expected length.")
         end
 
-        copyto!(model.parameters[model.hazkeys[value_keys[i]]], newvalues[value_keys[i]])
+        copyto!(model.parameters[mind], newvalues[vind])
+
+        # recombine if a spline hazard
+        if isa(model.hazards[mind], _SplineHazard)
+            recombine_parameters!(model.hazards[mind], newvalues[vind])
+        end
     end
 end
 

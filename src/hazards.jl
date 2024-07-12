@@ -244,15 +244,11 @@ Return the spline cause-specific hazards.
 """
 function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
 
-    # get the index
-    ind = Int64(ceil((t - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
-    ind = ind == 0 ? 1 : ind
-
-    # compute the log hazard
-    loghaz = log(dot(exp.(parameters), _hazard.hazbasis[:,ind]))
+    # compute the hazard
+    haz = (_hazard.riskperiod[1] < t < _hazard.riskperiod[2]) ? _hazard.hazsp(t) : 0.0
 
     # return the log hazard
-    give_log ? loghaz : exp(loghaz)
+    give_log ? log(haz) : haz
 end
 
 """
@@ -262,30 +258,41 @@ Return the spline cause-specific cumulative hazards over the interval [lb,ub].
 """
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true)
 
-    # indices
-    lind = Int64(floor((lb - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
-    uind = Int64(ceil((ub - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+    # clamp lb and ub to the risk period
+    riskstart = _hazard.riskperiod[1]
+    riskend   = _hazard.riskperiod[2]
 
-    # make sure lind is between 1 and meshsize - 1
-    if lind == 0
-        lind += 1
-        if uind == lind
-            uind += 1
+    l = clamp(lb, riskstart, riskend)
+    u = clamp(ub, riskstart, riskend)
+
+    # get bounds
+    sp_bounds = boundaries(_hazard.hazsp.spline.basis)
+
+    if l == u
+        # no cumulative hazard accrued
+        chaz = 0.0
+
+    elseif u < sp_bounds[1]
+        # both endpoints are in the linear extrapolation range
+        chaz = (u - l) * mean([_hazard.hazsp(l), _hazard.hazsp(u)]) 
+    else
+        #  accumulate in left linear extrapolation
+        if (l < sp_bounds[1]) 
+            # from start of risk period to l
+            lb_chaz = -(l - riskstart) * mean(_hazard.hazsp.([riskstart, l]))
+
+            # from l to the lower spline boundary
+            left_chaz = -(sp_bounds[1] - l) * mean(_hazard.hazsp.([sp_bounds[1], l]))
+
+            # from [l, sp_bound[1]] + [sp_bound[1], u] minus [riskstart, l]
+            chaz = _hazard.chazsp(u) + left_chaz - lb_chaz
+        else
+            chaz = _hazard.chazsp(u) - _hazard.chazsp(l)
         end
     end
-
-    if uind > _hazard.meshsize
-        uind = _hazard.meshsize
-        if lind == uind
-            lind -= 1
-        end
-    end
-
-    # log cumulative hazard
-    logchaz = log(dot(exp.(parameters), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind]))
 
     # return the log hazard
-    give_log ? logchaz : exp(logchaz)
+    give_log ? log(chaz) : chaz
 end
 
 """
@@ -295,12 +302,11 @@ Return the spline cause-specific hazards.
 """
 function call_haz(t, parameters, rowind, _hazard::_SplinePH; give_log = true)
 
-    # get the index
-    ind = Int64(ceil((t - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
-    ind = ind == 0 ? 1 : ind
+    # compute the hazard
+    haz = (_hazard.riskperiod[1] < t < _hazard.riskperiod[2]) ? _hazard.hazsp(t) : 0.0
 
     # compute the log hazard
-    loghaz = log(dot(exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.hazbasis[:,ind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.hazbasis, 1))])
+    loghaz = log(haz) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.rmat, 2))])
 
     # return the log hazard
     give_log ? loghaz : exp(loghaz)
@@ -313,27 +319,41 @@ Return the spline cause-specific cumulative hazards over the interval [lb,ub].
 """
 function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log = true)
 
-    # indices
-    lind = Int64(floor((lb - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
-    uind = Int64(ceil((ub - _hazard.meshrange[1]) / (_hazard.meshrange[2] - _hazard.meshrange[1]) * _hazard.meshsize))
+    # clamp lb and ub to the risk period
+    riskstart = _hazard.riskperiod[1]
+    riskend   = _hazard.riskperiod[2]
 
-    # # make sure lind is between 1 and meshsize - 1
-    if lind == 0
-        lind += 1
-        if uind == lind
-            uind += 1
-        end
-    end
+    l = clamp(lb, riskstart, riskend)
+    u = clamp(ub, riskstart, riskend)
 
-    if uind > _hazard.meshsize
-        uind = _hazard.meshsize
-        if lind == uind
-            lind -= 1
+    # get bounds
+    sp_bounds = boundaries(_hazard.hazsp.spline.basis)
+
+    if l == u
+        # no cumulative hazard accrued
+        chaz = 0.0
+
+    elseif u < sp_bounds[1]
+        # both endpoints are in the linear extrapolation range
+        chaz = (u - l) * (_hazard.hazsp(l) + _hazard.hazsp(u)) / 2
+    else
+        #  accumulate in left linear extrapolation
+        if (l < sp_bounds[1]) 
+            # from start of risk period to l
+            lb_chaz = -(l - riskstart) * mean(_hazard.hazsp.([riskstart, l]))
+
+            # from l to the lower spline boundary
+            left_chaz = -(sp_bounds[1] - l) * mean(_hazard.hazsp.([sp_bounds[1], l]))
+
+            # from [l, sp_bound[1]] + [sp_bound[1], u] minus [riskstart, l]
+            chaz = _hazard.chazsp(u) + left_chaz - lb_chaz
+        else
+            chaz = _hazard.chazsp(u) - _hazard.chazsp(l)
         end
-    end
+    end 
 
     # log cumulative hazard
-    logchaz = log(dot(exp.(parameters[1:size(_hazard.hazbasis, 1)]), _hazard.chazbasis[:,uind] - _hazard.chazbasis[:,lind])) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.chazbasis, 1))])
+    logchaz = log(chaz) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.rmat, 2))])
 
     # return the log hazard
     give_log ? logchaz : exp(logchaz)

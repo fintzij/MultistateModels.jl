@@ -217,7 +217,7 @@ end
 
 """
 
-Spline without covariates
+B-Spline without covariates
 """
 function init_par(_hazard::_Spline, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 
@@ -228,7 +228,7 @@ end
 
 """
 
-M-spline with covariates
+B-spline with covariates
 """
 function init_par(_hazard::_SplinePH, crude_log_rate=0)
     # set shape to 0 (i.e. log(1)) 

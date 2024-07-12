@@ -11,16 +11,18 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 
 # Additional arguments for semiparametric baseline hazards. Splines up to degree 3 (cubic polynomials) are supported . Spline bases are constructed via a call to the BSplineKit.jl. See [the BSplineKit.jl documentation](https://jipolanco.github.io/BSplineKit.jl/stable/) for additional details. 
 - `degree`: Degree of the spline polynomial basis, defaults to 3 for a cubic polynomial basis.
-- `knots`: Optional vector of knots, including boundary knots. Defaults to the range of sojourns in the data with no interior knots if not supplied.
+- `knots`: Optional vector of knots. Defaults to the range of sojourns in the data with no interior knots if not supplied.
+- `extrapolation`: Either "linear" or "flat", see the BSplineKit.jl package. 
+- `add_boundaries`: should spline knot locations be augmented with 0 and the maximum sojourn in the data? defaults to true so that the `knots` argument is interpreted as interior knots. 
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing)
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, extrapolation = "linear", add_boundaries = true)
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
         if !(degree ∈ [0,1,2,3])
             @error "Spline degree must be 0, 1, 2, or 3."
         end
-        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots)
+        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots, extrapolation, add_boundaries)
     end
 
     return h
@@ -251,16 +253,17 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
         elseif family == "sp" # m-splines
 
             # grab hazard object from splines2
-            hazard, cumulative_hazard, knots, boundaries = spline_hazards(hazards[h], data)
+            hazard, cumulative_hazard, rmat, knots, timespan = spline_hazards(hazards[h], data)
+
+            # number of parameters
+            npars = size(rmat, 2) + size(hazdat, 2) - 1
 
             # generate hazard struct
             ### no covariates
             if(size(hazdat, 2) == 1) 
+                
                 # parameter names
-                parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), "(Intercept)" => "Intercept")
-
-                # number of parameters
-                npars = size(hazard)[1] + size(hazdat, 2) - 1
+                parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(rmat, 2)))), "(Intercept)" => "Intercept")
 
                 # vector for parameters
                 hazpars = zeros(Float64, npars)
@@ -268,25 +271,24 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                 # append to model parameters
                 push!(parameters, hazpars)
 
-                haz_struct = _MSpline(Symbol(hazname),
+                haz_struct = _Spline(Symbol(hazname),
                                         hazdat, 
                                         Symbol.(parnames),
                                         hazards[h].statefrom,
                                         hazards[h].stateto,
-                                        hazards[h].meshsize,
-                                        [minimum(data.tstart), maximum(data.tstop)],
+                                        hazards[h].degree,
                                         knots,
                                         hazard,
                                         cumulative_hazard,
+                                        rmat,
+                                        [0.0, maximum(data.tstop)],
+                                        timespan,
                                         size(hazdat, 2) - 1)            
             else
                 ### proportional hazards
                 # parameter names
-                parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(hazard)[1]))), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
-
-                # number of parameters
-                npars = size(hazard, 1) + size(hazdat, 2) - 1
-
+                parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(rmat, 2)))), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
+               
                 # vector for parameters
                 hazpars = zeros(Float64, npars)
 
@@ -294,17 +296,19 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                 push!(parameters, hazpars)
 
                 # hazard struct
-                haz_struct = _MSplinePH(Symbol(hazname),
+                haz_struct = _SplinePH(Symbol(hazname),
                                         hazdat[:,Not(1)], 
                                         Symbol.(parnames),
                                         hazards[h].statefrom,
                                         hazards[h].stateto,
-                                        hazards[h].meshsize,
-                                        [minimum(data.tstart), maximum(data.tstop)],
+                                        hazards[h].degree,
                                         knots,
-                                        hazard, 
+                                        hazard,
                                         cumulative_hazard,
-                                        size(hazdat, 2) - 1)                               
+                                        rmat,
+                                        [0.0, maximum(data.tstop)],
+                                        timespan,
+                                        size(hazdat, 2) - 1)                             
             end
         end
 

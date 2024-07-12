@@ -62,7 +62,7 @@ struct ParametricHazard <: HazardFunction
 end
 
 """
-    SplineHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing}, degree::Int64, knots::Union{Vector{Float64},Nothing}, boundaryknots::Union{Vector{Float64},Nothing}, intercept::Bool, periodic::Bool)
+    SplineHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing}, degree::Int64, knots::Union{Vector{Float64},Nothing}, add_boundaries::bool)
 
 Specify a cause-specific baseline hazard. 
 
@@ -73,9 +73,9 @@ Specify a cause-specific baseline hazard.
 - `stateto`: state number for the destination state.
 - `df`: Degrees of freedom.
 - `degree`: Degree of the spline polynomial basis.
-- `knots`: Vector of knots.
-- `boundaryknots`: Length 2 vector of boundary knots.
-- `meshsize`: number of intervals into which to discretize the spline basis, defaults to 10000. 
+- `knots`: Vector of knot locations.
+- `extrapolation`: Either "linear" or "flat"
+- `add_boundaries`: should boundary knots be appended to the vector of knot locations.
 """
 struct SplineHazard <: HazardFunction
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
@@ -84,6 +84,8 @@ struct SplineHazard <: HazardFunction
     stateto::Int64     # destination state number
     degree::Int64
     knots::Union{Nothing,Vector{Float64}}
+    extrapolation::String
+    add_boundaries::Bool
 end
 
 """
@@ -173,7 +175,7 @@ struct _Spline <: _SplineHazard
     knots::Vector{Float64}
     hazsp::SplineExtrapolation
     chazsp::SplineExtrapolation
-    rmat::RecombineMatrix
+    rmat::Array{Float64}
     riskperiod::Vector{Float64}
     timespan::Vector{Float64}
     ncovar::Int64
@@ -192,7 +194,7 @@ struct _SplinePH <: _SplineHazard
     knots::Vector{Float64}
     hazsp::SplineExtrapolation
     chazsp::SplineExtrapolation
-    rmat::RecombineMatrix
+    rmat::Array{Float64}
     riskperiod::Vector{Float64}
     timespan::Vector{Float64}
     ncovar::Int64

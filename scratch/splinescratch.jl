@@ -36,20 +36,16 @@ bsp_basis = makebasis(Bb)
 
 # example
 x = [0.1, 0.3, 0.45, 0.6, 0.9]
-B = BSplineBasis(BSplineOrder(4), x)
+B = BSplineBasis(BSplineOrder(4), copy(x))
 R = RecombinedBSplineBasis(B, Derivative(2))
-R2 = RecombinedBSplineBasis(B, Natural())
 M = R.M      
 
 Bs = SplineExtrapolation(Spline(undef, B), Linear())
-Rs = SplineExtrapolation(Spline(undef, R), Linear())
 
 coefs_R = rand(length(R))
 coefs_B = M * coefs_R
 
 copyto!(Bs.spline.coefs, coefs_B)
-copyto!(Rs.spline.coefs, coefs_R)
-
 
 # plot
 z1 = collect(0.1:0.01:0.9)
@@ -63,7 +59,9 @@ plot!(p, z3, Bs.(z3); linestyle = :dash, color = :red)
 # how to make integral?
 Bi = integral(Bs)
 Ri = SplineExtrapolation(Bi, Linear())
-Ri(-0.01)
+
+0.5 * 0.05 * (Bs(0.0) + Bs(0.05))
+-(Ri(0.0) - Ri(0.05))
 
 # notes
 # the splines go in the spline hazard object
