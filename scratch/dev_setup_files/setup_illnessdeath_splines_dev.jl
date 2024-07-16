@@ -23,22 +23,18 @@ dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
               tstop = repeat(collect(1:ntimes)/ntimes, outer  = nsubj),
               statefrom = ones(nsubj * ntimes),
               stateto = ones(nsubj * ntimes ),
-              obstype = 2)
+              obstype = 2,
+              trt = rand([0.0,1.0], nsubj * ntimes))
 
 # create multistate model object with the simulated data
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, monotonic = "decreasing") # healthy -> ill
-h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 0, knots = [0.4,]) # healthy -> dead
+h12 = Hazard(@formula(0 ~ 1 + trt), "sp", 1, 2; degree = 1) # healthy -> ill
+h21 = Hazard(@formula(0 ~ 1), "sp", 2, 1; degree = 2) # healthy -> ill
+h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 2, knots = [0.4,]) # healthy -> dead
 # h21 = Hazard(@formula(0 ~ 1), "sp", 2, 1; degree = 0) # ill -> healthy
-h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 0) # ill -> dead
+h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 3, knots = [0.2, 0.5, 0.8]) # ill -> dead
 
-hazards = (h12, h13, h23); 
-splinemod = multistatemodel(h12, h13, h23; data = dat)
-
-set_parameters!(
-    splinemod, 
-    (h12 = [log(0.4)],
-     h13 = [log(0.4)],
-     h23 = [log(0.4)]))
+hazards = (h12, h13, h21, h23); 
+splinemod = multistatemodel(h12, h13, h21, h23; data = dat)
 
 simdat, paths = simulate(splinemod; data = true, paths = true)
 summarize_paths(paths)
@@ -65,23 +61,18 @@ h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3; degree = 0) # ill -> dead
 modelexp = multistatemodel(h12, h13, h23; data = simdat[1])
 
 # try to fit
-set_crude_init!(modelsp)
+crude_init!(modelsp)
 fitted = fit(modelsp; compute_vcov = true, verbose = true)
 
 
-
-using ArraysOfArrays, Optimization, OptimizationOptimJL, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra, RCall, Plots, StatsFuns, MacroTools, RuntimeGeneratedFunctions, ParetoSmooth, LinearAlgebra
+using ArraysOfArrays, Optimization, OptimizationOptimJL, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra, RCall, StatsFuns, MacroTools, BSplineKit, RuntimeGeneratedFunctions, ParetoSmooth, LinearAlgebra, ArraysOfArrays, ForwardDiff, DiffResults
 
 RCall.@rlibrary splines2
 
-using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book, _TotalHazardTransient, SamplePath, sample_ecctmc, compute_hazmat!, compute_tmat!, sample_ecctmc!, _MSpline, _ISplineIncreasing, _ISplineDecreasing, _MSplinePH, _ISplineIncreasingPH, _ISplineDecreasingPH, check_SamplingWeights, draw_samplepath, mcem_mll, mcem_ase, loglik!, ExactData, SamplePath, get_subjinds, enumerate_hazards, create_tmat, check_data!, _Hazard, SplineHazard, build_hazards, survprob, call_haz, call_cumulhaz, total_cumulhaz, next_state_probs, extract_paths, MarkovSurrogate, extract_paths, get_subjinds, extract_sojourns, spline_hazards, check_SamplingWeights, parse_constraints, MPanelData, make_surrogate_model, DrawSamplePaths!, get_subjinds, enumerate_hazards, MarkovSurrogate, extract_paths, loglik, ExactData, ExactDataAD, check_data!, check_SamplingWeights, spline_hazards, check_CensoringPatterns, build_emat, _TotalHazardAbsorbing, build_fbmats, mcem_lml, mcem_lml_subj
+using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book, _TotalHazardTransient, SamplePath, sample_ecctmc, compute_hazmat!, compute_tmat!, sample_ecctmc!, _Spline, _SplinePH, check_SamplingWeights, draw_samplepath, mcem_mll, mcem_ase, loglik!, ExactData, SamplePath, get_subjinds, enumerate_hazards, create_tmat, check_data!, _Hazard, SplineHazard, build_hazards, survprob, call_haz, call_cumulhaz, total_cumulhaz, next_state_probs, extract_paths, MarkovSurrogate, extract_paths, get_subjinds, extract_sojourns, spline_hazards, check_SamplingWeights, parse_constraints, MPanelData, make_surrogate_model, DrawSamplePaths!, get_subjinds, enumerate_hazards, MarkovSurrogate, extract_paths, loglik, ExactData, ExactDataAD, check_data!, check_SamplingWeights, spline_hazards, check_CensoringPatterns, build_emat, _TotalHazardAbsorbing, build_fbmats, mcem_lml, mcem_lml_subj, recombine_parameters!, set_riskperiod!
 
 nparticles = 10; maxiter = 150; tol = 1e-3; α = 0.05; γ = 0.05; κ = 4/3; verbose = true; surrogate = false; nsim = 1; subj = 1;
-ess_target_initial = 10; MaxSamplingEffort = 20; npaths_additional = 25; verbose = true; return_ConvergenceRecords = true; return_ProposedPaths = true
+ess_target_initial = 10; MaxSamplingEffort = 20; npaths_additional = 25; verbose = true; return_ConvergenceRecords = true; CensoringPatterns = nothing; return_ProposedPaths = true; SamplingWeights = nothing
 
 # SamplingWeights = nothing; 
-CensoringPatterns = nothing; optimize_surrogate = true; SamplingWeights = nothing
-
-constraints = nothing; surrogate_constraints = nothing; surrogate_parameters = nothing; compute_vcov = true
-
-
+CensoringPatterns = nothing; optimize_surrogate = true; SamplingWeights = nothing; constraints = nothing; surrogate_constraints = nothing; surrogate_parameters = nothing; compute_vcov = true

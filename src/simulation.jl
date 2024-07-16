@@ -113,15 +113,10 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
     times  = [tcur]; sizehint!(times, nstates * 2)
     states = [scur]; sizehint!(states, nstates * 2)
 
-    if any(isa.(model.hazards, _SplineHazard))
-        atol = maximum([maximum(map(x -> (isa(x, _SplineHazard) ? x.meshsize : 0), model.hazards))^-2, sqrt(eps())])
-        rtol = sqrt(atol)
-        optmethod = GoldenSection()
-    else
-        atol = sqrt(eps())
-        rtol = sqrt(atol)
-        optmethod = Brent()
-    end
+    # optimization settings
+    atol = sqrt(eps())
+    rtol = sqrt(atol)
+    optmethod = Brent()
 
     # flag for whether to stop simulation
     # obviously don't simulate if the initial state is absorbing

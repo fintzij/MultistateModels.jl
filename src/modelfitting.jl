@@ -63,7 +63,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
     ll_subj = loglik(sol.u, ExactData(model, samplepaths); return_ll_subj = true)
 
     # wrap results
-    return MultistateModelFitted(
+    model_fitted = MultistateModelFitted(
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
         likelihoods(loglik = -sol.minimum, subj_lml = ll_subj),
@@ -80,6 +80,14 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall)
+
+    # recombine spline parameters and calculate risk periods
+    for i in eachindex(model_fitted.hazards)
+        if isa(model_fitted.hazards[i], _SplineHazard)
+            recombine_parameters!(model_fitted.hazards[i], model_fitted.parameters[i])
+            set_riskperiod!(model_fitted.hazards[i])
+        end
+    end
 end
 
 
@@ -592,7 +600,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     ProposedPaths = return_ProposedPaths ? (paths=samplepaths, weights=ImportanceWeights) : nothing
 
     # wrap results
-    return MultistateModelFitted(
+    model_fitted = MultistateModelFitted(
         model.data,
         VectorOfVectors(params_cur, model.parameters.elem_ptr),
         logliks,
@@ -609,4 +617,12 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         ConvergenceRecords,
         ProposedPaths,
         model.modelcall)
+
+    # recombine spline parameters and calculate risk periods
+    for i in eachindex(model_fitted.hazards)
+        if isa(model_fitted.hazards[i], _SplineHazard)
+            recombine_parameters!(model_fitted.hazards[i], model_fitted.parameters[i])
+            set_riskperiod!(model_fitted.hazards[i])
+        end
+    end
 end

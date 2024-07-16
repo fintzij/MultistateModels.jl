@@ -62,7 +62,7 @@ struct ParametricHazard <: HazardFunction
 end
 
 """
-    SplineHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing}, degree::Int64, knots::Union{Vector{Float64},Nothing}, boundaryknots::Union{Vector{Float64},Nothing}, intercept::Bool, periodic::Bool)
+    SplineHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing}, degree::Int64, knots::Union{Vector{Float64},Nothing}, add_boundaries::bool)
 
 Specify a cause-specific baseline hazard. 
 
@@ -73,22 +73,21 @@ Specify a cause-specific baseline hazard.
 - `stateto`: state number for the destination state.
 - `df`: Degrees of freedom.
 - `degree`: Degree of the spline polynomial basis.
-- `knots`: Vector of knots.
-- `boundaryknots`: Length 2 vector of boundary knots.
-- `monotonic`: Assume that baseline hazard is monotonic, defaults to "nonmonotonic". If "increasing" or "decreasing", use an I-spline basis for the hazard and a C-spline for the cumulative hazard.
-- `meshsize`: number of intervals into which to discretize the spline basis, defaults to 10000. 
+- `knots`: Vector of knot locations.
+- `extrapolation`: Either "linear" or "flat"
+- `natural_spline`: Restrict the second derivative to zero at the boundaries (natural spline).
+- `add_boundaries`: should boundary knots be appended to the vector of knot locations.
 """
 struct SplineHazard <: HazardFunction
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
     family::String     # "sp" for splines
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
-    df::Union{Nothing,Int64}
     degree::Int64
     knots::Union{Nothing,Vector{Float64}}
-    boundaryknots::Union{Nothing,Vector{Float64}}
-    monotonic::String
-    meshsize::Int64
+    extrapolation::String
+    natural_spline::Bool
+    add_boundaries::Bool
 end
 
 """
@@ -166,104 +165,42 @@ struct _GompertzPH <: _SemiMarkovHazard
 end
 
 """
-M-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions. The cumulative hazard is an I-spline. 
+B-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of B-spline basis functions. 
 """
-struct _MSpline <: _SplineHazard
+struct _Spline <: _SplineHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
     statefrom::Int64
     stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
+    degree::Float64
     knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
+    hazsp::SplineExtrapolation
+    chazsp::SplineExtrapolation
+    natural_spline::Bool
+    rmat::Array{Float64}
+    riskperiod::Vector{Float64}
+    timespan::Vector{Float64}
     ncovar::Int64
 end
 
 """
-M-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of M-spline basis functions. The cumulative hazard is an I-spline. Covariates have a multiplicative effect on the baseline hazard.
+B-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of B-spline basis functions. Covariates have a multiplicative effect on the baseline hazard.
 """
-struct _MSplinePH <: _SplineHazard
+struct _SplinePH <: _SplineHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
     statefrom::Int64
     stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
+    degree::Float64
     knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
-    ncovar::Int64
-end
-
-"""
-Monotone increasing I-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of I-spline basis functions. The cumulative hazard is an C-spline. 
-"""
-struct _ISplineIncreasing <: _SplineHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
-    knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
-    ncovar::Int64
-end
-
-"""
-Monotone increasing I-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of I-spline basis functions. The cumulative hazard is an C-spline. Covariates have a multiplicative effect on the baseline hazard.
-"""
-struct _ISplineIncreasingPH <: _SplineHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
-    knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
-    ncovar::Int64
-end
-
-"""
-Monotone decreasing I-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of I-spline basis functions. The cumulative hazard is an C-spline. 
-"""
-struct _ISplineDecreasing <: _SplineHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
-    knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
-    ncovar::Int64
-end
-
-"""
-Monotone decreasing I-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of I-spline basis functions. The cumulative hazard is an C-spline. Covariates have a multiplicative effect on the baseline hazard.
-"""
-struct _ISplineDecreasingPH <: _SplineHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64
-    meshsize::Int64
-    meshrange::Vector{Float64}
-    knots::Vector{Float64}
-    hazbasis::Array{Float64}
-    chazbasis::Array{Float64}
+    hazsp::SplineExtrapolation
+    chazsp::SplineExtrapolation
+    natural_spline::Bool
+    rmat::Array{Float64}
+    riskperiod::Vector{Float64}
+    timespan::Vector{Float64}
     ncovar::Int64
 end
 

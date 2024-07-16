@@ -13,15 +13,15 @@ dat =
               x = repeat(rand(1), 5))
 
 # create multistate model object with the simulated data
-meshsize = 100000
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; monotonic = "nonmonotonic", degree = 3, knots = [0.25, 0.5, 0.75], meshsize = meshsize) # healthy -> ill
-h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; monotonic = "increasing", degree = 3, knots = [0.25, 0.5, 0.75], meshsize = meshsize) # healthy -> dead
-h14 = Hazard(@formula(0 ~ 1), "sp", 1, 4; monotonic = "decreasing", degree = 3, knots = [0.25, 0.5, 0.75], meshsize = meshsize)
-h21 = Hazard(@formula(0 ~ 1 + x), "sp", 2, 1; monotonic = "nonmonotonic", degree = 3, knots = [0.25, 0.5, 0.75], meshsize = meshsize) # healthy -> ill
-h31 = Hazard(@formula(0 ~ 1 + x), "sp", 3, 1; monotonic = "increasing", degree = 3, knots = [0.25, 0.5, 0.75], meshsize = meshsize) # healthy -> dead
-h41 = Hazard(@formula(0 ~ 1 + x), "sp", 4, 1; monotonic = "decreasing", degree = 3, knots = [0.25, 0.5, 0.75], meshsize = meshsize)
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = collect(0.2:0.2:0.8), add_boundaries = false, extrapolation = "flat") 
 
-hazards = (h12, h13, h14, h21, h31, h41)
-splinemod = multistatemodel(h12, h13, h14, h21, h31, h41; data = dat)
+h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = [0.25, 0.5, 0.75], add_boundaries = true) 
+
+h21 = Hazard(@formula(0 ~ 1 + x), "sp", 2, 1; degree = 3, knots = collect(0.2:0.2:0.8), add_boundaries = false) 
+
+h31 = Hazard(@formula(0 ~ 1 + x), "sp", 3, 1; degree = 1, knots = [0.25, 0.5, 0.75], add_boundaries = true, extrapolation = "flat") 
+
+hazards = (h12, h13, h21, h31)
+splinemod = multistatemodel(h12, h13, h21, h31; data = dat)
 
 initialize_parameters!(splinemod; crude = true)

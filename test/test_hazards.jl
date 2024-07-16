@@ -196,93 +196,29 @@ end
     @test MultistateModels.call_cumulhaz(lb, ub, msm_gom.parameters[2], 2, msm_gom.hazards[2]; give_log = false) ≈ exp(log(0.5) + 1.5 + log(exp(0.5 * ub) - exp(0.5 * lb)))
 end
 
-@testset "test_msplines" begin
+@testset "test_splines" begin
     # test that crudely integrated hazard and cumulative hazard are rougly the same
     cumul_haz_crude = 0.0
     hazind = 1
-    haz = splinemod.hazards[hazind]
-    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
+    ntimes = 100000
+    delta = 1/ntimes
+
+    for h in eachindex(splinemod.hazards)
+        # initialize
+        chaz_crude_interp = 0.0
+        chaz_crude_extrap = 0.0
+
+        # integrate over the boundaries
+        boundaries = [BSplineKit.boundaries(splinemod.hazards[h].hazsp.spline.basis)...]
+        times = (boundaries[1] + delta):delta:boundaries[2]
+        for t in times
+            chaz_crude_interp += MultistateModels.call_haz(t, splinemod.parameters[h], 1, splinemod.hazards[h]; give_log = false) * delta
+        end
+
+        # compute the cumulative hazard
+        chaz_interp = MultistateModels.call_cumulhaz(boundaries[1], boundaries[2], splinemod.parameters[h], 1, splinemod.hazards[h]; give_log = false)
+
+        # integrate over the timespan
+        @test isapprox(chaz_crude_interp, chaz_crude_interp)        
     end
-    cumul_haz_crude /= haz.meshsize
-
-    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
-
-    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
 end
-
-@testset "test_msplinesPH" begin
-    # test that crudely integrated hazard and cumulative hazard are rougly the same
-    cumul_haz_crude = 0.0
-    hazind = 4
-    haz = splinemod.hazards[hazind]
-    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
-    end
-    cumul_haz_crude /= haz.meshsize
-
-    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
-
-    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
-end
-
-@testset "test_isplines_increasing" begin
-    # test that crudely integrated hazard and cumulative hazard are rougly the same
-    cumul_haz_crude = 0.0
-    hazind = 2
-    haz = splinemod.hazards[hazind]
-    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
-    end
-    cumul_haz_crude /= haz.meshsize
-
-    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
-
-    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
-end
-
-@testset "test_isplines_increasingPH" begin
-    # test that crudely integrated hazard and cumulative hazard are rougly the same
-    cumul_haz_crude = 0.0
-    hazind = 5
-    haz = splinemod.hazards[hazind]
-    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
-    end
-    cumul_haz_crude /= haz.meshsize
-
-    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
-
-    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
-end
-
-@testset "test_isplines_decreasing" begin
-    # test that crudely integrated hazard and cumulative hazard are rougly the same
-    cumul_haz_crude = 0.0
-    hazind = 3
-    haz = splinemod.hazards[hazind]
-    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
-    end
-    cumul_haz_crude /= haz.meshsize
-
-    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
-
-    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
-end
-
-@testset "test_isplines_decreasingPH" begin
-    # test that crudely integrated hazard and cumulative hazard are rougly the same
-    cumul_haz_crude = 0.0
-    hazind = 6
-    haz = splinemod.hazards[hazind]
-    for t in range(haz.meshrange[1] / 4, haz.meshrange[2] / 2, step = 1/haz.meshsize)
-        cumul_haz_crude += MultistateModels.call_haz(t, splinemod.parameters[hazind], 1, haz; give_log = false) 
-    end
-    cumul_haz_crude /= haz.meshsize
-
-    cumul_haz = MultistateModels.call_cumulhaz(haz.meshrange[1] / 4, haz.meshrange[2] / 2, splinemod.parameters[hazind], 1, haz; give_log = false)
-
-    @test isapprox(cumul_haz_crude, cumul_haz; atol = 1e-4, rtol = 1e-4)
-end
-

@@ -1,6 +1,7 @@
 module MultistateModels
 
 using ArraysOfArrays
+using BSplineKit
 using Chain
 using DataFrames
 using DiffResults

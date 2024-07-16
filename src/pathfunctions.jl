@@ -175,7 +175,7 @@ end
 
 
 """
-    extract_paths(model::MultistateProcess; self_transitions = false)
+    extract_paths(data::DataFrame; self_transitions = false)
 
 Extract sample paths from a multistate model's data field and return an array of SamplePath objects. 
 
