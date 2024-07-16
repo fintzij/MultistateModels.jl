@@ -221,23 +221,4 @@ end
         # integrate over the timespan
         @test isapprox(chaz_crude_interp, chaz_crude_interp)        
     end
-
-    for h in eachindex(splinemod.hazards)
-        # initialize
-        chaz_crude_interp = 0.0
-        chaz_crude_extrap = 0.0
-
-        # integrate over the boundaries
-        boundaries = [0.0, 1.0]
-        times = (boundaries[1] + delta):delta:boundaries[2]
-        for t in times
-            chaz_crude_interp += MultistateModels.call_haz(t, splinemod.parameters[h], 1, splinemod.hazards[h]; give_log = false) * delta
-        end
-
-        # compute the cumulative hazard
-        chaz_interp = MultistateModels.call_cumulhaz(boundaries[1], boundaries[2], splinemod.parameters[h], 1, splinemod.hazards[h]; give_log = false)
-
-        # integrate over the timespan
-        @test isapprox(chaz_crude_interp, chaz_crude_interp)        
-    end
 end

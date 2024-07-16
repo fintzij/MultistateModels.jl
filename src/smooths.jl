@@ -93,7 +93,11 @@ Copy recombined parameters to the spline objects for hazard and cumulative hazar
 function recombine_parameters!(hazard::_SplineHazard, parameters)
     
     # write B-spline recombined B-spline parameters
-    copyto!(hazard.hazsp.spline.coefs, hazard.rmat * exp.(parameters[1:size(hazard.rmat, 2)]))
+    if (hazard.degree > 1) & hazard.natural_spline
+        copyto!(hazard.hazsp.spline.coefs, hazard.rmat * exp.(parameters[1:size(hazard.rmat, 2)]))
+    else
+        copyto!(hazard.hazsp.spline.coefs, exp.(parameters[1:size(hazard.rmat, 2)]))
+    end
 
     # get spline specs
     t = knots(hazard.hazsp)
