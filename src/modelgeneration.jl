@@ -13,16 +13,18 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 - `degree`: Degree of the spline polynomial basis, defaults to 3 for a cubic polynomial basis.
 - `knots`: Optional vector of knots. Defaults to the range of sojourns in the data with no interior knots if not supplied.
 - `extrapolation`: Either "linear" or "flat", see the BSplineKit.jl package. 
+- `natural_spline`: Restrict the second derivative to zero at the boundaries, defaults to true.
 - `add_boundaries`: should spline knot locations be augmented with 0 and the maximum sojourn in the data? defaults to true so that the `knots` argument is interpreted as interior knots. 
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, extrapolation = "linear", add_boundaries = true)
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, natural_spline = true, extrapolation = "linear", add_boundaries = true)
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
         if !(degree ∈ [0,1,2,3])
             @error "Spline degree must be 0, 1, 2, or 3."
         end
-        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots, extrapolation, add_boundaries)
+
+        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots,  extrapolation, natural_spline, add_boundaries)
     end
 
     return h
@@ -258,6 +260,9 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             # number of parameters
             npars = size(rmat, 2) + size(hazdat, 2) - 1
 
+            # check if a natural spline
+            natural_spline = (size(rmat, 1) == size(rmat, 2)) && isdiag(rmat) && all(diag(rmat) .== 1)
+
             # generate hazard struct
             ### no covariates
             if(size(hazdat, 2) == 1) 
@@ -280,6 +285,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                         knots,
                                         hazard,
                                         cumulative_hazard,
+                                        natural_spline,
                                         rmat,
                                         [0.0, maximum(data.tstop)],
                                         timespan,
@@ -305,6 +311,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                         knots,
                                         hazard,
                                         cumulative_hazard,
+                                        natural_spline,
                                         rmat,
                                         [0.0, maximum(data.tstop)],
                                         timespan,

@@ -19,6 +19,7 @@ function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVect
         # recombine if a spline hazard
         if isa(model.hazards[i], _SplineHazard) 
             recombine_parameters!(model.hazards[i], newvalues[i])
+            set_riskperiod!(model.hazards[i])
         end
     end
 end
@@ -45,6 +46,7 @@ function set_parameters!(model::MultistateProcess, newvalues::Tuple)
         # recombine if a spline hazard
         if isa(model.hazards[i], _SplineHazard)
             recombine_parameters!(model.hazards[i], newvalues[i])
+            set_riskperiod!(model.hazards[i])
         end
     end
 end
@@ -75,6 +77,7 @@ function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
         # recombine if a spline hazard
         if isa(model.hazards[mind], _SplineHazard)
             recombine_parameters!(model.hazards[mind], newvalues[vind])
+            set_riskperiod!(model.hazards[i])
         end
     end
 end

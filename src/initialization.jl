@@ -7,11 +7,21 @@ function set_crude_init!(model::MultistateProcess; constraints = nothing)
 
     if !isnothing(constraints)
         @error "Cannot initialize parameters to crude estimates when there are parameter constraints."    
+    
     elseif isnothing(constraints)
+        
         crude_par = calculate_crude(model)
+
         for i in model.hazards
             set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
+
             set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
+
+            # recombine if a spline hazard
+            if isa(i, _SplineHazard)
+                recombine_parameters!(i, set_par_to)
+                set_riskperiod!(i)
+            end
         end
     end
 end
@@ -38,11 +48,17 @@ function initialize_parameters!(model::MultistateProcess; constraints = nothing,
             set_par_to = init_par(model.hazards[i], surrog.parameters[i][1])
 
             # copy covariate effects if there are any
-            if typeof(model.hazards[i]) ∈ [_ExponentialPH, _WeibullPH, _GompertzPH, _MSplinePH, _ISplineIncreasingPH, _ISplineDecreasingPH]
+            if typeof(model.hazards[i]) ∈ [_ExponentialPH, _WeibullPH, _GompertzPH, _SplinePH]
                 set_par_to[reverse(range(length(set_par_to); step = -1, length = model.hazards[i].ncovar))] .= surrog.parameters[i][Not(1)]
             end
-
+            
             set_parameters!(model, NamedTuple{(model.hazards[i].hazname,)}((set_par_to,)))
+
+            # recombine if a spline hazard
+            if isa(model.hazards[i], _SplineHazard)
+                recombine_parameters!(model.hazards[i], set_par_to)
+                set_riskperiod!(model.hazards[i])
+            end
         end
     end
 end
@@ -140,19 +156,6 @@ function calculate_crude(model::MultistateProcess)
     #give_log ? log.(crude_mat) : crude_mat 
 end
 
-
-#exp_rates = MultistateModels.calculate_crude(model)
-#map(x -> match_moment(x, exp_rates[x.statefrom, x.stateto]))
-
-#output = similar(msm_2state_transadj.parameters)
-#copyto!(output, map(x -> MultistateModels.match_moment(x, cmat[x.statefrom, x.stateto]), msm_2state_transadj.hazards))
-
-
-# COMPARE calculate_crude() to fit_exact()
-# SHOULD WE PASS PARAMETERS ON LOG SCALE OR NATIVE SCALE
-# MATCHING MOMENTS WITH GOMPERTZ
-# PREALLOCATE VECTOR OF VECTORS TO STORE PARAMETERS?
-
 """
 
 Pass-through the crude exponential rate. Method for exponential hazard with no covariates.
@@ -161,7 +164,6 @@ function init_par(_hazard::_Exponential, crude_log_rate=0)
     return [crude_log_rate]
 end
 
-
 """
 
 Pass-through the crude exponential rate and zero out the coefficients for covariates. Method for exponential hazard with covariates.
@@ -169,7 +171,6 @@ Pass-through the crude exponential rate and zero out the coefficients for covari
 function init_par(_hazard::_ExponentialPH, crude_log_rate=0)
     return vcat(crude_log_rate, zeros(_hazard.ncovar))
 end
-
 
 """
 
@@ -192,7 +193,6 @@ function init_par(_hazard::_WeibullPH, crude_log_rate=0)
     return vcat([0; crude_log_rate], zeros(_hazard.ncovar))
 end
 
-
 """
 
 Gompertz without covariates
@@ -214,16 +214,23 @@ function init_par(_hazard::_GompertzPH, crude_log_rate=0)
     return vcat([0; crude_log_rate], zeros(_hazard.ncovar))
 end
 
-
 """
 
 B-Spline without covariates
 """
 function init_par(_hazard::_Spline, crude_log_rate=0)
-    # set shape to 0 (i.e. log(1)) 
-    # pass through crude exponential rate
-    npars = length(_hazard.parnames)
-    return fill(crude_log_rate, npars)
+
+    # use the recombined basis if needed
+    if _hazard.natural_spline 
+        B = _hazard.hazsp.spline.basis
+    else
+        B = RecombinedBSplineBasis(_hazard.hazsp.spline.basis, Derivative(2))
+    end
+
+    # get coefficients 
+    coefs = coefficients(approximate(x -> exp(crude_log_rate), B))  
+
+    return log.(coefs)
 end
 
 """
@@ -231,8 +238,16 @@ end
 B-spline with covariates
 """
 function init_par(_hazard::_SplinePH, crude_log_rate=0)
-    # set shape to 0 (i.e. log(1)) 
-    # pass through crude exponential rate 
-    # set covariate coefficients to 0
-    return vcat(fill(crude_log_rate, length(_hazard.parnames) - size(_hazard.data, 2)), zeros(_hazard.ncovar))
+
+     # use the recombined basis if needed
+     if _hazard.natural_spline 
+        B = _hazard.hazsp.spline.basis
+    else
+        B = RecombinedBSplineBasis(_hazard.hazsp.spline.basis, Derivative(2))
+    end
+
+    # get coefficients 
+    coefs = coefficients(approximate(x -> exp(crude_log_rate), B))  
+
+    return vcat(log.(coefs), zeros(_hazard.ncovar))
 end

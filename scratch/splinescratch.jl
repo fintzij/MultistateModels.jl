@@ -8,7 +8,7 @@ using Random
 # set up basis
 # x = sort(rand(Uniform(0.25, 0.75), 20))
 # breaks = sort(rand(Uniform(0.3, 0.7), 2))
-x = [0.1, 0.5, 0.9]
+x = [0.1, 0.5, 0.9, 1.2]
 z = collect(0.1:0.01:0.9)
 
 function makebasis(Bb)
@@ -35,9 +35,9 @@ bsp_basis = makebasis(Bb)
 
 
 # example
-x = [0.1, 0.3, 0.45, 0.6, 0.9]
+x = [0.1, 0.3, 0.5, 0.7]
 B = BSplineBasis(BSplineOrder(4), copy(x))
-R = RecombinedBSplineBasis(B, Derivative(2))
+R = RecombinedBSplineBasis(B, (Derivative(2)))
 M = R.M      
 
 Bs = SplineExtrapolation(Spline(undef, B), Linear())
@@ -67,3 +67,7 @@ Ri = SplineExtrapolation(Bi, Linear())
 # the splines go in the spline hazard object
 # spline extrapolations have a coefs field
 # need to compute the risk period where the hazard is nonzero when setting parameters
+A = approximate(x -> 2.3, R)
+A.([0.4, 0.5])
+
+D = Spline(B, M * coefficients(A))

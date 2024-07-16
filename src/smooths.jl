@@ -15,44 +15,60 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
 
     # interior knots and df
     if isnothing(hazard.knots)
+        # if no transitions observed (e.g., initializing a dataset) then use timespan
         if !any((data.statefrom .== hazard.statefrom) .& (data.stateto .== hazard.stateto))
             knots = copy(timespan)
         else
-            knots = [0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]
+            # else use 0 and maximum sojourns
+            knots = sort(unique([0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]))
         end
     else
+        # if no transitions observed (e.g., initializing a dataset) then use timespan
         if !any((data.statefrom .== hazard.statefrom) .& (data.stateto .== hazard.stateto))
-            sojourns = copy(timespan)
+            boundaries = copy(timespan)
         else
-            sojourns = [0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]
+            # calculate maximum sojourn
+            boundaries = [0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]
         end
 
         knots = hazard.knots
         ra = "→"; sf = hazard.statefrom; st = hazard.stateto
 
         if any((knots .< timespan[1]) .| (knots .> timespan[2]))
-            @warn "A knot for the $sf $ra $st transition was set outside of the range of time intervals in the data."
+            @warn "A knot for the $sf $ra $st transition was set outside of the time span of the data."
+        end
+
+        if any((knots .< boundaries[1]) .| (knots .> boundaries[2]))
+            @warn "A knot for the $sf $ra $st transition was set outside of the sojourns observed in the data."
         end
         
         if length(knots) == 1
-            @warn "A single knot location is specified for the $sf $ra $st transition, it will be assumed to be an interior knot. The boundaries have been set at 0 and the maximum observed sojourn."
+            @warn "A single knot location is specified for the $sf $ra $st transition, it will be assumed to be an interior knot. The boundaries have been set at 0 and $(boundaries[2])."
             
-            knots = sort([knots; timespan])
+            knots = sort(unique([knots; boundaries]))
 
         elseif hazard.add_boundaries
-            @info "Boundary knot locations have been added for the $sf $ra $st transition. The boundaries have been set at 0 and the maximum observed sojourn."
+            @info "Boundary knot locations have been added for the $sf $ra $st transition. The boundaries have been set at 0 and $(boundaries[2])."
             
-            knots = sort([knots; timespan])
+            knots = sort(unique([knots; boundaries]))
         end
     end
 
     # generate Splines
     B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(knots))
 
-    if hazard.degree > 1
+    if (hazard.degree > 1) & hazard.natural_spline
         # recombine
         R = RecombinedBSplineBasis(B, Derivative(2))
         M = Matrix{Float64}(R.M)
+
+        # check if the spline basis is large enough for the recombination        
+        testspline = approximate(x -> exp(1), R)
+
+        if !all((M * coefficients(testspline)) .≈ mean(M * coefficients(testspline)))
+            @error "The spline basis is not large enough to support the recombination procedure for natural splines. Consider using polynomials of another degree, adding knots, or an unrestricted spline."
+        end
+
     else
         M = diagm(ones(Float64, length(B)))
     end
@@ -100,7 +116,7 @@ Calculate and set the risk period for when a spline intensity is greater than ze
 """
 function set_riskperiod!(hazard::_SplineHazard)
 
-    if hazard.hazsp.method == Flat()
+    if hazard.hazsp.method == BSplineKit.Flat()
         copyto!(hazard.riskperiod, hazard.timespan)
     else
         # get spline boundaries
@@ -128,5 +144,4 @@ function set_riskperiod!(hazard::_SplineHazard)
             hazard.riskperiod[2] = minimum([hazard.timespan[2], sp_bounds[2] - riskend.value / riskend.derivs[1]])
         end
     end
-
 end

@@ -75,6 +75,7 @@ Specify a cause-specific baseline hazard.
 - `degree`: Degree of the spline polynomial basis.
 - `knots`: Vector of knot locations.
 - `extrapolation`: Either "linear" or "flat"
+- `natural_spline`: Restrict the second derivative to zero at the boundaries (natural spline).
 - `add_boundaries`: should boundary knots be appended to the vector of knot locations.
 """
 struct SplineHazard <: HazardFunction
@@ -85,6 +86,7 @@ struct SplineHazard <: HazardFunction
     degree::Int64
     knots::Union{Nothing,Vector{Float64}}
     extrapolation::String
+    natural_spline::Bool
     add_boundaries::Bool
 end
 
@@ -175,6 +177,7 @@ struct _Spline <: _SplineHazard
     knots::Vector{Float64}
     hazsp::SplineExtrapolation
     chazsp::SplineExtrapolation
+    natural_spline::Bool
     rmat::Array{Float64}
     riskperiod::Vector{Float64}
     timespan::Vector{Float64}
@@ -194,6 +197,7 @@ struct _SplinePH <: _SplineHazard
     knots::Vector{Float64}
     hazsp::SplineExtrapolation
     chazsp::SplineExtrapolation
+    natural_spline::Bool
     rmat::Array{Float64}
     riskperiod::Vector{Float64}
     timespan::Vector{Float64}

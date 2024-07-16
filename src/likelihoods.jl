@@ -116,7 +116,16 @@ Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() t
 """
 function loglik(parameters, data::ExactData; neg=true, return_ll_subj=false)
 
+    # nest parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+
+    # recombine spline parameters and calculate risk periods
+    for i in eachindex(data.model.hazards)
+        if isa(data.model.hazards[i], _SplineHazard)
+            recombine_parameters!(data.model.hazards[i], pars[i])
+            set_riskperiod!(data.model.hazards[i])
+        end
+    end
 
     if return_ll_subj
         # send each element of samplepaths to loglik
@@ -134,7 +143,16 @@ Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() t
 """
 function loglik(parameters, data::ExactDataAD; neg = true)
 
+    # nest parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+
+    # recombine spline parameters and calculate risk periods
+    for i in eachindex(data.model.hazards)
+        if isa(data.model.hazards[i], _SplineHazard)
+            recombine_parameters!(data.model.hazards[i], pars[i])
+            set_riskperiod!(data.model.hazards[i])
+        end
+    end
 
     # send each element of samplepaths to loglik
     ll = loglik(pars, data.path[1], data.model.hazards, data.model) * data.samplingweight[1]
@@ -309,6 +327,14 @@ function loglik(parameters, data::SMPanelData; neg = true, use_sampling_weight =
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
+    # recombine spline parameters and calculate risk periods
+    for i in eachindex(data.model.hazards)
+        if isa(data.model.hazards[i], _SplineHazard)
+            recombine_parameters!(data.model.hazards[i], pars[i])
+            set_riskperiod!(data.model.hazards[i])
+        end
+    end
+
     # compute the semi-markov log-likelihoods
     ll = 0.0
     for i in eachindex(data.paths)
@@ -338,6 +364,13 @@ function loglik!(parameters, logliks::Vector{}, data::SMPanelData; use_sampling_
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+
+    for i in eachindex(data.model.hazards)
+        if isa(data.model.hazards[i], _SplineHazard)
+            recombine_parameters!(data.model.hazards[i], pars[i])
+            set_riskperiod!(data.model.hazards[i])
+        end
+    end
 
     for i in eachindex(data.paths)
         for j in eachindex(data.paths[i])
