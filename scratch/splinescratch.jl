@@ -1,9 +1,11 @@
 using BenchmarkTools
 using BSplineKit
 using Distributions
+using ForwardDiff
 using LinearAlgebra
 using Plots
 using Random
+using Setfield
 
 # set up basis
 # x = sort(rand(Uniform(0.25, 0.75), 20))
@@ -40,21 +42,23 @@ B = BSplineBasis(BSplineOrder(4), copy(x))
 R = RecombinedBSplineBasis(B, (Derivative(2)))
 M = R.M      
 
-Bs = SplineExtrapolation(Spline(undef, B), Linear())
-
 coefs_R = rand(length(R))
 coefs_B = M * coefs_R
 
-copyto!(Bs.spline.coefs, coefs_B)
+Bs = SplineExtrapolation(Spline(B, coefs_B), Linear())
+Rs = SplineExtrapolation(Spline(R, coefs_R), Linear())
 
 # plot
 z1 = collect(0.1:0.01:0.9)
 z2 = collect(-0.1:0.01:0.1)
 z3 = collect(0.9:0.01:1.1)
 
-p = plot(z1, Bs.(z1))
+p = plot(z1, Bs.(z1), color = :red)
 plot!(p, z2, Bs.(z2); linestyle = :dash, color = :red)
 plot!(p, z3, Bs.(z3); linestyle = :dash, color = :red)
+plot!(p, z1, Rs.(z1); color = :green)
+plot!(p, z2, Rs.(z2); linestyle = :dot, color = :green)
+plot!(p, z3, Rs.(z3); linestyle = :dot, color = :green)
 
 # how to make integral?
 Bi = integral(Bs)
@@ -71,3 +75,42 @@ A = approximate(x -> 2.3, R)
 A.([0.4, 0.5])
 
 D = Spline(B, M * coefficients(A))
+
+
+# experiment with ForwardDiff
+x = [0.1, 0.3, 0.5, 0.7]
+B = BSplineBasis(BSplineOrder(4), copy(x))
+Bs = Spline(undef, B)
+
+# make a new spline with coefficients works
+f(cfs) = Spline(B, cfs)(0.5)
+ForwardDiff.gradient(f, rand(length(B)))
+
+# copying to coefficient field of existing spline doesn't work
+function g(cfs)
+    copyto!(Bs.coefs, cfs)
+    Bs(0.5)
+end
+ForwardDiff.gradient(g, rand(length(B)))
+
+# recreating the spline within a struct works
+struct spobj
+    sp::Spline
+end
+s = spobj(Spline(undef, B))
+
+function h(cfs; s = s)
+    s = @set s.sp = Spline(B, cfs)
+    s.sp(rand(Uniform(0.1, 0.7), 1)[1])
+end
+
+ForwardDiff.gradient(h, rand(length(B)))
+
+
+# experiment with derivatives
+B = BSplineBasis(BSplineOrder(4), -1:0.2:1);
+S = Spline(B, rand(length(B)))
+D = diff(S)
+
+D(-1)
+ForwardDiff.derivative(S, -1)

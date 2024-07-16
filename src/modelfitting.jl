@@ -81,13 +81,16 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall)
 
-    # recombine spline parameters and calculate risk periods
+    # remake splines and calculate risk periods
     for i in eachindex(model_fitted.hazards)
         if isa(model_fitted.hazards[i], _SplineHazard)
-            recombine_parameters!(model_fitted.hazards[i], model_fitted.parameters[i])
+            remake_splines!(model_fitted.hazards[i], model_fitted.parameters[i][1:model_fitted.hazards[i].nbasis])
             set_riskperiod!(model_fitted.hazards[i])
         end
     end
+
+    # return fitted object
+    return model_fitted
 end
 
 
@@ -618,11 +621,14 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         ProposedPaths,
         model.modelcall)
 
-    # recombine spline parameters and calculate risk periods
+    # remake splines and calculate risk periods
     for i in eachindex(model_fitted.hazards)
         if isa(model_fitted.hazards[i], _SplineHazard)
-            recombine_parameters!(model_fitted.hazards[i], model_fitted.parameters[i])
+            remake_splines!(model_fitted.hazards[i], model_fitted.parameters[i][1:model_fitted.hazards[i].nbasis])
             set_riskperiod!(model_fitted.hazards[i])
         end
     end
+
+    # return fitted object
+    return model_fitted
 end

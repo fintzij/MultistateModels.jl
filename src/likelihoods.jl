@@ -119,10 +119,10 @@ function loglik(parameters, data::ExactData; neg=true, return_ll_subj=false)
     # nest parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
-    # recombine spline parameters and calculate risk periods
+    # remake spline parameters and calculate risk periods
     for i in eachindex(data.model.hazards)
         if isa(data.model.hazards[i], _SplineHazard)
-            recombine_parameters!(data.model.hazards[i], pars[i])
+            remake_splines!(data.model.hazards[i], pars[i][1:data.model.hazards[i].nbasis])
             set_riskperiod!(data.model.hazards[i])
         end
     end
@@ -146,10 +146,10 @@ function loglik(parameters, data::ExactDataAD; neg = true)
     # nest parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
-    # recombine spline parameters and calculate risk periods
+    # remake spline parameters and calculate risk periods
     for i in eachindex(data.model.hazards)
         if isa(data.model.hazards[i], _SplineHazard)
-            recombine_parameters!(data.model.hazards[i], pars[i])
+            remake_splines!(data.model.hazards[i], pars[i][1:data.model.hazards[i].nbasis])
             set_riskperiod!(data.model.hazards[i])
         end
     end
@@ -327,10 +327,10 @@ function loglik(parameters, data::SMPanelData; neg = true, use_sampling_weight =
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
-    # recombine spline parameters and calculate risk periods
+    # remake spline parameters and calculate risk periods
     for i in eachindex(data.model.hazards)
         if isa(data.model.hazards[i], _SplineHazard)
-            recombine_parameters!(data.model.hazards[i], pars[i])
+            remake_splines!(data.model.hazards[i], pars[i][1:data.model.hazards[i].nbasis])
             set_riskperiod!(data.model.hazards[i])
         end
     end
@@ -367,7 +367,7 @@ function loglik!(parameters, logliks::Vector{}, data::SMPanelData; use_sampling_
 
     for i in eachindex(data.model.hazards)
         if isa(data.model.hazards[i], _SplineHazard)
-            recombine_parameters!(data.model.hazards[i], pars[i])
+            remake_splines!(data.model.hazards[i], pars[i][1:data.model.hazards[i].nbasis])
             set_riskperiod!(data.model.hazards[i])
         end
     end

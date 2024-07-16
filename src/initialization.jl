@@ -14,14 +14,7 @@ function set_crude_init!(model::MultistateProcess; constraints = nothing)
 
         for i in model.hazards
             set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
-
             set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
-
-            # recombine if a spline hazard
-            if isa(i, _SplineHazard)
-                recombine_parameters!(i, set_par_to)
-                set_riskperiod!(i)
-            end
         end
     end
 end
@@ -31,18 +24,18 @@ end
 
 Modify the parameter values in a MultistateProcess object, calibrate to the MLE of a Markov surrogate.
 """
-function initialize_parameters!(model::MultistateProcess; constraints = nothing, parameters = nothing, crude = false)
+function initialize_parameters!(model::MultistateProcess; constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, crude = false)
 
     if crude
         set_crude_init!(model; constraints = constraints)
     else
         # check that surrogate constraints are supplied if there are other constraints
-        if !isnothing(constraints)
+        if !isnothing(constraints) && isnothing(surrogate_constraints)
             @error "Constraints for the Markov surrogate must be provided if there are constraints on the model parameters."
         end
 
         # fit Markov surrogate
-        surrog = fit_surrogate(model; surrogate_constraints = constraints, surrogate_parameters = parameters, verbose = false)
+        surrog = fit_surrogate(model; surrogate_constraints = constraints, surrogate_parameters = surrogate_parameters, verbose = false)
 
         for i in eachindex(model.hazards)
             set_par_to = init_par(model.hazards[i], surrog.parameters[i][1])
@@ -53,12 +46,6 @@ function initialize_parameters!(model::MultistateProcess; constraints = nothing,
             end
             
             set_parameters!(model, NamedTuple{(model.hazards[i].hazname,)}((set_par_to,)))
-
-            # recombine if a spline hazard
-            if isa(model.hazards[i], _SplineHazard)
-                recombine_parameters!(model.hazards[i], set_par_to)
-                set_riskperiod!(model.hazards[i])
-            end
         end
     end
 end
@@ -221,14 +208,10 @@ B-Spline without covariates
 function init_par(_hazard::_Spline, crude_log_rate=0)
 
     # use the recombined basis if needed
-    if _hazard.natural_spline 
-        B = _hazard.hazsp.spline.basis
-    else
-        B = RecombinedBSplineBasis(_hazard.hazsp.spline.basis, Derivative(2))
-    end
+    B = _hazard.hazsp.spline.basis
 
     # get coefficients 
-    coefs = coefficients(approximate(x -> exp(crude_log_rate), B))  
+    coefs = coefficients(approximate(x -> exp(crude_log_rate), _hazard.hazsp.spline.basis))  
 
     return log.(coefs)
 end
@@ -240,11 +223,7 @@ B-spline with covariates
 function init_par(_hazard::_SplinePH, crude_log_rate=0)
 
      # use the recombined basis if needed
-     if _hazard.natural_spline 
-        B = _hazard.hazsp.spline.basis
-    else
-        B = RecombinedBSplineBasis(_hazard.hazsp.spline.basis, Derivative(2))
-    end
+    B = _hazard.hazsp.spline.basis
 
     # get coefficients 
     coefs = coefficients(approximate(x -> exp(crude_log_rate), B))  

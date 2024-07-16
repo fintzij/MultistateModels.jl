@@ -16,9 +16,9 @@ function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVect
         end
         copyto!(model.parameters[i], newvalues[i])
 
-        # recombine if a spline hazard
+        # remake if a spline hazard
         if isa(model.hazards[i], _SplineHazard) 
-            recombine_parameters!(model.hazards[i], newvalues[i])
+            remake_splines!(model.hazards[i], newvalues[i][1:model.hazards[i].nbasis])
             set_riskperiod!(model.hazards[i])
         end
     end
@@ -43,9 +43,9 @@ function set_parameters!(model::MultistateProcess, newvalues::Tuple)
 
         copyto!(model.parameters[i], newvalues[i])    
         
-        # recombine if a spline hazard
+        # remake if a spline hazard
         if isa(model.hazards[i], _SplineHazard)
-            recombine_parameters!(model.hazards[i], newvalues[i])
+            remake_splines!(model.hazards[i], newvalues[i][1:model.hazards[i].nbasis])
             set_riskperiod!(model.hazards[i])
         end
     end
@@ -61,23 +61,22 @@ function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
     # get keys for the new values
     value_keys = keys(newvalues)
 
-    for i in eachindex(value_keys)
+    for k in eachindex(value_keys)
 
-        vind = value_keys[i]
+        vind = value_keys[k]
         mind = model.hazkeys[vind]
 
         # check length of supplied parameters
-        if length(newvalues[vind]) != 
-                length(model.parameters[mind])
+        if length(newvalues[vind]) != length(model.parameters[mind])
             error("The new parameter values for $vind are not the expected length.")
         end
 
         copyto!(model.parameters[mind], newvalues[vind])
 
-        # recombine if a spline hazard
+        # remake if a spline hazard
         if isa(model.hazards[mind], _SplineHazard)
-            recombine_parameters!(model.hazards[mind], newvalues[vind])
-            set_riskperiod!(model.hazards[i])
+            remake_splines!(model.hazards[mind], newvalues[vind][1:model.hazards[mind].nbasis])
+            set_riskperiod!(model.hazards[mind])
         end
     end
 end

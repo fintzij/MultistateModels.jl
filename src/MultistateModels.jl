@@ -18,7 +18,6 @@ using OptimizationOptimJL
 using ParetoSmooth
 using Preferences
 using QuadGK
-using RCall
 using RuntimeGeneratedFunctions
 using StatsBase
 using StatsFuns
@@ -29,13 +28,6 @@ Preferences.set_preferences!(ForwardDiff, "nansafe_mode" => true)
 
 # need to import fit to overload and reexport it
 import StatsBase.fit
-
-# initialize R session for splines
-function __init__()
-    @eval RCall.R"if (!require('splines2', quietly=TRUE)) install.packages('splines2')"
-    @eval RCall.@rlibrary splines2
-    nothing
-end
 
 # initialize runtime generated function cache
 RuntimeGeneratedFunctions.init(@__MODULE__)

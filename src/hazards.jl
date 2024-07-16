@@ -306,7 +306,7 @@ function call_haz(t, parameters, rowind, _hazard::_SplinePH; give_log = true)
     haz = (_hazard.riskperiod[1] < t < _hazard.riskperiod[2]) ? _hazard.hazsp(t) : 0.0
 
     # compute the log hazard
-    loghaz = log(haz) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.rmat, 2))])
+    loghaz = log(haz) + dot(_hazard.data[rowind, :], parameters[Not(1:_hazard.nbasis)])
 
     # return the log hazard
     give_log ? loghaz : exp(loghaz)
@@ -353,7 +353,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log 
     end 
 
     # log cumulative hazard
-    logchaz = log(chaz) + dot(_hazard.data[rowind, :], parameters[Not(1:size(_hazard.rmat, 2))])
+    logchaz = log(chaz) + dot(_hazard.data[rowind, :], parameters[Not(1:_hazard.nbasis)])
 
     # return the log hazard
     give_log ? logchaz : exp(logchaz)
@@ -658,46 +658,3 @@ function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, haza
     # return cumulative hazards
     return cumulative_hazards
 end
-
-
-
-
-
-########## DEPRECATED
-# """
-#     next_state_probs!(ns_probs, scur, ind, model)
-
-# Update ns_probs with probabilities of transitioning to each state based on hazards from current state. 
-
-# # Arguments 
-# - ns_probs: vector of probabilities corresponding to each state, modified in place
-# - t: time at which hazards should be calculated
-# - scur: current state
-# - ind: index at complete dataset
-# - parameters: vector of vectors of model parameters
-# - hazards: vector of cause-specific hazards
-# - totalhazards: vector of total hazards
-# - tmat: transition matrix 
-# """
-# function next_state_probs!(ns_probs, t, scur, ind, parameters, hazards, totalhazards, tmat)
-
-#     # set ns_probs to zero for impossible transitions
-#     ns_probs[findall(tmat[scur,:] .== 0.0)] .= 0.0
-
-#     # indices for possible destination states
-#     trans_inds = findall(tmat[scur,:] .!= 0.0)
-        
-#     # calculate log hazards for possible transitions + normalize
-#     ns_probs[trans_inds] = 
-#         softmax(map(x -> call_haz(t, parameters[x], ind, hazards[x]), totalhazards[scur].components))
-
-#     # catch for numerical instabilities (weird edge case)
-#     if any(isnan.(ns_probs[trans_inds]))
-#         pisnan = findall(isnan.(ns_probs[trans_inds]))
-#         if length(pisnan) == 1
-#             ns_probs[trans_inds][pisnan] = 1 - sum(ns_probs[trans_inds][Not(pisnan)])
-#         else
-#             ns_probs[trans_inds][pisnan] .= 1 - sum(ns_probs[trans_inds][Not(pisnan)])/length(pisnan)
-#         end        
-#     end
-# end

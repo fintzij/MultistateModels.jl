@@ -261,14 +261,14 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             npars = size(rmat, 2) + size(hazdat, 2) - 1
 
             # check if a natural spline
-            natural_spline = (size(rmat, 1) == size(rmat, 2)) && isdiag(rmat) && all(diag(rmat) .== 1)
+            natural_spline = !((size(rmat, 1) == size(rmat, 2)) && isdiag(rmat) && all(diag(rmat) .== 1))
 
             # generate hazard struct
             ### no covariates
             if(size(hazdat, 2) == 1) 
                 
                 # parameter names
-                parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(rmat, 2)))), "(Intercept)" => "Intercept")
+                parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:length(hazard.spline.basis)))), "(Intercept)" => "Intercept")
 
                 # vector for parameters
                 hazpars = zeros(Float64, npars)
@@ -286,14 +286,14 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                         hazard,
                                         cumulative_hazard,
                                         natural_spline,
-                                        rmat,
-                                        [0.0, maximum(data.tstop)],
                                         timespan,
+                                        timespan,
+                                        length(hazard.spline.basis),
                                         size(hazdat, 2) - 1)            
             else
                 ### proportional hazards
                 # parameter names
-                parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:size(rmat, 2)))), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
+                parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:length(hazard.spline.basis)))), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
                
                 # vector for parameters
                 hazpars = zeros(Float64, npars)
@@ -312,9 +312,9 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                         hazard,
                                         cumulative_hazard,
                                         natural_spline,
-                                        rmat,
-                                        [0.0, maximum(data.tstop)],
                                         timespan,
+                                        timespan,
+                                        length(hazard.spline.basis),
                                         size(hazdat, 2) - 1)                             
             end
         end
