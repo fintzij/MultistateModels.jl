@@ -123,13 +123,6 @@ function set_riskperiod!(hazard::_SplineHazard)
         # compute derivatives
         derivs = D.(sp_bounds)
 
-        riskstart = DiffResults.DiffResult(0.0, (0.0,))
-        riskend = DiffResults.DiffResult(0.0, (0.0,))
-
-        # compute value and slope at endpoints
-        riskstart = ForwardDiff.derivative!(riskstart, hazard.hazsp, sp_bounds[1])
-        riskend = ForwardDiff.derivative!(riskend, hazard.hazsp, sp_bounds[2])
-
         # set riskperiod
         if derivs[1] <= 0.0
             hazard.riskperiod[1] = hazard.timespan[1]
