@@ -121,8 +121,8 @@ function set_riskperiod!(hazard::_SplineHazard)
         D = BSplineKit.diff(hazard.hazsp.spline)
 
         # compute derivatives
-        spvalues = hazard.hazsp.spline.(sp_bounds)
-        spderivs = D.(sp_bounds)
+        spvalues = ForwardDiff.value(hazard.hazsp.spline.(sp_bounds))
+        spderivs = ForwardDiff.value(D.(sp_bounds))
 
         # set riskperiod
         riskperiod = copy(hazard.timespan)
