@@ -121,20 +121,21 @@ function set_riskperiod!(hazard::_SplineHazard)
         D = BSplineKit.diff(hazard.hazsp.spline)
 
         # compute derivatives
-        derivs = D.(sp_bounds)
+        spvalues = hazard.hazsp.spline.(sp_bounds)
+        spderivs = D.(sp_bounds)
 
         # set riskperiod
         if derivs[1] <= 0.0
             hazard.riskperiod[1] = hazard.timespan[1]
         else
-            hazard.riskperiod[1] = maximum([hazard.timespan[1], sp_bounds[1] - hazard.hazsp.spline(sp_bounds[1]) / derivs[1]])
+            hazard.riskperiod[1] = maximum([hazard.timespan[1], sp_bounds[1] - spvalues[1] / derivs[1]])
         end
 
         # set riskperiod
         if derivs[2] >= 0.0
             hazard.riskperiod[2] = hazard.timespan[2]
         else
-            hazard.riskperiod[2] = maximum([hazard.timespan[2], sp_bounds[2] - hazard.hazsp.spline(sp_bounds[2]) / derivs[2]])
+            hazard.riskperiod[2] = maximum([hazard.timespan[2], sp_bounds[2] - spvalues[2] / derivs[2]])
         end
     end
 end
