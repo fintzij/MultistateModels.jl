@@ -103,3 +103,12 @@ function h(cfs; s = s)
 end
 
 ForwardDiff.gradient(h, rand(length(B)))
+
+
+# experiment with derivatives
+B = BSplineBasis(BSplineOrder(4), -1:0.2:1);
+S = Spline(B, rand(length(B)))
+D = diff(S)
+
+D(-1)
+ForwardDiff.derivative(S, -1)

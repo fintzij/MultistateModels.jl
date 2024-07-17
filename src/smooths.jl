@@ -117,7 +117,12 @@ function set_riskperiod!(hazard::_SplineHazard)
         # get spline boundaries
         sp_bounds = boundaries(hazard.hazsp.spline.basis)
         
-        # initialize diffresult object
+        # spline derivative
+        D = BSplineKit.diff(hazard.hazsp.spline)
+
+        # compute derivatives
+        derivs = D.(sp_bounds)
+
         riskstart = DiffResults.DiffResult(0.0, (0.0,))
         riskend = DiffResults.DiffResult(0.0, (0.0,))
 
@@ -126,17 +131,17 @@ function set_riskperiod!(hazard::_SplineHazard)
         riskend = ForwardDiff.derivative!(riskend, hazard.hazsp, sp_bounds[2])
 
         # set riskperiod
-        if riskstart.derivs[1] <= 0.0
+        if derivs[1] <= 0.0
             hazard.riskperiod[1] = hazard.timespan[1]
         else
-            hazard.riskperiod[1] = maximum([hazard.timespan[1], sp_bounds[1] - riskstart.value / riskstart.derivs[1]])
+            hazard.riskperiod[1] = maximum([hazard.timespan[1], sp_bounds[1] - hazard.hazsp.spline(sp_bounds[1]) / derivs[1]])
         end
 
         # set riskperiod
-        if riskend.derivs[1] >= 0.0
+        if derivs[2] >= 0.0
             hazard.riskperiod[2] = hazard.timespan[2]
         else
-            hazard.riskperiod[2] = minimum([hazard.timespan[2], sp_bounds[2] - riskend.value / riskend.derivs[1]])
+            hazard.riskperiod[2] = maximum([hazard.timespan[2], sp_bounds[2] - hazard.hazsp.spline(sp_bounds[2]) / derivs[2]])
         end
     end
 end
