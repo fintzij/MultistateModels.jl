@@ -287,7 +287,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                         cumulative_hazard,
                                         natural_spline,
                                         rmat,
-                                        [0.0, maximum(data.tstop)],
+                                        timespan,
                                         timespan,
                                         size(hazdat, 2) - 1)            
             else
@@ -313,7 +313,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                         cumulative_hazard,
                                         natural_spline,
                                         rmat,
-                                        [0.0, maximum(data.tstop)],
+                                        timespan,
                                         timespan,
                                         size(hazdat, 2) - 1)                             
             end

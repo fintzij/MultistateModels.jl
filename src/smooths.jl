@@ -111,9 +111,7 @@ Calculate and set the risk period for when a spline intensity is greater than ze
 """
 function set_riskperiod!(hazard::_SplineHazard)
 
-    if hazard.hazsp.method == BSplineKit.Flat()
-        copyto!(hazard.riskperiod, hazard.timespan)
-    else
+    if hazard.hazsp.method == BSplineKit.Linear()
         # get spline boundaries
         sp_bounds = boundaries(hazard.hazsp.spline.basis)
         
