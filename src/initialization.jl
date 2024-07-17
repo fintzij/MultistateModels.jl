@@ -35,7 +35,7 @@ function initialize_parameters!(model::MultistateProcess; constraints = nothing,
         end
 
         # fit Markov surrogate
-        surrog = fit_surrogate(model; surrogate_constraints = constraints, surrogate_parameters = surrog_parameters, verbose = false)
+        surrog = fit_surrogate(model; surrogate_constraints = constraints, surrogate_parameters = surrogate_parameters, verbose = false)
 
         for i in eachindex(model.hazards)
             set_par_to = init_par(model.hazards[i], surrog.parameters[i][1])
