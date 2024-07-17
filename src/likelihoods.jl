@@ -122,7 +122,7 @@ function loglik(parameters, data::ExactData; neg=true, return_ll_subj=false)
     # recombine spline parameters and calculate risk periods
     for i in eachindex(data.model.hazards)
         if isa(data.model.hazards[i], _SplineHazard)
-            recombine_parameters!(data.model.hazards[i], pars[i])
+            recombine_parameters!(data.model.hazards[i], pars[i][1:size(data.model.hazards[i].rmat, 2)])
             set_riskperiod!(data.model.hazards[i])
         end
     end
@@ -149,7 +149,7 @@ function loglik(parameters, data::ExactDataAD; neg = true)
     # recombine spline parameters and calculate risk periods
     for i in eachindex(data.model.hazards)
         if isa(data.model.hazards[i], _SplineHazard)
-            recombine_parameters!(data.model.hazards[i], pars[i])
+            recombine_parameters!(data.model.hazards[i], pars[i][1:size(data.model.hazards[i].rmat, 2)])
             set_riskperiod!(data.model.hazards[i])
         end
     end
@@ -330,7 +330,7 @@ function loglik(parameters, data::SMPanelData; neg = true, use_sampling_weight =
     # recombine spline parameters and calculate risk periods
     for i in eachindex(data.model.hazards)
         if isa(data.model.hazards[i], _SplineHazard)
-            recombine_parameters!(data.model.hazards[i], pars[i])
+            recombine_parameters!(data.model.hazards[i], pars[i][1:size(data.model.hazards[i].rmat, 2)])
             set_riskperiod!(data.model.hazards[i])
         end
     end
@@ -367,7 +367,7 @@ function loglik!(parameters, logliks::Vector{}, data::SMPanelData; use_sampling_
 
     for i in eachindex(data.model.hazards)
         if isa(data.model.hazards[i], _SplineHazard)
-            recombine_parameters!(data.model.hazards[i], pars[i])
+            recombine_parameters!(data.model.hazards[i], pars[i][1:size(data.model.hazards[i].rmat, 2)])
             set_riskperiod!(data.model.hazards[i])
         end
     end

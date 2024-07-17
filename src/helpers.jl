@@ -18,7 +18,7 @@ function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVect
 
         # recombine if a spline hazard
         if isa(model.hazards[i], _SplineHazard) 
-            recombine_parameters!(model.hazards[i], newvalues[i])
+            recombine_parameters!(model.hazards[i], newvalues[i][1:size(model.hazards[i].rmat,)])
             set_riskperiod!(model.hazards[i])
         end
     end
@@ -45,7 +45,7 @@ function set_parameters!(model::MultistateProcess, newvalues::Tuple)
         
         # recombine if a spline hazard
         if isa(model.hazards[i], _SplineHazard)
-            recombine_parameters!(model.hazards[i], newvalues[i])
+            recombine_parameters!(model.hazards[i], newvalues[i][1:size(model.hazards[i].rmat, 2)])
             set_riskperiod!(model.hazards[i])
         end
     end
@@ -61,14 +61,13 @@ function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
     # get keys for the new values
     value_keys = keys(newvalues)
 
-    for i in eachindex(value_keys)
+    for k in eachindex(value_keys)
 
-        vind = value_keys[i]
+        vind = value_keys[k]
         mind = model.hazkeys[vind]
 
         # check length of supplied parameters
-        if length(newvalues[vind]) != 
-                length(model.parameters[mind])
+        if length(newvalues[vind]) != length(model.parameters[mind])
             error("The new parameter values for $vind are not the expected length.")
         end
 
@@ -76,8 +75,8 @@ function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
 
         # recombine if a spline hazard
         if isa(model.hazards[mind], _SplineHazard)
-            recombine_parameters!(model.hazards[mind], newvalues[vind])
-            set_riskperiod!(model.hazards[i])
+            recombine_parameters!(model.hazards[mind], newvalues[vind][1:size(model.hazards[mind].rmat, 2)])
+            set_riskperiod!(model.hazards[mind])
         end
     end
 end

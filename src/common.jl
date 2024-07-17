@@ -167,7 +167,7 @@ end
 """
 B-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of B-spline basis functions. 
 """
-struct _Spline <: _SplineHazard
+mutable struct _Spline <: _SplineHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}
@@ -187,7 +187,7 @@ end
 """
 B-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of B-spline basis functions. Covariates have a multiplicative effect on the baseline hazard.
 """
-struct _SplinePH <: _SplineHazard
+mutable struct _SplinePH <: _SplineHazard
     hazname::Symbol
     data::Array{Float64}
     parnames::Vector{Symbol}

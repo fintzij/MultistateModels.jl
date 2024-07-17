@@ -261,7 +261,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             npars = size(rmat, 2) + size(hazdat, 2) - 1
 
             # check if a natural spline
-            natural_spline = (size(rmat, 1) == size(rmat, 2)) && isdiag(rmat) && all(diag(rmat) .== 1)
+            natural_spline = !((size(rmat, 1) == size(rmat, 2)) && isdiag(rmat) && all(diag(rmat) .== 1))
 
             # generate hazard struct
             ### no covariates

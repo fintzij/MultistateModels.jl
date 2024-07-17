@@ -1,9 +1,11 @@
 using BenchmarkTools
 using BSplineKit
 using Distributions
+using ForwardDiff
 using LinearAlgebra
 using Plots
 using Random
+using Setfield
 
 # set up basis
 # x = sort(rand(Uniform(0.25, 0.75), 20))
@@ -71,3 +73,33 @@ A = approximate(x -> 2.3, R)
 A.([0.4, 0.5])
 
 D = Spline(B, M * coefficients(A))
+
+
+# experiment with ForwardDiff
+x = [0.1, 0.3, 0.5, 0.7]
+B = BSplineBasis(BSplineOrder(4), copy(x))
+Bs = Spline(undef, B)
+
+# make a new spline with coefficients works
+f(cfs) = Spline(B, cfs)(0.5)
+ForwardDiff.gradient(f, rand(length(B)))
+
+# copying to coefficient field of existing spline doesn't work
+function g(cfs)
+    copyto!(Bs.coefs, cfs)
+    Bs(0.5)
+end
+ForwardDiff.gradient(g, rand(length(B)))
+
+# recreating the spline within a struct works
+struct spobj
+    sp::Spline
+end
+s = spobj(Spline(undef, B))
+
+function h(cfs; s = s)
+    s = @set s.sp = Spline(B, cfs)
+    s.sp(rand(Uniform(0.1, 0.7), 1)[1])
+end
+
+ForwardDiff.gradient(h, rand(length(B)))

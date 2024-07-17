@@ -92,25 +92,16 @@ Copy recombined parameters to the spline objects for hazard and cumulative hazar
 """
 function recombine_parameters!(hazard::_SplineHazard, parameters)
     
-    # write B-spline recombined B-spline parameters
-    if (hazard.degree > 1) & hazard.natural_spline
-        copyto!(hazard.hazsp.spline.coefs, hazard.rmat * exp.(parameters[1:size(hazard.rmat, 2)]))
-    else
-        copyto!(hazard.hazsp.spline.coefs, exp.(parameters[1:size(hazard.rmat, 2)]))
-    end
+    # recombined parameters for the hazard
+    hazpars = ((hazard.degree > 1) & hazard.natural_spline) ? hazard.rmat * exp.(parameters[1:size(hazard.rmat, 2)]) : exp.(parameters[1:size(hazard.rmat, 2)])
 
-    # get spline specs
-    t = knots(hazard.hazsp)
-    k = BSplineKit.order(hazard.hazsp)
+    # make new spline
+    hazsp = Spline(hazard.hazsp.spline.basis, hazpars)
+    chazsp = integral(hazsp)
 
-    # initialize first coefficient at
-    hazard.chazsp.spline.coefs[begin] = zero(eltype(hazard.chazsp.spline.coefs))
-
-    # write recombined parameters for integral
-    @inbounds for i in eachindex(hazard.hazsp.spline.coefs)
-        hazard.chazsp.spline.coefs[i + 1] = 
-            hazard.chazsp.spline.coefs[i] + hazard.hazsp.spline.coefs[i] * (t[i + k] - t[i]) / k
-    end
+    # remake spline objects with recombined parameters
+    hazard.hazsp = SplineExtrapolation(hazsp, hazard.hazsp.method)
+    hazard.chazsp = SplineExtrapolation(chazsp, hazard.chazsp.method)
 end
 
 """
@@ -149,3 +140,4 @@ function set_riskperiod!(hazard::_SplineHazard)
         end
     end
 end
+
