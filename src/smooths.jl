@@ -125,18 +125,19 @@ function set_riskperiod!(hazard::_SplineHazard)
         spderivs = D.(sp_bounds)
 
         # set riskperiod
-        if spderivs[1] <= 0.0
-            hazard.riskperiod[1] = hazard.timespan[1]
-        else
-            hazard.riskperiod[1] = maximum([hazard.timespan[1], sp_bounds[1] - spvalues[1] / spderivs[1]])
+        riskperiod = copy(hazard.timespan)
+
+        if spderivs[1] > 0.0
+            riskperiod[1] = maximum([hazard.timespan[1], sp_bounds[1] - spvalues[1] / spderivs[1]])
         end
 
         # set riskperiod
-        if spderivs[2] >= 0.0
-            hazard.riskperiod[2] = hazard.timespan[2]
-        else
-            hazard.riskperiod[2] = maximum([hazard.timespan[2], sp_bounds[2] - spvalues[2] / spderivs[2]])
+        if spderivs[2] < 0.0
+            riskperiod[2] = maximum([hazard.timespan[2], sp_bounds[2] - spvalues[2] / spderivs[2]])
         end
+
+        # copy
+        copyto!(hazard.riskperiod, riskperiod)
     end
 end
 
