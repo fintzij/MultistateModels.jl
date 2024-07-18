@@ -200,7 +200,7 @@ end
     # test that crudely integrated hazard and cumulative hazard are rougly the same
     cumul_haz_crude = 0.0
     hazind = 1
-    ntimes = 100000
+    ntimes = 1000000
     delta = 1/ntimes
 
     for h in eachindex(splinemod.hazards)
@@ -219,6 +219,20 @@ end
         chaz_interp = MultistateModels.call_cumulhaz(boundaries[1], boundaries[2], splinemod.parameters[h], 1, splinemod.hazards[h]; give_log = false)
 
         # integrate over the timespan
-        @test isapprox(chaz_crude_interp, chaz_crude_interp)        
+        @test isapprox(chaz_crude_interp, chaz_interp; atol = delta * 10)    
+
+        # integrate over the timespan
+        # boundaries = splinemod.hazards[1].timespan
+        boundaries = [0.0, 0.8]
+        times = (boundaries[1] + delta):delta:boundaries[2]
+        for t in times
+            chaz_crude_extrap += MultistateModels.call_haz(t, splinemod.parameters[h], 1, splinemod.hazards[h]; give_log = false) * delta
+        end
+
+        # compute the cumulative hazard
+        chaz_extrap = MultistateModels.call_cumulhaz(boundaries[1], boundaries[2], splinemod.parameters[h], 1, splinemod.hazards[h]; give_log = false)
+
+        # integrate over the timespan
+        @test isapprox(chaz_crude_extrap, chaz_extrap; atol = delta * 10)
     end
 end

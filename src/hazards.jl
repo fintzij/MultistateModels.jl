@@ -266,30 +266,74 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = 
     u = clamp(ub, riskstart, riskend)
 
     # get bounds
-    sp_bounds = boundaries(_hazard.hazsp.spline.basis)
+    sp_bounds = BSplineKit.boundaries(_hazard.hazsp.spline.basis)
 
     if l == u
         # no cumulative hazard accrued
         chaz = 0.0
 
-    elseif u < sp_bounds[1]
-        # both endpoints are in the linear extrapolation range
-        chaz = (u - l) * mean([_hazard.hazsp(l), _hazard.hazsp(u)]) 
-    else
-        #  accumulate in left linear extrapolation
-        if (l < sp_bounds[1]) 
-            # from start of risk period to l
-            lb_chaz = -(l - riskstart) * mean(_hazard.hazsp.([riskstart, l]))
+    elseif (u <= sp_bounds[1]) || (l >= sp_bounds[2])
+        # only extrapolation
+        if _hazard.hazsp.method == BSplineKit.Linear()
+            # trapezoid
+            chaz = (u - l) * mean([_hazard.hazsp(l), _hazard.hazsp(u)]) 
 
-            # from l to the lower spline boundary
-            left_chaz = -(sp_bounds[1] - l) * mean(_hazard.hazsp.([sp_bounds[1], l]))
-
-            # from [l, sp_bound[1]] + [sp_bound[1], u] minus [riskstart, l]
-            chaz = _hazard.chazsp(u) + left_chaz - lb_chaz
-        else
-            chaz = _hazard.chazsp(u) - _hazard.chazsp(l)
+        elseif _hazard.hazsp.method == BSplineKit.Flat()
+            # rectangle
+            chaz = (u - l) * ((u <= sp_bounds[1]) ? _hazard.hazsp(l) : _hazard.hazsp(u))
         end
-    end
+
+    elseif ((sp_bounds[1] < l < sp_bounds[2]) && (sp_bounds[1] < u < sp_bounds[2]))
+        # contributions in the initial extrapolation range cancel out
+        chaz = _hazard.chazsp(u) - _hazard.chazsp(l)
+
+    else
+        # cumulative hazard at l
+        l_chaz = 0.0
+
+        if _hazard.hazsp.method == BSplineKit.Linear()
+            # trapezoids
+            l_chaz += l < sp_bounds[1] ? 
+                        (l - riskstart) * mean(_hazard.hazsp.([l, riskstart])) : 
+                        (sp_bounds[1] - riskstart) * mean(_hazard.hazsp.([sp_bounds[1], riskstart]))
+
+        elseif _hazard.hazsp.method == BSplineKit.Flat()
+            # rectangles
+            l_chaz += l < sp_bounds[1] ? 
+                        (l - riskstart) * _hazard.hazsp(l) : 
+                        (sp_bounds[1] - riskstart) * _hazard.hazsp(sp_bounds[1]) 
+        end
+
+        if l >= sp_bounds[1]
+            l_chaz += _hazard.chazsp(l)
+        end
+
+        # cumulative hazard at u
+        u_chaz = 0.0
+
+        if _hazard.hazsp.method == BSplineKit.Linear()
+            u_chaz += (sp_bounds[1] - riskstart) * mean(_hazard.hazsp.([sp_bounds[1], riskstart]))
+
+        elseif _hazard.hazsp.method == BSplineKit.Flat()
+            u_chaz += (sp_bounds[1] - riskstart) * _hazard.hazsp(sp_bounds[1]) 
+        end
+
+        if u <= sp_bounds[2]
+            u_chaz += _hazard.chazsp(u)
+
+        elseif u > sp_bounds[2]
+            u_chaz += _hazard.chazsp(sp_bounds[2]) 
+
+            if _hazard.hazsp.method == BSplineKit.Linear()
+                u_chaz += (u - sp_bounds[2]) * mean(_hazard.hazsp.([u, sp_bounds[2]])) 
+                
+            elseif _hazard.hazsp.method == BSplineKit.Flat()
+                u_chaz += (u - sp_bounds[2]) * _hazard.hazsp(sp_bounds[2])
+            end
+        end
+
+        chaz = u_chaz - l_chaz
+    end 
 
     # return the log hazard
     give_log ? log(chaz) : chaz
@@ -327,29 +371,73 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log 
     u = clamp(ub, riskstart, riskend)
 
     # get bounds
-    sp_bounds = boundaries(_hazard.hazsp.spline.basis)
+    sp_bounds = BSplineKit.boundaries(_hazard.hazsp.spline.basis)
 
     if l == u
         # no cumulative hazard accrued
         chaz = 0.0
 
-    elseif u < sp_bounds[1]
-        # both endpoints are in the linear extrapolation range
-        chaz = (u - l) * (_hazard.hazsp(l) + _hazard.hazsp(u)) / 2
-    else
-        #  accumulate in left linear extrapolation
-        if (l < sp_bounds[1]) 
-            # from start of risk period to l
-            lb_chaz = -(l - riskstart) * mean(_hazard.hazsp.([riskstart, l]))
+    elseif (u <= sp_bounds[1]) || (l >= sp_bounds[2])
+        # only extrapolation
+        if _hazard.hazsp.method == BSplineKit.Linear()
+            # trapezoid
+            chaz = (u - l) * mean([_hazard.hazsp(l), _hazard.hazsp(u)]) 
 
-            # from l to the lower spline boundary
-            left_chaz = -(sp_bounds[1] - l) * mean(_hazard.hazsp.([sp_bounds[1], l]))
-
-            # from [l, sp_bound[1]] + [sp_bound[1], u] minus [riskstart, l]
-            chaz = _hazard.chazsp(u) + left_chaz - lb_chaz
-        else
-            chaz = _hazard.chazsp(u) - _hazard.chazsp(l)
+        elseif _hazard.hazsp.method == BSplineKit.Flat()
+            # rectangle
+            chaz = (u - l) * ((u <= sp_bounds[1]) ? _hazard.hazsp(l) : _hazard.hazsp(u))
         end
+
+    elseif ((sp_bounds[1] < l < sp_bounds[2]) && (sp_bounds[1] < u < sp_bounds[2]))
+        # contributions in the initial extrapolation range cancel out
+        chaz = _hazard.chazsp(u) - _hazard.chazsp(l)
+
+    else
+        # cumulative hazard at l
+        l_chaz = 0.0
+
+        if _hazard.hazsp.method == BSplineKit.Linear()
+            # trapezoids
+            l_chaz += l < sp_bounds[1] ? 
+                        (l - riskstart) * mean(_hazard.hazsp.([l, riskstart])) : 
+                        (sp_bounds[1] - riskstart) * mean(_hazard.hazsp.([sp_bounds[1], riskstart]))
+
+        elseif _hazard.hazsp.method == BSplineKit.Flat()
+            # rectangles
+            l_chaz += l < sp_bounds[1] ? 
+                        (l - riskstart) * _hazard.hazsp(l) : 
+                        (sp_bounds[1] - riskstart) * _hazard.hazsp(sp_bounds[1]) 
+        end
+
+        if l >= sp_bounds[1]
+            l_chaz += _hazard.chazsp(l)
+        end
+
+        # cumulative hazard at u
+        u_chaz = 0.0
+
+        if _hazard.hazsp.method == BSplineKit.Linear()
+            u_chaz += (sp_bounds[1] - riskstart) * mean(_hazard.hazsp.([sp_bounds[1], riskstart]))
+
+        elseif _hazard.hazsp.method == BSplineKit.Flat()
+            u_chaz += (sp_bounds[1] - riskstart) * _hazard.hazsp(sp_bounds[1]) 
+        end
+
+        if u <= sp_bounds[2]
+            u_chaz += _hazard.chazsp(u)
+
+        elseif u > sp_bounds[2]
+            u_chaz += _hazard.chazsp(sp_bounds[2]) 
+
+            if _hazard.hazsp.method == BSplineKit.Linear()
+                u_chaz += (u - sp_bounds[2]) * mean(_hazard.hazsp.([u, sp_bounds[2]])) 
+                
+            elseif _hazard.hazsp.method == BSplineKit.Flat()
+                u_chaz += (u - sp_bounds[2]) * _hazard.hazsp(sp_bounds[2])
+            end
+        end
+
+        chaz = u_chaz - l_chaz
     end 
 
     # log cumulative hazard

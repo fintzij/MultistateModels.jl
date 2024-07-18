@@ -44,9 +44,9 @@ function setup_model(; make_pars, data = nothing, nsubj = 250, family = "wei", n
             knots13 = knots[2]
         end
 
-        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = knots12, add_boundaries = false)
-        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 3, knots = knots13, add_boundaries = false)
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = [0.0, 1.0], add_boundaries = false)
+        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12, add_boundaries = false, extrapolation = "flat")
+        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13, add_boundaries = false, extrapolation = "flat")
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = [0.0, 1.0], add_boundaries = false, extrapolation = "flat")
     end
     
     # data for simulation parameters

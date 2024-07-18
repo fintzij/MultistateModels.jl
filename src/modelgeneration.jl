@@ -24,6 +24,9 @@ function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int6
             @error "Spline degree must be 0, 1, 2, or 3."
         end
 
+        # change extrapolation to flat if degree = 0
+        extrapolation = degree > 0 ? extrapolation : "flat"
+
         h = SplineHazard(hazard, family, statefrom, stateto, degree, knots,  extrapolation, natural_spline, add_boundaries)
     end
 
