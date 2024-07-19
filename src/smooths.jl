@@ -59,7 +59,7 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
 
     extrap_method = hazard.extrapolation == "linear" ? BSplineKit.Linear() : BSplineKit.Flat()
     sphaz = SplineExtrapolation(Spline(undef, B), extrap_method)
-    spchaz = SplineExtrapolation(integral(sphaz.spline), extrap_method)
+    spchaz = integral(sphaz.spline)
 
     return (sphaz = sphaz, spchaz = spchaz, rmat = M, knots = knots, timespan = timespan)
 end
@@ -76,8 +76,8 @@ function remake_splines!(hazard::_SplineHazard, parameters)
     chazsp = integral(hazsp)
 
     # remake spline objects with recombined parameters
-    hazard.hazsp = SplineExtrapolation(hazsp, hazard.hazsp.method)
-    hazard.chazsp = SplineExtrapolation(chazsp, hazard.chazsp.method)
+    hazard.hazsp = SplineExtrapolation(hazsp, hazard.hazsp.method);
+    hazard.chazsp = chazsp;
 end
 
 """
@@ -95,27 +95,15 @@ function set_riskperiod!(hazard::_SplineHazard)
         D = BSplineKit.diff(hazard.hazsp.spline)
 
         # compute derivatives
-        spvalues = ForwardDiff.value.(hazard.hazsp.spline.(sp_bounds))
-        spderivs = ForwardDiff.value.(D.(sp_bounds))
+        spvalues = hazard.hazsp.spline.(sp_bounds)
+        spderivs = ForwardDiff.derivative.(hazard.hazsp.spline, [sp_bounds...])
 
         # set riskperiod
-        riskperiod = zeros(Float64, 2)
-
-        if spderivs[1] > 0.0
-            riskperiod[1] = maximum([hazard.timespan[1], sp_bounds[1] - ForwardDiff.value(spvalues[1]) / ForwardDiff.value(spderivs[1])])
-        else
-            riskperiod[1] = hazard.timespan[1]
-        end
-
-        # set riskperiod
-        if spderivs[2] < 0.0
-            riskperiod[2] = minimum([hazard.timespan[2], sp_bounds[2] - ForwardDiff.value(spvalues[2]) / ForwardDiff.value(spderivs[2])])
-        else
-            riskperiod[2] = hazard.timespan[2]
-        end
+        riskperiod = [spderivs[1] <= 0 ? hazard.timespan[1] : maximum([hazard.timespan[1], sp_bounds[1] - spvalues[1] / spderivs[1]]),
+                      spderivs[2] >= 0 ? hazard.timespan[2] : minimum([hazard.timespan[2], sp_bounds[2] - spvalues[2] / spderivs[2]])]
 
         # copy
-        copyto!(hazard.riskperiod, riskperiod)
+        hazard.riskperiod = riskperiod
     end
 end
 

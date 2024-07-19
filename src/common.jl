@@ -174,10 +174,10 @@ mutable struct _Spline <: _SplineHazard
     degree::Float64
     knots::Vector{Float64}
     hazsp::SplineExtrapolation
-    chazsp::SplineExtrapolation
+    chazsp::Spline
     natural_spline::Bool
     riskperiod::Vector{Float64}
-    timespan::Vector{Float64}
+    timespan::Union{Vector{Float64}, Vector{ForwardDiff.Dual}}
     nbasis::Int64
     ncovar::Int64
 end
@@ -194,10 +194,10 @@ mutable struct _SplinePH <: _SplineHazard
     degree::Float64
     knots::Vector{Float64}
     hazsp::SplineExtrapolation
-    chazsp::SplineExtrapolation
+    chazsp::Spline
     natural_spline::Bool
     riskperiod::Vector{Float64}
-    timespan::Vector{Float64}
+    timespan::Union{Vector{Float64}, Vector{ForwardDiff.Dual}}
     nbasis::Int64
     ncovar::Int64
 end

@@ -69,7 +69,7 @@ function fit_surrogate(model; surrogate_parameters = nothing, surrogate_constrai
     if !isnothing(surrogate_parameters) 
         set_parameters!(surrogate_model, surrogate_parameters)
     elseif crude_inits
-        set_crude_init!(model)
+        set_crude_init!(surrogate_model)
     end
 
     # generate the constraint function and test at initial values

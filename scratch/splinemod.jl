@@ -4,12 +4,13 @@ using MultistateModels
 
 # set up the very simplest model
 nsubj = 1000
-dat = DataFrame(id = collect(1:nsubj),
-                tstart = zeros(nsubj),
-                tstop = ones(nsubj),
-                statefrom = ones(Int64, nsubj),
-                stateto = ones(Int64, nsubj) .+ 1,
-                obstype = ones(Int64, nsubj))
+ntimes = 10
+dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
+                tstart = repeat(0:(1/ntimes):(1 - 1/ntimes), outer = nsubj),
+                tstop = repeat((1/ntimes):(1/ntimes):1, outer = nsubj),
+                statefrom = fill(1, ntimes * nsubj),
+                stateto = fill(2, ntimes * nsubj),
+                obstype = fill(2, ntimes * nsubj))
 
 h12e = Hazard(@formula(0 ~ 1), "exp", 1, 2)
 
@@ -19,13 +20,13 @@ mod = multistatemodel(h12e; data = dat)
 simdat = simulate(mod; paths = false, data = true)[1]
 
 # set up model for inference
-h12s = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0, knots = [0.2, 0.8], add_boundaries = false)
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0, knots = [0.0, 1.0], extrapolation = "linear")
 
-model = multistatemodel(h12s; data = simdat)
+model = multistatemodel(h12; data = simdat)
 initialize_parameters!(model)
 
 model_fitted = fit(model)
 
 # notes
-# degree 0 with no extrapolation checks out
-# degree 0 with extrapolation is incorrect
+# exact data with degree 0 and 1 with extrapolation checks out
+# panel data not yet working

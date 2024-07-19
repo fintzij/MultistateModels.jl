@@ -119,19 +119,22 @@ function loglik(parameters, data::ExactData; neg=true, return_ll_subj=false)
     # nest parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
+    # snag the hazards
+    hazards = data.model.hazards
+
     # remake spline parameters and calculate risk periods
-    for i in eachindex(data.model.hazards)
-        if isa(data.model.hazards[i], _SplineHazard)
-            remake_splines!(data.model.hazards[i], pars[i][1:data.model.hazards[i].nbasis])
-            set_riskperiod!(data.model.hazards[i])
+    for i in eachindex(hazards)
+        if isa(hazards[i], _SplineHazard)
+            remake_splines!(hazards[i], pars[i][1:hazards[i].nbasis])
+            set_riskperiod!(hazards[i])
         end
     end
 
     if return_ll_subj
         # send each element of samplepaths to loglik
-        map((x, w) -> loglik(pars, x, data.model.hazards, data.model) * w, data.paths, data.model.SamplingWeights) # weighted
+        map((x, w) -> loglik(pars, x, hazards, data.model) * w, data.paths, data.model.SamplingWeights) # weighted
     else
-        ll = mapreduce((x, w) -> loglik(pars, x, data.model.hazards, data.model) * w, +, data.paths, data.model.SamplingWeights)    
+        ll = mapreduce((x, w) -> loglik(pars, x, hazards, data.model) * w, +, data.paths, data.model.SamplingWeights)    
         neg ? -ll : ll
     end
 end
@@ -146,16 +149,19 @@ function loglik(parameters, data::ExactDataAD; neg = true)
     # nest parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
+    # snag the hazards
+    hazards = data.model.hazards
+
     # remake spline parameters and calculate risk periods
-    for i in eachindex(data.model.hazards)
-        if isa(data.model.hazards[i], _SplineHazard)
-            remake_splines!(data.model.hazards[i], pars[i][1:data.model.hazards[i].nbasis])
-            set_riskperiod!(data.model.hazards[i])
+    for i in eachindex(hazards)
+        if isa(hazards[i], _SplineHazard)
+            remake_splines!(hazards[i], pars[i][1:hazards[i].nbasis])
+            set_riskperiod!(hazards[i])
         end
     end
 
     # send each element of samplepaths to loglik
-    ll = loglik(pars, data.path[1], data.model.hazards, data.model) * data.samplingweight[1]
+    ll = loglik(pars, data.path[1], hazards, data.model) * data.samplingweight[1]
 
     neg ? -ll : ll
 end
@@ -327,13 +333,18 @@ function loglik(parameters, data::SMPanelData; neg = true, use_sampling_weight =
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
+    # snag the hazards
+    hazards = data.model.hazards
+
     # remake spline parameters and calculate risk periods
-    for i in eachindex(data.model.hazards)
-        if isa(data.model.hazards[i], _SplineHazard)
-            remake_splines!(data.model.hazards[i], pars[i][1:data.model.hazards[i].nbasis])
-            set_riskperiod!(data.model.hazards[i])
+    for i in eachindex(hazards)
+        if isa(hazards[i], _SplineHazard)
+            remake_splines!(hazards[i], pars[i][1:hazards[i].nbasis])
+            set_riskperiod!(hazards[i])
         end
     end
+
+    println(ForwardDiff.value.(hazards[1].hazsp.spline.coefs))
 
     # compute the semi-markov log-likelihoods
     ll = 0.0
@@ -341,7 +352,7 @@ function loglik(parameters, data::SMPanelData; neg = true, use_sampling_weight =
         lls = 0.0
         for j in eachindex(data.paths[i])
             # mlm: function Q in the EM
-            lls += loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.ImportanceWeights[i][j] 
+            lls += loglik(pars, data.paths[i][j], hazards, data.model) * data.ImportanceWeights[i][j] 
         end
         if use_sampling_weight
             lls *= data.model.SamplingWeights[i]
@@ -363,16 +374,20 @@ function loglik!(parameters, logliks::Vector{}, data::SMPanelData; use_sampling_
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
-    for i in eachindex(data.model.hazards)
-        if isa(data.model.hazards[i], _SplineHazard)
-            remake_splines!(data.model.hazards[i], pars[i][1:data.model.hazards[i].nbasis])
-            set_riskperiod!(data.model.hazards[i])
+    # snag the hazards
+    hazards = data.model.hazards
+
+    # remake spline parameters and calculate risk periods
+    for i in eachindex(hazards)
+        if isa(hazards[i], _SplineHazard)
+            remake_splines!(hazards[i], pars[i][1:hazards[i].nbasis])
+            set_riskperiod!(hazards[i])
         end
     end
 
     for i in eachindex(data.paths)
         for j in eachindex(data.paths[i])
-            logliks[i][j] = use_sampling_weight ? loglik(pars, data.paths[i][j], data.model.hazards, data.model) * data.model.SamplingWeights[i] : loglik(pars, data.paths[i][j], data.model.hazards, data.model)
+            logliks[i][j] = use_sampling_weight ? loglik(pars, data.paths[i][j], hazards, data.model) * data.model.SamplingWeights[i] : loglik(pars, data.paths[i][j], hazards, data.model)
         end
     end
 end
