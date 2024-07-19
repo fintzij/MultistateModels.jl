@@ -84,7 +84,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
     # remake splines and calculate risk periods
     for i in eachindex(model_fitted.hazards)
         if isa(model_fitted.hazards[i], _SplineHazard)
-            remake_splines!(model_fitted.hazards[i], model_fitted.parameters[i][1:model_fitted.hazards[i].nbasis])
+            remake_splines!(model_fitted.hazards[i], model_fitted.parameters[i])
             set_riskperiod!(model_fitted.hazards[i])
         end
     end
@@ -624,7 +624,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # remake splines and calculate risk periods
     for i in eachindex(model_fitted.hazards)
         if isa(model_fitted.hazards[i], _SplineHazard)
-            remake_splines!(model_fitted.hazards[i], model_fitted.parameters[i][1:model_fitted.hazards[i].nbasis])
+            remake_splines!(model_fitted.hazards[i], model_fitted.parameters[i])
             set_riskperiod!(model_fitted.hazards[i])
         end
     end

@@ -125,7 +125,7 @@ function loglik(parameters, data::ExactData; neg=true, return_ll_subj=false)
     # remake spline parameters and calculate risk periods
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i][1:hazards[i].nbasis])
+            remake_splines!(hazards[i], pars[i])
             set_riskperiod!(hazards[i])
         end
     end
@@ -155,7 +155,7 @@ function loglik(parameters, data::ExactDataAD; neg = true)
     # remake spline parameters and calculate risk periods
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i][1:hazards[i].nbasis])
+            remake_splines!(hazards[i], pars[i])
             set_riskperiod!(hazards[i])
         end
     end
@@ -339,12 +339,10 @@ function loglik(parameters, data::SMPanelData; neg = true, use_sampling_weight =
     # remake spline parameters and calculate risk periods
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i][1:hazards[i].nbasis])
+            remake_splines!(hazards[i], pars[i])
             set_riskperiod!(hazards[i])
         end
     end
-
-    println(ForwardDiff.value.(hazards[1].hazsp.spline.coefs))
 
     # compute the semi-markov log-likelihoods
     ll = 0.0
@@ -380,7 +378,7 @@ function loglik!(parameters, logliks::Vector{}, data::SMPanelData; use_sampling_
     # remake spline parameters and calculate risk periods
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i][1:hazards[i].nbasis])
+            remake_splines!(hazards[i], pars[i])
             set_riskperiod!(hazards[i])
         end
     end
