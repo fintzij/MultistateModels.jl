@@ -223,7 +223,7 @@ end
 
         # integrate over the timespan
         # boundaries = splinemod.hazards[1].timespan
-        boundaries = [0.0, 0.8]
+        boundaries = [0.0, 1.0]
         times = (boundaries[1] + delta):delta:boundaries[2]
         for t in times
             chaz_crude_extrap += MultistateModels.call_haz(t, splinemod.parameters[h], 1, splinemod.hazards[h]; give_log = false) * delta

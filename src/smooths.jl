@@ -14,44 +14,23 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
     timespan = [minimum(data.tstart), maximum(data.tstop)]
 
     # interior knots and df
-    if isnothing(hazard.knots)
-        # if no transitions observed (e.g., initializing a dataset) then use timespan
-        if !any((data.statefrom .== hazard.statefrom) .& (data.stateto .== hazard.stateto))
-            knots = copy(timespan)
-        else
-            # else use 0 and maximum sojourns
-            knots = sort(unique([0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]))
-        end
+    # if no transitions observed (e.g., initializing a dataset) then use timespan
+    if !any((data.statefrom .== hazard.statefrom) .& (data.stateto .== hazard.stateto))
+        boundaries = copy(timespan)
     else
-        # if no transitions observed (e.g., initializing a dataset) then use timespan
-        if !any((data.statefrom .== hazard.statefrom) .& (data.stateto .== hazard.stateto))
-            boundaries = copy(timespan)
-        else
-            # calculate maximum sojourn
-            boundaries = [0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]
-        end
+        # calculate maximum sojourn
+        boundaries = [0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]
+    end
 
-        knots = hazard.knots
-        ra = "→"; sf = hazard.statefrom; st = hazard.stateto
+    knots = hazard.knots
+    ra = "→"; sf = hazard.statefrom; st = hazard.stateto
 
-        if any((knots .< timespan[1]) .| (knots .> timespan[2]))
-            @warn "A knot for the $sf $ra $st transition was set outside of the time span of the data."
-        end
+    if any((knots .< timespan[1]) .| (knots .> timespan[2]))
+        @warn "A knot for the $sf $ra $st transition was set outside of the time span of the data."
+    end
 
-        if any((knots .< boundaries[1]) .| (knots .> boundaries[2]))
-            @warn "A knot for the $sf $ra $st transition was set outside of the sojourns observed in the data."
-        end
-        
-        if length(knots) == 1
-            @warn "A single knot location is specified for the $sf $ra $st transition, it will be assumed to be an interior knot. The boundaries have been set at 0 and $(boundaries[2])."
-            
-            knots = sort(unique([knots; boundaries]))
-
-        elseif hazard.add_boundaries
-            @info "Boundary knot locations have been added for the $sf $ra $st transition. The boundaries have been set at 0 and $(boundaries[2])."
-            
-            knots = sort(unique([knots; boundaries]))
-        end
+    if any((knots .< boundaries[1]) .| (knots .> boundaries[2]))
+        @warn "A knot for the $sf $ra $st transition was set outside of the sojourns observed in the data."
     end
 
     # generate Splines
