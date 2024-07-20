@@ -3,7 +3,7 @@ using Distributions
 using MultistateModels
 
 # set up the very simplest model
-nsubj = 1000
+nsubj = 100
 ntimes = 10
 dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
                 tstart = repeat(0:(1/ntimes):(1 - 1/ntimes), outer = nsubj),
@@ -20,7 +20,7 @@ mod = multistatemodel(h12e; data = dat)
 simdat = simulate(mod; paths = false, data = true)[1]
 
 # set up model for inference
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0, knots = [0.0, 1.0], extrapolation = "linear")
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = [0.1, 0.9], extrapolation = "linear")
 
 model = multistatemodel(h12; data = simdat)
 initialize_parameters!(model)

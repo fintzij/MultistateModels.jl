@@ -1,29 +1,32 @@
 """
-    DrawSamplePaths(i, model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k)
+    DrawSamplePaths(i, model, ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates, draw_subjpaths)
 
 Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
 """
-function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates)
+function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates, draw_subjpaths)
 
     for i in eachindex(model.subjectindices)
-        DrawSamplePaths!(i, model; 
-            ess_target = ess_target,
-            ess_cur = ess_cur, 
-            MaxSamplingEffort = MaxSamplingEffort,
-            samplepaths = samplepaths, 
-            loglik_surrog = loglik_surrog, 
-            loglik_target_prop = loglik_target_prop, 
-            loglik_target_cur = loglik_target_cur, 
-            ImportanceWeights = ImportanceWeights, 
-            tpm_book_surrogate = tpm_book_surrogate, 
-            hazmat_book_surrogate = hazmat_book_surrogate, 
-            books = books, 
-            npaths_additional = npaths_additional, 
-            params_cur = params_cur, 
-            surrogate = surrogate, 
-            psis_pareto_k = psis_pareto_k,
-            fbmats = fbmats,
-            absorbingstates = absorbingstates)
+        if draw_subjpaths[i]
+            DrawSamplePaths!(i, model; 
+                ess_target = ess_target,
+                ess_cur = ess_cur, 
+                MaxSamplingEffort = MaxSamplingEffort,
+                samplepaths = samplepaths, 
+                loglik_surrog = loglik_surrog, 
+                loglik_target_prop = loglik_target_prop, 
+                loglik_target_cur = loglik_target_cur, 
+                ImportanceWeights = ImportanceWeights, 
+                tpm_book_surrogate = tpm_book_surrogate, 
+                hazmat_book_surrogate = hazmat_book_surrogate, 
+                books = books, 
+                npaths_additional = npaths_additional, 
+                params_cur = params_cur, 
+                surrogate = surrogate, 
+                psis_pareto_k = psis_pareto_k,
+                fbmats = fbmats,
+                absorbingstates = absorbingstates, 
+                draw_subjpaths = draw_subjpaths)
+        end
     end
 end
 
@@ -32,7 +35,7 @@ end
 
 Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
 """
-function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates)
+function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates, draw_subjpaths)
 
     n_path_max = MaxSamplingEffort*ess_target
     keep_sampling = ess_cur[i] < ess_target
@@ -52,9 +55,9 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 
     while keep_sampling
 
-        # make sure there are at least 25 paths in order to fit pareto
+        # make sure there are at least 100 paths in order to fit pareto
         npaths = length(samplepaths[i])
-        n_add  = npaths == 0 ? maximum([50, ess_target]) : npaths_additional
+        n_add  = npaths == 0 ? maximum([100, ess_target]) : npaths_additional
 
         # augment the number of paths
         append!(samplepaths[i], Vector{SamplePath}(undef, n_add))
@@ -77,7 +80,8 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
             loglik_target_prop[i] = [first(loglik_target_prop[i]),]
             loglik_surrog[i]      = [first(loglik_surrog[i]),]
             ImportanceWeights[i]  = [1.0,]
-            ess_cur[i]            = ess_target
+            ess_cur[i]            = 1
+            draw_subjpaths[i]     = false
         else
             # raw log importance weights
             logweights = reshape(loglik_target_cur[i] - loglik_surrog[i], 1, length(loglik_target_cur[i]), 1) 
@@ -106,7 +110,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
         end
         
         # check whether to stop
-        if ess_cur[i] >= ess_target
+        if (ess_cur[i] >= ess_target) | (draw_subjpaths[i] == false)
             keep_sampling = false
         end
         

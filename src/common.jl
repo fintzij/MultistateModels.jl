@@ -177,7 +177,7 @@ mutable struct _Spline <: _SplineHazard
     chazsp::Spline
     natural_spline::Bool
     riskperiod::Vector{Float64}
-    timespan::Union{Vector{Float64}, Vector{ForwardDiff.Dual}}
+    timespan::Vector{Float64}
     nbasis::Int64
     ncovar::Int64
 end
@@ -197,7 +197,7 @@ mutable struct _SplinePH <: _SplineHazard
     chazsp::Spline
     natural_spline::Bool
     riskperiod::Vector{Float64}
-    timespan::Union{Vector{Float64}, Vector{ForwardDiff.Dual}}
+    timespan::Vector{Float64}
     nbasis::Int64
     ncovar::Int64
 end
