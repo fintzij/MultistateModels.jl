@@ -74,7 +74,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
         end
 
         # no need to keep all paths
-        if length(unique(map(x -> x.times, samplepaths[i]))) == 1
+        if allequal(loglik_surrog[i])
             samplepaths[i]        = [first(samplepaths[i]),]
             loglik_target_cur[i]  = [first(loglik_target_cur[i]),]
             loglik_target_prop[i] = [first(loglik_target_prop[i]),]

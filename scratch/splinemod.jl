@@ -1,6 +1,8 @@
 using DataFrames
 using Distributions
 using MultistateModels
+using Random
+Random.seed!(1)
 
 # set up the very simplest model
 nsubj = 100
@@ -20,7 +22,7 @@ mod = multistatemodel(h12e; data = dat)
 simdat = simulate(mod; paths = false, data = true)[1]
 
 # set up model for inference
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = [0.1, 0.9], extrapolation = "linear")
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = [0.1, 0.5], extrapolation = "linear")
 
 model = multistatemodel(h12; data = simdat)
 initialize_parameters!(model)

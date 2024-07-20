@@ -369,6 +369,12 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # counter for whether successive iterations of ascent UB below tol
     convergence_counter = 0
 
+    mll_prop = mll_cur
+    mll_change = 0.0
+    ase = 0.0
+    ascent_lb = 0.0;
+    ascent_ub = 0.0
+
     # start algorithm
     while keep_going
 
@@ -378,6 +384,16 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # optimize the monte carlo marginal likelihood
         if verbose 
             println("Optimizing...")
+            println("Iteration: $iter")
+            println("Current target ESS: $(round(ess_target;digits=2)) per-subject")
+            println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(max(length.(samplepaths)...))]")
+            println("Current estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))")
+            println("Reweighted prior estimate of the marginal log-likelihood: $(round(mll_prop;digits=3))")
+            println("Change in marginal log-likelihood: $(round(mll_change;sigdigits=3))")
+            println("MCEM Asymptotic SE: $(round(ase;sigdigits=3))")
+            println("Ascent lower bound: $(round(ascent_lb; sigdigits=3))")
+            println("Ascent upper bound: $(round(ascent_ub; sigdigits=3))")
+            println("Current estimate of the log marginal likelihood: $(round(mcem_lml(loglik_target_cur, ImportanceWeights, model.SamplingWeights);digits=3))\n")
         end
 
         if isnothing(constraints)
