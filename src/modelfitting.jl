@@ -484,7 +484,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             append!(ess_trace, ess_cur)
 
             if verbose
-                println("Iteration: $iter")
+                println("Completed iteration: $iter")
                 println("Current target ESS: $(round(ess_target;digits=2)) per-subject")
                 println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(max(length.(samplepaths)...))]")
                 println("Current estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))")
@@ -518,6 +518,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             if iter >= maxiter
                 keep_going = false
                 @warn "The maximum number of iterations ($maxiter) has been reached.\n"
+            end
+
+            if any(ess_cur .> 1000) 
+                keep_going = false
             end
         end
     end
