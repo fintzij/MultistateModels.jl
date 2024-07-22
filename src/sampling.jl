@@ -71,32 +71,39 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
         end
 
         # no need to keep all paths
-        if allequal(loglik_target_cur[i])
-            samplepaths[i]        = [first(samplepaths[i]),]
-            loglik_target_cur[i]  = [first(loglik_target_cur[i]),]
-            loglik_target_prop[i] = [first(loglik_target_prop[i]),]
-            loglik_surrog[i]      = [first(loglik_surrog[i]),]
-            ImportanceWeights[i]  = [1.0,]
-            ess_cur[i]            = ess_target
-        else
+        # if length(unique(map(x -> x.times, samplepaths[i]))) == 1
+        #     samplepaths[i]        = [first(samplepaths[i]),]
+        #     loglik_target_cur[i]  = [first(loglik_target_cur[i]),]
+        #     loglik_target_prop[i] = [first(loglik_target_prop[i]),]
+        #     loglik_surrog[i]      = [first(loglik_surrog[i]),]
+        #     ImportanceWeights[i]  = [1.0,]
+        #     ess_cur[i]            = ess_target
+        # else
             # raw log importance weights
             logweights = reshape(loglik_target_cur[i] - loglik_surrog[i], 1, length(loglik_target_cur[i]), 1) 
 
-            # might fail if not enough samples to fit pareto
-            try
-                # pareto smoothed importance weights
-                psiw = ParetoSmooth.psis(logweights; source = "other");
-
-                # save importance weights and ess
-                copyto!(ImportanceWeights[i], psiw.weights)
-                ess_cur[i] = psiw.ess[1]
-                psis_pareto_k[i] = psiw.pareto_k[1]
-
-            catch err
-                ess_cur[i] = ParetoSmooth.relative_eff(logweights)[1] * length(loglik_target_cur[i])
+            # the case when the target and the surrogate are the same
+            if all(isapprox.(logweights, 0.0; atol = sqrt(eps())))
+                fill!(ImportanceWeights[i], 1/length(logweights))
+                ess_cur[i] = ess_target
                 psis_pareto_k[i] = 0.0
+            else
+                # might fail if not enough samples to fit pareto
+                try
+                    # pareto smoothed importance weights
+                    psiw = ParetoSmooth.psis(logweights; source = "other");
+    
+                    # save importance weights and ess
+                    copyto!(ImportanceWeights[i], psiw.weights)
+                    ess_cur[i] = psiw.ess[1]
+                    psis_pareto_k[i] = psiw.pareto_k[1]
+    
+                catch err
+                    ess_cur[i] = ParetoSmooth.relative_eff(logweights)[1] * length(loglik_target_cur[i])
+                    psis_pareto_k[i] = 0.0
+                end
             end
-        end
+        # end
         
         # check whether to stop
         if ess_cur[i] >= ess_target
