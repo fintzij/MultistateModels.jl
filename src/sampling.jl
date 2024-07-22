@@ -90,7 +90,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 
             # the case when the target and the surrogate are the same
             if all(isapprox.(logweights, 0.0, atol = sqrt(eps())))
-                fill!(ImportanceWeights[i], log(1/length(logweights)))
+                fill!(ImportanceWeights[i], 1/length(logweights))
                 ess_cur[i] = ess_target
                 psis_pareto_k[i] = 0.0
             else

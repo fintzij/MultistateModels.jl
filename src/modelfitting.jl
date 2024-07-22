@@ -375,7 +375,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     mll_prop = mll_cur
     mll_change = 0.0
     ase = 0.0
-    ascent_lb = 0.0;
+    ascent_lb = 0.0
     ascent_ub = 0.0
 
     # start algorithm
