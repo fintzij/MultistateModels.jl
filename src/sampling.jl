@@ -26,6 +26,8 @@ function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamp
                 fbmats = fbmats,
                 absorbingstates = absorbingstates, 
                 draw_subjpaths = draw_subjpaths)
+        else
+            ess_cur[i] = ess_target
         end
     end
 end
@@ -80,7 +82,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
             loglik_target_prop[i] = [first(loglik_target_prop[i]),]
             loglik_surrog[i]      = [first(loglik_surrog[i]),]
             ImportanceWeights[i]  = [1.0,]
-            ess_cur[i]            = 1
+            ess_cur[i]            = ess_target
             draw_subjpaths[i]     = false
         else
             # raw log importance weights
@@ -88,7 +90,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 
             # the case when the target and the surrogate are the same
             if all(isapprox.(logweights, 0.0, atol = sqrt(eps())))
-                fill!(ImportanceWeights[i], 1/length(logweights))
+                fill!(ImportanceWeights[i], log(1/length(logweights)))
                 ess_cur[i] = ess_target
                 psis_pareto_k[i] = 0.0
             else

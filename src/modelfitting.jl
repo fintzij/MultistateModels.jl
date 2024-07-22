@@ -201,7 +201,10 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - α: standard normal quantile for asymptotic lower bound for ascent
 - γ: standard normal quantile for stopping the MCEM algorithm
 - κ: Inflation factor for target ESS per person, ESS_new = ESS_cur * κ
+- atol_ests,rtol_ests: absolute and relative tolerance for consecutive parameter estimates and log-likelihood used in determining convergence.
+- dual_criteria: should
 - ess_target_initial: initial number of particles per participant for MCEM
+- max_ess: maximum ess after which the mcem is stopped for nonconvergence
 - MaxSamplingEffort: factor of the ESS at which to break the loop for sampling additional paths
 - npaths_additional: increment for number of additional paths when augmenting the pool of paths
 - verbose: print status
@@ -209,7 +212,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-3, α = 0.05, γ = 0.05, κ = 4/3, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-3, α = 0.05, γ = 0.05, κ = 4/3, atol_ests = 1e-6, rtol_ests = 1e-6, dual_criteria = true, ess_target_initial = 100, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -383,17 +386,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         # optimize the monte carlo marginal likelihood
         if verbose 
-            println("Optimizing...")
             println("Iteration: $iter")
+            println("Starting optimization...")
             println("Current target ESS: $(round(ess_target;digits=2)) per-subject")
             println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(max(length.(samplepaths)...))]")
-            println("Current estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))")
-            println("Reweighted prior estimate of the marginal log-likelihood: $(round(mll_prop;digits=3))")
-            println("Change in marginal log-likelihood: $(round(mll_change;sigdigits=3))")
-            println("MCEM Asymptotic SE: $(round(ase;sigdigits=3))")
-            println("Ascent lower bound: $(round(ascent_lb; sigdigits=3))")
-            println("Ascent upper bound: $(round(ascent_ub; sigdigits=3))")
-            println("Current estimate of the log marginal likelihood: $(round(mcem_lml(loglik_target_cur, ImportanceWeights, model.SamplingWeights);digits=3))\n")
         end
 
         if isnothing(constraints)
@@ -515,14 +511,14 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                 end
             end
 
-            if iter >= maxiter
+            if (iter >= maxiter) | (ess_target > max_ess)
                 keep_going = false
                 @warn "The maximum number of iterations ($maxiter) has been reached.\n"
             end
 
-            if any(ess_cur .> 1000) 
-                keep_going = false
-            end
+            # if any(ess_cur .> 1000) 
+            #     keep_going = false
+            # end
         end
     end
 

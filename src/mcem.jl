@@ -49,7 +49,7 @@ end
 """
     var_ris(l, w)
 
-Helper to compute the variance of two means estimated via importance sampling. 
+Helper to compute the variance of the ratio of two means estimated via importance sampling. 
 
 # Arguments:
 
