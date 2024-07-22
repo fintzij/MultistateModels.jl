@@ -57,7 +57,7 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
         @error "The extrapolation method for splines must be one of `flat` or `linear`"
     end
 
-    extrap_method = hazard.extrapolation == "linear" ? BSplineKit.Linear() : BSplineKit.Flat()
+    extrap_method = hazard.extrapolation == "linear" ? BSplineKit.SplineExtrapolations.Linear() : BSplineKit.SplineExtrapolations.Flat()
     sphaz = SplineExtrapolation(Spline(undef, B), extrap_method)
     spchaz = integral(sphaz.spline)
 
@@ -87,7 +87,7 @@ Calculate and set the risk period for when a spline intensity is greater than ze
 """
 function set_riskperiod!(hazard::_SplineHazard)
 
-    if hazard.hazsp.method == BSplineKit.Linear()
+    if hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
         # get spline boundaries
         sp_bounds = boundaries(hazard.hazsp.spline.basis)
         

@@ -427,6 +427,14 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             # increase the target ess for the factor κ
             ess_target = ceil(κ*ess_target)
 
+            # no need to sample subjects with a single possible path
+            ess_cur[findall(length.(ImportanceWeights) .== 1)] .= ess_target
+            # for i in 1:nsubj
+            #     if length(ImportanceWeights[i] == 1)
+            #         ess_cur[i] = ess_target
+            #     end
+            # end
+
             # ensure that ess per person is sufficient
             DrawSamplePaths!(model; 
                 ess_target = ess_target, 

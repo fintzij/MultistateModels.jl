@@ -274,7 +274,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = 
 
     elseif (u <= sp_bounds[1]) || (l >= sp_bounds[2])
         # only extrapolation
-        if _hazard.hazsp.method == BSplineKit.Linear()
+        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
             # trapezoid
             chaz = (u - l) * mean([_hazard.hazsp(l), _hazard.hazsp(u)]) 
 
@@ -291,7 +291,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = 
         # cumulative hazard at l
         l_chaz = 0.0
 
-        if _hazard.hazsp.method == BSplineKit.Linear()
+        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
             # trapezoids
             l_chaz += l < sp_bounds[1] ? 
                         (l - riskstart) * mean(_hazard.hazsp.([l, riskstart])) : 
@@ -311,7 +311,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = 
         # cumulative hazard at u
         u_chaz = 0.0
 
-        if _hazard.hazsp.method == BSplineKit.Linear()
+        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
             u_chaz += (sp_bounds[1] - riskstart) * mean(_hazard.hazsp.([sp_bounds[1], riskstart]))
 
         elseif _hazard.hazsp.method == BSplineKit.Flat()
@@ -324,7 +324,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = 
         elseif u > sp_bounds[2]
             u_chaz += _hazard.chazsp(sp_bounds[2]) 
 
-            if _hazard.hazsp.method == BSplineKit.Linear()
+            if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
                 u_chaz += (u - sp_bounds[2]) * mean(_hazard.hazsp.([u, sp_bounds[2]])) 
                 
             elseif _hazard.hazsp.method == BSplineKit.Flat()
@@ -379,7 +379,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log 
 
     elseif (u <= sp_bounds[1]) || (l >= sp_bounds[2])
         # only extrapolation
-        if _hazard.hazsp.method == BSplineKit.Linear()
+        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
             # trapezoid
             chaz = (u - l) * mean([_hazard.hazsp(l), _hazard.hazsp(u)]) 
 
@@ -396,7 +396,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log 
         # cumulative hazard at l
         l_chaz = 0.0
 
-        if _hazard.hazsp.method == BSplineKit.Linear()
+        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
             # trapezoids
             l_chaz += l < sp_bounds[1] ? 
                         (l - riskstart) * mean(_hazard.hazsp.([l, riskstart])) : 
@@ -416,7 +416,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log 
         # cumulative hazard at u
         u_chaz = 0.0
 
-        if _hazard.hazsp.method == BSplineKit.Linear()
+        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
             u_chaz += (sp_bounds[1] - riskstart) * mean(_hazard.hazsp.([sp_bounds[1], riskstart]))
 
         elseif _hazard.hazsp.method == BSplineKit.Flat()
@@ -429,7 +429,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log 
         elseif u > sp_bounds[2]
             u_chaz += _hazard.chazsp(sp_bounds[2]) 
 
-            if _hazard.hazsp.method == BSplineKit.Linear()
+            if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
                 u_chaz += (u - sp_bounds[2]) * mean(_hazard.hazsp.([u, sp_bounds[2]])) 
                 
             elseif _hazard.hazsp.method == BSplineKit.Flat()

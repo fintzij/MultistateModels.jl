@@ -3,7 +3,8 @@ using Distributions
 using MultistateModels
 using Random
 
-Random.seed!(123)
+# throws a psis error
+Random.seed!(126)
 
 # set up the very simplest model
 nsubj = 100
@@ -25,7 +26,7 @@ set_parameters!(mod, (h12 = (log(0.8), log(0.8)),))
 simdat = simulate(mod; paths = false, data = true)[1]
 
 # set up model for inference
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = [0.0, 0.5], extrapolation = "linear")
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0, knots = [0.0, 1.0], extrapolation = "flat")
 
 model = multistatemodel(h12; data = simdat)
 initialize_parameters!(model)
