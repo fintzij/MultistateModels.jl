@@ -72,7 +72,9 @@ function mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, Samp
 
     VarRis = 0.0
     for i in eachindex(SamplingWeights)
-        VarRis += var_ris(loglik_target_prop[i] - loglik_target_cur[i], ImportanceWeights[i]) / length(ImportanceWeights[i]) * SamplingWeights[i]
+        if length(ImportanceWeights[i]) != 1
+            VarRis += var_ris(loglik_target_prop[i] - loglik_target_cur[i], ImportanceWeights[i]) / length(ImportanceWeights[i]) * SamplingWeights[i]
+        end
     end
 
     # return the asymptotic standard error

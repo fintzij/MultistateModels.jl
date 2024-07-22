@@ -201,8 +201,6 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - α: standard normal quantile for asymptotic lower bound for ascent
 - γ: standard normal quantile for stopping the MCEM algorithm
 - κ: Inflation factor for target ESS per person, ESS_new = ESS_cur * κ
-- atol_ests,rtol_ests: absolute and relative tolerance for consecutive parameter estimates and log-likelihood used in determining convergence.
-- dual_criteria: should
 - ess_target_initial: initial number of particles per participant for MCEM
 - max_ess: maximum ess after which the mcem is stopped for nonconvergence
 - MaxSamplingEffort: factor of the ESS at which to break the loop for sampling additional paths
@@ -212,7 +210,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-3, α = 0.05, γ = 0.05, κ = 4/3, atol_ests = 1e-6, rtol_ests = 1e-6, dual_criteria = true, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-3, α = 0.05, γ = 0.05, κ = 1.2, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -429,11 +427,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
             # no need to sample subjects with a single possible path
             ess_cur[findall(length.(ImportanceWeights) .== 1)] .= ess_target
-            # for i in 1:nsubj
-            #     if length(ImportanceWeights[i] == 1)
-            #         ess_cur[i] = ess_target
-            #     end
-            # end
 
             # ensure that ess per person is sufficient
             DrawSamplePaths!(model; 
