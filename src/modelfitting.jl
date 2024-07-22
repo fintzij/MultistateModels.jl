@@ -466,7 +466,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             for i in 1:nsubj
                 if length(ImportanceWeights[i]) != 1
                     logweights = reshape(loglik_target_cur[i] - loglik_surrog[i], 1, length(loglik_target_cur[i]), 1) 
-                    psiw = psis(logweights; source = "other");
+                    psiw = ParetoSmooth.psis(logweights; source = "other");
                 # save importance weights and ess
                     copyto!(ImportanceWeights[i], psiw.weights)
                     ess_cur[i] = psiw.ess[1]

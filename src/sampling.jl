@@ -97,7 +97,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
                 # might fail if not enough samples to fit pareto
                 try
                     # pareto smoothed importance weights
-                    psiw = psis(logweights; source = "other");
+                    psiw = ParetoSmooth.psis(logweights; source = "other");
 
                     # save importance weights and ess
                     copyto!(ImportanceWeights[i], psiw.weights)
