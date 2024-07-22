@@ -212,7 +212,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-3, α = 0.05, γ = 0.05, κ = 4/3, atol_ests = 1e-6, rtol_ests = 1e-6, dual_criteria = true, ess_target_initial = 100, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-3, α = 0.05, γ = 0.05, κ = 4/3, atol_ests = 1e-6, rtol_ests = 1e-6, dual_criteria = true, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
