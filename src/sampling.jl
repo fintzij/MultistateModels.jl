@@ -52,9 +52,9 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 
     while keep_sampling
 
-        # make sure there are at least 100 paths in order to fit pareto
+        # make sure there are at least 50 paths in order to fit pareto
         npaths = length(samplepaths[i])
-        n_add  = npaths == 0 ? maximum([100, ess_target]) : npaths_additional
+        n_add  = npaths == 0 ? maximum([50, ess_target]) : npaths_additional
 
         # augment the number of paths
         append!(samplepaths[i], Vector{SamplePath}(undef, n_add))
@@ -71,14 +71,14 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
         end
 
         # no need to keep all paths
-        # if length(unique(map(x -> x.times, samplepaths[i]))) == 1
-        #     samplepaths[i]        = [first(samplepaths[i]),]
-        #     loglik_target_cur[i]  = [first(loglik_target_cur[i]),]
-        #     loglik_target_prop[i] = [first(loglik_target_prop[i]),]
-        #     loglik_surrog[i]      = [first(loglik_surrog[i]),]
-        #     ImportanceWeights[i]  = [1.0,]
-        #     ess_cur[i]            = ess_target
-        # else
+        if length(unique(map(x -> x.times, samplepaths[i]))) == 1
+            samplepaths[i]        = [first(samplepaths[i]),]
+            loglik_target_cur[i]  = [first(loglik_target_cur[i]),]
+            loglik_target_prop[i] = [first(loglik_target_prop[i]),]
+            loglik_surrog[i]      = [first(loglik_surrog[i]),]
+            ImportanceWeights[i]  = [1.0,]
+            ess_cur[i]            = ess_target
+        else
             # raw log importance weights
             logweights = reshape(loglik_target_cur[i] - loglik_surrog[i], 1, length(loglik_target_cur[i]), 1) 
 
@@ -103,7 +103,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
                     psis_pareto_k[i] = 0.0
                 end
             end
-        # end
+        end
         
         # check whether to stop
         if ess_cur[i] >= ess_target

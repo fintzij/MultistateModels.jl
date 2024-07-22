@@ -510,10 +510,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                 keep_going = false
                 @warn "The maximum number of iterations ($maxiter) has been reached.\n"
             end
-
-            # if any(ess_cur .> 1000) 
-            #     keep_going = false
-            # end
         end
     end
 

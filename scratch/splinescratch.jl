@@ -5,7 +5,6 @@ using ForwardDiff
 using LinearAlgebra
 using Plots
 using Random
-using Setfield
 
 # set up basis
 # x = sort(rand(Uniform(0.25, 0.75), 20))
@@ -114,3 +113,9 @@ D = diff(S)
 
 D(-1)
 ForwardDiff.derivative(S, -1)
+
+# experiment with barrier functions
+B = BSplineBasis(BSplineOrder(2), [0.3, 0.5, 0.7])
+S = Spline(B, [0.0, 1, 0.0])
+E = SplineExtrapolation(S, Linear())
+der = diff(E)
