@@ -325,9 +325,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         println("Initializing sample paths ...\n")
     end
 
-    # flag for whether to sample paths for a participant
-    draw_subjpaths = fill(true, nsubj)
-
     DrawSamplePaths!(model; 
         ess_target = ess_target, 
         ess_cur = ess_cur, 
@@ -345,8 +342,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         surrogate = surrogate, 
         psis_pareto_k = psis_pareto_k,
         fbmats = fbmats,
-        absorbingstates = absorbingstates,
-        draw_subjpaths = draw_subjpaths)
+        absorbingstates = absorbingstates)
     
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
@@ -449,8 +445,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                 surrogate = surrogate,
                 psis_pareto_k = psis_pareto_k,
                 fbmats = fbmats,
-                absorbingstates = absorbingstates,
-                draw_subjpaths = draw_subjpaths)
+                absorbingstates = absorbingstates)
         else
             # increment the iteration
             iter += 1
