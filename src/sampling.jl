@@ -52,9 +52,9 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 
     while keep_sampling
 
-        # make sure there are at least 50 paths in order to fit pareto
+        # make sure there are at least 100 paths in order to fit pareto
         npaths = length(samplepaths[i])
-        n_add  = npaths == 0 ? maximum([50, ess_target]) : npaths_additional
+        n_add  = npaths == 0 ? maximum([100, ess_target]) : npaths_additional
 
         # augment the number of paths
         append!(samplepaths[i], Vector{SamplePath}(undef, n_add))

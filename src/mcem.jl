@@ -73,7 +73,7 @@ function mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, Samp
     VarRis = 0.0
     for i in eachindex(SamplingWeights)
         if length(ImportanceWeights[i]) != 1
-            VarRis += var_ris(loglik_target_prop[i] - loglik_target_cur[i], ImportanceWeights[i]) / length(ImportanceWeights[i]) * SamplingWeights[i]
+            VarRis += var_ris(loglik_target_prop[i] - loglik_target_cur[i], ImportanceWeights[i]) / length(ImportanceWeights[i]) * SamplingWeights[i]^2
         end
     end
 
