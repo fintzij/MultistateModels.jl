@@ -79,6 +79,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         model.markovsurrogate,
         sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
+        nothing,
         model.modelcall)
 
     # remake splines and calculate risk periods
@@ -181,6 +182,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         model.markovsurrogate,
         sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
+        nothing,
         model.modelcall)
 end
 
@@ -210,7 +212,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-3, α = 0.05, γ = 0.05, κ = 1.2, ess_target_initial = 100, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-3, α = 0.05, γ = 0.05, κ = 1.2, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -258,12 +260,24 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
     # initialize containers
     samplepaths     = [sizehint!(Vector{SamplePath}(), ess_target_initial * MaxSamplingEffort * 20) for i in 1:nsubj]
+
+    # surrogate log likelihood
     loglik_surrog   = [sizehint!(Vector{Float64}(undef, 0), 
         ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+
+    # target log likelihood - current parameters
     loglik_target_cur  = [sizehint!(Vector{Float64}(undef, 0), 
         ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+
+    # target log likelihood - proposed parameters
     loglik_target_prop = [sizehint!(Vector{Float64}(undef, 0), 
         ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+
+    # Log (unnormalize) importance weights
+    _logImportanceWeights  = [sizehint!(Vector{Float64}(undef, 0), 
+        ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+
+    # exponentiated and normalized importance weights
     ImportanceWeights  = [sizehint!(Vector{Float64}(undef, 0), 
         ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
 
@@ -331,6 +345,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         loglik_surrog = loglik_surrog, 
         loglik_target_prop = loglik_target_prop, 
         loglik_target_cur = loglik_target_cur, 
+        _logImportanceWeights = _logImportanceWeights, 
         ImportanceWeights = ImportanceWeights, 
         tpm_book_surrogate = tpm_book_surrogate, 
         hazmat_book_surrogate = hazmat_book_surrogate, 
@@ -437,6 +452,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                 loglik_surrog = loglik_surrog, 
                 loglik_target_prop = loglik_target_prop, 
                 loglik_target_cur = loglik_target_cur, 
+                _logImportanceWeights = _logImportanceWeights, 
                 ImportanceWeights = ImportanceWeights,   
                 tpm_book_surrogate = tpm_book_surrogate,   
                 hazmat_book_surrogate = hazmat_book_surrogate, 
@@ -460,13 +476,39 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             
             # recalculate the importance ImportanceWeights and ess
             for i in 1:nsubj
-                if length(ImportanceWeights[i]) != 1
-                    logweights = reshape(loglik_target_cur[i] - loglik_surrog[i], 1, length(loglik_target_cur[i]), 1) 
-                    psiw = ParetoSmooth.psis(logweights; source = "other");
-                # save importance weights and ess
-                    copyto!(ImportanceWeights[i], psiw.weights)
-                    ess_cur[i] = psiw.ess[1]
-                    psis_pareto_k[i] = psiw.pareto_k[1]
+                # recompute the log unnormalized importance weight
+                _logImportanceWeights[i] = loglik_target_cur[i] .- loglik_surrog[i]
+
+                if length(_logImportanceWeights[i]) == 1
+                    # make sure the ESS is equal to the target
+                    ImportanceWeights[i] = [1.0,]
+                    ess_cur[i] = ess_target
+
+                elseif length(_logImportanceWeights[i]) != 1
+                    if all(isapprox.(_logImportanceWeights[i], 0.0; atol = sqrt(eps())))
+                        fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))
+                        ess_cur[i] = ess_target
+                        psis_pareto_k[i] = 0.0
+                    else
+                        # might fail if not enough samples to fit pareto
+                        try
+                            # pareto smoothed importance weights
+                            psiw = ParetoSmooth.psis(reshape(copy(_logImportanceWeights[i]), 1, length(_logImportanceWeights[i]), 1); source = "other");
+            
+                            # save normalized importance weights and ess
+                            copyto!(ImportanceWeights[i], psiw.weights)
+                            ess_cur[i] = psiw.ess[1]
+                            psis_pareto_k[i] = psiw.pareto_k[1]
+            
+                        catch err
+                            # exponentiate and normalize the unnormalized log weights
+                            copyto!(ImportanceWeights[i], normalize(exp.(_logImportanceWeights[i]), 1))
+
+                            # calculate the ess
+                            ess_cur[i] = 1 / sum(ImportanceWeights[i] .^ 2)
+                            psis_pareto_k[i] = 1.0
+                        end
+                    end
                 end
             end
 
@@ -486,7 +528,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                 println("Ascent lower bound: $(round(ascent_lb; sigdigits=3))")
                 println("Ascent upper bound: $(round(ascent_ub; sigdigits=3))")
                 println("Current estimate of the log marginal likelihood: $(round(mcem_lml(loglik_target_cur, ImportanceWeights, model.SamplingWeights);digits=3))\n")
-                #println("Time: $(Dates.format(now(), "HH:MM"))\n")
             end
 
             # check convergence
@@ -632,6 +673,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         surrogate,
         ConvergenceRecords,
         ProposedPaths,
+        ImportanceWeights,
         model.modelcall)
 
     # remake splines and calculate risk periods

@@ -3,7 +3,7 @@
 
 Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
 """
-function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates)
+function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, _logImportanceWeights, ImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates)
 
     for i in eachindex(model.subjectindices)
         DrawSamplePaths!(i, model; 
@@ -14,6 +14,7 @@ function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamp
             loglik_surrog = loglik_surrog, 
             loglik_target_prop = loglik_target_prop, 
             loglik_target_cur = loglik_target_cur, 
+            _logImportanceWeights = _logImportanceWeights, 
             ImportanceWeights = ImportanceWeights, 
             tpm_book_surrogate = tpm_book_surrogate, 
             hazmat_book_surrogate = hazmat_book_surrogate, 
@@ -32,9 +33,11 @@ end
 
 Draw additional sample paths until sufficient ess or until the maximum number of paths is reached
 """
-function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, ImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates)
+function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, _logImportanceWeights, ImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates)
 
     n_path_max = MaxSamplingEffort*ess_target
+
+    # sample new paths if the current ess is less than the target
     keep_sampling = ess_cur[i] < ess_target
 
     # subject data
@@ -54,53 +57,65 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 
         # make sure there are at least 100 paths in order to fit pareto
         npaths = length(samplepaths[i])
-        n_add  = npaths == 0 ? maximum([100, ess_target]) : npaths_additional
+        n_add  = npaths == 0 ? maximum([50, ess_target]) : npaths_additional
 
         # augment the number of paths
         append!(samplepaths[i], Vector{SamplePath}(undef, n_add))
         append!(loglik_surrog[i], zeros(n_add))
         append!(loglik_target_prop[i], zeros(n_add))
         append!(loglik_target_cur[i], zeros(n_add))
+        append!(_logImportanceWeights[i], zeros(n_add))
         append!(ImportanceWeights[i], zeros(n_add))
 
         # sample new paths and compute log likelihoods
         for j in npaths.+(1:n_add)
+            # path conditional on data
             samplepaths[i][j]       = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2], fbmats, absorbingstates)
+
+            # surrogate
             loglik_surrog[i][j]     = loglik(surrogate.parameters, samplepaths[i][j], surrogate.hazards, model)
+            
+            # target
             loglik_target_cur[i][j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i][j], model.hazards, model) 
+            
+            # unnormalized log importance weight
+            _logImportanceWeights[i][j] = loglik_target_cur[i][j] - loglik_surrog[i][j]
         end
 
         # no need to keep all paths
-        if length(unique(map(x -> x.times, samplepaths[i]))) == 1
+        if allequal(loglik_surrog[i])
             samplepaths[i]        = [first(samplepaths[i]),]
             loglik_target_cur[i]  = [first(loglik_target_cur[i]),]
             loglik_target_prop[i] = [first(loglik_target_prop[i]),]
             loglik_surrog[i]      = [first(loglik_surrog[i]),]
-            ImportanceWeights[i]  = [1.0,]
             ess_cur[i]            = ess_target
-        else
-            # raw log importance weights
-            logweights = reshape(loglik_target_cur[i] - loglik_surrog[i], 1, length(loglik_target_cur[i]), 1) 
+            ImportanceWeights[i]  = [1.0,]
+            _logImportanceWeights[i] = [first(_logImportanceWeights[i]),]
 
+        else
             # the case when the target and the surrogate are the same
-            if all(isapprox.(logweights, 0.0; atol = sqrt(eps())))
-                fill!(ImportanceWeights[i], 1/length(logweights))
+            if all(isapprox.(_logImportanceWeights[i], 0.0; atol = sqrt(eps())))
+                fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))
                 ess_cur[i] = ess_target
                 psis_pareto_k[i] = 0.0
             else
                 # might fail if not enough samples to fit pareto
                 try
                     # pareto smoothed importance weights
-                    psiw = ParetoSmooth.psis(logweights; source = "other");
+                    psiw = ParetoSmooth.psis(reshape(copy(_logImportanceWeights[i]), 1, length(_logImportanceWeights[i]), 1); source = "other");
     
-                    # save importance weights and ess
+                    # save normalized importance weights and ess
                     copyto!(ImportanceWeights[i], psiw.weights)
                     ess_cur[i] = psiw.ess[1]
                     psis_pareto_k[i] = psiw.pareto_k[1]
     
                 catch err
-                    ess_cur[i] = ParetoSmooth.relative_eff(logweights)[1] * length(loglik_target_cur[i])
-                    psis_pareto_k[i] = 0.0
+                    # exponentiate and normalize the unnormalized log weights
+                    copyto!(ImportanceWeights[i], normalize(exp.(_logImportanceWeights[i]), 1))
+
+                    # calculate the ess
+                    ess_cur[i] = 1 / sum(ImportanceWeights[i] .^ 2)
+                    psis_pareto_k[i] = 1.0
                 end
             end
         end
@@ -237,7 +252,7 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
             end
     
             # no need to keep all paths if redundant
-            if allequal(loglik_target[i])
+            if allequal(loglik_surrog[i])
                 samplepaths[i]       = [first(samplepaths[i]),]
                 loglik_target[i]     = [first(loglik_target[i]),]
                 loglik_surrog[i]     = [first(loglik_surrog[i]),]
@@ -249,7 +264,7 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
                     subj_ess[i] = length(samplepaths[i])
                 else
                     # raw log importance weights
-                    logweights = reshape(loglik_target[i] - loglik_surrog[i], 1, length(loglik_target[i]), 1) 
+                    logweights = reshape(copy(loglik_target[i] - loglik_surrog[i]), 1, length(loglik_target[i]), 1) 
 
                      # might fail if not enough samples to fit pareto, e.g. a single sample if only one path is possible.
                     if any(logweights .!= 0.0)
@@ -264,6 +279,7 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
                                 subj_pareto_k[i] = psiw.pareto_k[1]
 
                             catch err
+                                copyto!(ImportanceWeights[i], normalize(exp.(logweights), 1))
                                 subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
                             end
                         else
@@ -406,7 +422,7 @@ function draw_paths(model::MultistateProcess, npaths; paretosmooth = true, retur
         end
 
         # no need to keep all paths if redundant
-        if allequal(loglik_target[i])
+        if allequal(loglik_surrog[i])
             samplepaths[i]       = [first(samplepaths[i]),]
             loglik_target[i]     = [first(loglik_target[i]),]
             loglik_surrog[i]     = [first(loglik_surrog[i]),]
@@ -418,7 +434,7 @@ function draw_paths(model::MultistateProcess, npaths; paretosmooth = true, retur
                 subj_ess[i] = length(samplepaths[i])
             else
                 # raw log importance weights
-                logweights = reshape(ImportanceWeights[i], 1, length(loglik_target[i]), 1) 
+                logweights = reshape(copy(log.(ImportanceWeights[i])), 1, length(loglik_target[i]), 1) 
 
                 # might fail if not enough samples to fit pareto
                 if any(logweights .!= 0.0)
