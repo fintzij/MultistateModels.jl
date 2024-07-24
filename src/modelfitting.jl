@@ -16,7 +16,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         # get estimates
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
-        sol  = solve(prob, Newton())
+        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
         
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success)
@@ -50,7 +50,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
 
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_multistate)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths), lcons = constraints.lcons, ucons = constraints.ucons)
-        sol  = solve(prob, IPNewton())
+        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
 
         # no hessian when there are constraints
         if compute_vcov == true
@@ -66,7 +66,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
     model_fitted = MultistateModelFitted(
         model.data,
         VectorOfVectors(sol.u, model.parameters.elem_ptr),
-        likelihoods(loglik = -sol.minimum, subj_lml = ll_subj),
+        (loglik = -sol.minimum, subj_lml = ll_subj),
         vcov,
         model.hazards,
         model.totalhazards,
@@ -77,7 +77,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
+        (solution = sol,), # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall)
 
@@ -90,7 +90,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
     end
 
     # return fitted object
-    return model_fitted
+    return model_fitted;
 end
 
 
@@ -117,7 +117,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         # get estimates
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-        sol  = solve(prob, Newton())
+        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
 
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success)
@@ -151,7 +151,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_markov)
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books), lcons = constraints.lcons, ucons = constraints.ucons)
-        sol  = solve(prob, IPNewton())
+        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
 
         # no hessian when there are constraints
         if compute_vcov == true
@@ -161,8 +161,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     end
 
     # compute loglikelihood at the estimate
-    logliks = likelihoods(loglik = -sol.minimum, 
-                subj_lml = loglik(sol.u, MPanelData(model, books); return_ll_subj = true))
+    logliks = (loglik = -sol.minimum, subj_lml = loglik(sol.u, MPanelData(model, books); return_ll_subj = true))
 
     # wrap results
     return MultistateModelFitted(
@@ -179,9 +178,9 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         model.SamplingWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
-        sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
+        (solution = sol,), # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
-        model.modelcall)
+        model.modelcall);
 end
 
 
@@ -233,6 +232,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # check that κ is greater than 1
     if κ <= 1
         error("κ must be greater than 1.")
+    end
+
+    # throw a warning if trying to fit a spline model where the degree is 0 for all splines
+    if all(map(x -> (isa(x, _MarkovHazard) | (isa(x, _SplineHazard) & (x.degree == 0) & (length(x.knots) == 2))), model.hazards))
+        @error "Attempting to fit a Markov model via MCEM. Recode degree 0 splines as exponential hazards and refit."
     end
 
     # MCEM initialization
@@ -367,7 +371,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # print output
     if verbose
         println("Initial target ESS: $(round(ess_target;digits=2)) per-subject")
-        println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(max(length.(samplepaths)...))]")
+        println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(maximum(length.(samplepaths)))]")
         println("Estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))\n")
 
         println("Starting Monte Carlo EM...\n")
@@ -375,7 +379,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
     # counter for whether successive iterations of ascent UB below tol
     # convergence_counter = 0
-
     mll_prop = mll_cur
     mll_change = 0.0
     ase = 0.0
@@ -390,18 +393,14 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         # optimize the monte carlo marginal likelihood
         if verbose 
-            println("Iteration: $iter")
+            println("Iteration: $(maximum([1, iter]))")
             println("Starting optimization...")
             println("Current target ESS: $(round(ess_target;digits=2)) per-subject")
-            println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(max(length.(samplepaths)...))]")
+            println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(maximum(length.(samplepaths)))]")
         end
-
-        if isnothing(constraints)
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Newton()) # hessian-based
-        else
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), IPNewton())
-        end
-
+        
+        # optimize
+        params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Ipopt.Optimizer(); print_level = 0) # hessian-based
         params_prop = params_prop_optim.u
 
         # just make sure they're not equal
@@ -651,8 +650,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     subj_ll = mcem_lml_subj(loglik_target_cur, ImportanceWeights)
     data_ll = sum(subj_ll .* model.SamplingWeights)
 
-    logliks = likelihoods(loglik = data_ll,
-                          subj_lml = subj_ll)
+    logliks = (loglik = data_ll, subj_lml = subj_ll)
 
     # return convergence records
     ConvergenceRecords = return_ConvergenceRecords ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
@@ -688,5 +686,5 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     end
 
     # return fitted object
-    return model_fitted
+    return model_fitted;
 end

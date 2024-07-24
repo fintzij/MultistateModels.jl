@@ -49,13 +49,12 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
         # subject data
         subj_tpm_map = view(books[2], subj_inds, :)
         subj_emat    = view(model.emat, subj_inds, :)
-        #subj_fbmats  = view(fbmats, i)
         ForwardFiltering!(fbmats[i], subj_dat, tpm_book_surrogate, subj_tpm_map, subj_emat)
     end
 
+    # sample
     while keep_sampling
-
-        # make sure there are at least 100 paths in order to fit pareto
+        # make sure there are at least 50 paths in order to fit pareto
         npaths = length(samplepaths[i])
         n_add  = npaths == 0 ? maximum([50, ess_target]) : npaths_additional
 
@@ -96,7 +95,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
             # the case when the target and the surrogate are the same
             if all(isapprox.(_logImportanceWeights[i], 0.0; atol = sqrt(eps())))
                 fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))
-                ess_cur[i] = ess_target
+                ess_cur[i] = length(ImportanceWeights[i])
                 psis_pareto_k[i] = 0.0
             else
                 # might fail if not enough samples to fit pareto

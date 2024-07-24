@@ -9,10 +9,12 @@ using Distributions
 using ElasticArrays
 using ExponentialUtilities
 using ForwardDiff
+using Ipopt
 using LinearAlgebra
 using MacroTools
 using Optim # for simulation - keep
 using Optimization # for fitting - keep
+using OptimizationMOI
 using OrderedCollections
 using OptimizationOptimJL
 using ParetoSmooth

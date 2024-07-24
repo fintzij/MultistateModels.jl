@@ -91,6 +91,7 @@ function fit_surrogate(model; surrogate_parameters = nothing, surrogate_constrai
     if verbose
         println("Obtaining the MLE for the Markov surrogate model ...\n")
     end
+    
     surrogate_fitted = fit(surrogate_model; constraints = surrogate_constraints, compute_vcov = false)
 
     return surrogate_fitted
