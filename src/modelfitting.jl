@@ -79,7 +79,6 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         model.markovsurrogate,
         sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
-        nothing,
         model.modelcall)
 
     # remake splines and calculate risk periods
@@ -182,7 +181,6 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         model.markovsurrogate,
         sol.original, # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
-        nothing,
         model.modelcall)
 end
 
@@ -670,7 +668,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         surrogate,
         ConvergenceRecords,
         ProposedPaths,
-        ImportanceWeights,
         model.modelcall)
 
     # remake splines and calculate risk periods

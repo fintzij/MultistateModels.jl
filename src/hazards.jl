@@ -245,7 +245,7 @@ Return the spline cause-specific hazards.
 function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
 
     # compute the hazard
-    haz = (_hazard.riskperiod[1] < t < _hazard.riskperiod[2]) ? _hazard.hazsp(t) : sqrt(eps())
+    haz = (_hazard.riskperiod[1] < t < _hazard.riskperiod[2]) ? _hazard.hazsp(t) : 0.0
 
     # return the log hazard
     give_log ? log(haz) : haz
