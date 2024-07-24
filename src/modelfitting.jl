@@ -401,6 +401,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         
         # optimize
         params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Ipopt.Optimizer(); print_level = 0) # hessian-based
+
         params_prop = params_prop_optim.u
 
         # just make sure they're not equal
@@ -476,8 +477,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
                 if length(_logImportanceWeights[i]) == 1
                     # make sure the ESS is equal to the target
-                    # ImportanceWeights[i] = [1.0,]
-                    ImportanceWeights[i] = exp.(_logImportanceWeights[i])
+                    ImportanceWeights[i] = [1.0,]
                     ess_cur[i] = ess_target
 
                 elseif length(_logImportanceWeights[i]) != 1
