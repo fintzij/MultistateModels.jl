@@ -69,10 +69,10 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
         # sample new paths and compute log likelihoods
         for j in npaths.+(1:n_add)
             # path conditional on data
-            samplepaths[i][j]       = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2], fbmats, absorbingstates)
+            samplepaths[i][j] = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2], fbmats, absorbingstates)
 
             # surrogate
-            loglik_surrog[i][j]     = loglik(surrogate.parameters, samplepaths[i][j], surrogate.hazards, model)
+            loglik_surrog[i][j] = loglik(surrogate.parameters, samplepaths[i][j], surrogate.hazards, model)
             
             # target
             loglik_target_cur[i][j] = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), samplepaths[i][j], model.hazards, model) 
@@ -93,7 +93,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
 
         else
             # the case when the target and the surrogate are the same
-            if all(isapprox.(_logImportanceWeights[i], 0.0; atol = sqrt(eps())))
+            if all(iszero.(_logImportanceWeights[i]))
                 fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))
                 ess_cur[i] = length(ImportanceWeights[i])
                 psis_pareto_k[i] = 0.0

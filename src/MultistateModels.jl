@@ -16,7 +16,6 @@ using Optim # for simulation - keep
 using Optimization # for fitting - keep
 using OptimizationMOI
 using OrderedCollections
-using OptimizationOptimJL
 using ParetoSmooth
 using Preferences
 using QuadGK

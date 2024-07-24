@@ -7,7 +7,7 @@ Random.seed!(6)
 
 # set up the very simplest model
 nsubj = 100
-ntimes = 100
+ntimes = 10
 dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
                 tstart = repeat(0:(1/ntimes):(1 - 1/ntimes), outer = nsubj),
                 tstop = repeat((1/ntimes):(1/ntimes):1, outer = nsubj),
@@ -26,12 +26,12 @@ set_parameters!(mod, (h12 = (log(0.8), log(0.8)),))
 simdat = simulate(mod; paths = false, data = true)[1]
 
 # set up model for inference
-h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2; degree = 0, knots = [0.0, 1.0], extrapolation = "linear")
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0, knots = [0.0, 1.0], extrapolation = "linear")
 
 model = multistatemodel(h12; data = simdat)
 initialize_parameters!(model)
 
-model_fitted = fit(model; return_ProposedPaths = true)
+model_fitted = fit(model)
 
 plot(0:0.01:1, compute_hazard(0:0.01:1, mod, :h12))
 plot!(0:0.01:1, compute_hazard(0:0.01:1, model_fitted, :h12))
