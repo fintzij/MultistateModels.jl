@@ -235,7 +235,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     end
 
     # throw a warning if trying to fit a spline model where the degree is 0 for all splines
-    if all(map(x -> (isa(x, _MarkovHazard) | (isa(x, _SplineHazard) & (x.degree == 0) & (length(x.knots) == 2))), model.hazards))
+    if all(map(x -> (isa(x, _MarkovHazard) | (isa(x, _SplineHazard) && (x.degree == 0) && (length(x.knots) == 2))), model.hazards))
         @error "Attempting to fit a Markov model via MCEM. Recode degree 0 splines as exponential hazards and refit."
     end
 
@@ -401,7 +401,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         
         # optimize
         params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Ipopt.Optimizer(); print_level = 0) # hessian-based
-
+        
         params_prop = params_prop_optim.u
 
         # just make sure they're not equal

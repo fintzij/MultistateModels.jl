@@ -3,7 +3,7 @@ using Distributions
 using MultistateModels
 using Random
 
-# Random.seed!(6)
+Random.seed!(6)
 
 # set up the very simplest model
 nsubj = 100
@@ -26,7 +26,7 @@ set_parameters!(mod, (h12 = (log(0.8), log(0.8)),))
 simdat = simulate(mod; paths = false, data = true)[1]
 
 # set up model for inference
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = [0.01, 0.1, 0.5, 0.95], extrapolation = "linear")
+h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2; degree = 0, knots = [0.0, 1.0], extrapolation = "linear")
 
 model = multistatemodel(h12; data = simdat)
 initialize_parameters!(model)
