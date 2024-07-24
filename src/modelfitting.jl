@@ -374,7 +374,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     end
 
     # counter for whether successive iterations of ascent UB below tol
-    convergence_counter = 0
+    # convergence_counter = 0
 
     mll_prop = mll_cur
     mll_change = 0.0
@@ -428,7 +428,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             ase = 0
             ascent_lb = 0
             ascent_ub = 0
-            convergence_counter = 2
+            # convergence_counter = 2
+            convergence = true
         end
 
         if ascent_lb < 0
@@ -527,21 +528,29 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
             # check convergence
             if ascent_ub < tol
-                convergence_counter += 1
-            else
-                convergence_counter = 0
-            end
-
-            # check if convergence in successive iterations
-            convergence = convergence_counter > 1
-
-            # check whether to stop
-            if convergence
                 keep_going = false
+                convergence = true
                 if verbose
                     println("The MCEM algorithm has converged.\n")
                 end
             end
+
+            # if ascent_ub < tol
+            #     convergence_counter += 1
+            # else
+            #     convergence_counter = 0
+            # end
+
+            # # check if convergence in successive iterations
+            # convergence = convergence_counter > 1
+
+            # # check whether to stop
+            # if convergence
+            #     keep_going = false
+            #     if verbose
+            #         println("The MCEM algorithm has converged.\n")
+            #     end
+            # end
 
             if (iter >= maxiter) | (ess_target > max_ess)
                 keep_going = false
