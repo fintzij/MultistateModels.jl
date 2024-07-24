@@ -476,7 +476,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
                 if length(_logImportanceWeights[i]) == 1
                     # make sure the ESS is equal to the target
-                    ImportanceWeights[i] = [1.0,]
+                    # ImportanceWeights[i] = [1.0,]
+                    ImportanceWeights[i] = exp.(_logImportanceWeights[i])
                     ess_cur[i] = ess_target
 
                 elseif length(_logImportanceWeights[i]) != 1
