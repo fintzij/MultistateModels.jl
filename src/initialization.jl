@@ -211,12 +211,8 @@ function init_par(_hazard::_Spline, crude_log_rate=0)
     B = _hazard.hazsp.spline.basis
 
     # get coefficients 
-    if BSplineKit.order(B) == 1
-        coefs = fill(exp(crude_log_rate), length(B))
-    else
-        coefs = coefficients(approximate(x -> exp(crude_log_rate), B))  
-    end
-
+    coefs = fill(exp(crude_log_rate), length(B))
+    
     return log.(coefs)
 end
 
@@ -230,11 +226,7 @@ function init_par(_hazard::_SplinePH, crude_log_rate=0)
     B = _hazard.hazsp.spline.basis
 
     # get coefficients 
-    if length(B) == 1
-        coefs = [exp(crude_log_rate),]
-    else
-        coefs = coefficients(approximate(x -> exp(crude_log_rate), B))  
-    end
+    coefs = fill(exp(crude_log_rate), length(B))
 
     return vcat(log.(coefs), zeros(_hazard.ncovar))
 end

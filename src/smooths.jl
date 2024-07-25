@@ -19,22 +19,22 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
         boundaries = copy(timespan)
     else
         # calculate maximum sojourn
-        boundaries = [0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]
+        spbounds = [0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]
     end
 
-    knots = hazard.knots
+    spknots = hazard.knots
     ra = "→"; sf = hazard.statefrom; st = hazard.stateto
 
-    if any((knots .< timespan[1]) .| (knots .> timespan[2]))
+    if any((spknots .< timespan[1]) .| (spknots .> timespan[2]))
         @warn "A knot for the $sf $ra $st transition was set outside of the time span of the data."
     end
 
-    if any((knots .< boundaries[1]) .| (knots .> boundaries[2]))
+    if any((spknots .< spbounds[1]) .| (spknots .> spbounds[2]))
         @warn "A knot for the $sf $ra $st transition was set outside of the sojourns observed in the data."
     end
 
     # generate Splines
-    B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(knots))
+    B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(spknots))
 
     if (hazard.degree > 1) & hazard.natural_spline
         # recombine
@@ -61,7 +61,7 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
     sphaz = SplineExtrapolation(Spline(undef, B), extrap_method)
     spchaz = integral(sphaz.spline)
 
-    return (sphaz = sphaz, spchaz = spchaz, rmat = M, knots = knots, timespan = timespan)
+    return (sphaz = sphaz, spchaz = spchaz, rmat = M, knots = spknots, timespan = timespan)
 end
 
 """
