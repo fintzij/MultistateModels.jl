@@ -7,14 +7,14 @@ using Random
 # Random.seed!(6)
 
 # set up the very simplest model
-nsubj = 500
+nsubj = 2000
 ntimes = 10
 dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
                 tstart = repeat(0:(1/ntimes):(1 - 1/ntimes), outer = nsubj),
                 tstop = repeat((1/ntimes):(1/ntimes):1, outer = nsubj),
                 statefrom = fill(1, ntimes * nsubj),
                 stateto = fill(2, ntimes * nsubj),
-                obstype = fill(2, ntimes * nsubj))
+                obstype = fill(1, ntimes * nsubj))
 
 h12e = Hazard(@formula(0 ~ 1), "wei", 1, 2)
 
