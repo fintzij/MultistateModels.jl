@@ -469,6 +469,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
             # update the current log-likelihoods
             loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
+
+            # RESUME HERE, maybe the discrepancy could be b/c the splines are being remade?
             
             # recalculate the importance ImportanceWeights and ess
             for i in 1:nsubj

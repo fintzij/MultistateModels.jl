@@ -85,7 +85,6 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
         if allequal(loglik_surrog[i])
             samplepaths[i]        = [first(samplepaths[i]),]
             loglik_target_cur[i]  = [first(loglik_target_cur[i]),]
-            loglik_target_prop[i] = [first(loglik_target_prop[i]),]
             loglik_surrog[i]      = [first(loglik_surrog[i]),]
             ess_cur[i]            = ess_target
             ImportanceWeights[i]  = [1.0,]
