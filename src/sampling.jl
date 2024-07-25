@@ -5,6 +5,18 @@ Draw additional sample paths until sufficient ess or until the maximum number of
 """
 function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, MaxSamplingEffort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, _logImportanceWeights, ImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates)
 
+    # make sure spline parameters are assigned correctly
+     # nest the model parameters
+     pars = VectorOfVectors(params_cur, model.parameters.elem_ptr)
+
+     # remake spline parameters and calculate risk periods
+     for i in eachindex(model.hazards)
+         if isa(model.hazards[i], _SplineHazard)
+             remake_splines!(model.hazards[i], pars[i])
+             set_riskperiod!(model.hazards[i])
+         end
+     end
+
     for i in eachindex(model.subjectindices)
         DrawSamplePaths!(i, model; 
             ess_target = ess_target,
@@ -85,6 +97,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, MaxS
         if allequal(loglik_surrog[i])
             samplepaths[i]        = [first(samplepaths[i]),]
             loglik_target_cur[i]  = [first(loglik_target_cur[i]),]
+            loglik_target_prop[i] = [first(loglik_target_prop[i]),]
             loglik_surrog[i]      = [first(loglik_surrog[i]),]
             ess_cur[i]            = ess_target
             ImportanceWeights[i]  = [1.0,]
