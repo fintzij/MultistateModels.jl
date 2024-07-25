@@ -29,7 +29,7 @@ simdat = simulate(mod; paths = false, data = true)[1]
 h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0, knots = [0.0, 1.0], extrapolation = "linear")
 
 model = multistatemodel(h12; data = simdat)
-initialize_parameters!(model)
+# initialize_parameters!(model)
 
 model_fitted = fit(model)
 
