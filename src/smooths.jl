@@ -16,7 +16,7 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
     # interior knots and df
     # if no transitions observed (e.g., initializing a dataset) then use timespan
     if !any((data.statefrom .== hazard.statefrom) .& (data.stateto .== hazard.stateto))
-        boundaries = copy(timespan)
+        spbounds = copy(timespan)
     else
         # calculate maximum sojourn
         spbounds = [0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]

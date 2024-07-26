@@ -1,10 +1,12 @@
 using ArraysOfArrays
+using BSplineKit
 using Chain
+using CSV
 using DataFrames
 using Distributions
 using LinearAlgebra
 using MultistateModels
-# using RCall
+using RCall
 using StatsBase
 using Random
 
@@ -25,7 +27,7 @@ function make_obstimes()
 end
 
 # function to set up the model
-function setup_model(; make_pars, data = nothing, nsubj = 250, family = "wei", ntimes = 8, knots = nothing)
+function setup_model(; make_pars, data = nothing, nsubj = 200, family = "wei", ntimes = 8, knots = nothing)
     
     # create hazards
     if family != "sp"
@@ -37,16 +39,16 @@ function setup_model(; make_pars, data = nothing, nsubj = 250, family = "wei", n
             which12 = findall((data.statefrom .== 1) .& (data.stateto .== 2))
             which13 = findall((data.statefrom .== 1) .& (data.stateto .== 3))
 
-            knots12 = quantile(data.tstop[which12], [0.05, 1/3, 2/3,0.95])
-            knots13 = quantile(data.tstop[which13], [0.05, 1/3, 2/3,0.95])            
+            knots12 = quantile(data.tstop[which12], [0.05, 0.5, 0.95])
+            knots13 = quantile(data.tstop[which13], [0.05, 0.5, 0.95])            
         else
             knots12 = knots[1]
             knots13 = knots[2]
         end
 
-        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12, add_boundaries = false, extrapolation = "flat")
-        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13, add_boundaries = false, extrapolation = "flat")
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = [0.0, 1.0], add_boundaries = false, extrapolation = "flat")
+        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12)
+        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13)
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = [0.0, 1.0])
     end
     
     # data for simulation parameters
@@ -195,10 +197,10 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
 
     # fit model
     initialize_parameters!(model_fit)
-    model_fitted = fit(model_fit; α = 0.1, κ = 1.2, verbose = true, compute_vcov = true) 
+    model_fitted = fit(model_fit; verbose = true, compute_vcov = true) 
 
     ### simulate from the fitted model
-    model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "wei", "sp"][family], knots = [model_fitted.hazards[1].knots; model_fitted.hazards[2].knots])
+    model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "wei", "sp"][family], knots = (model_fitted.hazards[1].knots, model_fitted.hazards[2].knots))
 
     set_parameters!(model_sim2, model_fitted.parameters)
     paths_sim = simulate(model_sim2; nsim = sims_per_subj, paths = true, data = false)
@@ -222,45 +224,45 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
 end
 
 # function for summarizing the crude estimates and paths
-# function summarize_crude(paths, dat)
+function summarize_crude(paths, dat)
 
-#     # get crude estimates for event probabilities
-#     nsubj = size(paths, 1)
-#     probs = collect(summarize_paths(paths))[Not(end)]
-#     cis = rcopy(R"binom::binom.confint($probs*$nsubj, $nsubj, method = 'wilson')[,c('lower', 'upper')]")
+    # get crude estimates for event probabilities
+    nsubj = size(paths, 1)
+    probs = collect(summarize_paths(paths))[Not(end)]
+    cis = rcopy(R"binom::binom.confint($probs*$nsubj, $nsubj, method = 'wilson')[,c('lower', 'upper')]")
 
-#     # prepare dataset for restricted mean survival time
-#     times = map(p -> p.times[2], paths)
-#     statuses = map(p -> (p.states[2] == 1 ? 0.0 : 1.0), paths)
+    # prepare dataset for restricted mean survival time
+    times = map(p -> p.times[2], paths)
+    statuses = map(p -> (p.states[2] == 1 ? 0.0 : 1.0), paths)
     
-#     # get restricted mean survival time
-#     rmst = rcopy(R"sm = survival:::survmean(survfit(Surv($times, $statuses) ~ 1), rmean = max($times))[[1]][c('rmean', 'se(rmean)')];c(est = sm[1], lower = sm[1] - 1.96 * sm[2], upper = sm[1] + 1.96 * sm[2])")
+    # get restricted mean survival time
+    rmst = rcopy(R"sm = survival:::survmean(survfit(Surv($times, $statuses) ~ 1), rmean = max($times))[[1]][c('rmean', 'se(rmean)')];c(est = sm[1], lower = sm[1] - 1.96 * sm[2], upper = sm[1] + 1.96 * sm[2])")
 
-#     ests_crude = DataFrame(ests = [probs; rmst[1]],
-#                            lower = [cis.lower; rmst[2]],
-#                            upper = [cis.upper; rmst[3]])
-# end
+    ests_crude = DataFrame(ests = [probs; rmst[1]],
+                           lower = [cis.lower; rmst[2]],
+                           upper = [cis.upper; rmst[3]])
+end
 
-# # function for getting crude estimates
-# function crude_ests(;seed)
+# function for getting crude estimates
+function crude_ests(;seed)
 
-#     Random.seed!(seed)
+    Random.seed!(seed)
 
-#     # set up model for simulation
-#     model_sim = setup_model(; make_pars = true, data = nothing, family = "wei", nsubj = 1000)
+    # set up model for simulation
+    model_sim = setup_model(; make_pars = true, data = nothing, family = "wei", nsubj = 1000)
         
-#     # simulate paths
-#     dat = simulate(model_sim; nsim = 1, paths = false, data = true)[1]
-#     paths = MultistateModels.extract_paths(dat)
+    # simulate paths
+    dat = simulate(model_sim; nsim = 1, paths = false, data = true)[1]
+    paths = MultistateModels.extract_paths(dat)
     
-#     # get estimates and confidence intervals
-#     ests_crude = summarize_crude(paths, dat)
+    # get estimates and confidence intervals
+    ests_crude = summarize_crude(paths, dat)
 
-#     return hcat(DataFrame(simnum = seed, 
-#                      family = "crude",
-#                      var = ["pfs", "prog", "die_wprog", "die_noprog","rmpfst"]),
-#                      ests_crude)
-# end
+    return hcat(DataFrame(simnum = seed, 
+                     family = "crude",
+                     var = ["pfs", "prog", "die_wprog", "die_noprog","rmpfst"]),
+                     ests_crude)
+end
 
 # wrapper for doing work
 # function dowork(jobs, results)
