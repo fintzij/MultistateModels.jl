@@ -58,9 +58,8 @@ Helper to compute the variance of the ratio of two means estimated via importanc
 """
 function var_ris(l, w)
 
-    vris = (sum(l .* w)) ^ 2 * ((sum((w .* l).^2)) / sum(w .* l) ^2 - 2 * (sum(w.^2 .* l) / (sum(w .* l))) + sum(w .^ 2)) 
-
-    vris < eps() ? eps() : vris
+    all(isapprox.(l, 0.0)) ? 0.0 : (sum(l .* w)) ^ 2 * ((sum((w .* l).^2)) / sum(w .* l) ^2 - 2 * (sum(w.^2 .* l) / (sum(w .* l))) + sum(w .^ 2)) 
+    
 end
 
 """
