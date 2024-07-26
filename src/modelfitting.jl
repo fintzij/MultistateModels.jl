@@ -16,7 +16,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         # get estimates
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
-        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
+        sol  = solve(prob, Newton())
         
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success)
@@ -50,7 +50,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
 
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_multistate)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths), lcons = constraints.lcons, ucons = constraints.ucons)
-        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
+        sol  = solve(prob, IPNewton())
 
         # no hessian when there are constraints
         if compute_vcov == true
@@ -117,7 +117,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         # get estimates
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
+        sol  = solve(prob, Newton())
 
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success)
@@ -151,7 +151,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_markov)
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books), lcons = constraints.lcons, ucons = constraints.ucons)
-        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
+        sol  = solve(prob, IPNewton())
 
         # no hessian when there are constraints
         if compute_vcov == true
@@ -400,7 +400,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         end
         
         # optimize
-        params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Ipopt.Optimizer(); print_level = 0) # hessian-based
+        if isnothing(constraints)
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Newton()) # hessian-based
+        else
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), IPNewton())
+        end
         
         params_prop = params_prop_optim.u
 

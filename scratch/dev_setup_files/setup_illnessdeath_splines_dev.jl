@@ -64,7 +64,7 @@ modelexp = multistatemodel(h12, h13, h23; data = simdat[1])
 crude_init!(modelsp)
 fitted = fit(modelsp; compute_vcov = true, verbose = true)
 
-using ArraysOfArrays, Optimization, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra, RCall, StatsFuns, MacroTools, BSplineKit, RuntimeGeneratedFunctions, ParetoSmooth, LinearAlgebra, ArraysOfArrays, ForwardDiff, DiffResults, OptimizationMOI, Ipopt
+using ArraysOfArrays, Optimization, StatsModels, ExponentialUtilities,  ArraysOfArrays, ElasticArrays, ForwardDiff, LinearAlgebra, RCall, StatsFuns, MacroTools, BSplineKit, RuntimeGeneratedFunctions, ParetoSmooth, LinearAlgebra, ArraysOfArrays, ForwardDiff, DiffResults, OptimizationOptimJL
 
 using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_book, build_tpm_book, _TotalHazardTransient, SamplePath, sample_ecctmc, compute_hazmat!, compute_tmat!, sample_ecctmc!, _Spline, _SplinePH, check_SamplingWeights, draw_samplepath, mcem_mll, mcem_ase, loglik!, ExactData, SamplePath, get_subjinds, enumerate_hazards, create_tmat, check_data!, _Hazard, SplineHazard, build_hazards, survprob, call_haz, call_cumulhaz, total_cumulhaz, next_state_probs, extract_paths, MarkovSurrogate, extract_paths, get_subjinds, extract_sojourns, spline_hazards, check_SamplingWeights, parse_constraints, MPanelData, make_surrogate_model, DrawSamplePaths!, get_subjinds, enumerate_hazards, MarkovSurrogate, extract_paths, loglik, ExactData, ExactDataAD, check_data!, check_SamplingWeights, spline_hazards, check_CensoringPatterns, build_emat, _TotalHazardAbsorbing, build_fbmats, mcem_lml, mcem_lml_subj, remake_splines!, set_riskperiod!, set_crude_init!, init_par, _MarkovHazard, _SplineHazard
 
