@@ -209,7 +209,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 200, tol = 1e-2, α = 0.1, γ = 0.1, κ = 1.5, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.1, κ = 1.5, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -371,14 +371,13 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # print output
     if verbose
         println("Initial target ESS: $(round(ess_target;digits=2)) per-subject")
-        println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(maximum(length.(samplepaths)))]")
-        println("Estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))\n")
-
+        println("Initial range of the number of sample paths per-subject: [$(ceil(ess_target)), $(maximum(length.(samplepaths)))]")
+        println("Initial estimate of the marginal log-likelihood, Q: $(round(mll_cur;digits=3))")
+        println("Initial estimate of the log marginal likelihood: $(round(compute_loglik(model, loglik_surrog, loglik_target_cur).loglik;digits=3))\n")
         println("Starting Monte Carlo EM...\n")
     end
-
-    # counter for whether successive iterations of ascent UB below tol
-    # convergence_counter = 0
+    
+    # initialize MCEM
     mll_prop = mll_cur
     mll_change = 0.0
     ase = 0.0
@@ -388,41 +387,34 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # start algorithm
     while keep_going
 
-        # recalculate the marginal log likelihood 
-        mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
-
-        # optimize the monte carlo marginal likelihood
-        if verbose 
-            println("Iteration: $(maximum([1, iter]))")
-            println("Starting optimization...")
-            println("Current target ESS: $(round(ess_target;digits=2)) per-subject")
-            println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(maximum(length.(samplepaths)))]")
-        end
+        # increment the iteration
+        iter += 1
         
-        # optimize
+        # optimize the monte carlo marginal likelihood
         if isnothing(constraints)
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Newton()) # hessian-based
         else
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), IPNewton())
         end
-        
         params_prop = params_prop_optim.u
 
-        # just make sure they're not equal
-        if params_prop != params_cur 
-            # recalculate the log likelihoods
-            loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights); use_sampling_weight = false)
-    
-            # recalculate the marginal log likelihood
-            mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, model.SamplingWeights)
-    
+        # calculate the log likelihoods for the proposed parameters
+        loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights))
+        
+        # calculate the marginal log likelihood 
+        mll_cur  = mcem_mll(loglik_target_cur , ImportanceWeights, model.SamplingWeights)
+        mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, model.SamplingWeights)
+
+        # compute the ALB and AUB
+        if params_prop != params_cur
+
             # change in mll
             mll_change = mll_prop - mll_cur
     
             # calculate the ASE for ΔQ
             ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, model.SamplingWeights)
     
-             # calculate the lower bound for ΔQ
+            # calculate the lower bound for ΔQ
             ascent_lb = quantile(Normal(mll_change, ase), α)
             ascent_ub = quantile(Normal(mll_change, ase), 1-γ)
         else
@@ -432,138 +424,76 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             ase = 0
             ascent_lb = 0
             ascent_ub = 0
-            # convergence_counter = 2
             convergence = true
         end
 
+        # increment the current values of the parameter, marginal log likelihood, target loglik
+        params_cur        = deepcopy(params_prop)
+        mll_cur           = deepcopy(mll_prop)
+        loglik_target_cur = deepcopy(loglik_target_prop)
+
+        # increment log importance weights, importance weights, effective sample size and pareto shape parameter
+        ComputeImportanceWeightsESS!(loglik_target_cur, loglik_surrog, _logImportanceWeights, ImportanceWeights, ess_cur, ess_target, psis_pareto_k)
+
+        # print update
+        if verbose
+            println("Iteration: $iter")
+            println("Target ESS: $(round(ess_target;digits=2)) per-subject")
+            println("Range of the number of sampled paths per-subject: [$(ceil(ess_target)), $(max(length.(samplepaths)...))]")
+            println("Estimate of the marginal log-likelihood, Q: $(round(mll_cur;digits=3))")
+            println("Gain in marginal log-likelihood, ΔQ: $(round(mll_change;sigdigits=3))")
+            println("MCEM asymptotic standard error: $(round(ase;sigdigits=3))")
+            println("Ascent lower and upper bound: [$(round(ascent_lb; sigdigits=3)), $(round(ascent_ub; sigdigits=3))]")
+            println("Estimate of the log marginal likelihood, l(θ): $(round(compute_loglik(model, loglik_surrog, loglik_target_cur).loglik;digits=3))\n")
+        end
+
+        # save marginal log likelihood, parameters and effective sample size
+        append!(parameters_trace, params_cur)
+        push!(mll_trace, mll_cur)
+        append!(ess_trace, ess_cur)
+
+        # check for convergence
+        if ascent_ub < tol
+            convergence = true
+            if verbose  println("The MCEM algorithm has converged.\n") end
+            break
+        end
+
+        # check if limits are reached
+        if ess_target > max_ess  @warn "The maximum target ESS ($ess_target) has been reached.\n"; break end
+        if iter >= maxiter  @warn "The maximum number of iterations ($maxiter) has been reached.\n"; break end
+
+        # increase ess is necessary
         if ascent_lb < 0
             # increase the target ess for the factor κ
-            ess_target = ceil(κ*ess_target)
+            ess_target = ceil(κ*ess_target) # TODO: alternatively, use Caffo's power calculation to determine the new ESS target
+            if verbose  println("Target ESS is increased to $ess_target, because ascent lower bound < 0.\n") end
 
-            # no need to sample subjects with a single possible path
+            # no need to sample paths for subjects with a single possible path
             ess_cur[findall(length.(ImportanceWeights) .== 1)] .= ess_target
-
-            # ensure that ess per person is sufficient
-            DrawSamplePaths!(model; 
-                ess_target = ess_target, 
-                ess_cur = ess_cur, 
-                MaxSamplingEffort = MaxSamplingEffort,
-                samplepaths = samplepaths, 
-                loglik_surrog = loglik_surrog, 
-                loglik_target_prop = loglik_target_prop, 
-                loglik_target_cur = loglik_target_cur, 
-                _logImportanceWeights = _logImportanceWeights, 
-                ImportanceWeights = ImportanceWeights,   
-                tpm_book_surrogate = tpm_book_surrogate,   
-                hazmat_book_surrogate = hazmat_book_surrogate, 
-                books = books, 
-                npaths_additional = npaths_additional, 
-                params_cur = params_cur, 
-                surrogate = surrogate,
-                psis_pareto_k = psis_pareto_k,
-                fbmats = fbmats,
-                absorbingstates = absorbingstates)
-        else
-            # increment the iteration
-            iter += 1
-
-            # set proposed parameter and marginal likelihood values to current values
-            params_cur, params_prop = params_prop, params_cur
-            mll_cur, mll_prop = mll_prop, mll_cur
-
-            # update the current log-likelihoods
-            loglik_target_cur, loglik_target_prop = loglik_target_prop, loglik_target_cur
-
-            # RESUME HERE, maybe the discrepancy could be b/c the splines are being remade?
-            
-            # recalculate the importance ImportanceWeights and ess
-            for i in 1:nsubj
-                # recompute the log unnormalized importance weight
-                _logImportanceWeights[i] = loglik_target_cur[i] .- loglik_surrog[i]
-
-                if length(_logImportanceWeights[i]) == 1
-                    # make sure the ESS is equal to the target
-                    ImportanceWeights[i] = [1.0,]
-                    ess_cur[i] = ess_target
-
-                elseif length(_logImportanceWeights[i]) != 1
-                    if all(isapprox.(_logImportanceWeights[i], 0.0; atol = sqrt(eps())))
-                        fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))
-                        ess_cur[i] = ess_target
-                        psis_pareto_k[i] = 0.0
-                    else
-                        # might fail if not enough samples to fit pareto
-                        try
-                            # pareto smoothed importance weights
-                            psiw = ParetoSmooth.psis(reshape(copy(_logImportanceWeights[i]), 1, length(_logImportanceWeights[i]), 1); source = "other");
-            
-                            # save normalized importance weights and ess
-                            copyto!(ImportanceWeights[i], psiw.weights)
-                            ess_cur[i] = psiw.ess[1]
-                            psis_pareto_k[i] = psiw.pareto_k[1]
-            
-                        catch err
-                            # exponentiate and normalize the unnormalized log weights
-                            copyto!(ImportanceWeights[i], normalize(exp.(_logImportanceWeights[i]), 1))
-
-                            # calculate the ess
-                            ess_cur[i] = 1 / sum(ImportanceWeights[i] .^ 2)
-                            psis_pareto_k[i] = 1.0
-                        end
-                    end
-                end
-            end
-
-            # save marginal log likelihood, parameters and effective sample size
-            append!(parameters_trace, params_cur)
-            push!(mll_trace, mll_cur)
-            append!(ess_trace, ess_cur)
-
-            if verbose
-                println("Completed iteration: $iter")
-                println("Current target ESS: $(round(ess_target;digits=2)) per-subject")
-                println("Range of the number of sample paths per-subject: [$(ceil(ess_target)), $(max(length.(samplepaths)...))]")
-                println("Current estimate of the marginal log-likelihood: $(round(mll_cur;digits=3))")
-                println("Reweighted prior estimate of the marginal log-likelihood: $(round(mll_prop;digits=3))")
-                println("Change in marginal log-likelihood: $(round(mll_change;sigdigits=3))")
-                println("MCEM Asymptotic SE: $(round(ase;sigdigits=3))")
-                println("Ascent lower bound: $(round(ascent_lb; sigdigits=3))")
-                println("Ascent upper bound: $(round(ascent_ub; sigdigits=3))")
-                println("Current estimate of the log marginal likelihood: $(round(mcem_lml(loglik_target_cur, ImportanceWeights, model.SamplingWeights);digits=3))\n")
-            end
-
-            # check convergence
-            if ascent_ub < tol
-                keep_going = false
-                convergence = true
-                if verbose
-                    println("The MCEM algorithm has converged.\n")
-                end
-            end
-
-            # if ascent_ub < tol
-            #     convergence_counter += 1
-            # else
-            #     convergence_counter = 0
-            # end
-
-            # # check if convergence in successive iterations
-            # convergence = convergence_counter > 1
-
-            # # check whether to stop
-            # if convergence
-            #     keep_going = false
-            #     if verbose
-            #         println("The MCEM algorithm has converged.\n")
-            #     end
-            # end
-
-            if (iter >= maxiter) | (ess_target > max_ess)
-                keep_going = false
-                @warn "The maximum number of iterations ($maxiter) has been reached.\n"
-            end
         end
-    end
+
+        # ensure that ess per person is sufficient
+        DrawSamplePaths!(model; 
+            ess_target = ess_target, 
+            ess_cur = ess_cur, 
+            MaxSamplingEffort = MaxSamplingEffort,
+            samplepaths = samplepaths, 
+            loglik_surrog = loglik_surrog, 
+            loglik_target_prop = loglik_target_prop, 
+            loglik_target_cur = loglik_target_cur, 
+            _logImportanceWeights = _logImportanceWeights, 
+            ImportanceWeights = ImportanceWeights,   
+            tpm_book_surrogate = tpm_book_surrogate,   
+            hazmat_book_surrogate = hazmat_book_surrogate, 
+            books = books, 
+            npaths_additional = npaths_additional, 
+            params_cur = params_cur, 
+            surrogate = surrogate,
+            psis_pareto_k = psis_pareto_k,
+            fbmats = fbmats,
+            absorbingstates = absorbingstates)
+    end # end-while
 
     if !convergence
         @warn "MCEM did not converge."
@@ -654,10 +584,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     end
 
     # subject marginal likelihood
-    subj_ll = mcem_lml_subj(loglik_target_cur, ImportanceWeights)
-    data_ll = sum(subj_ll .* model.SamplingWeights)
-
-    logliks = (loglik = data_ll, subj_lml = subj_ll)
+    logliks = compute_loglik(model, loglik_surrog, loglik_target_cur)
 
     # return convergence records
     ConvergenceRecords = return_ConvergenceRecords ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
