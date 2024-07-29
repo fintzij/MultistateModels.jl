@@ -779,3 +779,49 @@ function BackwardSampling(m, p)
     return h
 
 end
+
+
+"""
+    ComputeImportanceWeights!(loglik_target, loglik_surrog, _logImportanceWeights, ImportanceWeights, ess_target)
+
+Compute the importance weights and ess.
+"""
+function ComputeImportanceWeightsESS!(loglik_target, loglik_surrog, _logImportanceWeights, ImportanceWeights, ess_cur, ess_target, psis_pareto_k)
+
+    for i in eachindex(loglik_surrog)
+        # recompute the log unnormalized importance weight
+        _logImportanceWeights[i] = loglik_target[i] .- loglik_surrog[i]
+
+        if length(_logImportanceWeights[i]) == 1
+            # make sure the ESS is equal to the target
+            ImportanceWeights[i] = [1.0,]
+            ess_cur[i] = ess_target
+
+        elseif length(_logImportanceWeights[i]) != 1
+            if all(isapprox.(_logImportanceWeights[i], 0.0; atol = sqrt(eps())))
+                fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))
+                ess_cur[i] = ess_target
+                psis_pareto_k[i] = 0.0
+            else
+                # might fail if not enough samples to fit pareto
+                try
+                    # pareto smoothed importance weights
+                    psiw = ParetoSmooth.psis(reshape(copy(_logImportanceWeights[i]), 1, length(_logImportanceWeights[i]), 1); source = "other");
+    
+                    # save normalized importance weights and ess
+                    copyto!(ImportanceWeights[i], psiw.weights)
+                    ess_cur[i] = psiw.ess[1]
+                    psis_pareto_k[i] = psiw.pareto_k[1]
+    
+                catch err
+                    # exponentiate and normalize the unnormalized log weights
+                    copyto!(ImportanceWeights[i], normalize(exp.(_logImportanceWeights[i]), 1))
+
+                    # calculate the ess
+                    ess_cur[i] = 1 / sum(ImportanceWeights[i] .^ 2)
+                    psis_pareto_k[i] = 1.0
+                end
+            end
+        end
+    end
+end

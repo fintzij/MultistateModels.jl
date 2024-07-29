@@ -156,6 +156,37 @@ function estimate_loglik(model::MultistateProcess; min_ess = 100)
 end
 
 """
+    compute_loglik(model::MultistateProcess, loglik_surrog)
+    
+Compute the log marginal likelihood from sample paths.  
+
+# Arguments
+- min_ess: minimum effective sample size, defaults to 100.
+"""
+function compute_loglik(model::MultistateProcess, loglik_surrog, loglik_target)
+    ImportanceWeightsUnnormalized = [exp.(loglik_target[i] .- loglik_surrog[i]) for i in eachindex(loglik_surrog)]
+
+    # calculate the log marginal likelihood
+    ml_subj = map(w -> mean(w), ImportanceWeightsUnnormalized) # need to use the *un-normalized* weights
+    lml_subj = log.(ml_subj)
+    lml = sum(lml_subj .* model.SamplingWeights)
+
+    # # calculate MCSEs
+    # var_lml_subj = map(w -> length(w) == 1 ? 0.0 : var(w) / length(w), ImportanceWeightsUnnormalized)
+    # var_lml_subj = var_lml_subj ./ (lml_subj.^2) # delta method
+
+    # # sum and include sampling weights
+    # var_lml = sum(var_lml_subj .* model.SamplingWeights.^2)
+
+    # return log likelihoods
+    return (loglik = lml, loglik_subj = lml_subj) #, mcse = sqrt(var_lml), mcse_loglik_subj = sqrt.(var_lml_subj))
+
+end
+
+
+
+
+"""
     aic(model::MultistateModelFitted; estimate_likelihood = false, min_ess = 100)
 
 Akaike's Information Criterion, defined as -2*log(L) + 2*k, where L is the likelihood and k is the number of consumed degrees of freedom. 
