@@ -367,7 +367,7 @@ end
 
 Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data. 
 """
-function loglik!(parameters, logliks::Vector{}, data::SMPanelData; use_sampling_weight = false)
+function loglik!(parameters, logliks::Vector{}, data::SMPanelData)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
@@ -385,7 +385,7 @@ function loglik!(parameters, logliks::Vector{}, data::SMPanelData; use_sampling_
 
     for i in eachindex(data.paths)
         for j in eachindex(data.paths[i])
-            logliks[i][j] = use_sampling_weight ? loglik(pars, data.paths[i][j], hazards, data.model) * data.model.SamplingWeights[i] : loglik(pars, data.paths[i][j], hazards, data.model)
+            logliks[i][j] = loglik(pars, data.paths[i][j], hazards, data.model)
         end
     end
 end
