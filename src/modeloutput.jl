@@ -77,7 +77,7 @@ Summary of model output.
 - `model::MultistateModelFitted`: fitted model
 - `confidence_level::Float64`: confidence level of the confidence intervals
 """
-function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95, estimate_likelihood = false, min_ess = 100) 
+function summary(model::MultistateModelFitted; compute_se = true, confidence_level::Float64 = 0.95, estimate_likelihood = false, min_ess = 100) 
     
     # maximum likelihood estimates
     mle = get_parameters(model)
@@ -85,7 +85,7 @@ function summary(model::MultistateModelFitted; confidence_level::Float64 = 0.95,
     # container for summary table
     summary_table = Vector{DataFrame}(undef, length(model.hazards))
 
-    if isnothing(model.vcov)
+    if isnothing(model.vcov | !compute_se)
         println("Confidence intervals are not computed for models without a variance-covariance matrix.")
         # populate summary tables for each hazard
         for s in eachindex(summary_table)
