@@ -211,6 +211,9 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 """
 function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-2, α = 0.1, γ = 0.05, κ = 2.0, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
 
+    # copy of data
+    data_original = deepcopy(model.data)
+
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
         # create constraint function and check that constraints are satisfied at the initial values
@@ -358,6 +361,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
+
+    return model.data
 
     # generate optimization problem
     if isnothing(constraints)
@@ -594,7 +599,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
     # wrap results
     model_fitted = MultistateModelFitted(
-        model.data,
+        data_original,
         VectorOfVectors(params_cur, model.parameters.elem_ptr),
         logliks,
         vcov,
