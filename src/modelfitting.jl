@@ -209,7 +209,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.1, κ = 1.5, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-2, α = 0.1, γ = 0.05, κ = 2.0, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -331,11 +331,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
     end
 
-    # draw sample paths until the target ess is reached 
-    if verbose
-        println("Initializing sample paths ...\n")
-    end
+    # compute normalizing constant of Markov proposal
+    NormConstantProposal = surrogate_fitted.loglik.loglik
 
+    # draw sample paths until the target ess is reached 
+    if verbose  println("Initializing sample paths ...\n") end
     DrawSamplePaths!(model; 
         ess_target = ess_target, 
         ess_cur = ess_cur, 
@@ -373,7 +373,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         println("Initial target ESS: $(round(ess_target;digits=2)) per-subject")
         println("Initial range of the number of sample paths per-subject: [$(ceil(ess_target)), $(maximum(length.(samplepaths)))]")
         println("Initial estimate of the marginal log-likelihood, Q: $(round(mll_cur;digits=3))")
-        println("Initial estimate of the log marginal likelihood: $(round(compute_loglik(model, loglik_surrog, loglik_target_cur).loglik;digits=3))\n")
+        println("Initial estimate of the log marginal likelihood: $(round(compute_loglik(model, loglik_surrog, loglik_target_cur, NormConstantProposal).loglik;digits=3))\n")
         println("Starting Monte Carlo EM...\n")
     end
     
@@ -444,7 +444,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             println("Gain in marginal log-likelihood, ΔQ: $(round(mll_change;sigdigits=3))")
             println("MCEM asymptotic standard error: $(round(ase;sigdigits=3))")
             println("Ascent lower and upper bound: [$(round(ascent_lb; sigdigits=3)), $(round(ascent_ub; sigdigits=3))]")
-            println("Estimate of the log marginal likelihood, l(θ): $(round(compute_loglik(model, loglik_surrog, loglik_target_cur).loglik;digits=3))\n")
+            println("Estimate of the log marginal likelihood, l(θ): $(round(compute_loglik(model, loglik_surrog, loglik_target_cur, NormConstantProposal).loglik;digits=3))\n")
         end
 
         # save marginal log likelihood, parameters and effective sample size
@@ -584,7 +584,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     end
 
     # subject marginal likelihood
-    logliks = compute_loglik(model, loglik_surrog, loglik_target_cur)
+    logliks = compute_loglik(model, loglik_surrog, loglik_target_cur, NormConstantProposal)
 
     # return convergence records
     ConvergenceRecords = return_ConvergenceRecords ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
