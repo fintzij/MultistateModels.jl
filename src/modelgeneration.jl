@@ -11,12 +11,13 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 
 # Additional arguments for semiparametric baseline hazards. Splines up to degree 3 (cubic polynomials) are supported . Spline bases are constructed via a call to the BSplineKit.jl. See [the BSplineKit.jl documentation](https://jipolanco.github.io/BSplineKit.jl/stable/) for additional details. 
 - `degree`: Degree of the spline polynomial basis, defaults to 3 for a cubic polynomial basis.
-- `knots`: Vector of knots, including boundaries.
+- `knots`: Vector of interior knots.
+- `boundaryknots`: Optional vector of boundary knots, defaults to the range of possible sojourn times if not supplied.
 - `extrapolation`: Either "linear" or "flat", see the BSplineKit.jl package. 
 - `natural_spline`: Restrict the second derivative to zero at the boundaries, defaults to true.
 - `knots` argument is interpreted as interior knots. 
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, natural_spline = true, extrapolation = "linear")
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, natural_spline = true, extrapolation = "linear")
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
@@ -24,14 +25,10 @@ function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int6
             @error "Spline degree must be 0, 1, 2, or 3."
         end
 
-        if length(knots) < 2
-            @error "A vector of knot locations must be supplied."
-        end
-
         # change extrapolation to flat if degree = 0
         extrapolation = degree > 0 ? extrapolation : "flat"
 
-        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots,  extrapolation, natural_spline)
+        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots, boundaryknots, extrapolation, natural_spline)
     end
 
     return h
@@ -259,7 +256,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                         hazards[h].stateto,
                         size(hazdat, 2) - 1)
             end
-        elseif family == "sp" # m-splines
+        elseif family == "sp" # B-splines
 
             # grab hazard object from splines2
             hazard, cumulative_hazard, rmat, knots, timespan = spline_hazards(hazards[h], data)

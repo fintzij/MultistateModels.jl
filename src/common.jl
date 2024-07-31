@@ -62,7 +62,7 @@ struct ParametricHazard <: HazardFunction
 end
 
 """
-    SplineHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing}, degree::Int64, knots::Union{Vector{Float64},Nothing})
+    SplineHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing}, degree::Int64, knots::Union{Vector{Float64},Nothing}, boundaryknots::Union{Vector{Float64},Nothing}, extrapolation::String, natural_spline::Bool)
 
 Specify a cause-specific baseline hazard. 
 
@@ -74,6 +74,7 @@ Specify a cause-specific baseline hazard.
 - `df`: Degrees of freedom.
 - `degree`: Degree of the spline polynomial basis.
 - `knots`: Vector of knot locations.
+- `boundaryknots`: Vector of boundary knot locations
 - `extrapolation`: Either "linear" or "flat"
 - `natural_spline`: Restrict the second derivative to zero at the boundaries (natural spline).
 """
@@ -84,6 +85,7 @@ struct SplineHazard <: HazardFunction
     stateto::Int64     # destination state number
     degree::Int64
     knots::Union{Nothing,Vector{Float64}}
+    boundaryknots::Union{Nothing,Vector{Float64}}
     extrapolation::String
     natural_spline::Bool
 end
