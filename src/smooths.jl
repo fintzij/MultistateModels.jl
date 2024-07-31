@@ -10,28 +10,35 @@ Arguments:
 """
 function spline_hazards(hazard::SplineHazard, data::DataFrame)
 
-    # boundary knots
-    timespan = [minimum(data.tstart), maximum(data.tstop)]
+    # transition
+    ra = "→"; sf = hazard.statefrom; st = hazard.stateto
 
-    # interior knots and df
+    # boundary knots
+    timespan = [0.0, maximum(data.tstop)]
+
     # if no transitions observed (e.g., initializing a dataset) then use timespan
     if !any((data.statefrom .== hazard.statefrom) .& (data.stateto .== hazard.stateto))
-        spbounds = copy(timespan)
+        spbounds = [0.0, timespan[2]]
     else
         # calculate maximum sojourn
         spbounds = [0.0, maximum(extract_sojourns(hazard, data, extract_paths(data; self_transitions = false); sojourns_only = true))]
     end
 
-    spknots = hazard.knots
-    ra = "→"; sf = hazard.statefrom; st = hazard.stateto
+    # grab boundary knots
+    bknots = isnothing(hazard.boundaryknots) ? spbounds : hazard.boundaryknots
 
-    if any((spknots .< timespan[1]) .| (spknots .> timespan[2]))
-        @warn "A knot for the $sf $ra $st transition was set outside of the time span of the data."
+    if bknots[1] > spbounds[1]
+        @warn "The left boundary for the $sf $ra $st transition was set above the minimum possible sojourn and will be set to 0."
+        bknots[1] = spbounds[1]
     end
 
-    if any((spknots .< spbounds[1]) .| (spknots .> spbounds[2]))
-        @warn "A knot for the $sf $ra $st transition was set outside of the sojourns observed in the data."
+    if bknots[2] < spbounds[2]
+        @warn "The right boundary for the $sf $ra $st transition was set before the greatest sojourn observed in the data and will be set to $(spbounds[2])."
+        bknots[2] = spbounds[2]
     end
+
+    # make knots
+    spknots = unique(sort([bknots[1]; hazard.knots; bknots[2]]))    
 
     # generate Splines
     B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(spknots))

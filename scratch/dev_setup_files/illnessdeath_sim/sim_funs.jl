@@ -30,17 +30,18 @@ end
 function setup_model(; make_pars, data = nothing, nsubj = 200, family = "wei", ntimes = 8, knots = nothing)
     
     # create hazards
-    if family != "sp"
+    if (family != "sp1") & (family != "sp3")
         h12 = Hazard(@formula(0 ~ 1), family, 1, 2)
         h13 = Hazard(@formula(0 ~ 1), family, 1, 3)
         h23 = Hazard(@formula(0 ~ 1), family, 2, 3)
-    else
+
+    elseif family == "sp1"
         if isnothing(knots)
             which12 = findall((data.statefrom .== 1) .& (data.stateto .== 2))
             which13 = findall((data.statefrom .== 1) .& (data.stateto .== 3))
 
-            knots12 = quantile(data.tstop[which12], [0.05, 0.5, 0.95])
-            knots13 = quantile(data.tstop[which13], [0.05, 0.5, 0.95])            
+            knots12 = median(data.tstop[which12])
+            knots13 = median(data.tstop[which13])
         else
             knots12 = knots[1]
             knots13 = knots[2]
@@ -48,6 +49,22 @@ function setup_model(; make_pars, data = nothing, nsubj = 200, family = "wei", n
 
         h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12)
         h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13)
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = [0.0, 1.0])
+
+    elseif family == "sp3"
+        if isnothing(knots)
+            which12 = findall((data.statefrom .== 1) .& (data.stateto .== 2))
+            which13 = findall((data.statefrom .== 1) .& (data.stateto .== 3))
+
+            knots12 = quantile(data.tstop[which12], [1/3, 2/3])
+            knots13 = quantile(data.tstop[which13], [1/3, 2/3])
+        else
+            knots12 = knots[1]
+            knots13 = knots[2]
+        end
+
+        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = knots12)
+        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 3, knots = knots13)
         h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = [0.0, 1.0])
     end
     
@@ -180,7 +197,8 @@ end
 # family:
 #   1: "exp"
 #   2: "wei"
-#   3: "sp"
+#   3: "sp1" - degree 1 with knot at midpoint and range
+#   4: "sp3" - degree 3 with knots at 0.05, 1/3 and 2/3, and 0.95 quantiles
 function work_function(;simnum, seed, family, sims_per_subj, nboot)
 
     Random.seed!(seed)
@@ -193,14 +211,15 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
     dat = reduce(vcat, map(x -> observe_subjdat(x, model_sim), paths))
 
     ### set up model for fitting
-    model_fit = setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp"][family])
+    model_fit = setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp1", "sp3"][family])
 
     # fit model
     initialize_parameters!(model_fit)
     model_fitted = fit(model_fit; verbose = true, compute_vcov = true) 
 
     ### simulate from the fitted model
-    model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "wei", "sp"][family], knots = (model_fitted.hazards[1].knots, model_fitted.hazards[2].knots))
+    spknots = family > 2 ? knots = (model_fitted.hazards[1].knots, model_fitted.hazards[2].knots) : nothing
+    model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "wei", "sp1", "sp3"][family], knots = spknots)
 
     set_parameters!(model_sim2, model_fitted.parameters)
     paths_sim = simulate(model_sim2; nsim = sims_per_subj, paths = true, data = false)
@@ -211,16 +230,10 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
     # get asymptotic bootstrap CIs
     asymp_cis = asymptotic_bootstrap(model_sim2, flatview(model_fitted.parameters), model_fitted.vcov,  sims_per_subj, nboot)    
 
-    # estimate and CI for parameters
-    parests = DataFrame(simnum = simnum, 
-                        ests = reduce(vcat, model_fitted.parameters),
-                        lower = reduce(vcat, model_fitted.parameters) - 1.96 * sqrt.(diag(model_fitted.vcov)),
-                        upper = reduce(vcat, model_fitted.parameters) + 1.96 * sqrt.(diag(model_fitted.vcov)))
-
     results = DataFrame(simnum = simnum, family = family, var = string.(collect(keys(ests))), ests = collect(ests), lower = asymp_cis[:,1], upper = asymp_cis[:,2])
 
     ### return results
-    return results, parests
+    return results
 end
 
 # function for summarizing the crude estimates and paths
