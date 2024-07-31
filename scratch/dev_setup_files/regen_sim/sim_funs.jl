@@ -117,10 +117,10 @@ function setup_collapsed_model(; make_pars, data, model_number, ntimes = 4, null
         h24 = Hazard(@formula(0 ~ 1 + mab), "wei", 2, 4)
         h45 = Hazard(@formula(0 ~ 1 + mab), "exp", 4, 5)
     elseif model_number == 4
-        h12 = Hazard(@formula(0 ~ 1 + mab), "sp", 1, 2; degree = 1, knots = [0, 5/7, 4.0])
-        h23 = Hazard(@formula(0 ~ 1 + mab), "sp", 2, 3; degree = 1, knots = [0.0, 1.0, 4.0])
-        h24 = Hazard(@formula(0 ~ 1 + mab), "sp", 2, 4; degree = 1, knots = [0.0, 1.0, 4.0])
-        h45 = Hazard(@formula(0 ~ 1 + mab), "sp", 4, 5; degree = 1, knots = [0.0, 1.0, 4.0])        
+        h12 = Hazard(@formula(0 ~ 1 + mab), "sp", 1, 2, degree = 1, knots = [0.0, 5/7, 4.0])
+        h23 = Hazard(@formula(0 ~ 1 + mab), "sp", 2, 3, degree = 1, knots = [0.0, 1.0, 4.0])
+        h24 = Hazard(@formula(0 ~ 1 + mab), "sp", 2, 4, degree = 1, knots = [0.0, 1.0, 4.0])
+        h45 = Hazard(@formula(0 ~ 1 + mab), "sp", 4, 5, degree = 1, knots = [0.0, 1.0, 4.0])        
     end
 
     if isnothing(SamplingWeights)
@@ -659,7 +659,7 @@ function fit_collapsed(dat; model_number, SamplingWeights = nothing)
     initialize_parameters!(model_fit)
 
     # fit models
-    model_fitted = fit(model_fit; verbose = true, compute_vcov = false, maxiter = 500, ess_target_initial = 100, α = 0.1)
+    model_fitted = fit(model_fit; verbose = true, compute_vcov = false, maxiter = 500, ess_target_initial = 100)
 
     return model_fitted
 end
@@ -696,7 +696,7 @@ function work_function(;seed1, seed2, model_number, nulleff)
             model_fitted = fit(model_fit; verbose = true, compute_vcov = true) 
         elseif model_number == 2
             initialize_parameters!(model_fit)
-            model_fitted = fit(model_fit; verbose = true, compute_vcov = true, maxiter = 500, ess_target_initial = 200, α = 0.1, κ = 1.5)
+            model_fitted = fit(model_fit; verbose = true, compute_vcov = true, maxiter = 500, ess_target_initial = 200)
         end
 
         # model for simulation

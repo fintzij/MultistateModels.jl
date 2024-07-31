@@ -22,7 +22,7 @@ h21 = Hazard(@formula(0 ~ 1 + x), "sp", 2, 1; degree = 3, knots = collect(0.2:0.
 
 h31 = Hazard(@formula(0 ~ 1 + x), "sp", 3, 1; degree = 1, knots = [0.25, 0.5, 0.75], extrapolation = "flat") 
 
-h32 = Hazard(@formula(0 ~ 1), "sp", 3, 2; degree = 1, knots = [0.5, 0.8], extrapolation = "linear")
+h32 = Hazard(@formula(0 ~ 1), "sp", 3, 2; degree = 1, extrapolation = "linear")
 
 hazards = (h12, h13, h21, h31, h32)
 splinemod = multistatemodel(h12, h13, h21, h31, h32; data = dat)

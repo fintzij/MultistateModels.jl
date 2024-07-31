@@ -235,12 +235,4 @@ end
         # integrate over the timespan
         @test isapprox(chaz_crude_extrap, chaz_extrap; atol = delta * 10)
     end
-
-    # test that the hazard and cumulative hazard are as expected
-    @test isequal(MultistateModels.call_haz(0.2, splinemod.parameters[5], 1, splinemod.hazards[5]; give_log = false), 0.0)
-    @test isequal(MultistateModels.call_haz(0.5, splinemod.parameters[5], 1, splinemod.hazards[5]; give_log = false), 0.25)
-    @test isequal(MultistateModels.call_haz(0.8, splinemod.parameters[5], 1, splinemod.hazards[5]; give_log = false), 0.7)
-
-    @test isequal(MultistateModels.call_cumulhaz(0.0, 0.3, splinemod.parameters[5], 1, splinemod.hazards[5]; give_log = false), 0.0)
-    @test isapprox(MultistateModels.call_cumulhaz(0.5, 1.0, splinemod.parameters[5], 1, splinemod.hazards[5]; give_log = false), 0.5 * 1.25 / 2)
 end

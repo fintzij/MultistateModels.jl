@@ -268,7 +268,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = 
     # get bounds
     sp_bounds = BSplineKit.boundaries(_hazard.hazsp.spline.basis)
 
-    if l == u
+    if isapprox(l, u; atol = eps())
         # no cumulative hazard accrued
         chaz = 0.0
 
@@ -336,7 +336,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = 
     end 
 
     # return the log hazard
-    give_log ? log(chaz) : chaz
+    give_log ? log(clamp(chaz, 0.0, Inf)) : chaz
 end
 
 """
@@ -373,7 +373,7 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log 
     # get bounds
     sp_bounds = BSplineKit.boundaries(_hazard.hazsp.spline.basis)
 
-    if l == u
+    if isapprox(l, u; atol = eps())
         # no cumulative hazard accrued
         chaz = 0.0
 
@@ -440,8 +440,11 @@ function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log 
         chaz = u_chaz - l_chaz
     end 
 
+    # make sure there are no small numerical errors leading to negative cumulative hazard increments
+
+
     # log cumulative hazard
-    logchaz = log(chaz) + dot(_hazard.data[rowind, :], parameters[Not(1:_hazard.nbasis)])
+    logchaz = log(clamp(chaz, 0.0, Inf)) + dot(_hazard.data[rowind, :], parameters[Not(1:_hazard.nbasis)])
 
     # return the log hazard
     give_log ? logchaz : exp(logchaz)

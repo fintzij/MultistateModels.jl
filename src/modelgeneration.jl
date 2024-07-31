@@ -1,5 +1,5 @@
 """
-    Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing}, periodic::Bool = false, monotonic::Bool = false)
+    Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Float64, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing}, periodic::Bool = false, monotonic::Bool = false)
 
 Specify a parametric or semi-parametric baseline cause-specific hazard function. 
 
@@ -17,7 +17,7 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 - `natural_spline`: Restrict the second derivative to zero at the boundaries, defaults to true.
 - `knots` argument is interpreted as interior knots. 
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, natural_spline = true, extrapolation = "linear")
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Float64, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, natural_spline = true, extrapolation = "linear")
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 

@@ -14,7 +14,7 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
     ra = "→"; sf = hazard.statefrom; st = hazard.stateto
 
     # boundary knots
-    timespan = [0.0, maximum(data.tstop)]
+    timespan = [minimum(data.tstart), maximum(data.tstop)]
 
     # if no transitions observed (e.g., initializing a dataset) then use timespan
     if !any((data.statefrom .== hazard.statefrom) .& (data.stateto .== hazard.stateto))
@@ -37,8 +37,18 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
         bknots[2] = spbounds[2]
     end
 
+    # snag interior knots
+    intknots = isnothing(hazard.knots) ? Vector{Float64}() : hazard.knots
+
+    # warn if any interior knots are outside of the boundaries
+    if !isnothing(hazard.knots) && (any(intknots .< bknots[1]) | any(intknots .> bknots[2]))
+        @warn "Interior knots were specified outside of the spline boundary knots. The boundary knots will be set to the range of the interior knots."
+        bknots[1] = bknots[1] > minimum(intknots) ? minimum(intknots) : bknots[1]
+        bknots[2] = bknots[2] < maximum(intknots) ? maximum(intknots) : bknots[2]
+    end
+
     # make knots
-    spknots = unique(sort([bknots[1]; hazard.knots; bknots[2]]))    
+    spknots = unique(sort([bknots[1]; intknots; bknots[2]]))    
 
     # generate Splines
     B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(spknots))
@@ -121,7 +131,8 @@ function set_riskperiod!(hazard::_SplineHazard)
             riskperiod[2] = hazard.timespan[2]
         end
 
-        # copy
+        # clamp and copy
+        clamp!(riskperiod, hazard.timespan[1], hazard.timespan[2])
         copyto!(hazard.riskperiod, riskperiod)
     end
 end
