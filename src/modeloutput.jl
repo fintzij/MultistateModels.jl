@@ -163,13 +163,13 @@ Compute the log marginal likelihood from sample paths.
 # Arguments
 - min_ess: minimum effective sample size, defaults to 100.
 """
-function compute_loglik(model::MultistateProcess, loglik_surrog, loglik_target)
+function compute_loglik(model::MultistateProcess, loglik_surrog, loglik_target, NormConstantProposal)
     ImportanceWeightsUnnormalized = [exp.(loglik_target[i] .- loglik_surrog[i]) for i in eachindex(loglik_surrog)]
 
     # calculate the log marginal likelihood
     ml_subj = map(w -> mean(w), ImportanceWeightsUnnormalized) # need to use the *un-normalized* weights
     lml_subj = log.(ml_subj)
-    lml = sum(lml_subj .* model.SamplingWeights)
+    lml = sum(lml_subj .* model.SamplingWeights) + NormConstantProposal
 
     # # calculate MCSEs
     # var_lml_subj = map(w -> length(w) == 1 ? 0.0 : var(w) / length(w), ImportanceWeightsUnnormalized)
@@ -182,8 +182,6 @@ function compute_loglik(model::MultistateProcess, loglik_surrog, loglik_target)
     return (loglik = lml, loglik_subj = lml_subj) #, mcse = sqrt(var_lml), mcse_loglik_subj = sqrt.(var_lml_subj))
 
 end
-
-
 
 
 """
