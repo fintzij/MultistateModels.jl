@@ -229,7 +229,7 @@ function extract_sojourns(statefrom, stateto, samplepaths::Vector{SamplePath})
     # accumulate sojourns
     for s in eachindex(samplepaths)
         for i in Base.OneTo(length(samplepaths[s].states) - 1)
-            if (samplepaths[s].states[i] == sf) && (samplepaths[s].states[i + 1] == st)
+            if (samplepaths[s].states[i] == statefrom) && (samplepaths[s].states[i + 1] == stateto)
                 push!(times, samplepaths[s].times[i+1] - samplepaths[s].times[i])
             end
         end
