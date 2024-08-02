@@ -218,40 +218,19 @@ function extract_paths(data::DataFrame; self_transitions = false)
 end
 
 """
-    extract_sojourns(hazard, data::DataFrame, samplepaths::Vector{SamplePath})
-
-Extract unique gap and sojourn times.
+    extract_sojourns(statefrom, stateto, samplepaths::Vector{SamplePath}; type = "events")
 """
-function extract_sojourns(hazard, data::DataFrame, samplepaths::Vector{SamplePath}; sojourns_only = true)
+function extract_sojourns(statefrom, stateto, samplepaths::Vector{SamplePath})
 
     # initialize times
     times = Vector{Float64}()
     sizehint!(times, length(samplepaths))
 
+    # accumulate sojourns
     for s in eachindex(samplepaths)
-        
-        # get subject data
-        subj_dat = view(data, findall(data.id .== samplepaths[s].subj), :)
-
-        for i in Base.OneTo(length(samplepaths[s].states)-1)
-            if samplepaths[s].states[i] == hazard.statefrom
-
-                if sojourns_only & (samplepaths[s].states[i + 1] == hazard.stateto)
-                    append!(times, diff(samplepaths[s].times[i:(i+1)]))
-                else
-                    # append the times at which the hazard and cumulative hazard are evaluated
-                    tdatinds = findall((subj_dat.tstop .>= samplepaths[s].times[i]) .& (subj_dat.tstop .<= samplepaths[s].times[i+1]))
-
-                    append!(times, 
-                        unique(round.([
-                            samplepaths[s].times[i];
-                            samplepaths[s].times[i+1];
-                            subj_dat.tstop[tdatinds];
-                            diff([samplepaths[s].times[i]; 
-                                  subj_dat.tstop[tdatinds]; 
-                                  samplepaths[s].times[i+1]]); 
-                            diff(samplepaths[s].times[i:(i+1)])]; sigdigits = 8)))
-                end
+        for i in Base.OneTo(length(samplepaths[s].states) - 1)
+            if (samplepaths[s].states[i] == sf) && (samplepaths[s].states[i + 1] == st)
+                push!(times, samplepaths[s].times[i+1] - samplepaths[s].times[i])
             end
         end
     end

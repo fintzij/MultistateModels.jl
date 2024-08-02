@@ -30,41 +30,28 @@ end
 function setup_model(; make_pars, data = nothing, nsubj = 200, family = "wei", ntimes = 8, knots = nothing)
     
     # create hazards
-    if (family != "sp1") & (family != "sp3")
+    if (family != "sp1") & (family != "sp2")
         h12 = Hazard(@formula(0 ~ 1), family, 1, 2)
         h13 = Hazard(@formula(0 ~ 1), family, 1, 3)
         h23 = Hazard(@formula(0 ~ 1), family, 2, 3)
 
     elseif family == "sp1"
-        if isnothing(knots)
-            which12 = findall((data.statefrom .== 1) .& (data.stateto .== 2))
-            which13 = findall((data.statefrom .== 1) .& (data.stateto .== 3))
 
-            knots12 = median(data.tstop[which12])
-            knots13 = median(data.tstop[which13])
-        else
-            knots12 = knots[1]
-            knots13 = knots[2]
-        end
+        knots12 = knots[1]
+        knots13 = knots[2]
+        knots23 = knots[3]
+
+        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12[2], boundaryknots = knots12[Not(2)], extrapolation = "flat")
+        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13[2], boundaryknots = knots13[Not(2)], extrapolation = "flat")
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, boundaryknots = knots23, extrapolation = "flat")
+
+    elseif family == "sp2"
+        
+        knots12 = knots[1]
+        knots13 = knots[2]
 
         h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12)
         h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13)
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, boundaryknots = [0.0, 1.0])
-
-    elseif family == "sp3"
-        if isnothing(knots)
-            which12 = findall((data.statefrom .== 1) .& (data.stateto .== 2))
-            which13 = findall((data.statefrom .== 1) .& (data.stateto .== 3))
-
-            knots12 = quantile(data.tstop[which12], [1/3, 2/3])
-            knots13 = quantile(data.tstop[which13], [1/3, 2/3])
-        else
-            knots12 = knots[1]
-            knots13 = knots[2]
-        end
-
-        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = knots12)
-        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 3, knots = knots13)
         h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, boundaryknots = [0.0, 1.0])
     end
     
@@ -198,7 +185,7 @@ end
 #   1: "exp"
 #   2: "wei"
 #   3: "sp1" - degree 1 with knot at midpoint and range
-#   4: "sp3" - degree 3 with knots at 0.05, 1/3 and 2/3, and 0.95 quantiles
+#   4: "sp2" - degree 3 with knots at 0.05, 1/3 and 2/3, and 0.95 quantiles
 function work_function(;simnum, seed, family, sims_per_subj, nboot)
 
     Random.seed!(seed)
@@ -210,8 +197,22 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
     paths = simulate(model_sim; nsim = 1, paths = true, data = false)
     dat = reduce(vcat, map(x -> observe_subjdat(x, model_sim), paths))
 
+    if family < 3
+        spknots = nothing
+    elseif family == 3
+        q12 = quantile(MultistateModels.extract_sojourns(model_sim.hazards[1], dat, MultistateModels.extract_paths(dat; self_transitions = false)), [0.1, 0.5, 0.9])
+        q13 = quantile(MultistateModels.extract_sojourns(model_sim.hazards[2], dat, MultistateModels.extract_paths(dat; self_transitions = false)), [0.1, 0.5, 0.9])
+        q23 = quantile(MultistateModels.extract_sojourns(model_sim.hazards[3], dat, MultistateModels.extract_paths(dat; self_transitions = false)), [0.25, 0.75])
+
+        spknots = (knots12 = q12, knots13 = q13, knots23 = q23)
+
+    elseif family == 4
+        spknots = (knots12 = quantile(MultistateModels.extract_sojourns(model_sim.hazards[1], dat, MultistateModels.extract_paths(dat; self_transitions = false)), [1/3, 2/3]),
+        knots13 = quantile(MultistateModels.extract_sojourns(model_sim.hazards[2], dat, MultistateModels.extract_paths(dat; self_transitions = false)), [1/3, 2/3]))
+    end
+
     ### set up model for fitting
-    model_fit = setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp1", "sp3"][family])
+    model_fit = setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp1", "sp2"][family], knots = spknots)
 
     # fit model
     initialize_parameters!(model_fit)
@@ -219,7 +220,7 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
 
     ### simulate from the fitted model
     spknots = family > 2 ? knots = (model_fitted.hazards[1].knots, model_fitted.hazards[2].knots) : nothing
-    model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "wei", "sp1", "sp3"][family], knots = spknots)
+    model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "wei", "sp1", "sp2"][family], knots = spknots)
 
     set_parameters!(model_sim2, model_fitted.parameters)
     paths_sim = simulate(model_sim2; nsim = sims_per_subj, paths = true, data = false)
