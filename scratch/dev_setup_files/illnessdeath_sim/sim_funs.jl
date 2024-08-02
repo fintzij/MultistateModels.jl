@@ -43,16 +43,17 @@ function setup_model(; make_pars, data = nothing, nsubj = 200, family = "wei", n
 
         h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12[2], boundaryknots = knots12[Not(2)], extrapolation = "flat")
         h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13[2], boundaryknots = knots13[Not(2)], extrapolation = "flat")
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, boundaryknots = [0.5, 0.5 + eps()], extrapolation = "flat")
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, boundaryknots = knots23, extrapolation = "flat")
 
     elseif family == "sp2"
         
         knots12 = knots[1]
         knots13 = knots[2]
+        knots23 = knots[3]
 
-        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12)
-        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13)
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, boundaryknots = [0.0, 1.0])
+        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = knots12[2:3], boundaryknots = knots12[Not(2:3)], extrapolation = "flat")
+        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 3, knots = knots13[2:3], boundaryknots = knots13[Not(2:3)], extrapolation = "flat")
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, boundaryknots = knots23, extrapolation = "flat")
     end
     
     # data for simulation parameters
@@ -200,15 +201,17 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
     if family < 3
         spknots = nothing
     elseif family == 3
-        q12 = quantile(MultistateModels.extract_sojourns(1, 2, MultistateModels.extract_paths(dat; self_transitions = false)), [0.1, 0.5, 0.9])
-        q13 = quantile(MultistateModels.extract_sojourns(1, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.1, 0.5, 0.9])
-        q23 = quantile(MultistateModels.extract_sojourns(2, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.25, 0.75])
+        q12 = quantile(MultistateModels.extract_sojourns(1, 2, MultistateModels.extract_paths(dat; self_transitions = false)), [0.05, 0.5, 0.95])
+        q13 = quantile(MultistateModels.extract_sojourns(1, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.05, 0.5, 0.95])
+        q23 = quantile(MultistateModels.extract_sojourns(2, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.05, 0.95])
 
         spknots = (knots12 = q12, knots13 = q13, knots23 = q23)
-
     elseif family == 4
-        spknots = (knots12 = quantile(MultistateModels.extract_sojourns(model_sim.hazards[1], dat, MultistateModels.extract_paths(dat; self_transitions = false)), [1/3, 2/3]),
-        knots13 = quantile(MultistateModels.extract_sojourns(model_sim.hazards[2], dat, MultistateModels.extract_paths(dat; self_transitions = false)), [1/3, 2/3]))
+        q12 = quantile(MultistateModels.extract_sojourns(1, 2, MultistateModels.extract_paths(dat; self_transitions = false)), [0.05, 1/3, 2/3, 0.95])
+        q13 = quantile(MultistateModels.extract_sojourns(1, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.05, 1/3, 2/3, 0.95])
+        q23 = quantile(MultistateModels.extract_sojourns(2, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.05, 0.95])
+
+        spknots = (knots12 = q12, knots13 = q13, knots23 = q23)
     end
 
     ### set up model for fitting

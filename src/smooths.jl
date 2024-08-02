@@ -27,13 +27,13 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
     # grab boundary knots
     bknots = isnothing(hazard.boundaryknots) ? spbounds : hazard.boundaryknots
 
-    if bknots[1] > spbounds[1]
-        @warn "The left boundary for the $sf $ra $st transition was set above the minimum possible sojourn and will be set to 0."
+    if ((bknots[1] > spbounds[1]) & (hazard.extrapolation == "linear"))
+        @warn "The left boundary for the $sf $ra $st transition was set above the minimum possible sojourn and will be set to 0 because extrapolation method is linear."
         bknots[1] = spbounds[1]
     end
 
-    if bknots[2] < spbounds[2]
-        @warn "The right boundary for the $sf $ra $st transition was set before the greatest sojourn observed in the data and will be set to $(spbounds[2])."
+    if ((bknots[2] < spbounds[2]) & (hazard.extrapolation == "linear"))
+        @warn "The right boundary for the $sf $ra $st transition was set before the greatest sojourn observed in the data and will be set to $(spbounds[2]) because the extrapolation method is linear."
         bknots[2] = spbounds[2]
     end
 
