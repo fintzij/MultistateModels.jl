@@ -43,7 +43,7 @@ function setup_model(; make_pars, data = nothing, nsubj = 200, family = "wei", n
 
         h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12[2], boundaryknots = knots12[Not(2)], extrapolation = "flat")
         h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13[2], boundaryknots = knots13[Not(2)], extrapolation = "flat")
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, boundaryknots = [0.0, eps()], extrapolation = "flat")
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, boundaryknots = [0.5, 0.5 + eps()], extrapolation = "flat")
 
     elseif family == "sp2"
         
