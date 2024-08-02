@@ -236,7 +236,7 @@ function extract_sojourns(hazard, data::DataFrame, samplepaths::Vector{SamplePat
         for i in Base.OneTo(length(samplepaths[s].states)-1)
             if samplepaths[s].states[i] == hazard.statefrom
 
-                if sojourns_only
+                if sojourns_only & (samplepaths[s].states[i + 1] == hazard.stateto)
                     append!(times, diff(samplepaths[s].times[i:(i+1)]))
                 else
                     # append the times at which the hazard and cumulative hazard are evaluated
