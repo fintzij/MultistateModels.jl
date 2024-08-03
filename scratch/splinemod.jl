@@ -27,7 +27,7 @@ set_parameters!(mod, (h12 = (log(0.8), log(0.4)),))
 simdat = simulate(mod; paths = false, data = true)[1]
 
 # set up model for inference
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = quantile(simdat.tstop[findall(simdat.stateto .== 2)], [0.05, 1/3, 2/3, 0.95]), extrapolation = "linear")
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = quantile(simdat.tstop[findall(simdat.stateto .== 2)], [0.0, 0.25, 0.5, 0.75, 1.0]), extrapolation = "linear", monotone = -1)
 # h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
 
 model = multistatemodel(h12; data = simdat)
@@ -35,6 +35,6 @@ initialize_parameters!(model)
 
 model_fitted = fit(model, tol=1e-2)
 
-using Plots
-plot(0:0.01:1, compute_hazard(0:0.01:1, mod, :h12))
-plot!(0:0.01:1, compute_hazard(0:0.01:1, model_fitted, :h12))
+
+plot(0:0.01:1, compute_hazard(0:0.01:1, model_fitted, :h12))
+plot!(0:0.01:1, compute_hazard(0:0.01:1, mod, :h12))

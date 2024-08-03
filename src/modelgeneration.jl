@@ -16,8 +16,10 @@ Specify a parametric or semi-parametric baseline cause-specific hazard function.
 - `extrapolation`: Either "linear" or "flat", see the BSplineKit.jl package. 
 - `natural_spline`: Restrict the second derivative to zero at the boundaries, defaults to true.
 - `knots` argument is interpreted as interior knots. 
+- `monotone`; 0, -1, or 1 for non-monotone, monotone decreasing, or monotone increasing.
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Float64, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, natural_spline = true, extrapolation = "linear")
+function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Float64, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, natural_spline = true, extrapolation = "linear", monotone = 0)
+
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
@@ -25,10 +27,16 @@ function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int6
             @error "Spline degree must be 0, 1, 2, or 3."
         end
 
+        if natural_spline & (monotone != 0)
+            @info "Natural boundary conditions are not currently compatible with monotone splines. The restrictions on second derivatives at the spline boundaries will be removed."
+            natural_spline = false
+        end
+
         # change extrapolation to flat if degree = 0
         extrapolation = degree > 0 ? extrapolation : "flat"
+        natural_spline = degree < 2 ? false : natural_spline
 
-        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots, boundaryknots, extrapolation, natural_spline)
+        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots, boundaryknots, extrapolation, natural_spline, sign(monotone))
     end
 
     return h
@@ -264,9 +272,6 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             # number of parameters
             npars = size(rmat, 2) + size(hazdat, 2) - 1
 
-            # check if a natural spline
-            natural_spline = !((size(rmat, 1) == size(rmat, 2)) && isdiag(rmat) && all(diag(rmat) .== 1))
-
             # generate hazard struct
             ### no covariates
             if(size(hazdat, 2) == 1) 
@@ -289,7 +294,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                         knots,
                                         hazard,
                                         cumulative_hazard,
-                                        natural_spline,
+                                        hazards[h].natural_spline,
+                                        hazards[h].monotone,
                                         timespan,
                                         timespan,
                                         length(hazard.spline.basis),
@@ -315,7 +321,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                                         knots,
                                         hazard,
                                         cumulative_hazard,
-                                        natural_spline,
+                                        hazards[h].natural_spline,
+                                        hazards[h].monotone,
                                         timespan,
                                         timespan,
                                         length(hazard.spline.basis),

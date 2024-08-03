@@ -82,6 +82,36 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
 end
 
 """
+    spline_ests2coefs(coefs; monotone = 0)
+
+Transform spline parameter estimates on their unrestricted estimation scale to coefficients.
+"""
+function spline_ests2coefs(coefs; monotone = 0)
+    if monotone == 0
+        exp.(coefs)
+    elseif monotone == 1
+        cumsum(exp.(coefs))
+    elseif monotone == -1
+        reverse(cumsum(exp.(coefs)))
+    end
+end
+
+"""
+    spline_coefs2ests(ests; monotone = 0)
+
+Transform spline coefficients to unrestrected estimation scale parameters.
+"""
+function spline_coefs2ests(ests; monotone = 0)
+    if monotone == 0
+        log.(ests)
+    elseif monotone == 1
+        [log(ests[begin]); log.(diff(ests))]
+    elseif monotone == -1
+        [log(ests[end]); log.(diff(reverse(ests)))]
+    end
+end
+
+"""
     remake_splines!(hazard::_SplineHazard, parameters)
 
 Remake splines in hazard object with new parameters.
@@ -89,7 +119,7 @@ Remake splines in hazard object with new parameters.
 function remake_splines!(hazard::_SplineHazard, parameters)
     
     # make new spline
-    hazsp = Spline(hazard.hazsp.spline.basis, exp.(parameters[1:hazard.nbasis]))
+    hazsp = Spline(hazard.hazsp.spline.basis, spline_ests2coefs(parameters[1:hazard.nbasis]; monotone = hazard.monotone))
     chazsp = integral(hazsp)
 
     # remake spline objects with recombined parameters

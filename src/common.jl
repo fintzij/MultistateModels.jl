@@ -77,6 +77,7 @@ Specify a cause-specific baseline hazard.
 - `boundaryknots`: Vector of boundary knot locations
 - `extrapolation`: Either "linear" or "flat"
 - `natural_spline`: Restrict the second derivative to zero at the boundaries (natural spline).
+- `monotone`: 
 """
 struct SplineHazard <: HazardFunction
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
@@ -88,6 +89,7 @@ struct SplineHazard <: HazardFunction
     boundaryknots::Union{Nothing,Vector{Float64}}
     extrapolation::String
     natural_spline::Bool
+    monotone::Int64
 end
 
 """
@@ -178,6 +180,7 @@ mutable struct _Spline <: _SplineHazard
     hazsp::SplineExtrapolation
     chazsp::Spline
     natural_spline::Bool
+    monotone::Int64
     riskperiod::Vector{Float64}
     timespan::Vector{Float64}
     nbasis::Int64
@@ -198,6 +201,7 @@ mutable struct _SplinePH <: _SplineHazard
     hazsp::SplineExtrapolation
     chazsp::Spline
     natural_spline::Bool
+    monotone::Int64
     riskperiod::Vector{Float64}
     timespan::Vector{Float64}
     nbasis::Int64

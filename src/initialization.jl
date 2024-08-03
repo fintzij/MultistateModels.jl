@@ -16,6 +16,13 @@ function set_crude_init!(model::MultistateProcess; constraints = nothing)
             set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
             set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
         end
+
+        for i in eachindex(model.hazards)
+            if isa(model.hazards[i], _SplineHazard)
+                remake_splines!(model.hazards[i], model.parameters[i])
+                set_riskperiod!(model.hazards[i])
+            end
+        end
     end
 end
 
@@ -46,6 +53,11 @@ function initialize_parameters!(model::MultistateProcess; constraints = nothing,
             end
             
             set_parameters!(model, NamedTuple{(model.hazards[i].hazname,)}((set_par_to,)))
+
+            if isa(model.hazards[i], _SplineHazard)
+                remake_splines!(model.hazards[i], model.parameters[i])
+                set_riskperiod!(model.hazards[i])
+            end
         end
     end
 end
@@ -210,10 +222,15 @@ function init_par(_hazard::_Spline, crude_log_rate=0)
     # use the recombined basis if needed
     B = _hazard.hazsp.spline.basis
 
-    # get coefficients 
-    coefs = fill(exp(crude_log_rate), length(B))
-    
-    return log.(coefs)
+    # if monotone all coefficients are the same to start
+    coefs = fill(crude_log_rate, length(B))
+    if _hazard.monotone == 1
+        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(0.95, 1.05; length = length(B))); monotone = 1)
+    elseif _hazard.monotone == -1
+        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(1.05, 0.95; length = length(B))); monotone = -1)
+    end        
+
+    return coefs
 end
 
 """
@@ -226,7 +243,12 @@ function init_par(_hazard::_SplinePH, crude_log_rate=0)
     B = _hazard.hazsp.spline.basis
 
     # get coefficients 
-    coefs = fill(exp(crude_log_rate), length(B))
+    coefs = fill(crude_log_rate, length(B))
+    if _hazard.monotone == 1
+        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(0.95, 1.05; length = length(B))); monotone = 1)
+    elseif _hazard.monotone == -1
+        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(1.05, 0.95; length = length(B))); monotone = -1)
+    end        
 
     return vcat(log.(coefs), zeros(_hazard.ncovar))
 end

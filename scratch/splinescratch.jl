@@ -114,8 +114,19 @@ D = diff(S)
 D(-1)
 ForwardDiff.derivative(S, -1)
 
-# experiment with barrier functions
-B = BSplineBasis(BSplineOrder(2), [0.3, 0.5, 0.7])
-S = Spline(B, [0.0, 1, 0.0])
-E = SplineExtrapolation(S, Linear())
-der = diff(E)
+# experiment with monotonicity via covariate constraints
+x = collect(0:0.1:1.0)
+B = BSplineBasis(BSplineOrder(4), x)
+c = collect(range(1.2, 3.3; length = length(B)))
+S = Spline(B, c)
+
+plot(0:0.001:1.0, S.(0:0.001:1.0))
+
+# monotone decreasing
+x = [0.0; sort(rand(3)); 1.0]
+B = BSplineBasis(BSplineOrder(4), x)
+c = cumsum(rand(length(B)))
+S = Spline(B, reverse(c))
+
+plot(0:0.001:1.0, S.(0:0.001:1.0))
+
