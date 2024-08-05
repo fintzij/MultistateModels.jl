@@ -86,13 +86,13 @@ end
 
 Transform spline parameter estimates on their unrestricted estimation scale to coefficients.
 """
-function spline_ests2coefs(coefs; monotone = 0)
+function spline_ests2coefs(ests; monotone = 0)
     if monotone == 0
-        exp.(coefs)
+        exp.(ests)
     elseif monotone == 1
-        cumsum(exp.(coefs))
+        cumsum(exp.(ests))
     elseif monotone == -1
-        reverse(cumsum(exp.(coefs)))
+        reverse(cumsum(exp.(ests)))
     end
 end
 
@@ -101,13 +101,13 @@ end
 
 Transform spline coefficients to unrestrected estimation scale parameters.
 """
-function spline_coefs2ests(ests; monotone = 0)
+function spline_coefs2ests(coefs; monotone = 0)
     if monotone == 0
-        log.(ests)
+        log.(coefs)
     elseif monotone == 1
-        [log(ests[begin]); log.(diff(ests))]
+        [log(coefs[begin]); log.(diff(coefs))]
     elseif monotone == -1
-        [log(ests[end]); log.(diff(reverse(ests)))]
+        [log(coefs[end]); log.(diff(reverse(coefs)))]
     end
 end
 

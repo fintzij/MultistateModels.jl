@@ -130,3 +130,19 @@ S = Spline(B, reverse(c))
 
 plot(0:0.001:1.0, S.(0:0.001:1.0))
 
+## test est scale
+coefs = [0.2, 1.3, 1.43, 2.21, 2.28, 2.82]
+ests = [log(0.2); log.(diff(coefs))]
+
+function s_e2c(es)
+    cs = zeros(length(es))
+    cs[1] = exp(es[1])
+    for k in 2:length(cs)
+        cs[k] = cs[k-1] + exp(es[k])
+    end
+    return(cs)
+end 
+
+spline_ests2coefs(ests; monotone = 1) == coefs
+cumsum(exp.(ests))
+s_e2c(ests) == coefs
