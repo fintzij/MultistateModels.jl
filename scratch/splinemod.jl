@@ -16,19 +16,19 @@ dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
                 stateto = fill(2, ntimes * nsubj),
                 obstype = fill(2, ntimes * nsubj))
 
-h12e = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+h12e = Hazard(@formula(0 ~ 1), "exp", 1, 2)
 
 mod = multistatemodel(h12e; data = dat)
 
-# set_parameters!(mod, (h12 = [log(0.8),],))
-set_parameters!(mod, (h12 = (log(0.8), log(0.4)),))
+set_parameters!(mod, (h12 = [log(0.8),],))
+# set_parameters!(mod, (h12 = (log(0.8), log(0.4)),))
 
 # simulate
 simdat = simulate(mod; paths = false, data = true)[1]
 
 # set up model for inference
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = quantile(simdat.tstop[findall(simdat.stateto .== 2)], [0.0, 0.25, 0.5, 0.75, 1.0]), extrapolation = "linear", monotone = -1)
-# h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = quantile(simdat.tstop[findall(simdat.stateto .== 2)], [0.0, 0.25, 0.5, 0.75, 1.0]), extrapolation = "linear", monotone = -1)
+# h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 0, boundaryknots = [0.0, 1.0])
 
 model = multistatemodel(h12; data = simdat)
 initialize_parameters!(model)
