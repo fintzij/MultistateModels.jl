@@ -33,6 +33,6 @@ h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = [0.0; quantile(sim
 model = multistatemodel(h12; data = simdat)
 initialize_parameters!(model)
 
-model_fitted = fit(model; tol = 0.01, γ = 0.01)
+model_fitted = fit(model; tol = 0.001, γ = 0.01)
 
 plot(0:0.01:1, compute_hazard(0:0.01:1, model_fitted, :h12)); plot!(0:0.01:1, compute_hazard(0:0.01:1, model_sim, :h12))
