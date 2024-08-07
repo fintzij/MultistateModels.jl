@@ -81,19 +81,22 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
     return (sphaz = sphaz, spchaz = spchaz, rmat = M, knots = spknots, timespan = timespan)
 end
 
+
+
 """
     spline_ests2coefs(coefs; monotone = 0)
 
 Transform spline parameter estimates on their unrestricted estimation scale to coefficients.
 """
 function spline_ests2coefs(ests; monotone = 0)
-    if monotone == 0
-        exp.(ests)
-    elseif monotone == 1
-        cumsum(exp.(ests))
-    elseif monotone == -1
-        reverse(cumsum(exp.(ests)))
-    end
+
+    # transform
+    coefs = (monotone == 0) ? exp.(ests) : (monotone == 1) ? cumsum(exp.(ests)) : reverse(cumsum(exp.(ests)))
+    
+    # clamp numerical zeros
+    coefs[findall(isapprox.(coefs, 0.0; atol = sqrt(eps())))] .= zero(eltype(coefs))    
+
+    return coefs
 end
 
 """
@@ -102,12 +105,41 @@ end
 Transform spline coefficients to unrestrected estimation scale parameters.
 """
 function spline_coefs2ests(coefs; monotone = 0)
-    if monotone == 0
-        log.(coefs)
-    elseif monotone == 1
-        [log(coefs[begin]); log.(diff(coefs))]
+
+    if monotone == 1
+        # get differences
+        coefs = [coefs[1]; diff(coefs)]
+
     elseif monotone == -1
-        [log(coefs[end]); log.(diff(reverse(coefs)))]
+        # get differences in reverse
+        coefs = [coefs[end]; diff(reverse(coefs))]
+    end
+
+    # clamp numerical errors to zero
+    coefs[findall(isapprox.(coefs, 0.0; atol = sqrt(eps())))] .= zero(eltype(coefs))
+
+    ests = log.(coefs)
+
+    return ests
+end
+
+"""
+    rectify_coefs(ests, monotone)
+
+Pass model estimates through spline coefficient transformations to remove numerical zeros. 
+"""
+function rectify_coefs!(ests, model)
+
+    nested = VectorOfVectors(ests, model.parameters.elem_ptr)
+
+    for i in eachindex(model.hazards)
+        if isa(model.hazards[i], _SplineHazard)
+            # get rectified parameters
+            rectified = [spline_coefs2ests(spline_ests2coefs(nested[i]; monotone = model.hazards[i].monotone); monotone = model.hazards[i].monotone); nested[i][Not(1:model.hazards[i].nbasis)]]
+
+            # copy back to ests
+            deepsetindex!(nested, rectified, i)
+        end
     end
 end
 

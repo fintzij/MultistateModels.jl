@@ -17,6 +17,11 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
         sol  = solve(prob, Newton())
+
+        # rectify spline coefs
+        if any(isa.(model.hazards, _SplineHazard))
+            rectify_coefs!(sol.u, model)
+        end
         
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success)
@@ -31,8 +36,10 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
 
             # grab results
             gradient = DiffResults.gradient(diffres)
-            vcov = pinv(Symmetric(.-DiffResults.hessian(diffres)))
-            vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
+            fishinf = -DiffResults.hessian(diffres)
+            fishinf[findall(isapprox.(fishinf, 0.0; atol = sqrt(eps())))] .= 0.0
+            vcov = pinv(Symmetric(fishinf))
+            vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
             vcov = Symmetric(vcov)
         else
             vcov = nothing
@@ -51,6 +58,11 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_multistate)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths), lcons = constraints.lcons, ucons = constraints.ucons)
         sol  = solve(prob, IPNewton())
+
+        # rectify spline coefs
+        if any(isa.(model.hazards, _SplineHazard))
+            rectify_coefs!(sol.u, model)
+        end
 
         # no hessian when there are constraints
         if compute_vcov == true
@@ -502,6 +514,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         @warn "MCEM did not converge."
     end
 
+    # rectify spline coefs
+    if any(isa.(model.hazards, _SplineHazard))
+        rectify_coefs!(params_cur, model)
+    end
+
     # hessian
     if !isnothing(constraints)
 
@@ -580,7 +597,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # get the variance-covariance matrix
         fishinf[findall(isapprox.(fishinf, 0.0; atol = sqrt(eps())))] .= 0.0
         vcov = pinv(Symmetric(fishinf))
-        vcov[findall(isapprox.(vcov, 0.0; atol = eps(Float64)))] .= 0.0
+        vcov[findall(isapprox.(vcov, 0.0; atol = sqrt(eps(Float64))))] .= 0.0
         vcov = Symmetric(vcov)
     else
         vcov = nothing
