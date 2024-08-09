@@ -21,13 +21,13 @@ end
 # function to make the assessment times
 function make_obstimes()    
     # observation times
-    times = [0.0; collect(0.5:0.5:3.5) .+ (rand(Beta(2, 2), 7) .- 0.25) .* 0.25; 4.0]
+    times = [0.0; collect(0.1:0.1:0.9) .+ (rand(Beta(1.5, 1.5), 9) .- 0.5) .* 0.1; 1.0]
     
-    return times / 4.0
+    return times 
 end
 
 # function to set up the model
-function setup_model(; make_pars, data = nothing, nsubj = 250, family = "wei", ntimes = 8, knots = nothing)
+function setup_model(; make_pars, data = nothing, nsubj = 400, family = "wei", ntimes = 10, spknots = nothing)
     
     # create hazards
     if (family != "sp1") & (family != "sp2")
@@ -37,23 +37,23 @@ function setup_model(; make_pars, data = nothing, nsubj = 250, family = "wei", n
 
     elseif family == "sp1"
 
-        knots12 = knots[1]
-        knots13 = knots[2]
-        knots23 = knots[3]
+        knots12 = spknots[1]
+        knots13 = spknots[2]
+        knots23 = spknots[3]
 
         h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12[Not([begin, end])], boundaryknots = knots12[[begin, end]], extrapolation = "flat", monotone = 1)
         h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13[Not([begin, end])], boundaryknots = knots13[[begin, end]], extrapolation = "flat", monotone = -1)
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = knots23[Not([begin, end])], boundaryknots = knots23[[begin, end]], extrapolation = "linear")
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 0, knots = knots23[Not([begin, end])], boundaryknots = knots23[[begin, end]], extrapolation = "flat")
 
     elseif family == "sp2"
         
-        knots12 = knots[1]
-        knots13 = knots[2]
-        knots23 = knots[3]
+        knots12 = spknots[1]
+        knots13 = spknots[2]
+        knots23 = spknots[3]
 
-        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = knots12[Not([begin, end])], boundaryknots = knots12[[begin, end]], extrapolation = "linear", monotone = 1)
-        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 3, knots = knots13[Not([begin, end])], boundaryknots = knots13[[begin, end]], extrapolation = "linear", monotone = -1)
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, boundaryknots = knots23[[begin, end]], extrapolation = "linear")
+        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = knots12[Not([begin, end])], boundaryknots = knots12[[begin, end]], extrapolation = "flat", monotone = 1)
+        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 3, knots = knots13[Not([begin, end])], boundaryknots = knots13[[begin, end]], extrapolation = "flat", monotone = -1)
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 0, knots = knots23[Not([begin, end])], boundaryknots = knots23[[begin, end]], extrapolation = "flat")
     end
     
     # data for simulation parameters
@@ -106,7 +106,7 @@ function observe_subjdat(path, model)
                         statefrom = obsstates[Not(end)],
                         stateto = obsstates[Not(1)])
 
-    # cull redundatnt rows
+    # cull redundatnt rows in absorbing state
     subjdat = subjdat[Not((subjdat.stateto .== 3) .& (subjdat.statefrom .== 3)), :]
 
     # obstype
@@ -192,7 +192,7 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
     Random.seed!(seed)
 
     # set up model for simulation
-    model_sim = setup_model(; make_pars = true, data = nothing, family = "wei", nsubj = 200)
+    model_sim = setup_model(; make_pars = true, data = nothing, family = "wei", nsubj = 400)
         
     # simulate paths
     paths = simulate(model_sim; nsim = 1, paths = true, data = false)
@@ -201,28 +201,28 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
     if family < 3
         spknots = nothing
     elseif family == 3
-        q12 = quantile(MultistateModels.extract_sojourns(1, 2, MultistateModels.extract_paths(dat; self_transitions = false)), [0.0, 0.25, 0.5, 0.75, 1.0])
-        q13 = quantile(MultistateModels.extract_sojourns(1, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.0, 0.25, 0.5, 0.75, 1.0])
-        q23 = quantile(MultistateModels.extract_sojourns(2, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.0, 1/3, 2/3, 1.0])
+        q12 = [0.0; quantile(MultistateModels.extract_sojourns(1, 2, MultistateModels.extract_paths(dat; self_transitions = false)), [0.5, 1.0])]
+        q13 = [0.0; quantile(MultistateModels.extract_sojourns(1, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.5, 1.0])]
+        q23 = [0.0; quantile(MultistateModels.extract_sojourns(2, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.5, 1.0])]        
 
         spknots = (knots12 = q12, knots13 = q13, knots23 = q23)
     elseif family == 4
-        q12 = quantile(MultistateModels.extract_sojourns(1, 2, MultistateModels.extract_paths(dat; self_transitions = false)), [0.0, 1/3, 2/3, 1.0])
-        q13 = quantile(MultistateModels.extract_sojourns(1, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.0, 1/3, 2/3, 1.0])
-        q23 = quantile(MultistateModels.extract_sojourns(2, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.0, 0.5, 1.0])
+        q12 = [0.0; quantile(MultistateModels.extract_sojourns(1, 2, MultistateModels.extract_paths(dat; self_transitions = false)), [0.5, 1.0])]
+        q13 = [0.0; quantile(MultistateModels.extract_sojourns(1, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.5, 1.0])]
+        q23 = [0.0; quantile(MultistateModels.extract_sojourns(2, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.5, 1.0])]
 
         spknots = (knots12 = q12, knots13 = q13, knots23 = q23)
     end
 
     ### set up model for fitting
-    model_fit = setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp1", "sp2"][family], knots = spknots)
+    model_fit = setup_model(; make_pars = false, data = dat, family = ["exp", "wei", "sp1", "sp2"][family], spknots = spknots)
 
     # fit model
     initialize_parameters!(model_fit)
-    model_fitted = fit(model_fit; verbose = true, compute_vcov = true) 
+    model_fitted = fit(model_fit; verbose = true, compute_vcov = true, ess_target_initial = 50, α = 0.2, γ = 0.2) 
 
     ### simulate from the fitted model
-    model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "wei", "sp1", "sp2"][family], knots = spknots)
+    model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "wei", "sp1", "sp2"][family], spknots = spknots)
 
     set_parameters!(model_sim2, model_fitted.parameters)
     paths_sim = simulate(model_sim2; nsim = sims_per_subj, paths = true, data = false)

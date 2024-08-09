@@ -1,4 +1,3 @@
-using BenchmarkTools
 using BSplineKit
 using Distributions
 using ForwardDiff

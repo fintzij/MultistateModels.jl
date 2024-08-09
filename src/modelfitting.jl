@@ -38,7 +38,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
             gradient = DiffResults.gradient(diffres)
             fishinf = -DiffResults.hessian(diffres)
             fishinf[findall(isapprox.(fishinf, 0.0; atol = sqrt(eps())))] .= 0.0
-            vcov = pinv(Symmetric(fishinf))
+            vcov = pinv(Symmetric(fishinf), rtol = sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
             vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
             vcov = Symmetric(vcov)
         else
@@ -144,7 +144,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
             # grab results
             gradient = DiffResults.gradient(diffres)
-            vcov = pinv(Symmetric(.-DiffResults.hessian(diffres)))
+            vcov = pinv(Symmetric(.-DiffResults.hessian(diffres)), rtol = sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
             vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
             vcov = Symmetric(vcov)
         else
@@ -545,7 +545,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # container for gradient and hessian
         diffres = DiffResults.HessianResult(params_cur)
     
-        # define objective
         ll = pars -> (loglik(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
 
         # accumulate Fisher information
@@ -596,7 +595,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         # get the variance-covariance matrix
         fishinf[findall(isapprox.(fishinf, 0.0; atol = sqrt(eps())))] .= 0.0
-        vcov = pinv(Symmetric(fishinf))
+        vcov = pinv(Symmetric(fishinf); rtol = sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
         vcov[findall(isapprox.(vcov, 0.0; atol = sqrt(eps(Float64))))] .= 0.0
         vcov = Symmetric(vcov)
     else
