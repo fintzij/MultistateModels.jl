@@ -426,3 +426,29 @@ function collapse_data(data::DataFrame; SamplingWeights::Vector{Float64} = ones(
        
     return DataCollapsed, SamplingWeightsCollapsed
 end
+
+"""
+    make_optim_pars(; solver = "newtontrust")
+
+Package optimization hyperparameters together. 
+"""
+function make_optim_pars(optim_pars; solver = "newtontrust")
+    if solver == "newtontrust"
+        if isnothing(optim_pars)
+            optim_pars = (
+                initial_delta = 1.0,
+                delta_hat = 5.0,
+                eta = 0.1,
+                rho_lower = 0.25,
+                rho_upper = 0.75)
+        else
+            optim_pars = (
+                initial_delta = haskey(optim_pars, :initial_delta) ? optim_pars.initial_delta : 1.0,
+                delta_hat = haskey(optim_pars, :delta_hat) ? optim_pars.delta_hat : 5.0,
+                eta = haskey(optim_pars, :eta) ? optim_pars.eta : 0.1,
+                rho_lower = haskey(optim_pars, :rho_lower) ? optim_pars.rho_lower : 0.25,
+                rho_upper = haskey(optim_pars, :rho_upper) ? optim_pars.rho_upper : 0.75)
+        end
+    end
+    return optim_pars
+end

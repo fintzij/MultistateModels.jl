@@ -4,8 +4,6 @@ using MultistateModels
 using Plots
 using Random
 
-# Random.seed!(0)
-
 # set up the very simplest model
 nsubj = 100
 ntimes = 10
@@ -26,7 +24,7 @@ set_parameters!(model_sim, (h12 = (log(1.25), log(1.5)),))
 simdat = simulate(model_sim; paths = false, data = true)[1]
 
 # set up model for inference
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = [0.25, 0.5, 0.75], extrapolation = "linear")
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = [0.25, 0.5, 0.75], extrapolation = "linear", monotone = 1)
 
 model = multistatemodel(h12; data = simdat)
 

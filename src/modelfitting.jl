@@ -3,7 +3,7 @@
 
 Fit a multistate model given exactly observed sample paths.
 """
-function fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
+function fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing, kwargs...)
 
     # initialize array of sample paths
     samplepaths = extract_paths(model; self_transitions = false)
@@ -16,7 +16,17 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         # get estimates
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
-        sol  = solve(prob, Newton())
+
+        # set solver options
+        optim_pars = make_optim_pars(optim_pars; solver = "newtontrust")
+
+        sol  = solve(prob, 
+                     NewtonTrustRegion(;
+                        initial_delta = optim_pars.initial_delta,
+                        delta_hat = optim_pars.delta_hat,
+                        eta = optim_pars.eta,
+                        rho_lower = optim_pars.rho_lower,
+                        rho_upper = optim_pars.rho_upper))
 
         # rectify spline coefs
         if any(isa.(model.hazards, _SplineHazard))
@@ -116,7 +126,7 @@ Fit a multistate markov model to interval censored data or a mix of panel data a
 - verbose: print messages, defaults to true.
 - compute_vcov: compute variance-covariance matrix, defaults to true if no constraints or false otherwise.
 """
-function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
+function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing, kwargs...)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -129,7 +139,17 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         # get estimates
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-        sol  = solve(prob, Newton())
+
+        # set solver options
+        optim_pars = make_optim_pars(optim_pars; solver = "newtontrust")
+
+        sol  = solve(prob, 
+                NewtonTrustRegion(;
+                initial_delta = optim_pars.initial_delta,
+                delta_hat = optim_pars.delta_hat,
+                eta = optim_pars.eta,
+                rho_lower = optim_pars.rho_lower,
+                rho_upper = optim_pars.rho_upper))
 
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success)
@@ -221,8 +241,9 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ConvergenceRecords: save history throughout the run
 - return_ProposedPaths: save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
+- optim_pars: named tuple with parameters to be passed to Optim.jl for NewtonTrustRegion. 
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.1, κ = 2.0, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, optim_pars = nothing, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.1, κ = 2.0, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing, kwargs...)
 
     # copy of data
     data_original = deepcopy(model.data)
@@ -380,11 +401,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights))
 
-        # set solver
-        # if isnothing(optim_pars)
-        #     # set defaults if not provided
-        #     optim_pars = make_optim_pars()
-        # end
+        # set solver options
+        optim_pars = make_optim_pars(optim_pars; solver = "newtontrust")
     else
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
         prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
@@ -415,13 +433,13 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # optimize the monte carlo marginal likelihood
         if isnothing(constraints)
             params_prop_optim = solve(
-                remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Newton())
-                # NewtonTrustRegion(;
-                #     initial_delta = optim_pars.initial_delta,
-                #     delta_hat = optim_pars.delta_hat,
-                #     eta = optim_pars.eta,
-                #     rho_lower = optim_pars.lower,
-                #     rho_upper = optim_pars.upper)) # hessian-based
+                remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), 
+                NewtonTrustRegion(;
+                    initial_delta = optim_pars.initial_delta,
+                    delta_hat = optim_pars.delta_hat,
+                    eta = optim_pars.eta,
+                    rho_lower = optim_pars.rho_lower,
+                    rho_upper = optim_pars.rho_upper)) # hessian-based
         else
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), IPNewton())
         end
