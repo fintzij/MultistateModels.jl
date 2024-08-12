@@ -88,13 +88,15 @@ end
 
 Transform spline parameter estimates on their unrestricted estimation scale to coefficients.
 """
-function spline_ests2coefs(ests; monotone = 0)
+function spline_ests2coefs(ests; monotone = 0, clamp_zeros = false)
 
     # transform
     coefs = (monotone == 0) ? exp.(ests) : (monotone == 1) ? cumsum(exp.(ests)) : reverse(cumsum(exp.(ests)))
     
     # clamp numerical zeros
-    coefs[findall(isapprox.(coefs, 0.0; atol = sqrt(eps())))] .= zero(eltype(coefs))    
+    if clamp_zeros
+        coefs[findall(isapprox.(coefs, 0.0; atol = sqrt(eps())))] .= zero(eltype(coefs))    
+    end
 
     return coefs
 end
@@ -104,7 +106,7 @@ end
 
 Transform spline coefficients to unrestrected estimation scale parameters.
 """
-function spline_coefs2ests(coefs; monotone = 0)
+function spline_coefs2ests(coefs; monotone = 0, clamp_zeros = false)
 
     if monotone == 1
         # get differences
@@ -116,7 +118,9 @@ function spline_coefs2ests(coefs; monotone = 0)
     end
 
     # clamp numerical errors to zero
-    coefs[findall(isapprox.(coefs, 0.0; atol = sqrt(eps())))] .= zero(eltype(coefs))
+    if clamp_zeros
+        coefs[findall(isapprox.(coefs, 0.0; atol = sqrt(eps())))] .= zero(eltype(coefs))
+    end
 
     ests = log.(coefs)
 
@@ -135,7 +139,7 @@ function rectify_coefs!(ests, model)
     for i in eachindex(model.hazards)
         if isa(model.hazards[i], _SplineHazard)
             # get rectified parameters
-            rectified = [spline_coefs2ests(spline_ests2coefs(nested[i]; monotone = model.hazards[i].monotone); monotone = model.hazards[i].monotone); nested[i][Not(1:model.hazards[i].nbasis)]]
+            rectified = [spline_coefs2ests(spline_ests2coefs(nested[i]; monotone = model.hazards[i].monotone, clamp_zeros = true); monotone = model.hazards[i].monotone, clamp_zeros = true); nested[i][Not(1:model.hazards[i].nbasis)]]
 
             # copy back to ests
             deepsetindex!(nested, rectified, i)

@@ -71,4 +71,5 @@ using MultistateModels: build_tpm_mapping, loglik, SMPanelData, build_hazmat_boo
 optimize_surrogate = true; constraints = nothing; surrogate_constraints = nothing; surrogate_parameters = nothing; maxiter = 100; tol = 1e-3; α = 0.2; γ = 0.2; κ = 2.0; ess_target_initial = 50; max_ess = 10000; MaxSamplingEffort = 20; npaths_additional = 10; verbose = true; return_ConvergenceRecords = true; return_ProposedPaths = false; compute_vcov = true
 
 # SamplingWeights = nothing; 
-CensoringPatterns = nothing; SamplingWeights = nothing;
+CensoringPatterns = nothing; 
+SamplingWeights = nothing;

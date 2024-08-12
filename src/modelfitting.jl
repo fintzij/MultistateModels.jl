@@ -144,7 +144,8 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
             # grab results
             gradient = DiffResults.gradient(diffres)
-            vcov = pinv(Symmetric(.-DiffResults.hessian(diffres)), rtol = sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
+            fishinf = Symmetric(.-DiffResults.hessian(diffres))
+            vcov = pinv(fishinf, rtol = sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
             vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
             vcov = Symmetric(vcov)
         else
@@ -221,7 +222,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.1, κ = 2.0, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.1, κ = 2.0, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, optim_pars = nothing, kwargs...)
 
     # copy of data
     data_original = deepcopy(model.data)
@@ -378,6 +379,12 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     if isnothing(constraints)
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights))
+
+        # set solver
+        if isnothing(optim_pars)
+            # set defaults if not provided
+            optim_pars = make_optim_pars()
+        end
     else
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
         prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
@@ -407,7 +414,14 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         
         # optimize the monte carlo marginal likelihood
         if isnothing(constraints)
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Newton()) # hessian-based
+            params_prop_optim = solve(
+                remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Newton())
+                # NewtonTrustRegion(;
+                #     initial_delta = optim_pars.initial_delta,
+                #     delta_hat = optim_pars.delta_hat,
+                #     eta = optim_pars.eta,
+                #     rho_lower = optim_pars.lower,
+                #     rho_upper = optim_pars.upper)) # hessian-based
         else
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), IPNewton())
         end
