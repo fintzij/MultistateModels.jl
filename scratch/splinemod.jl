@@ -26,7 +26,7 @@ set_parameters!(model_sim, (h12 = (log(1.25), log(1.5)),))
 simdat = simulate(model_sim; paths = false, data = true)[1]
 
 # set up model for inference
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = [0.0; quantile(simdat.tstop[findall(simdat.stateto .== 2)], [0.5]; 1.0)], extrapolation = "linear", monotone = 1)
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = [0.25, 0.5, 0.75], extrapolation = "linear")
 
 model = multistatemodel(h12; data = simdat)
 
