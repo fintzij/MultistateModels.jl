@@ -381,10 +381,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights))
 
         # set solver
-        if isnothing(optim_pars)
-            # set defaults if not provided
-            optim_pars = make_optim_pars()
-        end
+        # if isnothing(optim_pars)
+        #     # set defaults if not provided
+        #     optim_pars = make_optim_pars()
+        # end
     else
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
         prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
