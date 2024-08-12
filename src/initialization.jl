@@ -244,7 +244,9 @@ function init_par(_hazard::_SplinePH, crude_log_rate=0)
 
     # get coefficients 
     coefs = fill(crude_log_rate, length(B))
-    if _hazard.monotone == 1
+    if _hazard.monotone == 0
+        coefs = exp.(coefs)
+    elseif _hazard.monotone == 1
         coefs = spline_coefs2ests(exp.(coefs) .* collect(range(0.95, 1.05; length = length(B))); monotone = 1)
     elseif _hazard.monotone == -1
         coefs = spline_coefs2ests(exp.(coefs) .* collect(range(1.05, 0.95; length = length(B))); monotone = -1)
