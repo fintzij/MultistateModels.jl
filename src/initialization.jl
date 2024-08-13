@@ -225,9 +225,9 @@ function init_par(_hazard::_Spline, crude_log_rate=0)
     # if monotone all coefficients are the same to start
     coefs = fill(crude_log_rate, length(B))
     if _hazard.monotone == 1
-        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(0.95, 1.05; length = length(B))); monotone = 1)
+        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(0.95, 1.05; length = length(B))), _hazard)
     elseif _hazard.monotone == -1
-        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(1.05, 0.95; length = length(B))); monotone = -1)
+        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(1.05, 0.95; length = length(B)))_hazard)
     end        
 
     return coefs
@@ -247,9 +247,9 @@ function init_par(_hazard::_SplinePH, crude_log_rate=0)
     if _hazard.monotone == 0
         coefs = exp.(coefs)
     elseif _hazard.monotone == 1
-        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(0.95, 1.05; length = length(B))); monotone = 1)
+        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(0.95, 1.05; length = length(B))), _hazard)
     elseif _hazard.monotone == -1
-        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(1.05, 0.95; length = length(B))); monotone = -1)
+        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(1.05, 0.95; length = length(B))), _hazard)
     end        
 
     return vcat(log.(coefs), zeros(_hazard.ncovar))

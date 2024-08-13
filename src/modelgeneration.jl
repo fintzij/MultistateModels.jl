@@ -23,10 +23,6 @@ function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int6
     if family != "sp"
         h = ParametricHazard(hazard, family, statefrom, stateto)
     else 
-        if !(degree ∈ [0,1,2,3])
-            @error "Spline degree must be 0, 1, 2, or 3."
-        end
-
         if natural_spline & (monotone != 0)
             @info "Natural boundary conditions are not currently compatible with monotone splines. The restrictions on second derivatives at the spline boundaries will be removed."
             natural_spline = false

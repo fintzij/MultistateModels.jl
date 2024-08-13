@@ -47,7 +47,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
             # grab results
             gradient = DiffResults.gradient(diffres)
             fishinf = -DiffResults.hessian(diffres)
-            fishinf[findall(isapprox.(fishinf, 0.0; atol = sqrt(eps())))] .= 0.0
+            # fishinf[findall(isapprox.(fishinf, 0.0; atol = sqrt(eps())))] .= 0.0
             vcov = pinv(Symmetric(fishinf), rtol = sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
             vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
             vcov = Symmetric(vcov)

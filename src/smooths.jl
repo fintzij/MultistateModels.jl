@@ -55,7 +55,7 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
 
     if (hazard.degree > 1) & hazard.natural_spline
         # recombine
-        B = RecombinedBSplineBasis(B, Derivative(2))
+        B = RecombinedBSplineBasis(B, Natural())
         M = Matrix{Float64}(B.M)
 
         # check if the spline basis is large enough for the recombination        
@@ -84,14 +84,41 @@ end
 
 
 """
-    spline_ests2coefs(coefs; monotone = 0)
+    spline_ests2coefs(coefs, hazard; clamp_zeros = false)
 
 Transform spline parameter estimates on their unrestricted estimation scale to coefficients.
 """
-function spline_ests2coefs(ests; monotone = 0, clamp_zeros = false)
+function spline_ests2coefs(ests, hazard; clamp_zeros = false)
 
     # transform
-    coefs = (monotone == 0) ? exp.(ests) : (monotone == 1) ? cumsum(exp.(ests)) : reverse(cumsum(exp.(ests)))
+    if hazard.monotone == 0
+        # just exponentiate
+        coefs = exp.(ests)
+
+    elseif hazard.monotone != 0
+
+        # exponentiate 
+        ests_nat = exp.(ests)
+        coefs    = zeros(eltype(ests_nat), length(ests))
+            
+        # accumulate
+        if length(coefs) > 1
+            k = BSplineKit.order(hazard.hazsp)
+            t = knots(hazard.hazsp.spline)
+    
+            for i in 2:length(coefs)
+                coefs[i] = coefs[i-1] + ests_nat[i] * (t[i + k] - t[i]) / k
+            end
+        end
+
+        # intercept
+        coefs .+= ests_nat[1]
+
+        # if monotone decreasing then reverse
+        if hazard.monotone == -1
+            reverse!(coefs)
+        end
+    end
     
     # clamp numerical zeros
     if clamp_zeros
@@ -102,27 +129,45 @@ function spline_ests2coefs(ests; monotone = 0, clamp_zeros = false)
 end
 
 """
-    spline_coefs2ests(ests; monotone = 0)
+    spline_coefs2ests(ests, hazard; clamp_zeros = false)
 
 Transform spline coefficients to unrestrected estimation scale parameters.
 """
-function spline_coefs2ests(coefs; monotone = 0, clamp_zeros = false)
+function spline_coefs2ests(coefs, hazard; clamp_zeros = false)
 
-    if monotone == 1
-        # get differences
-        coefs = [coefs[1]; diff(coefs)]
+    # transform
+    if hazard.monotone == 0
+        # just exponentiate
+        ests = log.(coefs)
 
-    elseif monotone == -1
-        # get differences in reverse
-        coefs = [coefs[end]; diff(reverse(coefs))]
+    elseif hazard.monotone != 0
+
+        # reverse if moonotone decreasing
+        coefs_nat = deepcopy((hazard.monotone == 1) ? coefs : reverse(coefs))
+
+        # initialize
+        ests_nat = zeros(eltype(coefs), length(coefs_nat))
+        
+        # accumulate
+        if length(coefs) > 1
+            k = BSplineKit.order(hazard.hazsp)
+            t = knots(hazard.hazsp.spline)
+            
+            for i in length(ests_nat):-1:2
+                ests_nat[i] = (coefs_nat[i] - coefs_nat[i - 1]) * k / (t[i + k] - t[i])
+            end
+        end
+
+        # intercept
+        ests_nat[1] = coefs_nat[1]
+
+        ests = log.(ests_nat)
     end
-
+    
     # clamp numerical errors to zero
     if clamp_zeros
-        coefs[findall(isapprox.(coefs, 0.0; atol = sqrt(eps())))] .= zero(eltype(coefs))
+        ests[findall(isapprox.(ests, 0.0; atol = sqrt(eps())))] .= zero(eltype(ests))
     end
-
-    ests = log.(coefs)
 
     return ests
 end
@@ -139,7 +184,7 @@ function rectify_coefs!(ests, model)
     for i in eachindex(model.hazards)
         if isa(model.hazards[i], _SplineHazard)
             # get rectified parameters
-            rectified = [spline_coefs2ests(spline_ests2coefs(nested[i]; monotone = model.hazards[i].monotone, clamp_zeros = true); monotone = model.hazards[i].monotone, clamp_zeros = true); nested[i][Not(1:model.hazards[i].nbasis)]]
+            rectified = [spline_coefs2ests(spline_ests2coefs(nested[i], model.hazards[i]; clamp_zeros = true), model.hazards[i]; clamp_zeros = true); nested[i][Not(1:model.hazards[i].nbasis)]]
 
             # copy back to ests
             deepsetindex!(nested, rectified, i)
@@ -155,7 +200,7 @@ Remake splines in hazard object with new parameters.
 function remake_splines!(hazard::_SplineHazard, parameters)
     
     # make new spline
-    hazsp = Spline(hazard.hazsp.spline.basis, spline_ests2coefs(parameters[1:hazard.nbasis]; monotone = hazard.monotone))
+    hazsp = Spline(hazard.hazsp.spline.basis, spline_ests2coefs(parameters[1:hazard.nbasis], hazard))
     chazsp = integral(hazsp)
 
     # remake spline objects with recombined parameters
