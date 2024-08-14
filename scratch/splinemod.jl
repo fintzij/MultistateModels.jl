@@ -4,10 +4,10 @@ using MultistateModels
 using Plots
 using Random
 
-Random.seed!(123)
+Random.seed!(52787)
 
 # set up the very simplest model
-nsubj = 10000
+nsubj = 100
 ntimes = 10
 dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
                 tstart = repeat(0:(1/ntimes):(1 - 1/ntimes), outer = nsubj),
@@ -26,7 +26,7 @@ set_parameters!(model_sim, (h12 = (log(1.25), log(1)),))
 simdat = simulate(model_sim; paths = false, data = true)[1]
 
 # set up model for inference
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 4, knots = quantile(simdat.tstop[findall(simdat.stateto .== 2)], [0.25, 0.5, 0.75]), extrapolation = "linear", monotone = 1)
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = quantile(simdat.tstop[findall(simdat.stateto .== 2)], [0.5,]), extrapolation = "linear", monotone = 0)
 
 model = multistatemodel(h12; data = simdat)
 

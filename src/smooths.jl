@@ -184,7 +184,7 @@ function rectify_coefs!(ests, model)
     for i in eachindex(model.hazards)
         if isa(model.hazards[i], _SplineHazard)
             # get rectified parameters
-            rectified = [spline_coefs2ests(spline_ests2coefs(nested[i], model.hazards[i]; clamp_zeros = true), model.hazards[i]; clamp_zeros = true); nested[i][Not(1:model.hazards[i].nbasis)]]
+            rectified = [spline_coefs2ests(spline_ests2coefs(nested[i][1:model.hazards[i].nbasis], model.hazards[i]; clamp_zeros = true), model.hazards[i]; clamp_zeros = true); nested[i][Not(1:model.hazards[i].nbasis)]]
 
             # copy back to ests
             deepsetindex!(nested, rectified, i)
