@@ -138,7 +138,7 @@ function spline_coefs2ests(coefs, hazard; clamp_zeros = false)
     # transform
     if hazard.monotone == 0
         # just exponentiate
-        ests = log.(coefs)
+        ests_nat = coefs
 
     elseif hazard.monotone != 0
 
@@ -161,13 +161,14 @@ function spline_coefs2ests(coefs, hazard; clamp_zeros = false)
         # intercept
         ests_nat[1] = coefs_nat[1]
 
-        ests = log.(ests_nat)
     end
     
     # clamp numerical errors to zero
     if clamp_zeros
-        ests[findall(isapprox.(ests, 0.0; atol = sqrt(eps())))] .= zero(eltype(ests))
+        ests_nat[findall(isapprox.(ests_nat, 0.0; atol = sqrt(eps())))] .= zero(eltype(ests_nat))
     end
+
+    ests = log.(ests_nat)
 
     return ests
 end

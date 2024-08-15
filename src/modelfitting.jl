@@ -3,7 +3,7 @@
 
 Fit a multistate model given exactly observed sample paths.
 """
-function fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing, kwargs...)
+function fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing,  kwargs...)
 
     # initialize array of sample paths
     samplepaths = extract_paths(model; self_transitions = false)
@@ -46,10 +46,10 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
 
             # grab results
             gradient = DiffResults.gradient(diffres)
-            fishinf = -DiffResults.hessian(diffres)
-            # fishinf[findall(isapprox.(fishinf, 0.0; atol = sqrt(eps())))] .= 0.0
+            # fishinf = -DiffResults.hessian(diffres)
             vcov = pinv(Symmetric(fishinf), rtol = sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
-            vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)))] .= 0.0
+            # vcov = pinv(Symmetric(fishinf), rtol = 0.00001)
+            vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)), rtol = sqrt(eps(Float64)))] .= 0.0
             vcov = Symmetric(vcov)
         else
             vcov = nothing
