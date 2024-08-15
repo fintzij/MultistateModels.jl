@@ -42,7 +42,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         end
         
         # get vcov
-        if compute_vcov && (sol.retcode == ReturnCode.Success)
+        if compute_vcov && (sol.retcode == ReturnCode.Success) && !any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
             # preallocate the hessian matrix
             diffres = DiffResults.HessianResult(sol.u)
 
@@ -562,11 +562,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     end
 
     # hessian
-    if !isnothing(constraints)
+    if !isnothing(constraints) || any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
 
         # no hessian when there are constraints
         if compute_vcov == true
-            @warn "No covariance matrix is returned when constraints are provided."
+            @warn "No covariance matrix is returned when constraints are provided or when using monotone splines."
         end
         vcov = nothing
     
