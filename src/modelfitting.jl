@@ -253,7 +253,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - optim_pars: named tuple with parameters to be passed to Optim.jl for NewtonTrustRegion. 
 - vcov_threshold: if true, the variance covariance matrix calculation only inverts singular values of the fisher information matrix that are greater than 1 / sqrt(log(n) * k) where k is the number of parameters and n is the number of subjects in the dataset. otherwise, the absolute tolerance is set to the square root of eps(). 
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.1, κ = 2.0, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.1, κ = 2.0, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing, vcov_threshold = true, kwargs...)
 
     # copy of data
     data_original = deepcopy(model.data)
@@ -636,7 +636,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         end
 
         # get the variance-covariance matrix
-        vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(length(samplepaths)) * length(sol.u))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
+        vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(nsubj) * length(params_cur))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
         vcov[findall(isapprox.(vcov, 0.0; atol = sqrt(eps(Float64))))] .= 0.0
         vcov = Symmetric(vcov)
     else
