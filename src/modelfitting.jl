@@ -143,6 +143,9 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     # extract and initialize model parameters
     parameters = flatview(model.parameters)
 
+    # number of subjects
+    nsubj = length(model.subjectindices)
+
     # parse constraints, or not, and solve
     if isnothing(constraints)
         # get estimates
@@ -174,7 +177,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
             # grab results
             gradient = DiffResults.gradient(diffres)
             fishinf = Symmetric(.-DiffResults.hessian(diffres))
-            vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(length(samplepaths)) * length(sol.u))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
+            vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(nsubj) * length(sol.u))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
             vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
             vcov = Symmetric(vcov)
         else
