@@ -86,7 +86,10 @@ function summary(model::MultistateModelFitted; compute_se = true, confidence_lev
     summary_table = Vector{DataFrame}(undef, length(model.hazards))
 
     if isnothing(model.vcov) | !compute_se
-        println("Confidence intervals are not computed for models without a variance-covariance matrix.")
+
+        if isnothing(model.vcov)
+            println("Confidence intervals are not computed for models without a variance-covariance matrix.")
+        end
         # populate summary tables for each hazard
         for s in eachindex(summary_table)
             # summary for hazard s (only the estimate when there is no vcov)
