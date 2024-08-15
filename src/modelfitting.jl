@@ -1,9 +1,17 @@
 """
     fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
 
-Fit a multistate model given exactly observed sample paths.
+Fit a multistate model to continuously observed data.
+
+# Arguments
+- model: multistate model object
+- constraints: constraints on model parameters
+- verbose: print messages, defaults to true
+- compute_vcov: defaults to true
+- optim_pars: named tuple with parameters to be passed to Optim.jl for NewtonTrustRegion. 
+- vcov_threshold: if true, the variance covariance matrix calculation only inverts singular values of the fisher information matrix that are greater than 1 / sqrt(log(n) * k) where k is the number of parameters and n is the number of subjects in the dataset. otherwise, the absolute tolerance is set to the square root of eps(). 
 """
-function fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing,  kwargs...)
+function fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing, vcov_threshold = true, kwargs...)
 
     # initialize array of sample paths
     samplepaths = extract_paths(model; self_transitions = false)
@@ -46,9 +54,8 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
 
             # grab results
             gradient = DiffResults.gradient(diffres)
-            # fishinf = -DiffResults.hessian(diffres)
-            vcov = pinv(Symmetric(fishinf), rtol = sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
-            # vcov = pinv(Symmetric(fishinf), rtol = 0.00001)
+            fishinf = -DiffResults.hessian(diffres)
+            vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(length(samplepaths)) * length(sol.u))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
             vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)), rtol = sqrt(eps(Float64)))] .= 0.0
             vcov = Symmetric(vcov)
         else
@@ -125,8 +132,10 @@ Fit a multistate markov model to interval censored data or a mix of panel data a
 - constraints: constraints on model parameters.
 - verbose: print messages, defaults to true.
 - compute_vcov: compute variance-covariance matrix, defaults to true if no constraints or false otherwise.
+- optim_pars: named tuple with parameters to be passed to Optim.jl for NewtonTrustRegion. 
+- vcov_threshold: if true, the variance covariance matrix calculation only inverts singular values of the fisher information matrix that are greater than 1 / sqrt(log(n) * k) where k is the number of parameters and n is the number of subjects in the dataset. otherwise, the absolute tolerance is set to the square root of eps(). 
 """
-function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing, kwargs...)
+function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing, vcov_threshold = true, kwargs...)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -165,7 +174,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
             # grab results
             gradient = DiffResults.gradient(diffres)
             fishinf = Symmetric(.-DiffResults.hessian(diffres))
-            vcov = pinv(fishinf, rtol = sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
+            vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(length(samplepaths)) * length(sol.u))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
             vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
             vcov = Symmetric(vcov)
         else
@@ -242,6 +251,7 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - return_ProposedPaths: save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 - optim_pars: named tuple with parameters to be passed to Optim.jl for NewtonTrustRegion. 
+- vcov_threshold: if true, the variance covariance matrix calculation only inverts singular values of the fisher information matrix that are greater than 1 / sqrt(log(n) * k) where k is the number of parameters and n is the number of subjects in the dataset. otherwise, the absolute tolerance is set to the square root of eps(). 
 """
 function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-3, α = 0.1, γ = 0.1, κ = 2.0, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, optim_pars::Union{Nothing, NamedTuple} = nothing, kwargs...)
 
@@ -626,8 +636,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         end
 
         # get the variance-covariance matrix
-        fishinf[findall(isapprox.(fishinf, 0.0; atol = sqrt(eps())))] .= 0.0
-        vcov = pinv(Symmetric(fishinf); rtol = sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
+        vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(length(samplepaths)) * length(sol.u))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
         vcov[findall(isapprox.(vcov, 0.0; atol = sqrt(eps(Float64))))] .= 0.0
         vcov = Symmetric(vcov)
     else
