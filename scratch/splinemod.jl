@@ -14,7 +14,7 @@ dat = DataFrame(id = repeat(collect(1:nsubj), inner = ntimes),
                 tstop = repeat((1/ntimes):(1/ntimes):1, outer = nsubj),
                 statefrom = fill(1, ntimes * nsubj),
                 stateto = fill(2, ntimes * nsubj),
-                obstype = fill(1, ntimes * nsubj))
+                obstype = fill(2, ntimes * nsubj))
 
 h12e = Hazard(@formula(0 ~ 1), "wei", 1, 2)
 
@@ -26,7 +26,7 @@ set_parameters!(model_sim, (h12 = (log(1.25), log(1)),))
 simdat = simulate(model_sim; paths = false, data = true)[1]
 
 # set up model for inference
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = quantile(simdat.tstop[findall(simdat.stateto .== 2)], [0.25, 0.5, 0.75,]), extrapolation = "linear", monotone = 0)
+h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2; degree = 3, knots = quantile(simdat.tstop[findall(simdat.stateto .== 2)], [0.25, 0.5, 0.75,]), extrapolation = "linear", monotone = 0)
 
 model = multistatemodel(h12; data = simdat)
 

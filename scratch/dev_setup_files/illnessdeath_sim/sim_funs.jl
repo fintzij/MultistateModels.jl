@@ -27,7 +27,7 @@ function make_obstimes()
 end
 
 # function to set up the model
-function setup_model(; make_pars, data = nothing, nsubj = 400, family = "wei", ntimes = 10, spknots = nothing)
+function setup_model(; make_pars, data = nothing, nsubj = 300, family = "wei", ntimes = 10, spknots = nothing)
     
     # create hazards
     if (family != "sp1") & (family != "sp2")
@@ -41,9 +41,9 @@ function setup_model(; make_pars, data = nothing, nsubj = 400, family = "wei", n
         knots13 = spknots[2]
         knots23 = spknots[3]
 
-        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12[Not([begin, end])], boundaryknots = knots12[[begin, end]], extrapolation = "flat", monotone = 1)
-        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13[Not([begin, end])], boundaryknots = knots13[[begin, end]], extrapolation = "flat", monotone = -1)
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 0, knots = knots23[Not([begin, end])], boundaryknots = knots23[[begin, end]], extrapolation = "flat")
+        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 1, knots = knots12[Not([begin, end])], boundaryknots = knots12[[begin, end]], extrapolation = "flat")
+        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 1, knots = knots13[Not([begin, end])], boundaryknots = knots13[[begin, end]], extrapolation = "flat")
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = knots23[Not([begin, end])], boundaryknots = knots23[[begin, end]], extrapolation = "flat")
 
     elseif family == "sp2"
         
@@ -51,9 +51,9 @@ function setup_model(; make_pars, data = nothing, nsubj = 400, family = "wei", n
         knots13 = spknots[2]
         knots23 = spknots[3]
 
-        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = knots12[Not([begin, end])], boundaryknots = knots12[[begin, end]], extrapolation = "flat", monotone = 1)
-        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 3, knots = knots13[Not([begin, end])], boundaryknots = knots13[[begin, end]], extrapolation = "flat", monotone = -1)
-        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 0, knots = knots23[Not([begin, end])], boundaryknots = knots23[[begin, end]], extrapolation = "flat")
+        h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree = 3, knots = knots12[Not([begin, end])], boundaryknots = knots12[[begin, end]], extrapolation = "flat", monotone = 0)
+        h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree = 3, knots = knots13[Not([begin, end])], boundaryknots = knots13[[begin, end]], extrapolation = "flat", monotone = 0)
+        h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree = 1, knots = knots23[Not([begin, end])], boundaryknots = knots23[[begin, end]], extrapolation = "flat")
     end
     
     # data for simulation parameters
@@ -192,7 +192,7 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
     Random.seed!(seed)
 
     # set up model for simulation
-    model_sim = setup_model(; make_pars = true, data = nothing, family = "wei", nsubj = 400)
+    model_sim = setup_model(; make_pars = true, data = nothing, family = "wei", nsubj = 300)
         
     # simulate paths
     paths = simulate(model_sim; nsim = 1, paths = true, data = false)
@@ -207,8 +207,8 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
 
         spknots = (knots12 = q12, knots13 = q13, knots23 = q23)
     elseif family == 4
-        q12 = [0.0; quantile(MultistateModels.extract_sojourns(1, 2, MultistateModels.extract_paths(dat; self_transitions = false)), [0.5, 1.0])]
-        q13 = [0.0; quantile(MultistateModels.extract_sojourns(1, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.5, 1.0])]
+        q12 = [0.0; quantile(MultistateModels.extract_sojourns(1, 2, MultistateModels.extract_paths(dat; self_transitions = false)), [0.25, 0.5, 0.75, 1.0])]
+        q13 = [0.0; quantile(MultistateModels.extract_sojourns(1, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.25, 0.5, 0.75, 1.0])]
         q23 = [0.0; quantile(MultistateModels.extract_sojourns(2, 3, MultistateModels.extract_paths(dat; self_transitions = false)), [0.5, 1.0])]
 
         spknots = (knots12 = q12, knots13 = q13, knots23 = q23)
