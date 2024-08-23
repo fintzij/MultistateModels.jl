@@ -13,7 +13,7 @@ Fit a multistate model to continuously observed data.
 function fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, vcov_threshold = true, kwargs...)
 
     # initialize array of sample paths
-    samplepaths = extract_paths(model; self_transitions = false)
+    samplepaths = extract_paths(model)
 
     # extract and initialize model parameters
     parameters = flatview(model.parameters)

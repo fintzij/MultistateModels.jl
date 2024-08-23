@@ -25,6 +25,12 @@ msm_expwei = multistatemodel(h12, h23; data = dat)
 # simulate data for msm_expwei3 and put it in the model
 simdat, paths = simulate(msm_expwei; paths = true, data = true)
 
+constpath11 = MultistateModels.SamplePath(1, [0.0, 10.0], [1,1])
+constpath12 = MultistateModels.SamplePath(1, collect(0:10), fill(1, 11))
+
+constpath21 = MultistateModels.SamplePath(1, [0.0, 10.0], [2,2])
+constpath22 = MultistateModels.SamplePath(1, collect(0:10), fill(2, 11))
+
 function getdat(i)
     inds = findall(simdat[1].id .== i)
     n = length(inds)

@@ -44,7 +44,7 @@ function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model:
 
         # time in state (clock reset)
         timespent   = 0.0   # accumulates occupancy time
-        timeinstate = tstop - tcur # sojourn time
+        timeinstate = tstop - tcur # sojourn time in the jump chain
 
         # initialize survival probability
         log_surv_prob = 0.0

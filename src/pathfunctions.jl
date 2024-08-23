@@ -131,15 +131,14 @@ end
 
 
 """
-    extract_paths(model::MultistateProcess; self_transitions = false)
+    extract_paths(model::MultistateProcess)
 
 Extract sample paths from a multistate model's data field and return an array of SamplePath objects. 
 
 # Arguments
 - model: multistate model object
-- self_transitions: keep self-transitions? Defaults to false.
 """
-function extract_paths(model::MultistateProcess; self_transitions = false)
+function extract_paths(model::MultistateProcess)
 
     # get IDs
     nsubj = length(model.subjectindices)
@@ -156,18 +155,8 @@ function extract_paths(model::MultistateProcess; self_transitions = false)
         # get sequence of states
         states = [model.data[model.subjectindices[i], :statefrom]; model.data[model.subjectindices[i][end], :stateto]]
 
-        # remove duplicates
-        if !self_transitions && (length(states) > 2)
-            if any(states[2:(end - 1)] .== states[1:(end-2)])
-                dropinds = findall(states[2:(end-1)] .== states[1:(end-2)]) .+ 1
-
-                states = states[Not(dropinds)]
-                times = times[Not(dropinds)]
-            end
-        end
-
         # grab the path
-        samplepaths[i] = SamplePath(i, times, states)
+        samplepaths[i] = reduce_jumpchain(SamplePath(i, times, states))
     end
 
     return samplepaths
@@ -175,15 +164,14 @@ end
 
 
 """
-    extract_paths(data::DataFrame; self_transitions = false)
+    extract_paths(data::DataFrame)
 
 Extract sample paths from a multistate model's data field and return an array of SamplePath objects. 
 
 # Arguments
 - data: DataFrame with data from multistate model object.
-- self_transitions: keep self-transitions? Defaults to false.
 """
-function extract_paths(data::DataFrame; self_transitions = false)
+function extract_paths(data::DataFrame)
 
     # get subject indices
     subjinds, nsubj = get_subjinds(data)
@@ -200,18 +188,8 @@ function extract_paths(data::DataFrame; self_transitions = false)
         # get sequence of states
         states = [data[subjinds[i], :statefrom]; data[subjinds[i][end], :stateto]]
 
-        # remove duplicates
-        if !self_transitions && (length(states) > 2)
-            if any(states[2:(end - 1)] .== states[1:(end-2)])
-                dropinds = findall(states[2:(end-1)] .== states[1:(end-2)]) .+ 1
-
-                states = states[Not(dropinds)]
-                times = times[Not(dropinds)]
-            end
-        end
-
         # grab the path
-        samplepaths[i] = SamplePath(i, times, states)
+        samplepaths[i] = reduce_jumpchain(SamplePath(i, times, states))
     end
 
     return samplepaths
@@ -238,4 +216,26 @@ function extract_sojourns(statefrom, stateto, samplepaths::Vector{SamplePath})
     unique!(sort!(times))
 
     return times
+end
+
+"""
+    reduce_jumpchain!(path::SamplePath)
+
+Reduce the jump chain for a sample path so it doesn't include non-transitions, e.g., SamplePath(1,[0.0, 0.5, 1.0], [1, 1, 1]) -> SamplePath(1, [0.0, 1.0], [1, 1]). 
+"""
+function reduce_jumpchain(path::SamplePath)
+
+    # no need to reduce if jump chain is constant
+    pathlen = length(path.states)
+    if pathlen .== 2
+        newpath = path
+    else
+        # run length encoding
+        rlp = rle(path.states)
+        jumpinds = unique([1; cumsum(rlp[2])[Not(end)] .+ 1; pathlen])
+
+        newpath = SamplePath(path.subj, path.times[jumpinds], path.states[jumpinds])
+    end
+
+    return newpath
 end

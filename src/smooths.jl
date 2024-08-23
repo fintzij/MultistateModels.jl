@@ -21,7 +21,7 @@ function spline_hazards(hazard::SplineHazard, data::DataFrame)
         spbounds = [0.0, timespan[2]]
     else
         # calculate maximum sojourn
-        spbounds = [0.0, maximum([extract_sojourns(hazard.statefrom, hazard.stateto, extract_paths(data; self_transitions = false)); extract_sojourns(hazard.statefrom, hazard.statefrom, extract_paths(data; self_transitions = false))])]
+        spbounds = [0.0, maximum([extract_sojourns(hazard.statefrom, hazard.stateto, extract_paths(data)); extract_sojourns(hazard.statefrom, hazard.statefrom, extract_paths(data))])]
     end
 
     # grab boundary knots

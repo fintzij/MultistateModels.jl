@@ -709,7 +709,7 @@ function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat
     end
 
     # return path
-    return SamplePath(subj, times, states)
+    return reduce_jumpchain(SamplePath(subj, times, states))
 end
 
 """

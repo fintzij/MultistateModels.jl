@@ -375,6 +375,7 @@ struct SamplePath
     subj::Int64
     times::Vector{Float64}
     states::Vector{Int64}
+    SamplePath(subj, times, states) = length(times) != length(states) ? error("Number of times in a jump chain must equal the number of states.") : new(subj, times, states)
 end
 
 """
