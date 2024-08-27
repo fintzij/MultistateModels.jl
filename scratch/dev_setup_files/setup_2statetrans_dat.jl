@@ -43,7 +43,7 @@ fitted = fit(model; tol = 1e-4, ess_target_initial = 100);
 # load libraries and functions
 using ArraysOfArrays, Optimization, Optim, StatsModels, StatsFuns, ExponentialUtilities, ElasticArrays, BenchmarkTools, Profile, ProfileView, DiffResults, ForwardDiff
 
-constraints = nothing; nparticles = 10; maxiter = 100; tol = 1e-2; α = 0.1; γ = 0.05; κ = 1.5;
+constraints = nothing; nparticles = 10; maxiter = 100; tol = 1e-2; ascent_threshold = 0.1; stopping_threshold = 0.05; ess_increase = 1.5;
 surrogate_parameters = nothing; ess_target_initial = 10; MaxSamplingEffort = 10;
 verbose = true; return_ConvergenceRecords = true; return_ProposedPaths = true; npaths_additional = 10
 

@@ -57,14 +57,14 @@ end
 
 
 """
-    get_ConvergenceRecords(model::MultistateModelFitted) 
+    get_convergence_records(model::MultistateModelFitted) 
 
 Return the convergence records for the fit. 
 
 # Arguments 
 - model: fitted model
 """
-function get_ConvergenceRecords(model::MultistateModelFitted) 
+function get_convergence_records(model::MultistateModelFitted) 
     model.ConvergenceRecords
 end
 

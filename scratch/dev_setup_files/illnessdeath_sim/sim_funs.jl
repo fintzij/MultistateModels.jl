@@ -219,7 +219,7 @@ function work_function(;simnum, seed, family, sims_per_subj, nboot)
 
     # fit model
     initialize_parameters!(model_fit)
-    model_fitted = fit(model_fit; verbose = true, compute_vcov = true, ess_target_initial = 50, α = 0.2, γ = 0.2) 
+    model_fitted = fit(model_fit; verbose = true, compute_vcov = true, ess_target_initial = 50, ascent_threshold = 0.2, stopping_threshold = 0.2) 
 
     ### simulate from the fitted model
     model_sim2 = setup_model(; make_pars = false, data = model_sim.data, family = ["exp", "wei", "sp1", "sp2"][family], spknots = spknots)

@@ -3,6 +3,103 @@
 
 Set model parameters given a vector of values. Copies `newvalues`` to `model.parameters`.
 """
+function set_parameters(model::MultistateProcess, newvalues::Union{VectorOfVectors,Vector{Vector{Float64}}})
+
+    model = deepcopy(model)
+    
+    # check that we have the right number of parameters
+    if(length(model.parameters) != length(newvalues))
+        error("New values and model parameters are not of the same length.")
+    end
+
+    for i in eachindex(model.parameters)
+        if(length(model.parameters[i]) != length(newvalues[i]))
+            @error "New values for hazard $i and model parameters for that hazard are not of the same length."
+        end
+        copyto!(model.parameters[i], newvalues[i])
+
+        # remake if a spline hazard
+        if isa(model.hazards[i], _SplineHazard) 
+            remake_splines!(model.hazards[i], newvalues[i])
+            set_riskperiod!(model.hazards[i])
+        end
+    end
+
+    return model
+end
+
+"""
+    set_parameters!(model::MultistateProcess, newvalues::Tuple)
+
+Set model parameters given a tuple of vectors parameterizing transition intensities. Assigns new values to `model.parameters[i]`, where `i` indexes the transition intensities in the order they appear in the model object.
+"""
+function set_parameters(model::MultistateProcess, newvalues::Tuple)
+
+    model = deepcopy(model)
+
+    # check that there is a vector of parameters for each cause-specific hazard
+    if(length(model.parameters) != length(newvalues))
+        error("Number of supplied parameter vectors not equal to number of transition intensities.")
+    end
+
+    for i in eachindex(newvalues)
+        # check that we have the right number of parameters
+        if(length(model.parameters[i]) != length(newvalues[i]))
+            @error "New values and parameters for cause-specific hazard $i are not of the same length."
+        end
+
+        copyto!(model.parameters[i], newvalues[i])    
+        
+        # remake if a spline hazard
+        if isa(model.hazards[i], _SplineHazard)
+            remake_splines!(model.hazards[i], newvalues[i])
+            set_riskperiod!(model.hazards[i])
+        end
+    end
+
+    return model
+end
+
+"""
+    set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
+
+Set model parameters given a tuple of vectors parameterizing transition intensities. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  
+"""
+function set_parameters(model::MultistateProcess, newvalues::NamedTuple)
+
+    model = deepcopy(model)
+    
+    # get keys for the new values
+    value_keys = keys(newvalues)
+
+    for k in eachindex(value_keys)
+
+        vind = value_keys[k]
+        mind = model.hazkeys[vind]
+
+        # check length of supplied parameters
+        if length(newvalues[vind]) != length(model.parameters[mind])
+            error("The new parameter values for $vind are not the expected length.")
+        end
+
+        copyto!(model.parameters[mind], newvalues[vind])
+
+        # remake if a spline hazard
+        if isa(model.hazards[mind], _SplineHazard)
+            remake_splines!(model.hazards[mind], newvalues[vind])
+            set_riskperiod!(model.hazards[mind])
+        end
+    end
+
+    return model
+end
+
+
+"""
+    set_parameters!(model::MultistateProcess, newvalues::Vector{Float64})
+
+Set model parameters given a vector of values. Copies `newvalues`` to `model.parameters`.
+"""
 function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVectors,Vector{Vector{Float64}}})
     
     # check that we have the right number of parameters

@@ -210,7 +210,7 @@ end
 
 
 """
-fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-2, α = 0.1, γ = 0.1, κ = 1.5, ess_target_initial = 100, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, kwargs...)
+fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 1.5, ess_target_initial = 100, max_sampling_effort = 20, npaths_additional = 10, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, kwargs...)
 
 Fit a semi-Markov model to panel data via Monte Carlo EM.
 
@@ -221,21 +221,21 @@ Fit a semi-Markov model to panel data via Monte Carlo EM.
 - constraints: tuple for specifying parameter constraints
 - surrogate_constraints: tuple for specifying parameter constraints for the Markov surrogate
 - maxiter: maximum number of MCEM iterations
-- tol: tolerance for the change in the MLL, i.e., upper bound of the stopping rule to be ruled out
-- α: standard normal quantile for asymptotic lower bound for ascent
-- γ: standard normal quantile for stopping the MCEM algorithm
-- κ: Inflation factor for target ESS per person, ESS_new = ESS_cur * κ
+- tol: tolerance for the change in the MLL, i.e., upper bound of the stopping rule to be ruled out. Defaults to 0.01.
+- ascent_threshold: standard normal quantile for asymptotic lower bound for ascent
+- stopping_threshold: standard normal quantile for stopping the MCEM algorithm
+- ess_increase: Inflation factor for target ESS per person, ESS_new = ESS_cur * ess_increase
 - ess_target_initial: initial number of particles per participant for MCEM
 - max_ess: maximum ess after which the mcem is stopped for nonconvergence
-- MaxSamplingEffort: factor of the ESS at which to break the loop for sampling additional paths
+- max_sampling_effort: factor of the ESS at which to break the loop for sampling additional paths
 - npaths_additional: increment for number of additional paths when augmenting the pool of paths
 - verbose: print status
-- return_ConvergenceRecords: save history throughout the run
-- return_ProposedPaths: save latent paths and importance weights
+- return_convergence_records: save history throughout the run
+- return_proposed_paths save latent paths and importance weights
 - compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
 - vcov_threshold: if true, the variance covariance matrix calculation only inverts singular values of the fisher information matrix that are greater than 1 / sqrt(log(n) * k) where k is the number of parameters and n is the number of subjects in the dataset. otherwise, the absolute tolerance is set to the square root of eps(). 
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-2, α = 0.1, γ = 0.1, κ = 2.0, ess_target_initial = 50, max_ess = 10000, MaxSamplingEffort = 20, npaths_additional = 10, verbose = true, return_ConvergenceRecords = true, return_ProposedPaths = false, compute_vcov = true, vcov_threshold = true, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, kwargs...)
 
     # copy of data
     data_original = deepcopy(model.data)
@@ -253,14 +253,14 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         end
     end
 
-    # check that MaxSamplingEffort is greater than 1
-    if MaxSamplingEffort <= 1
-        error("MaxSamplingEffort must be greater than 1.")
+    # check that max_sampling_effort is greater than 1
+    if max_sampling_effort <= 1
+        error("max_sampling_effort must be greater than 1.")
     end
 
-    # check that κ is greater than 1
-    if κ <= 1
-        error("κ must be greater than 1.")
+    # check that ess_increase is greater than 1
+    if ess_increase <= 1
+        error("ess_increase must be greater than 1.")
     end
 
     # throw a warning if trying to fit a spline model where the degree is 0 for all splines
@@ -290,27 +290,27 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     psis_pareto_k = zeros(nsubj)
 
     # initialize containers
-    samplepaths     = [sizehint!(Vector{SamplePath}(), ess_target_initial * MaxSamplingEffort * 20) for i in 1:nsubj]
+    samplepaths     = [sizehint!(Vector{SamplePath}(), ess_target_initial * max_sampling_effort * 20) for i in 1:nsubj]
 
     # surrogate log likelihood
     loglik_surrog   = [sizehint!(Vector{Float64}(undef, 0), 
-        ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+        ess_target_initial * max_sampling_effort * 2) for i in 1:nsubj]
 
     # target log likelihood - current parameters
     loglik_target_cur  = [sizehint!(Vector{Float64}(undef, 0), 
-        ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+        ess_target_initial * max_sampling_effort * 2) for i in 1:nsubj]
 
     # target log likelihood - proposed parameters
     loglik_target_prop = [sizehint!(Vector{Float64}(undef, 0), 
-        ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+        ess_target_initial * max_sampling_effort * 2) for i in 1:nsubj]
 
     # Log (unnormalize) importance weights
     _logImportanceWeights  = [sizehint!(Vector{Float64}(undef, 0), 
-        ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+        ess_target_initial * max_sampling_effort * 2) for i in 1:nsubj]
 
     # exponentiated and normalized importance weights
     ImportanceWeights  = [sizehint!(Vector{Float64}(undef, 0), 
-        ess_target_initial * MaxSamplingEffort * 2) for i in 1:nsubj]
+        ess_target_initial * max_sampling_effort * 2) for i in 1:nsubj]
 
     # make fbmats if necessary
     if any(model.data.obstype .> 2)
@@ -368,7 +368,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     DrawSamplePaths!(model; 
         ess_target = ess_target, 
         ess_cur = ess_cur, 
-        MaxSamplingEffort = MaxSamplingEffort,
+        max_sampling_effort = max_sampling_effort,
         samplepaths = samplepaths, 
         loglik_surrog = loglik_surrog, 
         loglik_target_prop = loglik_target_prop, 
@@ -439,8 +439,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, model.SamplingWeights)
     
             # calculate the lower bound for ΔQ
-            ascent_lb = quantile(Normal(mll_change, ase), α)
-            ascent_ub = quantile(Normal(mll_change, ase), 1-γ)
+            ascent_lb = quantile(Normal(mll_change, ase), ascent_threshold)
+            ascent_ub = quantile(Normal(mll_change, ase), 1-stopping_threshold)
         else
             loglik_target_prop = loglik_target_cur
             mll_prop = mll_cur
@@ -494,8 +494,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         # increase ess is necessary
         if ascent_lb < 0
-            # increase the target ess for the factor κ
-            ess_target = ceil(κ*ess_target) # TODO: alternatively, use Caffo's power calculation to determine the new ESS target
+            # increase the target ess for the factor ess_increase
+            ess_target = ceil(ess_increase*ess_target) # TODO: alternatively, use Caffo's power calculation to determine the new ESS target
             if verbose  println("Target ESS is increased to $ess_target, because ascent lower bound < 0.\n") end
 
             # no need to sample paths for subjects with a single possible path
@@ -506,7 +506,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         DrawSamplePaths!(model; 
             ess_target = ess_target, 
             ess_cur = ess_cur, 
-            MaxSamplingEffort = MaxSamplingEffort,
+            max_sampling_effort = max_sampling_effort,
             samplepaths = samplepaths, 
             loglik_surrog = loglik_surrog, 
             loglik_target_prop = loglik_target_prop, 
@@ -619,10 +619,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     logliks = compute_loglik(model, loglik_surrog, loglik_target_cur, NormConstantProposal)
 
     # return convergence records
-    ConvergenceRecords = return_ConvergenceRecords ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
+    ConvergenceRecords = return_convergence_records ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
 
     # return sampled paths and importance weights
-    ProposedPaths = return_ProposedPaths ? (paths=samplepaths, weights=ImportanceWeights) : nothing
+    ProposedPaths = return_proposed_paths ? (paths=samplepaths, weights=ImportanceWeights) : nothing
 
     # wrap results
     model_fitted = MultistateModelFitted(
