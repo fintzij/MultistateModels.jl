@@ -97,8 +97,8 @@ function summary(model::MultistateModelFitted; compute_se = true, confidence_lev
         end
     else    
         # standard error
-        vcov = get_vcov(model)
-        se = sqrt.(vcov[diagind(vcov)])
+        varcov = get_vcov(model)
+        se = sqrt.(varcov[diagind(varcov)])
         se_vv = VectorOfVectors(se, model.parameters.elem_ptr)
         # critical value
         z_critical = quantile(Normal(0.0, 1.0), 1-(1-confidence_level)/2)
@@ -111,7 +111,7 @@ function summary(model::MultistateModelFitted; compute_se = true, confidence_lev
                 se = reduce(vcat, se_vv[s]))
                 summary_table[s].lower = summary_table[s].estimate .- z_critical .* summary_table[s].se
                 summary_table[s].upper = summary_table[s].estimate .+ z_critical .* summary_table[s].se
-            end
+        end
     end
 
     # add hazard names to the table

@@ -5,14 +5,15 @@ using MultistateModels
 
 h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
 
-dat = 
-    DataFrame(id = [1,1,1,2,2,2],
-              tstart = [0, 10, 20, 0, 10, 20],
-              tstop = [10, 20, 100, 10, 20, 100],
-              statefrom = [1, 1, 1, 1, 1, 1],
-              stateto = [2, 2, 2, 2, 2, 2],
-              obstype = [1, 0, 1, 1, 0, 1],
-              trt = [0, 0, 0, 1, 1, 1])
+nsubj = 100
+ntimes = 10
+dat = DataFrame(id = repeat(collect(1:nsubj), inner = 5),
+              tstart = repeat(collect(0.0:2.0:8.0), outer = nsubj),
+              tstop = repeat(collect(2.0:2.0:10.0), outer = nsubj),
+              statefrom = fill(1, (5*nsubj)),
+              stateto = fill(2, (5*nsubj)),
+              obstype = fill(2, (5*nsubj)),
+              trt = reduce(vcat, [sample([0,1], 1)[1] * ones(5) for i in 1:nsubj]))
 
 # create multistate model object
 msm = multistatemodel(h12; data = dat)
@@ -21,7 +22,7 @@ msm = multistatemodel(h12; data = dat)
 set_parameters!(msm, (h12 = [log(0.2), log(2)],))
 
 # weibull
-h12 = Hazard(@formula(0 ~ 1 + trt), "wei", 1, 2)
+h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
 
 dat = 
     DataFrame(id = [1,2],

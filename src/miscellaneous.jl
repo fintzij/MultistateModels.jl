@@ -1,26 +1,26 @@
-"""
-    statetable(model::MultistateProcess, groups::Vararg{Symbol})
+# """
+#     statetable(model::MultistateProcess, groups::Vararg{Symbol})
 
-Generate a table with counts of observed transitions.
+# Generate a table with counts of observed transitions.
 
-# Arguments
+# # Arguments
 
-- model: multistate model object.
-- groups: variables on which to stratify the tables of transition counts.
-"""
-function statetable(model::MultistateProcess, groups::Vararg{Symbol})
+# - model: multistate model object.
+# - groups: variables on which to stratify the tables of transition counts.
+# """
+# function statetable(model::MultistateProcess, groups::Vararg{Symbol})
 
-    # apply groupby to get all different combinations of data frames
-    if length(groups) == 0
-        stable, groupkeys = compute_statetable(model.data, model.tmat), "Overall"
-    else
-        gdat = groupby(model.data, collect(groups))
-        stable, groupkeys = map(x -> compute_statetable(gdat[x], model.tmat), collect(1:length(gdat))), collect(keys(gdat))
-    end
+#     # apply groupby to get all different combinations of data frames
+#     if length(groups) == 0
+#         stable, groupkeys = compute_statetable(model.data, model.tmat), "Overall"
+#     else
+#         gdat = groupby(model.data, collect(groups))
+#         stable, groupkeys = map(x -> compute_statetable(gdat[x], model.tmat), collect(1:length(gdat))), collect(keys(gdat))
+#     end
     
-    # return a data structure that contains the transmats and the corresponding keys
-    return (stable, groupkeys)
-end
+#     # return a data structure that contains the transmats and the corresponding keys
+#     return (stable, groupkeys)
+# end
 
 """
     make_constraints(cons::Vector{Expr}, lcons::Vector{Float64}, ucons::Vector{Float64})

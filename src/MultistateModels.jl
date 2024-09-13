@@ -59,7 +59,7 @@ export
     set_parameters,
     set_parameters!,
     simulate,
-    statetable,
+    # statetable,
     summary,
     __init__
 
