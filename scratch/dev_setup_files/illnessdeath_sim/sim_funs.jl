@@ -93,6 +93,12 @@ function observe_subjdat(path, model)
 
     # times and states
     obstimes = unique(sort([0.0; subj_dat_raw.tstop; path.times[findall(path.states .== 3)]]))
+
+    # insert a time for a ghost transition
+    if all([2,3] .∈ Ref(path.states))
+        push!(obstimes, path.times[end] - sqrt(eps()))
+        sort!(obstimes)
+    end
     
     # sort!(obstimes)
     obsinds  = searchsortedlast.(Ref(path.times), obstimes)
@@ -108,19 +114,9 @@ function observe_subjdat(path, model)
     # cull redundant rows in absorbing state
     subjdat = subjdat[Not((subjdat.stateto .== 3) .& (subjdat.statefrom .== 3)), :]
 
-    # if subject passed through 2 on the way to 3 record it if not in the subject data
-    if all([2,3] .∈ Ref(path.states)) && !(all([2,3] .∈ Ref(subjdat.stateto))) 
-        # insert a ghost transition 
-        insert!(subjdat, nrow(subjdat), 
-                (id = i, tstart = subjdat.tstart[end], tstop = subjdat.tstop[end] - 0.0001, statefrom = 1, stateto = 2))
-
-        subjdat.tstart[end]    = subjdat.tstop[end] - 0.0001
-        subjdat.statefrom[end] = 2
-    end
-
     # obstype
     subjdat[:,:obstype] .= [x == 3 ? 1 : 2 for x in subjdat[:,:stateto]]
-    # subjdat[findall(subjdat.statefrom .== subjdat.stateto),:obstype] .= 1
+    subjdat[findall(subjdat.statefrom .== subjdat.stateto),:obstype] .= 1
 
     # return subjdat
     return subjdat
