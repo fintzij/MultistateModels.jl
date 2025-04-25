@@ -523,3 +523,21 @@ function collapse_data(data::DataFrame; SamplingWeights::Vector{Float64} = ones(
        
     return DataCollapsed, SamplingWeightsCollapsed
 end
+
+"""
+    initialize_surrogate!(model::MultistateSemiMarkovProcess; surrogate_parameters = nothing, surrogate_constraints = nothing, crude_inits = true, verbose = true)
+
+Populate the field for the markov surrogate in semi-Markov models.
+"""
+function initialize_surrogate!(model::MultistateProcess; surrogate_parameters = nothing, surrogate_constraints = nothing, crude_inits = true, verbose = true)
+
+    # fit surrogate model
+    surrogate_fitted = fit_surrogate(model; surrogate_parameters=surrogate_parameters, surrogate_constraints=surrogate_constraints, crude_inits=crude_inits, verbose=verbose)
+
+    # create the surrogate object
+    surrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters)
+
+    for i in eachindex(model.markovsurrogate.parameters)
+        copyto!(model.markovsurrogate.parameters[i], surrogate_fitted.parameters[i])
+    end
+end

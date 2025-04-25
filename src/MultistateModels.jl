@@ -54,6 +54,7 @@ export
     Hazard,
     initialize_parameters,
     initialize_parameters!,
+    initialize_surrogate!,
     make_constraints,
     multistatemodel,
     set_parameters,
