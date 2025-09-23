@@ -18,5 +18,6 @@ include("test/setup_splines.jl")
     include("test/test_modelgeneration.jl")
     include("test/test_hazards.jl")
     include("test/test_helpers.jl")
+    include("test/test_make_subjdat.jl")
     include("test/test_loglik.jl")
 end

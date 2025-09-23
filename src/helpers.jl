@@ -541,3 +541,60 @@ function initialize_surrogate!(model::MultistateProcess; surrogate_parameters = 
         copyto!(model.markovsurrogate.parameters[i], surrogate_fitted.parameters[i])
     end
 end
+
+"""
+    make_subjdat(path::SamplePath, subjectdata::SubDataFrame)
+
+Create a DataFrame for a single subject from a SamplePath object and the original data for that subject.
+"""
+function make_subjdat(path::SamplePath, subjectdata::SubDataFrame) 
+
+    # times when the likelihood needs to be evaluated
+    if (ncol(subjectdata) > 6) & (nrow(subjectdata) > 1)
+        
+        # times when covariates change
+        keepvec = findall(map(i -> !isequal(subjectdata[i-1, 7:end], subjectdata[i, 7:end]), 2:nrow(subjectdata))) .+ 1 
+
+        # utimes is the times in the path (which includes first and last times from subjectdata), and tstart when covariates change
+        utimes = sort(unique(vcat(path.times, subjectdata.tstart[keepvec])))
+
+    else 
+        utimes = path.times
+    end
+
+    # get indices in the data object that correspond to the unique times
+    datinds = searchsortedlast.(Ref(subjectdata.tstart), utimes)
+
+    # get indices in the path that correspond to the unique times
+    pathinds = searchsortedlast.(Ref(path.times), utimes)
+
+    # make subject data
+    subjdat_lik = DataFrame(
+        tstart = utimes[Not(end)],
+        tstop  = utimes[Not(begin)],
+        increment = diff(utimes),
+        sojourn = 0.0,
+        sojournind = pathinds[Not(end)],
+        statefrom = path.states[pathinds[Not(end)]],
+        stateto   = path.states[pathinds[Not(begin)]])
+
+    # compute sojourns
+    subjdat_gdf = groupby(subjdat_lik, :sojournind)
+    for g in subjdat_gdf
+        g.sojourn .= cumsum([0.0; g.increment[Not(end)]])
+    end
+
+    # remove sojournind
+    select!(subjdat_lik, Not(:sojournind))
+
+    # tack on covariates if any
+    if ncol(subjectdata) > 6
+        # get covariates at the relevant times
+        covars = subjectdata[datinds[Not(end)], Not([:id, :tstart, :tstop, :statefrom, :stateto, :obstype])]
+        # concatenate and return
+        subjdat_lik = hcat(subjdat_lik, covars)
+    end
+    
+    # output
+    return subjdat_lik
+end

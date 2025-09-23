@@ -1,0 +1,26 @@
+# set up a MultistateModel object
+using DataFrames
+using MultistateModels
+using MultistateModels: SamplePath
+
+h12 = Hazard(@formula(0 ~ 1 + trt + age), "exp", 1, 2)
+h21 = Hazard(@formula(0 ~ 1 + trt + age), "wei", 2, 1)
+# Test case from the scratch file - data with covariate changes
+dat = DataFrame(
+    id = [1,1,1,1,1],
+    tstart = [0.0, 3.0, 7.0, 12.0, 18.0],
+    tstop = [3.0, 7.0, 12.0, 18.0, 25.0],
+    statefrom = [1, 1, 1, 1, 1],
+    stateto = [1, 1, 1, 1, 1],
+    obstype = [2, 2, 2, 2, 2],
+    trt = [0, 1, 1, 0, 1],
+    age = [50, 50, 55, 55, 60]
+)
+
+model = multistatemodel(h12, h21; data = dat)
+subjectdata = view(model.data, model.data.id .== 1, :)
+path = SamplePath(1, [0.0, 5.04, 15.01, 25.0], [1, 2, 1, 1])
+
+subjdat_lik = make_subjdat(path, subjectdata)
+
+ll_new = loglik_path(model.parameters, subjdat_lik, model.hazards, model)

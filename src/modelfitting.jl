@@ -139,7 +139,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     # parse constraints, or not, and solve
     if isnothing(constraints)
         # get estimates
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+        optf = OptimizationFunction(loglik_markov, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
         sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
 
@@ -149,7 +149,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
             diffres = DiffResults.HessianResult(sol.u)
 
             # single argument function for log-likelihood            
-            ll = pars -> loglik(pars, MPanelData(model, books); neg=false)
+            ll = pars -> loglik_markov(pars, MPanelData(model, books); neg=false)
 
             # compute gradient and hessian
             diffres = ForwardDiff.hessian!(diffres, ll, sol.u)
@@ -174,7 +174,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
             @error "Constraints $badcons are violated at the initial parameter values."
         end
 
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_markov)
+        optf = OptimizationFunction(loglik_markov, Optimization.AutoForwardDiff(), cons = consfun_markov)
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books), lcons = constraints.lcons, ucons = constraints.ucons)
         sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
 
@@ -559,7 +559,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # container for gradient and hessian
         diffres = DiffResults.HessianResult(params_cur)
     
-        ll = pars -> (loglik(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
+        ll = pars -> (loglik_AD(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
 
         # accumulate Fisher information
         for i in 1:nsubj

@@ -4,11 +4,37 @@
 
 ### Exactly observed sample paths ----------------------
 """
-    loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess) 
+    loglik_path(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess) 
 
 Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
 """
-function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess) 
+loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard}, totalhazards::Vector{<:_TotalHazard})
+
+     # initialize log likelihood
+     ll = 0.0
+ 
+     # recurse through the sample path
+     for i in Base.OneTo(nrow(subjectdata))
+
+        # accumulate survival probabilty
+        ll += survprob(subjectdata.sojourn[i], subjectdata.sojourn[i] + subjectdata.increment[i], parameters, i, model.totalhazards[subjectdata.statefrom[i]], hazards; give_log = true) # TODO: update hazard and cumhazard to take into account new format of covariates
+ 
+        # accumulate hazard if there is a transition
+        if subjectdata.statefrom[i] != subjectdata.stateto[i]
+            ll += call_haz(subjectdata.sojourn[i] + subjectdata.increment[i], pars[totalhazards[subjectdata.statefrom[i], subjectdata.stateto[i]]], i, hazards[totalhazards[subjectdata.statefrom[i], subjectdata.stateto[i]]]; give_log = true)
+        end
+     end
+ 
+     # unweighted loglikelihood
+     return ll
+end
+
+"""
+    loglik_path_OLD(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess) 
+
+Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
+"""
+function loglik_path_OLD(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess) 
 
     # initialize log likelihood
     ll = 0.0
@@ -114,7 +140,7 @@ end
 
 Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. 
 """
-function loglik(parameters, data::ExactData; neg=true, return_ll_subj=false)
+function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false)
 
     # nest parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
@@ -132,9 +158,9 @@ function loglik(parameters, data::ExactData; neg=true, return_ll_subj=false)
 
     if return_ll_subj
         # send each element of samplepaths to loglik
-        map((x, w) -> loglik(pars, x, hazards, data.model) * w, data.paths, data.model.SamplingWeights) # weighted
+        map((path, w) -> loglik_path(pars, path, hazards, data.model) * w, data.paths, data.model.SamplingWeights) # weighted # UPDATE
     else
-        ll = mapreduce((x, w) -> loglik(pars, x, hazards, data.model) * w, +, data.paths, data.model.SamplingWeights)    
+        ll = mapreduce((path, w) -> loglik_path(pars, path, hazards, data.model) * w, +, data.paths, data.model.SamplingWeights)    # UPDATE
         neg ? -ll : ll
     end
 end
@@ -142,9 +168,9 @@ end
 """
     loglik(parameters, data::ExactDataAD; neg = true) 
 
-Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. 
+Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. NOTE: Why is this different from loglik_exact?
 """
-function loglik(parameters, data::ExactDataAD; neg = true)
+function loglik_AD(parameters, data::ExactDataAD; neg = true)
 
     # nest parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
@@ -161,7 +187,7 @@ function loglik(parameters, data::ExactDataAD; neg = true)
     end
 
     # send each element of samplepaths to loglik
-    ll = loglik(pars, data.path[1], hazards, data.model) * data.samplingweight[1]
+    ll = loglik_path(pars, data.path[1], hazards, data.model) * data.samplingweight[1] # need to UPDATE
 
     neg ? -ll : ll
 end
@@ -171,7 +197,7 @@ end
 
 Return sum of (negative) log likelihood for a Markov model fit to panel and/or exact and/or censored data. 
 """
-function loglik(parameters, data::MPanelData; neg = true, return_ll_subj = false)
+function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj = false)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
@@ -328,7 +354,7 @@ end
 
 Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data. 
 """
-function loglik(parameters, data::SMPanelData; neg = true, use_sampling_weight = true)
+function loglik_semi_markov(parameters, data::SMPanelData; neg = true, use_sampling_weight = true)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
@@ -350,7 +376,7 @@ function loglik(parameters, data::SMPanelData; neg = true, use_sampling_weight =
         lls = 0.0
         for j in eachindex(data.paths[i])
             # mlm: function Q in the EM
-            lls += loglik(pars, data.paths[i][j], hazards, data.model) * data.ImportanceWeights[i][j] 
+            lls += loglik_path(pars, data.paths[i][j], hazards, data.model) * data.ImportanceWeights[i][j] # UPDATE
         end
         if use_sampling_weight
             lls *= data.model.SamplingWeights[i]
@@ -365,9 +391,9 @@ end
 """
     loglik(parameters, data::SMPanelData)
 
-Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data. 
+Update log-likelihood for each individual and each path of panel data in a semi-Markov model.
 """
-function loglik!(parameters, logliks::Vector{}, data::SMPanelData)
+function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
@@ -385,7 +411,7 @@ function loglik!(parameters, logliks::Vector{}, data::SMPanelData)
 
     for i in eachindex(data.paths)
         for j in eachindex(data.paths[i])
-            logliks[i][j] = loglik(pars, data.paths[i][j], hazards, data.model)
+            logliks[i][j] = loglik_path(pars, data.paths[i][j], hazards, data.model)
         end
     end
 end
