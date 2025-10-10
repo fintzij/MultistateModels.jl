@@ -8,7 +8,7 @@
 
 Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
 """
-loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard}, totalhazards::Vector{<:_TotalHazard})
+loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard}, totalhazards::Vector{<:_TotalHazard}, tmat::Array{Int,2})
 
      # initialize log likelihood
      ll = 0.0
@@ -17,118 +17,21 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
      for i in Base.OneTo(nrow(subjectdata))
 
         # accumulate survival probabilty
-        ll += survprob(subjectdata.sojourn[i], subjectdata.sojourn[i] + subjectdata.increment[i], parameters, i, model.totalhazards[subjectdata.statefrom[i]], hazards; give_log = true) # TODO: update hazard and cumhazard to take into account new format of covariates
+        ll += survprob(subjectdata.sojourn[i], subjectdata.sojourn[i] + subjectdata.increment[i], pars, i, totalhazards[subjectdata.statefrom[i]], hazards; give_log = true) # TODO: update hazard and cumhazard to take into account new format of covariates
  
         # accumulate hazard if there is a transition
         if subjectdata.statefrom[i] != subjectdata.stateto[i]
-            ll += call_haz(subjectdata.sojourn[i] + subjectdata.increment[i], pars[totalhazards[subjectdata.statefrom[i], subjectdata.stateto[i]]], i, hazards[totalhazards[subjectdata.statefrom[i], subjectdata.stateto[i]]]; give_log = true)
+            
+            # index for transition
+            transind = tmat[subjectdata.statefrom[i], subjectdata.stateto[i]]
+
+            # log hazard at time of transition
+            ll += call_haz(subjectdata.sojourn[i] + subjectdata.increment[i], pars[transind], i, hazards[transind]; give_log = true)
         end
      end
  
      # unweighted loglikelihood
      return ll
-end
-
-"""
-    loglik_path_OLD(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess) 
-
-Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
-"""
-function loglik_path_OLD(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess) 
-
-    # initialize log likelihood
-    ll = 0.0
-
-    # subject data
-    subj_inds = model.subjectindices[path.subj]
-    subj_dat  = view(model.data, subj_inds, :)
-
-    # number of jumps/left endpoints
-    n_intervals = length(path.times) - 1
-
-    # current index
-    subj_dat_ind = 1 # row in subject data
-    comp_dat_ind = subj_inds[subj_dat_ind] # index in complete data
-
-    # data time interval
-    time_R = subj_dat.tstop[subj_dat_ind]
-
-    # recurse through the sample path
-    for i in Base.OneTo(n_intervals)
-
-        # current and next state
-        scur  = path.states[i]
-        snext = path.states[i+1]
-
-        # keep accruing log-likelihood contributions for sojourn
-        keep_going = isa(model.totalhazards[scur], _TotalHazardTransient)
-
-        # times in the jump chain (clock forward)
-        # gets reset each time as i gets incremented
-        tcur  = path.times[i]   # current time
-        tstop = path.times[i+1] # time of next jump
-
-        # time in state (clock reset)
-        timespent   = 0.0   # accumulates occupancy time
-        timeinstate = tstop - tcur # sojourn time in the jump chain
-
-        # initialize survival probability
-        log_surv_prob = 0.0
-
-        # accumulate log likelihood
-        while keep_going
-
-            if tstop <= time_R
-                # event happens in (time_L, time_R]
-                # accumulate log(Pr(T ≥ timeinstate | T ≥ timespent))
-                log_surv_prob += survprob(timespent, timeinstate, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true)
-
-                # increment log likelihood
-                ll += log_surv_prob
-
-                # if event happened, accrue hazard
-                if snext != scur
-                    ll += call_haz(timeinstate, parameters[model.tmat[scur, snext]], comp_dat_ind, hazards[model.tmat[scur, snext]]; give_log = true)
-                end
-
-                # increment row index in subj_dat
-                if (tstop == time_R) & (subj_dat_ind != size(subj_dat, 1))
-                    subj_dat_ind += 1
-                    comp_dat_ind += 1
-
-                    # increment time_R
-                    time_R = subj_dat.tstop[subj_dat_ind]
-                end
-
-                # break out of the while loop
-                keep_going = false
-
-            else
-                # event doesn't hapen in (time_L, time_R]
-                # accumulate log-survival
-                # accumulate log(Pr(T ≥ time_R | T ≥ timespent))
-                log_surv_prob += survprob(timespent, timespent + time_R - tcur, parameters, comp_dat_ind, model.totalhazards[scur], hazards; give_log = true)
-                
-                # increment timespent
-                timespent += time_R - tcur
-
-                # increment current time
-                tcur = time_R
-
-                # increment row index in subj_dat
-                if subj_dat_ind != size(subj_dat, 1)
-                    subj_dat_ind += 1
-                    comp_dat_ind += 1
-
-                    # increment time_R
-                    time_R = subj_dat.tstop[subj_dat_ind]
-                end
-            end
-        end
-    end
-
-    # unweighted loglikelihood
-    return ll
 end
 
 ########################################################

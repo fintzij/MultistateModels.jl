@@ -3,6 +3,7 @@ module MultistateModels
 using ArraysOfArrays
 using BSplineKit
 using Chain
+using ComponentArrays
 using DataFrames
 using DiffResults
 using Distributions
@@ -16,6 +17,7 @@ using Optim # for simulation - keep
 using Optimization # for fitting - keep
 using OptimizationMOI
 using OrderedCollections
+using ParameterHandling
 using ParetoSmooth
 using Preferences
 using QuadGK

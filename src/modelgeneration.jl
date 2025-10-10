@@ -108,7 +108,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
     # initialize the arrays of hazards
     _hazards = Vector{_Hazard}(undef, length(hazards))
 
-    # initialize vector of parameters
+    # named tuple for parameters
     parameters = VectorOfVectors{Float64}()
 
     # initialize a dictionary for indexing into the vector of hazards
@@ -123,208 +123,208 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
         # save index in the dictionary
         merge!(hazkeys, Dict(Symbol(hazname) => h))
 
-        # generate the model matrix
-        hazschema = 
-            apply_schema(
-                hazards[h].hazard, 
-                 StatsModels.schema(
-                     hazards[h].hazard, 
-                     data))
+        # # generate the model matrix
+        # hazschema = 
+        #     apply_schema(
+        #         hazards[h].hazard, 
+        #          StatsModels.schema(
+        #              hazards[h].hazard, 
+        #              data))
 
-        # grab the design matrix 
-        hazdat = modelcols(hazschema, data)[2]
+        # # grab the design matrix 
+        # hazdat = modelcols(hazschema, data)[2]
 
-        # get the family
-        family = surrogate ? "exp" : hazards[h].family 
+        # # get the family
+        # family = surrogate ? "exp" : hazards[h].family 
 
-        # now we get the functions and other objects for the mutable struct
-        if family == "exp"
+        # # now we get the functions and other objects for the mutable struct
+        # if family == "exp"
 
-            # number of parameters
-            npars = size(hazdat)[2]
+        #     # number of parameters
+        #     npars = size(hazdat)[2]
 
-            # vector for parameters
-            hazpars = zeros(Float64, npars)
+        #     # vector for parameters
+        #     hazpars = zeros(Float64, npars)
 
-            # append to model parameters
-            push!(parameters, hazpars)
+        #     # append to model parameters
+        #     push!(parameters, hazpars)
 
-            # get names
-            parnames = replace.(hazname*"_".*coefnames(hazschema)[2], "(Intercept)" => "Intercept")
+        #     # get names
+        #     parnames = replace.(hazname*"_".*coefnames(hazschema)[2], "(Intercept)" => "Intercept")
 
-            # generate hazard struct
-            if npars == 1
-                haz_struct = 
-                    _Exponential(
-                        Symbol(hazname),
-                        hazdat,
-                        [Symbol.(parnames)],
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1) # make sure this is a vector
-            else
-                haz_struct = 
-                    _ExponentialPH(
-                        Symbol(hazname),
-                        hazdat,
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1)
-            end
+        #     # generate hazard struct
+        #     if npars == 1
+        #         haz_struct = 
+        #             _Exponential(
+        #                 Symbol(hazname),
+        #                 hazdat,
+        #                 [Symbol.(parnames)],
+        #                 hazards[h].statefrom,
+        #                 hazards[h].stateto,
+        #                 size(hazdat, 2) - 1) # make sure this is a vector
+        #     else
+        #         haz_struct = 
+        #             _ExponentialPH(
+        #                 Symbol(hazname),
+        #                 hazdat,
+        #                 Symbol.(parnames),
+        #                 hazards[h].statefrom,
+        #                 hazards[h].stateto,
+        #                 size(hazdat, 2) - 1)
+        #     end
 
-        elseif family == "wei" 
+        # elseif family == "wei" 
 
-            # number of parameters
-            npars = size(hazdat, 2)
+        #     # number of parameters
+        #     npars = size(hazdat, 2)
 
-            # vector for parameters
-            hazpars = zeros(Float64, 1 + npars)
+        #     # vector for parameters
+        #     hazpars = zeros(Float64, 1 + npars)
 
-            # append to model parameters
-            push!(parameters, hazpars)
+        #     # append to model parameters
+        #     push!(parameters, hazpars)
 
-            # generate hazard struct
-            if npars == 1
+        #     # generate hazard struct
+        #     if npars == 1
                 
-                # parameter names
-                parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "_(Intercept)" => "")
+        #         # parameter names
+        #         parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "_(Intercept)" => "")
 
-                haz_struct = 
-                    _Weibull(
-                        Symbol(hazname),
-                        hazdat, 
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1)
+        #         haz_struct = 
+        #             _Weibull(
+        #                 Symbol(hazname),
+        #                 hazdat, 
+        #                 Symbol.(parnames),
+        #                 hazards[h].statefrom,
+        #                 hazards[h].stateto,
+        #                 size(hazdat, 2) - 1)
                         
-            else
+        #     else
                 
-                # parameter names
-                parnames = vcat(
-                        hazname * "_shape",
-                        hazname * "_scale",
-                        hazname*"_".*coefnames(hazschema)[2][Not(1)])
+        #         # parameter names
+        #         parnames = vcat(
+        #                 hazname * "_shape",
+        #                 hazname * "_scale",
+        #                 hazname*"_".*coefnames(hazschema)[2][Not(1)])
 
-                haz_struct = 
-                    _WeibullPH(
-                        Symbol(hazname),
-                        hazdat,
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1)
-            end
+        #         haz_struct = 
+        #             _WeibullPH(
+        #                 Symbol(hazname),
+        #                 hazdat,
+        #                 Symbol.(parnames),
+        #                 hazards[h].statefrom,
+        #                 hazards[h].stateto,
+        #                 size(hazdat, 2) - 1)
+        #     end
 
-        elseif family == "gom"
+        # elseif family == "gom"
 
-            # number of parameters
-            npars = size(hazdat, 2)
+        #     # number of parameters
+        #     npars = size(hazdat, 2)
 
-            # vector for parameters
-            hazpars = zeros(Float64, 1 + npars)
+        #     # vector for parameters
+        #     hazpars = zeros(Float64, 1 + npars)
 
-            # append to model parameters
-            push!(parameters, hazpars)
+        #     # append to model parameters
+        #     push!(parameters, hazpars)
 
-            # generate hazard struct
-            if npars == 1
+        #     # generate hazard struct
+        #     if npars == 1
                 
-                # parameter names
-                parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "_(Intercept)" => "")
+        #         # parameter names
+        #         parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "_(Intercept)" => "")
 
-                haz_struct = 
-                    _Gompertz(
-                        Symbol(hazname),
-                        hazdat, 
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1)
+        #         haz_struct = 
+        #             _Gompertz(
+        #                 Symbol(hazname),
+        #                 hazdat, 
+        #                 Symbol.(parnames),
+        #                 hazards[h].statefrom,
+        #                 hazards[h].stateto,
+        #                 size(hazdat, 2) - 1)
                         
-            else
+        #     else
                 
-                # parameter names
-                parnames = vcat(
-                        hazname * "_shape",
-                        hazname * "_scale",
-                        hazname*"_".*coefnames(hazschema)[2][Not(1)])
+        #         # parameter names
+        #         parnames = vcat(
+        #                 hazname * "_shape",
+        #                 hazname * "_scale",
+        #                 hazname*"_".*coefnames(hazschema)[2][Not(1)])
 
-                haz_struct = 
-                    _GompertzPH(
-                        Symbol(hazname),
-                        hazdat,
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1)
-            end
-        elseif family == "sp" # B-splines
+        #         haz_struct = 
+        #             _GompertzPH(
+        #                 Symbol(hazname),
+        #                 hazdat,
+        #                 Symbol.(parnames),
+        #                 hazards[h].statefrom,
+        #                 hazards[h].stateto,
+        #                 size(hazdat, 2) - 1)
+        #     end
+        # elseif family == "sp" # B-splines
 
-            # grab hazard object from splines2
-            hazard, cumulative_hazard, rmat, knots, timespan = spline_hazards(hazards[h], data)
+        #     # grab hazard object from splines2
+        #     hazard, cumulative_hazard, rmat, knots, timespan = spline_hazards(hazards[h], data)
 
-            # number of parameters
-            npars = size(rmat, 2) + size(hazdat, 2) - 1
+        #     # number of parameters
+        #     npars = size(rmat, 2) + size(hazdat, 2) - 1
 
-            # generate hazard struct
-            ### no covariates
-            if(size(hazdat, 2) == 1) 
+        #     # generate hazard struct
+        #     ### no covariates
+        #     if(size(hazdat, 2) == 1) 
                 
-                # parameter names
-                parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:length(hazard.spline.basis)))), "(Intercept)" => "Intercept")
+        #         # parameter names
+        #         parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:length(hazard.spline.basis)))), "(Intercept)" => "Intercept")
 
-                # vector for parameters
-                hazpars = zeros(Float64, npars)
+        #         # vector for parameters
+        #         hazpars = zeros(Float64, npars)
 
-                # append to model parameters
-                push!(parameters, hazpars)
+        #         # append to model parameters
+        #         push!(parameters, hazpars)
 
-                haz_struct = _Spline(Symbol(hazname),
-                                        hazdat, 
-                                        Symbol.(parnames),
-                                        hazards[h].statefrom,
-                                        hazards[h].stateto,
-                                        hazards[h].degree,
-                                        knots,
-                                        hazard,
-                                        cumulative_hazard,
-                                        hazards[h].natural_spline,
-                                        hazards[h].monotone,
-                                        timespan,
-                                        timespan,
-                                        length(hazard.spline.basis),
-                                        size(hazdat, 2) - 1)            
-            else
-                ### proportional hazards
-                # parameter names
-                parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:length(hazard.spline.basis)))), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
+        #         haz_struct = _Spline(Symbol(hazname),
+        #                                 hazdat, 
+        #                                 Symbol.(parnames),
+        #                                 hazards[h].statefrom,
+        #                                 hazards[h].stateto,
+        #                                 hazards[h].degree,
+        #                                 knots,
+        #                                 hazard,
+        #                                 cumulative_hazard,
+        #                                 hazards[h].natural_spline,
+        #                                 hazards[h].monotone,
+        #                                 timespan,
+        #                                 timespan,
+        #                                 length(hazard.spline.basis),
+        #                                 size(hazdat, 2) - 1)            
+        #     else
+        #         ### proportional hazards
+        #         # parameter names
+        #         parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:length(hazard.spline.basis)))), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
                
-                # vector for parameters
-                hazpars = zeros(Float64, npars)
+        #         # vector for parameters
+        #         hazpars = zeros(Float64, npars)
 
-                # append to model parameters
-                push!(parameters, hazpars)
+        #         # append to model parameters
+        #         push!(parameters, hazpars)
 
-                # hazard struct
-                haz_struct = _SplinePH(Symbol(hazname),
-                                        hazdat[:,Not(1)], 
-                                        Symbol.(parnames),
-                                        hazards[h].statefrom,
-                                        hazards[h].stateto,
-                                        hazards[h].degree,
-                                        knots,
-                                        hazard,
-                                        cumulative_hazard,
-                                        hazards[h].natural_spline,
-                                        hazards[h].monotone,
-                                        timespan,
-                                        timespan,
-                                        length(hazard.spline.basis),
-                                        size(hazdat, 2) - 1)                             
-            end
-        end
+        #         # hazard struct
+        #         haz_struct = _SplinePH(Symbol(hazname),
+        #                                 hazdat[:,Not(1)], 
+        #                                 Symbol.(parnames),
+        #                                 hazards[h].statefrom,
+        #                                 hazards[h].stateto,
+        #                                 hazards[h].degree,
+        #                                 knots,
+        #                                 hazard,
+        #                                 cumulative_hazard,
+        #                                 hazards[h].natural_spline,
+        #                                 hazards[h].monotone,
+        #                                 timespan,
+        #                                 timespan,
+        #                                 length(hazard.spline.basis),
+        #                                 size(hazdat, 2) - 1)                             
+        #     end
+        # end
 
         # note: want a symbol that names the hazard + vector of symbols for parameters
         _hazards[h] = haz_struct

@@ -4,11 +4,7 @@
 # - Multiple rows with covariates: includes both state change and covariate change times
 # - Single row with covariates OR no covariates: uses only path times
 # - Returns appropriate columns based on whether covariates exist
-
-using DataFrames
-using MultistateModels
 using MultistateModels: SamplePath, make_subjdat
-using Test
 
 @testset "test_make_subjdat" begin
     

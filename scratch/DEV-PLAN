@@ -1,2 +1,9 @@
 0. Unit test log likelihood function for paths
 1. hazard functions to runtime generated functions 
+
+
+-------
+for the data structure:
+statsmodels is useful, but don't want it on a per-transition basis
+ - parse all formulas and create a single data structure once
+ - then create subjectdata for each path using the single structure

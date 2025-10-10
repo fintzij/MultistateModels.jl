@@ -1,20 +1,30 @@
-using ArraysOfArrays
-using ElasticArrays
-using BenchmarkTools
+using ParameterHandling
+using NestedTuples
 
+# make tuple
+pars = (
+    t1 = (
+        bl = positive(1.0),
+        trt = real(0.5)
+    ),
+    t2 = (
+        shape = positive(1.2),
+        scale = positive(2.0),
+        linpred = (
+            bl = real(-1.0),
+            trt = real(0.3)
+        )
+    )
+)
 
-testvec = [sizehint!(ElasticArray{Float64, 1}(undef, 0), 1000) for i in 1:1000]
+# schema
+s = schema(pars)
 
-testvec2 = [sizehint!(Vector{Float64}(), 1000) for i in 1:1000]
+# leaf setter
+f = leaf_setter(pars)
 
-
-function app!(v, n)
-    for i in 1:length(v)
-        for j in 1:n
-            append!(v[i], 0.0)
-        end
-    end
-end
-
-@btime app!(testvec, 1000)
-@btime app!(testvec2, 1000) # vector of vectors is slightly faster
+# NOTES
+# hazard could carry its own parameter schema
+# model object should be a mutable struct
+# easiest just to create a new named tuple each time parameters are set or update
+# the parameters field itself is a named tuple, which is immutable. no need for it to be mutable as creating a new one is not intensive

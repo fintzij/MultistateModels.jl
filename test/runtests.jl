@@ -1,3 +1,4 @@
+using DataFrames
 using LinearAlgebra
 using MultistateModels
 using Random
@@ -13,6 +14,7 @@ include("test/setup_3state_weiph.jl")
 include("test/setup_2state_trans.jl")
 include("test/setup_gompertz.jl")
 include("test/setup_splines.jl")
+include("test/test_miscellaneous.jl")
 
 @testset "runtests" begin
     include("test/test_modelgeneration.jl")
