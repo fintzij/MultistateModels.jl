@@ -196,101 +196,36 @@ function calculate_crude(model::MultistateProcess)
 end
 
 """
+Initialize parameters for new hazard types (MarkovHazard, SemiMarkovHazard, SplineHazard).
 
-Pass-through the crude exponential rate. Method for exponential hazard with no covariates.
+Dispatches based on family and has_covariates to determine parameter initialization.
 """
-function init_par(_hazard::_Exponential, crude_log_rate=0)
-    return [crude_log_rate]
-end
-
-"""
-
-Pass-through the crude exponential rate and zero out the coefficients for covariates. Method for exponential hazard with covariates.
-"""
-function init_par(_hazard::_ExponentialPH, crude_log_rate=0)
-    return vcat(crude_log_rate, zeros(_hazard.ncovar))
-end
-
-"""
-
-Weibull without covariates
-"""
-function init_par(_hazard::_Weibull, crude_log_rate=0)
-    # set shape parameter to 0 (i.e. log(1)) so it's exponential
-    # pass through crude log exponential rate
-    return [0; crude_log_rate]
-end
-
-"""
-
-Weibull with covariates
-"""
-function init_par(_hazard::_WeibullPH, crude_log_rate=0)
-    # set shape parameter to 0 (i.e. log(1)) so it's exponential
-    # pass through crude exponential rate
-    # set covariate coefficients to 0
-    return vcat([0; crude_log_rate], zeros(_hazard.ncovar))
-end
-
-"""
-
-Gompertz without covariates
-"""
-function init_par(_hazard::_Gompertz, crude_log_rate=0)
-    # set shape to 0 (i.e. log(1)) 
-    # pass through crude exponential rate 
-    return [0; crude_log_rate]
-end
-
-"""
-
-Gompertz with covariates
-"""
-function init_par(_hazard::_GompertzPH, crude_log_rate=0)
-    # set shape to 0 (i.e. log(1)) 
-    # pass through crude exponential rate 
-    # set covariate coefficients to 0
-    return vcat([0; crude_log_rate], zeros(_hazard.ncovar))
-end
-
-"""
-
-B-Spline without covariates
-"""
-function init_par(_hazard::_Spline, crude_log_rate=0)
-
-    # use the recombined basis if needed
-    B = _hazard.hazsp.spline.basis
-
-    # if monotone all coefficients are the same to start
-    coefs = fill(crude_log_rate, length(B))
-    if _hazard.monotone == 1
-        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(0.95, 1.05; length = length(B))), _hazard)
-    elseif _hazard.monotone == -1
-        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(1.05, 0.95; length = length(B)))_hazard)
-    end        
-
-    return coefs
-end
-
-"""
-
-B-spline with covariates
-"""
-function init_par(_hazard::_SplinePH, crude_log_rate=0)
-
-     # use the recombined basis if needed
-    B = _hazard.hazsp.spline.basis
-
-    # get coefficients 
-    coefs = fill(crude_log_rate, length(B))
-    if _hazard.monotone == 0
-        coefs = exp.(coefs)
-    elseif _hazard.monotone == 1
-        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(0.95, 1.05; length = length(B))), _hazard)
-    elseif _hazard.monotone == -1
-        coefs = spline_coefs2ests(exp.(coefs) .* collect(range(1.05, 0.95; length = length(B))), _hazard)
-    end        
-
-    return vcat(log.(coefs), zeros(_hazard.ncovar))
+function init_par(hazard::Union{MarkovHazard,SemiMarkovHazard,SplineHazard}, crude_log_rate=0)
+    family = hazard.family
+    has_covs = hazard.has_covariates
+    ncovar = hazard.npar_total - hazard.npar_baseline
+    
+    if family == "exp"
+        # Exponential: [log_baseline] or [log_baseline, β1, β2, ...]
+        return has_covs ? vcat(crude_log_rate, zeros(ncovar)) : [crude_log_rate]
+        
+    elseif family == "wei"
+        # Weibull: [log_shape, log_scale] or [log_shape, log_scale, β1, β2, ...]
+        # Initialize shape=1 (log_shape=0) to start as exponential
+        baseline = [0.0, crude_log_rate]  # log(shape=1), log_scale
+        return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
+        
+    elseif family == "gom"
+        # Gompertz: [log_shape, log_scale] or [log_shape, log_scale, β1, β2, ...]
+        # Initialize shape=1 (log_shape=0) to start as exponential
+        baseline = [0.0, crude_log_rate]  # log(shape=1), log_scale
+        return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
+        
+    elseif family == "sp"
+        # Spline: Will be implemented when splines are fully migrated
+        error("Spline initialization not yet implemented for new SplineHazard type")
+        
+    else
+        error("Unknown hazard family: $family")
+    end
 end

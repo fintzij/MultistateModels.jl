@@ -1,41 +1,524 @@
-"""
-    survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{<:_Hazard}; give_log = true) 
+#=============================================================================
+PHASE 2: Runtime-Generated Hazard Functions
 
-Return the survival probability over the interval [lb, ub]. 
+PARAMETER SCALE CONVENTION (Phase 2.5):
+- All baseline/shape/scale parameters are stored and passed on LOG SCALE
+- This matches the model.parameters storage convention (legacy compatibility)
+- Covariate coefficients (β) remain on NATURAL SCALE
+- Functions internally apply exp() transformations to return natural scale hazards
+- ParameterHandling.jl integration (Phase 3) will handle transformations explicitly
 
-# Arguments 
-- `lb`: start time
-- `ub`: end time
-- `parameters`: model parameters, a vector of vectors
-- `rowind`: row index in data
-- `_totalhazard::_TotalHazardTransient`: total hazard from transient state, contains indices for hazards that contribute to the total hazard
-- `_hazards::_Hazard`: vector of cause-specific hazards
-- `give_log::Bool`: should the log total hazard be returned (default)
+Example:
+  model.parameters = [[0.8], [log(2.5), log(1.5)]]  # Log scale storage
+  hazard_fn(t, [0.8], []) returns exp(0.8) = 2.225...  # Natural scale output
+=============================================================================# 
+
 """
-function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards; give_log = true) 
+    extract_covar_names(parnames::Vector{Symbol})
+
+Extract covariate names from parameter names by removing hazard prefix and excluding Intercept/shape/scale.
+
+# Example
+```julia
+parnames = [:h12_Intercept, :h12_age, :h12_trt]
+extract_covar_names(parnames)  # Returns [:age, :trt]
+
+parnames_wei = [:h12_shape, :h12_scale, :h12_age]
+extract_covar_names(parnames_wei)  # Returns [:age]
+```
+"""
+function extract_covar_names(parnames::Vector{Symbol})
+    covar_names = Symbol[]
+    for pname in parnames
+        pname_str = String(pname)
+        # Skip intercept, shape, and scale parameters (not covariates)
+        if occursin("Intercept", pname_str) || occursin("shape", pname_str) || occursin("scale", pname_str)
+            continue
+        end
+        # Remove hazard prefix (e.g., "h12_age" -> "age")
+        covar_name = replace(pname_str, r"^h\d+_" => "")
+        push!(covar_names, Symbol(covar_name))
+    end
+    return covar_names
+end
+
+"""
+    extract_covariates(subjdat::DataFrameRow, parnames::Vector{Symbol})
+
+Extract covariates from a DataFrame row as a NamedTuple, using parameter names to determine which columns to extract.
+
+# Arguments
+- `subjdat`: A DataFrameRow containing covariate values
+- `parnames`: Vector of parameter names (e.g., [:h12_Intercept, :h12_age, :h12_trt])
+
+# Returns
+- Empty NamedTuple() if no covariates
+- NamedTuple with covariate values otherwise (e.g., (age=50, trt=1))
+
+# Example
+```julia
+row = DataFrame(id=1, tstart=0.0, tstop=10.0, statefrom=1, stateto=2, obstype=1, age=50, trt=1)[1, :]
+parnames = [:h12_Intercept, :h12_age, :h12_trt]
+extract_covariates(row, parnames)  # Returns (age=50, trt=1)
+```
+"""
+function extract_covariates(subjdat::Union{DataFrameRow,DataFrame}, parnames::Vector{Symbol})
+    covar_names = extract_covar_names(parnames)
+    
+    if isempty(covar_names)
+        return NamedTuple()
+    end
+    
+    # Extract values from subjdat
+    # Handle both DataFrameRow and DataFrame (for single-row DataFrame)
+    if subjdat isa DataFrame
+        @assert nrow(subjdat) == 1 "DataFrame must have exactly one row"
+        subjdat_row = subjdat[1, :]
+    else
+        subjdat_row = subjdat
+    end
+    
+    values = Tuple(subjdat_row[cname] for cname in covar_names)
+    return NamedTuple{Tuple(covar_names)}(values)
+end
+
+"""
+    generate_exponential_hazard(has_covariates::Bool, parnames::Vector{Symbol}=Symbol[])
+
+Generate runtime function for exponential hazard with name-based covariate matching.
+
+# Arguments
+- `has_covariates`: Whether covariates are present
+- `parnames`: Vector of parameter names (optional). If provided, enables name-based covariate access.
+
+# Returns
+- `hazard_fn(t, pars, covars)`: Returns hazard rate on natural scale
+- `cumhaz_fn(lb, ub, pars, covars)`: Returns cumulative hazard over [lb, ub]
+
+# Parameters (LOG scale for baseline, natural scale for covariate effects)
+- Without covariates: `pars = [log_rate]`, `covars = NamedTuple()` or `Float64[]`
+  - hazard = exp(log_rate)
+- With covariates (name-based): `pars = [log_baseline, coef1, coef2, ...]`, `covars = (age=x1, trt=x2, ...)`
+  - hazard = exp(log_baseline + coef1*age + coef2*trt + ...)
+- With covariates (index-based, deprecated): `pars = [log_baseline, coef1, coef2, ...]`, `covars = [x1, x2, ...]`
+  - hazard = exp(log_baseline + coef1*x1 + coef2*x2 + ...)
+
+# Note: When parnames is provided, covariates are matched by name via NamedTuple, ensuring
+       correctness when different hazards have different covariates.
+"""
+function generate_exponential_hazard(has_covariates::Bool, parnames::Vector{Symbol}=Symbol[])
+    if !has_covariates
+        # No covariates: exp(log_rate) gives constant hazard rate
+        hazard_fn = @RuntimeGeneratedFunction(:(
+            function(t, pars, covars)
+                return exp(pars[1])  # exp(log_rate) = rate
+            end
+        ))
+        
+        cumhaz_fn = @RuntimeGeneratedFunction(:(
+            function(lb, ub, pars, covars)
+                return exp(pars[1]) * (ub - lb)  # rate * duration
+            end
+        ))
+    elseif isempty(parnames)
+        # With covariates, index-based (backward compatibility)
+        hazard_fn = @RuntimeGeneratedFunction(:(
+            function(t, pars, covars)
+                log_baseline = pars[1]
+                linear_pred = zero(eltype(pars))
+                for i in 2:length(pars)
+                    linear_pred += pars[i] * covars[i-1]
+                end
+                return exp(log_baseline + linear_pred)
+            end
+        ))
+        
+        cumhaz_fn = @RuntimeGeneratedFunction(:(
+            function(lb, ub, pars, covars)
+                log_baseline = pars[1]
+                linear_pred = zero(eltype(pars))
+                for i in 2:length(pars)
+                    linear_pred += pars[i] * covars[i-1]
+                end
+                return exp(log_baseline + linear_pred) * (ub - lb)
+            end
+        ))
+    else
+        # With covariates, name-based (NEW: uses NamedTuple)
+        covar_names = extract_covar_names(parnames)
+        
+        # Build expressions for name-based access
+        # e.g., pars[2] * covars.age + pars[3] * covars.trt
+        linear_pred_terms = [:(pars[$(i+1)] * covars.$(covar_names[i])) 
+                             for i in 1:length(covar_names)]
+        linear_pred_expr = if isempty(linear_pred_terms)
+            :(zero(eltype(pars)))
+        else
+            Expr(:call, :+, linear_pred_terms...)
+        end
+        
+        hazard_fn = @RuntimeGeneratedFunction(:(
+            function(t, pars, covars)
+                log_baseline = pars[1]
+                linear_pred = $linear_pred_expr
+                return exp(log_baseline + linear_pred)
+            end
+        ))
+        
+        cumhaz_fn = @RuntimeGeneratedFunction(:(
+            function(lb, ub, pars, covars)
+                log_baseline = pars[1]
+                linear_pred = $linear_pred_expr
+                return exp(log_baseline + linear_pred) * (ub - lb)
+            end
+        ))
+    end
+    
+    return hazard_fn, cumhaz_fn
+end
+
+"""
+    generate_weibull_hazard(has_covariates::Bool, parnames::Vector{Symbol}=Symbol[])
+
+Generate runtime function for Weibull hazard with name-based covariate matching.
+
+# Arguments
+- `has_covariates`: Whether covariates are present
+- `parnames`: Vector of parameter names (optional). If provided, enables name-based covariate access.
+
+# Returns
+- `hazard_fn(t, pars, covars)`: Returns hazard rate at time t
+- `cumhaz_fn(lb, ub, pars, covars)`: Returns cumulative hazard over [lb, ub]
+
+# Parameters (LOG scale for shape and scale, natural scale for covariate effects)
+- Without covariates: `pars = [log_shape, log_scale]`, `covars = NamedTuple()` or `Float64[]`
+  - h(t) = shape * scale * t^(shape-1), where shape=exp(log_shape), scale=exp(log_scale)
+- With covariates (name-based): `pars = [log_shape, log_scale, coef1, coef2, ...]`, `covars = (age=x1, trt=x2, ...)`
+  - Proportional hazards on scale: h(t) = shape * t^(shape-1) * scale * exp(β'X)
+- With covariates (index-based, deprecated): `pars = [...], `covars = [x1, x2, ...]`
+
+# Note: When parnames is provided, covariates are matched by name via NamedTuple.
+"""
+function generate_weibull_hazard(has_covariates::Bool, parnames::Vector{Symbol}=Symbol[])
+    if !has_covariates
+        # No covariates: h(t) = shape * scale * t^(shape-1)
+        hazard_fn = @RuntimeGeneratedFunction(:(
+            function(t, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                return exp(log_shape + log_scale + expm1(log_shape) * log(t))
+            end
+        ))
+        
+        cumhaz_fn = @RuntimeGeneratedFunction(:(
+            function(lb, ub, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                shape = exp(log_shape)
+                scale = exp(log_scale)
+                return scale * (ub^shape - lb^shape)
+            end
+        ))
+    elseif isempty(parnames)
+        # With covariates, index-based (backward compatibility)
+        hazard_fn = @RuntimeGeneratedFunction(:(
+            function(t, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                linear_pred = zero(eltype(pars))
+                for i in 3:length(pars)
+                    linear_pred += pars[i] * covars[i-2]
+                end
+                return exp(log_shape + expm1(log_shape) * log(t) + log_scale + linear_pred)
+            end
+        ))
+        
+        cumhaz_fn = @RuntimeGeneratedFunction(:(
+            function(lb, ub, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                shape = exp(log_shape)
+                scale = exp(log_scale)
+                linear_pred = zero(eltype(pars))
+                for i in 3:length(pars)
+                    linear_pred += pars[i] * covars[i-2]
+                end
+                return scale * exp(linear_pred) * (ub^shape - lb^shape)
+            end
+        ))
+    else
+        # With covariates, name-based (NEW: uses NamedTuple)
+        covar_names = extract_covar_names(parnames)
+        
+        # Build expressions for name-based access
+        linear_pred_terms = [:(pars[$(i+2)] * covars.$(covar_names[i])) 
+                             for i in 1:length(covar_names)]
+        linear_pred_expr = if isempty(linear_pred_terms)
+            :(zero(eltype(pars)))
+        else
+            Expr(:call, :+, linear_pred_terms...)
+        end
+        
+        hazard_fn = @RuntimeGeneratedFunction(:(
+            function(t, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                linear_pred = $linear_pred_expr
+                return exp(log_shape + expm1(log_shape) * log(t) + log_scale + linear_pred)
+            end
+        ))
+        
+        cumhaz_fn = @RuntimeGeneratedFunction(:(
+            function(lb, ub, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                shape = exp(log_shape)
+                scale = exp(log_scale)
+                linear_pred = $linear_pred_expr
+                return scale * exp(linear_pred) * (ub^shape - lb^shape)
+            end
+        ))
+    end
+    
+    return hazard_fn, cumhaz_fn
+end
+
+"""
+    generate_gompertz_hazard(has_covariates::Bool, parnames::Vector{Symbol}=Symbol[])
+
+Generate runtime function for Gompertz hazard with name-based covariate matching.
+
+# Arguments
+- `has_covariates`: Whether covariates are present
+- `parnames`: Vector of parameter names (optional). If provided, enables name-based covariate access.
+
+# Returns
+- `hazard_fn(t, pars, covars)`: Returns hazard rate at time t
+- `cumhaz_fn(lb, ub, pars, covars)`: Returns cumulative hazard over [lb, ub]
+
+# Parameters (LOG scale for shape and scale, natural scale for covariate effects)
+- Without covariates: `pars = [log_shape, log_scale]`, `covars = NamedTuple()` or `Float64[]`
+  - h(t) = scale * shape * exp(shape*t), where shape=exp(log_shape), scale=exp(log_scale)
+- With covariates (name-based): `pars = [log_shape, log_scale, coef1, coef2, ...]`, `covars = (age=x1, trt=x2, ...)`
+  - h(t) = scale * shape * exp(shape*t + β'X)
+- With covariates (index-based, deprecated): `pars = [...], `covars = [x1, x2, ...]`
+
+# Note: When parnames is provided, covariates are matched by name via NamedTuple.
+"""
+function generate_gompertz_hazard(has_covariates::Bool, parnames::Vector{Symbol}=Symbol[])
+    if !has_covariates
+        # No covariates: h(t) = scale * shape * exp(shape*t)
+        hazard_fn = @RuntimeGeneratedFunction(:(
+            function(t, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                shape = exp(log_shape)
+                return exp(log_scale + log_shape + shape * t)
+            end
+        ))
+        
+        cumhaz_fn = @RuntimeGeneratedFunction(:(
+            function(lb, ub, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                shape = exp(log_shape)
+                scale = exp(log_scale)
+                if abs(shape) < 1e-10
+                    return scale * (ub - lb)
+                else
+                    return scale * (exp(shape * ub) - exp(shape * lb))
+                end
+            end
+        ))
+    elseif isempty(parnames)
+        # With covariates, index-based (backward compatibility)
+        hazard_fn = @RuntimeGeneratedFunction(:(
+            function(t, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                shape = exp(log_shape)
+                linear_pred = zero(eltype(pars))
+                for i in 3:length(pars)
+                    linear_pred += pars[i] * covars[i-2]
+                end
+                return exp(log_scale + log_shape + shape * t + linear_pred)
+            end
+        ))
+        
+        cumhaz_fn = @RuntimeGeneratedFunction(:(
+            function(lb, ub, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                shape = exp(log_shape)
+                scale = exp(log_scale)
+                if abs(shape) < 1e-10
+                    baseline_cumhaz = scale * (ub - lb)
+                else
+                    baseline_cumhaz = scale * (exp(shape * ub) - exp(shape * lb))
+                end
+                linear_pred = zero(eltype(pars))
+                for i in 3:length(pars)
+                    linear_pred += pars[i] * covars[i-2]
+                end
+                return baseline_cumhaz * exp(linear_pred)
+            end
+        ))
+    else
+        # With covariates, name-based (NEW: uses NamedTuple)
+        covar_names = extract_covar_names(parnames)
+        
+        # Build expressions for name-based access
+        linear_pred_terms = [:(pars[$(i+2)] * covars.$(covar_names[i])) 
+                             for i in 1:length(covar_names)]
+        linear_pred_expr = if isempty(linear_pred_terms)
+            :(zero(eltype(pars)))
+        else
+            Expr(:call, :+, linear_pred_terms...)
+        end
+        
+        hazard_fn = @RuntimeGeneratedFunction(:(
+            function(t, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                shape = exp(log_shape)
+                linear_pred = $linear_pred_expr
+                return exp(log_scale + log_shape + shape * t + linear_pred)
+            end
+        ))
+        
+        cumhaz_fn = @RuntimeGeneratedFunction(:(
+            function(lb, ub, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                shape = exp(log_shape)
+                scale = exp(log_scale)
+                if abs(shape) < 1e-10
+                    baseline_cumhaz = scale * (ub - lb)
+                else
+                    baseline_cumhaz = scale * (exp(shape * ub) - exp(shape * lb))
+                end
+                linear_pred = $linear_pred_expr
+                return baseline_cumhaz * exp(linear_pred)
+            end
+        ))
+    end
+    
+    return hazard_fn, cumhaz_fn
+end
+
+#=============================================================================
+PHASE 2: Callable Hazard Interface
+=============================================================================# 
+
+"""
+    (hazard::MarkovHazard)(t, pars, covars=Float64[])
+
+Make MarkovHazard directly callable for hazard evaluation.
+Returns hazard rate at time t (time parameter ignored for Markov processes).
+"""
+function (hazard::MarkovHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,NamedTuple}=Float64[])
+    return hazard.hazard_fn(t, pars, covars)
+end
+
+"""
+    (hazard::SemiMarkovHazard)(t, pars, covars=Float64[])
+
+Make SemiMarkovHazard directly callable for hazard evaluation.
+Returns hazard rate at time t.
+"""
+function (hazard::SemiMarkovHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,NamedTuple}=Float64[])
+    return hazard.hazard_fn(t, pars, covars)
+end
+
+"""
+    (hazard::SplineHazard)(t, pars, covars=Float64[])
+
+Make SplineHazard directly callable for hazard evaluation.
+Returns hazard rate at time t.
+"""
+function (hazard::SplineHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,NamedTuple}=Float64[])
+    return hazard.hazard_fn(t, pars, covars)
+end
+
+"""
+    cumulative_hazard(hazard::Union{MarkovHazard,SemiMarkovHazard,SplineHazard}, lb, ub, pars, covars=Float64[])
+
+Compute cumulative hazard over interval [lb, ub].
+"""
+function cumulative_hazard(hazard::Union{MarkovHazard,SemiMarkovHazard,SplineHazard}, 
+                          lb::Real, ub::Real, 
+                          pars::AbstractVector, 
+                          covars::Union{AbstractVector,NamedTuple}=Float64[])
+    return hazard.cumhaz_fn(lb, ub, pars, covars)
+end
+
+#=============================================================================
+PHASE 2: Backward Compatibility Layer
+=============================================================================# 
+
+"""
+Backward compatibility: Make new hazard types work with old call_haz() dispatch.
+
+For new hazard types (MarkovHazard, SemiMarkovHazard, SplineHazard), we extract covariates
+by name using the parnames field and the provided subjdat row.
+
+# Note on Interface:
+- Old hazard types: Expect `rowind` and have `.data` field
+- New hazard types: Expect `subjdat::DataFrameRow` and use `parnames` to extract covariates
+- Both interfaces supported for backward compatibility
+"""
+
+# MarkovHazard backward compatibility (with subjdat)
+function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::MarkovHazard; give_log = true)
+    covars = extract_covariates(subjdat, hazard.parnames)
+    haz = hazard(t, parameters, covars)
+    give_log ? log(haz) : haz
+end
+
+function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::MarkovHazard; give_log = true)
+    covars = extract_covariates(subjdat, hazard.parnames)
+    cumhaz = cumulative_hazard(hazard, lb, ub, parameters, covars)
+    give_log ? log(cumhaz) : cumhaz
+end
+
+# SemiMarkovHazard backward compatibility (with subjdat)
+function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SemiMarkovHazard; give_log = true)
+    covars = extract_covariates(subjdat, hazard.parnames)
+    haz = hazard(t, parameters, covars)
+    give_log ? log(haz) : haz
+end
+
+function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SemiMarkovHazard; give_log = true)
+    covars = extract_covariates(subjdat, hazard.parnames)
+    cumhaz = cumulative_hazard(hazard, lb, ub, parameters, covars)
+    give_log ? log(cumhaz) : cumhaz
+end
+
+# SplineHazard backward compatibility (with subjdat)
+function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SplineHazard; give_log = true)
+    covars = extract_covariates(subjdat, hazard.parnames)
+    haz = hazard(t, parameters, covars)
+    give_log ? log(haz) : haz
+end
+
+function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SplineHazard; give_log = true)
+    covars = extract_covariates(subjdat, hazard.parnames)
+    cumhaz = cumulative_hazard(hazard, lb, ub, parameters, covars)
+    give_log ? log(cumhaz) : cumhaz
+end
+
+#=============================================================================
+OLD DISPATCH-BASED FUNCTIONS (Will be deprecated after Phase 2)
+=============================================================================#
+
+"""
+    survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards, subjdat; give_log = true) 
+
+Return the survival probability over the interval [lb, ub].
+"""
+function survprob(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards, subjdat; give_log = true) 
 
     # log total cumulative hazard
-    log_survprob = -total_cumulhaz(lb, ub, parameters, rowind, _totalhazard, _hazards; give_log = false)
+    log_survprob = -total_cumulhaz(lb, ub, parameters, rowind, _totalhazard, _hazards, subjdat; give_log = false)
 
     # return survival probability or not
     give_log ? log_survprob : exp(log_survprob)
 end
 
 """
-    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards::Vector{<:_Hazard}; give_log = true) 
+    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards, subjdat; give_log = true) 
 
-Return the log-total cumulative hazard out of a transient state over the interval [lb, ub]. 
-
-# Arguments 
-- `lb`: start time
-- `ub`: end time
-- `parameters`: model parameters, a vector of vectors
-- `rowind`: row index in data
-- `_totalhazard::_TotalHazardTransient`: total hazard from transient state, contains indices for hazards that contribute to the total hazard
-- `_hazards::_Hazard`: vector of cause-specific hazards
-- `give_log::Bool`: should the log total hazard be returned (default)
+Return the log-total cumulative hazard out of a transient state over the interval [lb, ub].
 """
-function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards; give_log = true) 
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTransient, _hazards, subjdat; give_log = true) 
 
     # log total cumulative hazard
     tot_haz = 0.0
@@ -45,7 +528,7 @@ function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTr
                     lb,
                     ub, 
                     parameters[x],
-                    rowind, 
+                    subjdat[rowind, :],  # Pass the specific row from subjdat
                     _hazards[x];
                     give_log = false)
     end
@@ -55,399 +538,15 @@ function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardTr
 end
 
 """
-    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards::Vector{<:_Hazard}; give_log = true) 
+    total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards, subjdat; give_log = true) 
 
-Return zero log-total cumulative hazard over the interval [lb, ub] as the current state is absorbing. 
-
-# Arguments 
-- `lb`: start time
-- `ub`: end time
-- `parameters`: model parameters, a vector of vectors
-- `rowind`: row index in data
-- `_totalhazard::_TotalHazardAbsorbing`: absorbing state.
-- `_hazards::_Hazard`: vector of cause-specific hazards
-- `give_log::Bool`: should the log total hazard be returned (default)
+Return zero log-total cumulative hazard over the interval [lb, ub] as the current state is absorbing.
 """
-function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards; give_log = true) 
+function total_cumulhaz(lb, ub, parameters, rowind, _totalhazard::_TotalHazardAbsorbing, _hazards, subjdat; give_log = true) 
 
     # return 0 cumulative hazard
     give_log ? -Inf : 0
 
-end
-
-"""
-    call_haz(t, parameters, rowind, _hazard::_Exponential; give_log = true)
-
-Return the exponential cause-specific hazards.
-"""
-function call_haz(t, parameters, rowind, _hazard::_Exponential; give_log = true)
-    give_log ? parameters[1] : exp(parameters[1])
-end
-
-"""
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Exponential; give_log = true)
-
-Cumulative hazard for the exponential hazards over the interval [lb, ub]. 
-"""
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Exponential; give_log = true)
-    give_log ? parameters[1] + log(ub - lb) : exp(parameters[1] + log(ub - lb))
-end
-
-"""
-    call_haz(t, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
-
-Return the exponential cause-specific hazards with covariate adjustment.
-"""
-function call_haz(t, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
-    log_haz = dot(parameters, _hazard.data[rowind,:])
-    give_log ? log_haz : exp(log_haz)
-end
-
-"""
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
-
-Cumulative hazard for exponential proportional hazards over the interval [lb, ub].
-"""
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_ExponentialPH; give_log = true)
-    log_haz = dot(parameters, _hazard.data[rowind,:])
-    give_log ? log_haz + log(ub - lb) : exp(log_haz + log(ub - lb))
-end
-
-"""
-    call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
-
-Return the Weibull cause-specific hazards. No covariate adjustement. See rstanarm R package for parameterization.
-"""
-function call_haz(t, parameters, rowind, _hazard::_Weibull; give_log = true)
-
-    # scale and shape
-    log_shape = parameters[1]
-    log_scale = parameters[2]
-
-    # compute hazard 
-    log_haz = log_scale + log_shape + expm1(log_shape) * log(t) 
-
-    give_log ? log_haz : exp(log_haz)
-end
-
-"""
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true)
-
-Cumulative hazard for Weibull hazards over the interval [lb, ub]. See rstanarm R package for parameterization.
-"""
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Weibull; give_log = true)
-
-    # scale and shape
-    shape = exp(parameters[1])
-    log_scale = parameters[2]
-
-    # cumulative hazard
-    log_cumul_haz = log(ub ^ shape - lb ^ shape) + log_scale
-
-    give_log ? log_cumul_haz : exp(log_cumul_haz)
-end
-
-"""
-    call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true)
-
-Return the Weibull cause-specific proportional hazards.
-"""
-function call_haz(t, parameters, rowind, _hazard::_WeibullPH; give_log = true)
-
-    # scale and shape
-    log_shape = parameters[1]
-
-    # compute hazard
-    log_haz = 
-        log_shape + expm1(log_shape) * log(t) + dot(parameters[2:end], _hazard.data[rowind,:])
-
-    give_log ? log_haz : exp(log_haz)
-end
-
-"""
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log = true)
-
-Cumulative hazard for Weibull proportional hazards over the interval [lb, ub].
-"""
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_WeibullPH; give_log = true)
-
-    # scale and shape
-    shape = exp(parameters[1])
-
-    # cumulative hazard
-    log_cumul_haz = 
-        log(ub ^ shape - lb ^ shape) + dot(parameters[2:end], _hazard.data[rowind,:])
-
-    give_log ? log_cumul_haz : exp(log_cumul_haz)
-end
-
-"""
-    call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true)
-
-Return the Gompertz cause-specific hazards. No covariate adjustement.
-"""
-function call_haz(t, parameters, rowind, _hazard::_Gompertz; give_log = true)
-
-    # compute hazard 
-    log_haz = parameters[2] + parameters[1] + exp(parameters[1]) * t 
-
-    give_log ? log_haz : exp(log_haz)
-end
-
-"""
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log = true)
-
-Cumulative hazard for Gompertz hazards over the interval [lb, ub].
-"""
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Gompertz; give_log = true)
-
-    shape = exp(parameters[1])
-    
-    # cumulative hazard
-    log_cumul_haz = parameters[2] + log(exp(ub * shape) - exp(lb * shape))
-    
-    give_log ? log_cumul_haz : exp(log_cumul_haz)
-end
-
-"""
-    call_haz(t, parameters, rowind, _hazard::_GompertzPH; give_log = true)
-
-Return the Gompertz cause-specific proportional hazards.
-"""
-function call_haz(t, parameters, rowind, _hazard::_GompertzPH; give_log = true)
-
-    # compute hazard
-    log_haz = dot(parameters[2:end], _hazard.data[rowind,:]) + parameters[1] + exp(parameters[1]) * t 
-
-    give_log ? log_haz : exp(log_haz)
-end
-
-"""
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_log = true)
-
-Cumulative hazard for Gompertz proportional hazards over the interval [lb, ub].
-"""
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_GompertzPH; give_log = true)
-
-    shape = exp(parameters[1])
-    
-    # cumulative hazard
-    log_cumul_haz = dot(parameters[2:end], _hazard.data[rowind,:]) + log(exp(ub * shape) - exp(lb * shape))
-
-    give_log ? log_cumul_haz : exp(log_cumul_haz)
-end
-
-"""
-    call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
-
-Return the spline cause-specific hazards.
-"""
-function call_haz(t, parameters, rowind, _hazard::_Spline; give_log = true)
-
-    # compute the hazard
-    haz = (_hazard.riskperiod[1] <= t <= _hazard.riskperiod[2]) ? _hazard.hazsp(t) : 0.0
-
-    # return the log hazard
-    give_log ? log(haz) : haz
-end
-
-"""
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline, give_log = true)
-
-Return the spline cause-specific cumulative hazards over the interval [lb,ub].
-"""
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_Spline; give_log = true)
-
-    # clamp lb and ub to the risk period
-    riskstart = _hazard.riskperiod[1]
-    riskend   = _hazard.riskperiod[2]
-
-    l = clamp(lb, riskstart, riskend)
-    u = clamp(ub, riskstart, riskend)
-
-    # get bounds
-    sp_bounds = BSplineKit.boundaries(_hazard.hazsp.spline.basis)
-
-    if isapprox(l, u; atol = eps())
-        # no cumulative hazard accrued
-        chaz = 0.0
-
-    elseif (u < sp_bounds[1]) || (l > sp_bounds[2])
-        # only extrapolation
-        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
-            # trapezoid
-            chaz = (u - l) * mean([_hazard.hazsp(l), _hazard.hazsp(u)]) 
-
-        elseif _hazard.hazsp.method == BSplineKit.Flat()
-            # rectangle
-            chaz = (u - l) * ((u <= sp_bounds[1]) ? _hazard.hazsp(l) : _hazard.hazsp(u))
-        end
-
-    elseif ((sp_bounds[1] <= l <= sp_bounds[2]) && (sp_bounds[1] <= u <= sp_bounds[2]))
-        # contributions in the initial extrapolation range cancel out
-        chaz = _hazard.chazsp(u) - _hazard.chazsp(l)
-
-    else
-        # cumulative hazard at l
-        l_chaz = 0.0
-
-        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
-            # trapezoids
-            l_chaz += l < sp_bounds[1] ? 
-                        (l - riskstart) * mean(_hazard.hazsp.([l, riskstart])) : 
-                        (sp_bounds[1] - riskstart) * mean(_hazard.hazsp.([sp_bounds[1], riskstart]))
-
-        elseif _hazard.hazsp.method == BSplineKit.Flat()
-            # rectangles
-            l_chaz += l < sp_bounds[1] ? 
-                        (l - riskstart) * _hazard.hazsp(l) : 
-                        (sp_bounds[1] - riskstart) * _hazard.hazsp(sp_bounds[1]) 
-        end
-
-        if l >= sp_bounds[1]
-            l_chaz += _hazard.chazsp(l)
-        end
-
-        # cumulative hazard at u
-        u_chaz = 0.0
-
-        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
-            u_chaz += (sp_bounds[1] - riskstart) * mean(_hazard.hazsp.([sp_bounds[1], riskstart]))
-
-        elseif _hazard.hazsp.method == BSplineKit.Flat()
-            u_chaz += (sp_bounds[1] - riskstart) * _hazard.hazsp(sp_bounds[1]) 
-        end
-
-        if u <= sp_bounds[2]
-            u_chaz += _hazard.chazsp(u)
-
-        elseif u > sp_bounds[2]
-            u_chaz += _hazard.chazsp(sp_bounds[2]) 
-
-            if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
-                u_chaz += (u - sp_bounds[2]) * mean(_hazard.hazsp.([u, sp_bounds[2]])) 
-                
-            elseif _hazard.hazsp.method == BSplineKit.Flat()
-                u_chaz += (u - sp_bounds[2]) * _hazard.hazsp(sp_bounds[2])
-            end
-        end
-
-        chaz = u_chaz - l_chaz
-    end 
-
-    # return the log hazard
-    give_log ? log(clamp(chaz, 0.0, Inf)) : chaz
-end
-
-"""
-    call_haz(t, parameters, rowind, _hazard::_SplinePH; give_log = true)
-
-Return the spline cause-specific hazards.
-"""
-function call_haz(t, parameters, rowind, _hazard::_SplinePH; give_log = true)
-
-    # compute the hazard
-    haz = (_hazard.riskperiod[1] <= t <= _hazard.riskperiod[2]) ? _hazard.hazsp(t) : 0.0
-
-    # compute the log hazard
-    loghaz = log(haz) + dot(_hazard.data[rowind, :], parameters[Not(1:_hazard.nbasis)])
-
-    # return the log hazard
-    give_log ? loghaz : exp(loghaz)
-end
-
-"""
-    call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log = true)
-
-Return the spline cause-specific cumulative hazards over the interval [lb,ub].
-"""
-function call_cumulhaz(lb, ub, parameters, rowind, _hazard::_SplinePH; give_log = true)
-
-    # clamp lb and ub to the risk period
-    riskstart = _hazard.riskperiod[1]
-    riskend   = _hazard.riskperiod[2]
-
-    l = clamp(lb, riskstart, riskend)
-    u = clamp(ub, riskstart, riskend)
-
-    # get bounds
-    sp_bounds = BSplineKit.boundaries(_hazard.hazsp.spline.basis)
-
-    if isapprox(l, u; atol = eps())
-        # no cumulative hazard accrued
-        chaz = 0.0
-
-    elseif (u <= sp_bounds[1]) || (l >= sp_bounds[2])
-        # only extrapolation
-        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
-            # trapezoid
-            chaz = (u - l) * mean([_hazard.hazsp(l), _hazard.hazsp(u)]) 
-
-        elseif _hazard.hazsp.method == BSplineKit.Flat()
-            # rectangle
-            chaz = (u - l) * ((u <= sp_bounds[1]) ? _hazard.hazsp(l) : _hazard.hazsp(u))
-        end
-
-    elseif ((sp_bounds[1] < l < sp_bounds[2]) && (sp_bounds[1] < u < sp_bounds[2]))
-        # contributions in the initial extrapolation range cancel out
-        chaz = _hazard.chazsp(u) - _hazard.chazsp(l)
-
-    else
-        # cumulative hazard at l
-        l_chaz = 0.0
-
-        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
-            # trapezoids
-            l_chaz += l < sp_bounds[1] ? 
-                        (l - riskstart) * mean(_hazard.hazsp.([l, riskstart])) : 
-                        (sp_bounds[1] - riskstart) * mean(_hazard.hazsp.([sp_bounds[1], riskstart]))
-
-        elseif _hazard.hazsp.method == BSplineKit.Flat()
-            # rectangles
-            l_chaz += l < sp_bounds[1] ? 
-                        (l - riskstart) * _hazard.hazsp(l) : 
-                        (sp_bounds[1] - riskstart) * _hazard.hazsp(sp_bounds[1]) 
-        end
-
-        if l >= sp_bounds[1]
-            l_chaz += _hazard.chazsp(l)
-        end
-
-        # cumulative hazard at u
-        u_chaz = 0.0
-
-        if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
-            u_chaz += (sp_bounds[1] - riskstart) * mean(_hazard.hazsp.([sp_bounds[1], riskstart]))
-
-        elseif _hazard.hazsp.method == BSplineKit.Flat()
-            u_chaz += (sp_bounds[1] - riskstart) * _hazard.hazsp(sp_bounds[1]) 
-        end
-
-        if u <= sp_bounds[2]
-            u_chaz += _hazard.chazsp(u)
-
-        elseif u > sp_bounds[2]
-            u_chaz += _hazard.chazsp(sp_bounds[2]) 
-
-            if _hazard.hazsp.method == BSplineKit.SplineExtrapolations.Linear()
-                u_chaz += (u - sp_bounds[2]) * mean(_hazard.hazsp.([u, sp_bounds[2]])) 
-                
-            elseif _hazard.hazsp.method == BSplineKit.Flat()
-                u_chaz += (u - sp_bounds[2]) * _hazard.hazsp(sp_bounds[2])
-            end
-        end
-
-        chaz = u_chaz - l_chaz
-    end 
-
-    # make sure there are no small numerical errors leading to negative cumulative hazard increments
-
-
-    # log cumulative hazard
-    logchaz = log(clamp(chaz, 0.0, Inf)) + dot(_hazard.data[rowind, :], parameters[Not(1:_hazard.nbasis)])
-
-    # return the log hazard
-    give_log ? logchaz : exp(logchaz)
 end
 
 """

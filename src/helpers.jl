@@ -98,7 +98,9 @@ end
 """
     set_parameters!(model::MultistateProcess, newvalues::Vector{Float64})
 
-Set model parameters given a vector of values. Copies `newvalues`` to `model.parameters`.
+Set model parameters given a vector of values. Copies `newvalues` to `model.parameters`.
+
+# Phase 3 Update: Now automatically updates `model.parameters_ph` to keep both representations synchronized.
 """
 function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVectors,Vector{Vector{Float64}}})
     
@@ -119,12 +121,21 @@ function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVect
             set_riskperiod!(model.hazards[i])
         end
     end
+    
+    # Phase 3: Update parameters_ph automatically (now that structs are mutable)
+    model.parameters_ph = update_parameters_ph!(model)
+    
+    return nothing
 end
 
 """
     set_parameters!(model::MultistateProcess, newvalues::Tuple)
 
-Set model parameters given a tuple of vectors parameterizing transition intensities. Assigns new values to `model.parameters[i]`, where `i` indexes the transition intensities in the order they appear in the model object.
+Set model parameters given a tuple of vectors parameterizing transition intensities. 
+Assigns new values to `model.parameters[i]`, where `i` indexes the transition intensities 
+in the order they appear in the model object.
+
+# Phase 3 Update: Now automatically updates `model.parameters_ph` to keep both representations synchronized.
 """
 function set_parameters!(model::MultistateProcess, newvalues::Tuple)
     # check that there is a vector of parameters for each cause-specific hazard
@@ -146,12 +157,20 @@ function set_parameters!(model::MultistateProcess, newvalues::Tuple)
             set_riskperiod!(model.hazards[i])
         end
     end
+    
+    # Phase 3: Update parameters_ph automatically
+    model.parameters_ph = update_parameters_ph!(model)
+    
+    return nothing
 end
 
 """
     set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
 
-Set model parameters given a tuple of vectors parameterizing transition intensities. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  
+Set model parameters given a tuple of vectors parameterizing transition intensities. 
+Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.
+
+# Phase 3 Update: Now automatically updates `model.parameters_ph` to keep both representations synchronized.
 """
 function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
     
@@ -176,6 +195,58 @@ function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
             set_riskperiod!(model.hazards[mind])
         end
     end
+    
+    # Phase 3: Update parameters_ph automatically
+    model.parameters_ph = update_parameters_ph!(model)
+    
+    return nothing
+end
+
+"""
+    set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{Float64})
+
+Set parameters for a single hazard by hazard index.
+
+# Arguments
+- `model::MultistateProcess`: The model to update
+- `h::Int64`: Index of the hazard to update
+- `newvalues::Vector{Float64}`: New parameter values (log scale for baseline/shape/scale, natural for covariates)
+
+# Phase 3: Automatically updates both `parameters` and `parameters_ph` to keep them synchronized.
+
+# Example
+```julia
+# Update hazard 1 with new baseline parameter
+set_parameters!(model, 1, [log(0.5)])
+
+# Update hazard with baseline and covariate effects
+set_parameters!(model, 2, [log(2.0), log(1.5), 0.3, -0.2])
+```
+"""
+function set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{Float64})
+    # Check hazard index
+    if h < 1 || h > length(model.parameters)
+        error("Hazard index $h is out of bounds. Model has $(length(model.parameters)) hazards.")
+    end
+    
+    # Check parameter length
+    if length(newvalues) != length(model.parameters[h])
+        error("New values length ($(length(newvalues))) does not match expected length ($(length(model.parameters[h]))) for hazard $h.")
+    end
+    
+    # Update parameters
+    copyto!(model.parameters[h], newvalues)
+    
+    # Remake splines if needed
+    if isa(model.hazards[h], _SplineHazard)
+        remake_splines!(model.hazards[h], newvalues)
+        set_riskperiod!(model.hazards[h])
+    end
+    
+    # Phase 3: Update parameters_ph automatically
+    model.parameters_ph = update_parameters_ph!(model)
+    
+    return nothing
 end
 
 """
@@ -199,6 +270,224 @@ function get_subjinds(data::DataFrame)
 
     # return indices
     return subjinds, nsubj
+end
+
+#=============================================================================
+PHASE 2: Parameter Update with ParameterHandling.jl
+=============================================================================# 
+
+"""
+    update_parameters_ph!(model::MultistateProcess)
+
+Rebuild the parameters_ph structure from current model.parameters.
+Called internally after parameter updates to keep structures synchronized.
+
+Note: Since NamedTuples are immutable, this creates a NEW parameters_ph structure.
+The model struct field cannot be updated in-place. This will be addressed in Phase 3
+by making model structs mutable or using Ref for parameters_ph.
+"""
+function update_parameters_ph!(model::MultistateProcess)
+    # Rebuild parameters_ph from current VectorOfVectors parameters
+    # Note: model.parameters are on log scale, but positive() expects natural scale
+    params_transformed_pairs = [
+        hazname => ParameterHandling.positive(exp.(Vector{Float64}(model.parameters[idx])))
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    
+    params_transformed = NamedTuple(params_transformed_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    params_natural = ParameterHandling.value(params_transformed)
+    
+    # Return new structure (caller needs to update model if needed)
+    return (
+        flat = params_flat,
+        transformed = params_transformed,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
+end
+
+#=============================================================================
+PHASE 3: Parameter Getter Functions
+=============================================================================# 
+
+"""
+    get_parameters_flat(model::MultistateProcess)
+
+Get model parameters as a flat vector suitable for optimization.
+
+This is the representation that optimization algorithms expect - a single
+flat Vector{Float64} with all parameters concatenated.
+
+# Returns
+- `Vector{Float64}`: Flat parameter vector (transformed/log scale)
+
+# Example
+```julia
+flat_params = get_parameters_flat(model)
+# Use in optimizer
+result = optimize(flat_params) do p
+    # unflatten and update model
+    objective_function(p, model)
+end
+```
+
+# See also
+- [`get_parameters_transformed`](@ref) - Get parameters with transformations as NamedTuple
+- [`get_parameters_natural`](@ref) - Get parameters on natural scale as NamedTuple
+- [`get_unflatten_fn`](@ref) - Get function to unflatten parameters
+"""
+function get_parameters_flat(model::MultistateProcess)
+    return model.parameters_ph.flat
+end
+
+"""
+    get_parameters_transformed(model::MultistateProcess)
+
+Get model parameters in transformed (log) scale as a NamedTuple.
+
+Parameters are organized by hazard name with log transformations applied
+for positive constraints (baseline, shape, scale). Covariate coefficients
+remain on natural scale.
+
+# Returns
+- `NamedTuple`: Parameters by hazard name with transformations
+
+# Example
+```julia
+params_trans = get_parameters_transformed(model)
+# Access specific hazard
+h12_trans = params_trans.h12  # e.g., positive([log(2.0)])
+```
+
+# See also
+- [`get_parameters_flat`](@ref) - Get parameters as flat vector for optimization
+- [`get_parameters_natural`](@ref) - Get parameters on natural scale
+"""
+function get_parameters_transformed(model::MultistateProcess)
+    return model.parameters_ph.transformed
+end
+
+"""
+    get_parameters_natural(model::MultistateProcess)
+
+Get model parameters on natural scale as a NamedTuple.
+
+All positive constraints are inverted (exp applied to log scale parameters).
+This is the "human-readable" representation where baseline rates, shapes, 
+and scales are on their natural positive scale.
+
+# Returns
+- `NamedTuple`: Parameters by hazard name on natural scale
+
+# Example
+```julia
+params_nat = get_parameters_natural(model)
+# Access specific hazard - values are on natural scale
+h12_baseline = params_nat.h12[1]  # e.g., 2.0 (not log(2.0))
+```
+
+# See also
+- [`get_parameters_flat`](@ref) - Get parameters as flat vector
+- [`get_parameters_transformed`](@ref) - Get parameters with transformations
+"""
+function get_parameters_natural(model::MultistateProcess)
+    return model.parameters_ph.natural
+end
+
+"""
+    get_unflatten_fn(model::MultistateProcess)
+
+Get the unflatten function to convert flat parameter vector back to NamedTuple.
+
+This function is useful in optimization when you need to convert the flat
+vector back to the structured NamedTuple representation.
+
+# Returns
+- `Function`: unflatten function that takes a flat vector and returns NamedTuple
+
+# Example
+```julia
+unflatten = get_unflatten_fn(model)
+flat_params = get_parameters_flat(model)
+params_transformed = unflatten(flat_params)
+params_natural = ParameterHandling.value(params_transformed)
+```
+
+# See also
+- [`get_parameters_flat`](@ref) - Get flat parameter vector
+- [`get_parameters_transformed`](@ref) - Get transformed parameters
+"""
+function get_unflatten_fn(model::MultistateProcess)
+    return model.parameters_ph.unflatten
+end
+
+"""
+    get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natural)
+
+Get parameters for a specific hazard by index.
+
+# Arguments
+- `model::MultistateProcess`: The model
+- `h::Int64`: Hazard index (1-based)
+- `scale::Symbol`: One of `:natural`, `:transformed`, or `:log` (default: `:natural`)
+
+# Returns
+- `Vector{Float64}`: Parameters for the specified hazard
+
+# Scales
+- `:natural` - Natural scale (baseline/shape/scale are positive values)
+- `:transformed` - Transformed scale (from ParameterHandling, includes wrapper)
+- `:log` - Log scale (from model.parameters VectorOfVectors, backward compat)
+
+# Examples
+```julia
+# Get natural scale parameters for hazard 1
+params_nat = get_parameters(model, 1)  # Returns [2.0, 1.5, ...]
+
+# Get log scale parameters (legacy representation)
+params_log = get_parameters(model, 1, scale=:log)  # Returns [log(2.0), log(1.5), ...]
+
+# Get transformed parameters (with ParameterHandling wrapper)
+params_trans = get_parameters(model, 1, scale=:transformed)
+```
+
+# See also
+- [`get_parameters_flat`](@ref) - Get all parameters as flat vector
+- [`get_parameters_natural`](@ref) - Get all parameters on natural scale
+- [`set_parameters!`](@ref) - Set parameters for a hazard
+"""
+function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natural)
+    # Validate hazard index
+    if h < 1 || h > length(model.parameters)
+        throw(BoundsError(model.parameters, h))
+    end
+    
+    if scale == :log
+        # Legacy representation - direct from VectorOfVectors
+        return model.parameters[h]
+    elseif scale == :natural || scale == :transformed
+        # Find hazard name from index
+        hazname = nothing
+        for (name, idx) in model.hazkeys
+            if idx == h
+                hazname = name
+                break
+            end
+        end
+        if hazname === nothing
+            error("Could not find hazard name for index $h")
+        end
+        
+        # Return appropriate representation
+        if scale == :natural
+            return model.parameters_ph.natural[hazname]
+        else  # :transformed
+            return model.parameters_ph.transformed[hazname]
+        end
+    else
+        throw(ArgumentError("scale must be :natural, :transformed, or :log (got :$scale)"))
+    end
 end
 
 """

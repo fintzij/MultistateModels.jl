@@ -131,13 +131,13 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
     while keep_going
         
         # calculate event probability over the next interval
-        interval_incid = (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + tstop - tcur, model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false))
+        interval_incid = (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + tstop - tcur, model.parameters, ind, model.totalhazards[scur], model.hazards, subj_dat; give_log = false))
 
         # check if event happened in the interval
         if (u < (cuminc + interval_incid)) && (u >= cuminc)
 
             # update the current time - roughly 1 millisecond must pass if time is in minutes
-            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards; give_log = false))) - log(u))^2), delta_t, tstop - tcur, optmethod; rel_tol = rtol, abs_tol = atol)
+            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards, subj_dat; give_log = false))) - log(u))^2), delta_t, tstop - tcur, optmethod; rel_tol = rtol, abs_tol = atol)
 
             if Optim.converged(timeincrement)
                 timeinstate += timeincrement.minimizer

@@ -17,7 +17,8 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
      for i in Base.OneTo(nrow(subjectdata))
 
         # accumulate survival probabilty
-        ll += survprob(subjectdata.sojourn[i], subjectdata.sojourn[i] + subjectdata.increment[i], pars, i, totalhazards[subjectdata.statefrom[i]], hazards; give_log = true) # TODO: update hazard and cumhazard to take into account new format of covariates
+        # NOTE: survprob and total_cumulhaz still use old rowind-based interface
+        ll += survprob(subjectdata.sojourn[i], subjectdata.sojourn[i] + subjectdata.increment[i], pars, i, totalhazards[subjectdata.statefrom[i]], hazards, subjectdata[i, :]; give_log = true)
  
         # accumulate hazard if there is a transition
         if subjectdata.statefrom[i] != subjectdata.stateto[i]
@@ -26,7 +27,8 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
             transind = tmat[subjectdata.statefrom[i], subjectdata.stateto[i]]
 
             # log hazard at time of transition
-            ll += call_haz(subjectdata.sojourn[i] + subjectdata.increment[i], pars[transind], i, hazards[transind]; give_log = true)
+            # Pass the DataFrame row for new hazard types (with name-based covariate matching)
+            ll += call_haz(subjectdata.sojourn[i] + subjectdata.increment[i], pars[transind], subjectdata[i, :], hazards[transind]; give_log = true)
         end
      end
  

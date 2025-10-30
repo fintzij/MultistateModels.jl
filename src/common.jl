@@ -28,8 +28,118 @@ Abstract type for total hazards.
 """
 abstract type _TotalHazard end
 
+#=============================================================================
+PHASE 2: Consolidated Hazard Types (3 types instead of 8)
+=============================================================================# 
+
 """
-    Abstract type for multistate process.
+    MarkovHazard
+
+Consolidated hazard type for Markov processes (time-homogeneous).
+Supports exponential family hazards with optional covariates.
+
+# Fields
+- `hazname::Symbol`: Name identifier (e.g., :h12)
+- `statefrom::Int64`: Origin state
+- `stateto::Int64`: Destination state  
+- `family::String`: Distribution family ("exp")
+- `parnames::Vector{Symbol}`: Parameter names
+- `npar_baseline::Int64`: Number of baseline parameters (without covariates)
+- `npar_total::Int64`: Total number of parameters (baseline + covariates)
+- `hazard_fn`: Runtime-generated hazard function (t, pars, covars) -> Float64
+- `cumhaz_fn`: Runtime-generated cumulative hazard function
+- `has_covariates::Bool`: Whether covariates are present
+"""
+struct MarkovHazard <: _MarkovHazard
+    hazname::Symbol
+    statefrom::Int64
+    stateto::Int64
+    family::String
+    parnames::Vector{Symbol}
+    npar_baseline::Int64
+    npar_total::Int64
+    hazard_fn::Function
+    cumhaz_fn::Function
+    has_covariates::Bool
+end
+
+"""
+    SemiMarkovHazard
+
+Consolidated hazard type for semi-Markov processes (time-dependent).
+Supports Weibull and Gompertz families with optional covariates.
+
+# Fields
+- `hazname::Symbol`: Name identifier (e.g., :h12)
+- `statefrom::Int64`: Origin state
+- `stateto::Int64`: Destination state
+- `family::String`: Distribution family ("wei", "gom")
+- `parnames::Vector{Symbol}`: Parameter names
+- `npar_baseline::Int64`: Number of baseline parameters (shape + scale)
+- `npar_total::Int64`: Total number of parameters (baseline + covariates)
+- `hazard_fn`: Runtime-generated hazard function (t, pars, covars) -> Float64
+- `cumhaz_fn`: Runtime-generated cumulative hazard function
+- `has_covariates::Bool`: Whether covariates are present
+"""
+struct SemiMarkovHazard <: _SemiMarkovHazard
+    hazname::Symbol
+    statefrom::Int64
+    stateto::Int64
+    family::String
+    parnames::Vector{Symbol}
+    npar_baseline::Int64
+    npar_total::Int64
+    hazard_fn::Function
+    cumhaz_fn::Function
+    has_covariates::Bool
+end
+
+"""
+    SplineHazard
+
+Consolidated hazard type for spline-based hazards.
+Uses B-spline basis functions for flexible baseline hazard.
+
+# Fields
+- `hazname::Symbol`: Name identifier (e.g., :h12)
+- `statefrom::Int64`: Origin state
+- `stateto::Int64`: Destination state
+- `family::String`: Always "sp" for splines
+- `parnames::Vector{Symbol}`: Parameter names
+- `npar_baseline::Int64`: Number of spline coefficients
+- `npar_total::Int64`: Total number of parameters (spline + covariates)
+- `hazard_fn`: Runtime-generated hazard function (t, pars, covars) -> Float64
+- `cumhaz_fn`: Runtime-generated cumulative hazard function
+- `has_covariates::Bool`: Whether covariates are present
+- `degree::Int64`: Spline degree
+- `knots::Vector{Float64}`: Knot locations
+- `natural_spline::Bool`: Natural spline constraint
+- `monotone::Int64`: Monotonicity constraint (0, -1, 1)
+end
+"""
+struct SplineHazard <: _SplineHazard
+    hazname::Symbol
+    statefrom::Int64
+    stateto::Int64
+    family::String
+    parnames::Vector{Symbol}
+    npar_baseline::Int64
+    npar_total::Int64
+    hazard_fn::Function
+    cumhaz_fn::Function
+    has_covariates::Bool
+    degree::Int64
+    knots::Vector{Float64}
+    natural_spline::Bool
+    monotone::Int64
+end
+
+#=============================================================================
+OLD HAZARD TYPES (Will be deprecated after Phase 2)
+=============================================================================#
+
+"""
+Abstract type for multistate process.
 """
 abstract type MultistateProcess end
 
@@ -93,122 +203,6 @@ struct SplineHazard <: HazardFunction
 end
 
 """
-Exponential cause-specific hazard.
-"""
-struct _Exponential <: _MarkovHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64   # starting state number
-    stateto::Int64     # destination state number
-    ncovar::Int64
-end
-
-"""
-Exponential cause-specific hazard with covariate adjustment. Rate is a log-linear function of covariates.
-"""
-struct _ExponentialPH <: _MarkovHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64   # starting state number
-    stateto::Int64     # destination state number
-    ncovar::Int64
-end
-
-"""
-Weibull cause-specific hazard.
-"""
-struct _Weibull <: _SemiMarkovHazard
-    hazname::Symbol
-    data::Array{Float64} # just an intercept
-    parnames::Vector{Symbol}
-    statefrom::Int64   # starting state number
-    stateto::Int64     # destination state number
-    ncovar::Int64
-end
-
-
-"""
-Weibull cause-specific proportional hazard. The log baseline hazard is a linear function of log time and covariates have a multiplicative effect on the baseline hazard.
-"""
-struct _WeibullPH <: _SemiMarkovHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64   # starting state number
-    stateto::Int64     # destination state number
-    ncovar::Int64
-end
-
-"""
-Gompertz cause-specific hazard.
-"""
-struct _Gompertz <: _SemiMarkovHazard
-    hazname::Symbol
-    data::Array{Float64} # just an intercept
-    parnames::Vector{Symbol}
-    statefrom::Int64   # starting state number
-    stateto::Int64     # destination state number
-    ncovar::Int64
-end
-
-
-"""
-Gompertz cause-specific proportional hazard. The log baseline hazard is a linear function of time and covariates have a multiplicative effect on the baseline hazard.
-"""
-struct _GompertzPH <: _SemiMarkovHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64   # starting state number
-    stateto::Int64     # destination state number
-    ncovar::Int64
-end
-
-"""
-B-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of B-spline basis functions. 
-"""
-mutable struct _Spline <: _SplineHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64
-    degree::Float64
-    knots::Vector{Float64}
-    hazsp::SplineExtrapolation
-    chazsp::Spline
-    natural_spline::Bool
-    monotone::Int64
-    riskperiod::Vector{Float64}
-    timespan::Vector{Float64}
-    nbasis::Int64
-    ncovar::Int64
-end
-
-"""
-B-spline for cause-specific hazard. The baseline hazard evaluted at a time, t, is a linear combination of B-spline basis functions. Covariates have a multiplicative effect on the baseline hazard.
-"""
-mutable struct _SplinePH <: _SplineHazard
-    hazname::Symbol
-    data::Array{Float64}
-    parnames::Vector{Symbol}
-    statefrom::Int64
-    stateto::Int64
-    degree::Float64
-    knots::Vector{Float64}
-    hazsp::SplineExtrapolation
-    chazsp::Spline
-    natural_spline::Bool
-    monotone::Int64
-    riskperiod::Vector{Float64}
-    timespan::Vector{Float64}
-    nbasis::Int64
-    ncovar::Int64
-end
-
-"""
 Total hazard for absorbing states, contains nothing as the total hazard is always zero.
 """
 struct _TotalHazardAbsorbing <: _TotalHazard 
@@ -246,10 +240,20 @@ end
     MultistateModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{Union{_Exponential, _ExponentialPH}}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
 Struct that fully specifies a multistate process for simulation or inference, used in the case when sample paths are fully observed. 
+
+# New ParameterHandling fields (Phase 1):
+- `parameters_ph`: NamedTuple containing:
+  - `flat::Vector{Float64}` - flat parameter vector for optimizer
+  - `transformed` - ParameterHandling transformed parameters (with positive() etc.)
+  - `natural::NamedTuple` - natural scale parameters by hazard name
+  - `unflatten::Function` - function to unflatten flat vector
+
+# Phase 3 Change: Now mutable to allow `parameters_ph` updates
 """
-struct MultistateModel <: MultistateProcess
+mutable struct MultistateModel <: MultistateProcess
     data::DataFrame
-    parameters::VectorOfVectors 
+    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
+    parameters_ph::NamedTuple  # NEW: Nested ParameterHandling structure
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -266,10 +270,13 @@ end
     MultistateMarkovModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{Union{_Exponential, _ExponentialPH}}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
 Struct that fully specifies a multistate Markov process with no censored state, used with panel data.
+
+# Phase 3 Change: Now mutable to allow `parameters_ph` updates
 """
-struct MultistateMarkovModel <: MultistateMarkovProcess
+mutable struct MultistateMarkovModel <: MultistateMarkovProcess
     data::DataFrame
-    parameters::VectorOfVectors 
+    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
+    parameters_ph::NamedTuple  # Nested: (flat, transformed, natural, unflatten)
     hazards::Vector{_MarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -286,10 +293,13 @@ end
 MultistateMarkovModelCensored(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
 Struct that fully specifies a multistate Markov process with some censored states, used with panel data.
+
+# Phase 3 Change: Now mutable to allow `parameters_ph` updates
 """
-struct MultistateMarkovModelCensored <: MultistateMarkovProcess
+mutable struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     data::DataFrame
-    parameters::VectorOfVectors 
+    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
+    parameters_ph::NamedTuple  # Nested: (flat, transformed, natural, unflatten)
     hazards::Vector{_MarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -305,32 +315,36 @@ end
 """
 MultistateSemiMarkovModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
-Struct that fully specifies a multistate semi-Markov process with no censored state for simulation or inference. 
+Struct that fully specifies a multistate semi-Markov process, used with exact death times.
+
+# Phase 3 Change: Now mutable to allow `parameters_ph` updates
 """
-struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
+mutable struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
     data::DataFrame
-    parameters::VectorOfVectors 
-    hazards::Vector{_Hazard}
+    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
+    parameters_ph::NamedTuple  # Nested: (flat, transformed, natural, unflatten)
+    hazards::Vector{_SemiMarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     SamplingWeights::Vector{Float64}
-    CensoringPatterns::Matrix{Int64}
-    markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
 
 """
 MultistateSemiMarkovModelCensored(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
-Struct that fully specifies a multistate semi-Markov process with some censored states for simulation or inference. 
+Struct that fully specifies a multistate semi-Markov process with some censored states, used with panel data.
+
+# Phase 3 Change: Now mutable to allow `parameters_ph` updates
 """
-struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
+mutable struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     data::DataFrame
-    parameters::VectorOfVectors 
-    hazards::Vector{_Hazard}
+    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
+    parameters_ph::NamedTuple  # Nested: (flat, transformed, natural, unflatten)
+    hazards::Vector{_SemiMarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     emat::Matrix{Int64}
@@ -345,11 +359,14 @@ end
 """
     MultistateModelFitted(data::DataFrame, parameters::VectorOfVectors, gradient::Vector{Float64}, hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
 
-Struct that fully specifies a fitted multistate model. 
+Struct that fully specifies a fitted multistate model.
+
+# Phase 3 Change: Now mutable (though less critical for fitted models)
 """
-struct MultistateModelFitted <: MultistateProcess
+mutable struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
-    parameters::VectorOfVectors 
+    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
+    parameters_ph::NamedTuple  # NEW Phase 3: (flat, transformed, natural, unflatten)
     loglik::NamedTuple
     vcov::Union{Nothing,Matrix{Float64}}
     hazards::Vector{_Hazard}

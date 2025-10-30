@@ -94,243 +94,248 @@ end
 
 # mutable structs
 
+#=============================================================================
+PHASE 2: Consolidated build_hazards with Runtime Functions
+=============================================================================# 
+
 """
-    build_hazards(hazards:Hazard...; data:DataFrame, surrogate = false)
+    build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = false)
 
-Return internal array of internal _Hazard subtypes called _hazards.
+**PHASE 2 VERSION** - Build consolidated hazard structs with runtime-generated functions.
 
-Accept iterable collection of `Hazard` objects, plus data. 
+Creates one of 3 hazard types (MarkovHazard, SemiMarkovHazard, SplineHazard) instead of 8.
+Hazard structs no longer contain data - they store runtime-generated functions instead.
+Parameters managed via ParameterHandling.jl with positive() transformation.
 
-_hazards[1] corresponds to the first allowable transition enumerated in a transition matrix (in row major order), _hazards[2] to the second and so on... So _hazards will have length equal to number of allowable transitions.
+# Returns
+- `_hazards`: Vector of consolidated hazard structs (callable)
+- `parameters`: Legacy VectorOfVectors (for compatibility)
+- `parameters_ph`: NamedTuple with (flat, transformed, natural, unflatten) - **Phase 3 addition**
+- `hazkeys`: Dict mapping hazard names to indices
+
+# Changes from Phase 1
+- No data stored in hazard structs
+- Runtime-generated functions for hazard/cumulative hazard
+- Consolidated 8 types → 3 types
+- Direct callable interface: hazard(t, pars, covars)
+
+# Phase 3 Update
+- Now returns `parameters_ph` as third output for ParameterHandling integration
 """
 function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = false)
     
-    # initialize the arrays of hazards
+    # Initialize arrays
     _hazards = Vector{_Hazard}(undef, length(hazards))
-
-    # named tuple for parameters
     parameters = VectorOfVectors{Float64}()
-
-    # initialize a dictionary for indexing into the vector of hazards
     hazkeys = Dict{Symbol, Int64}()
 
-    # assign a hazard function
+    # Build each hazard
     for h in eachindex(hazards) 
 
-        # name for the hazard
-        hazname = "h"*string(hazards[h].statefrom)*string(hazards[h].stateto)
-
-        # save index in the dictionary
+        # Hazard name
+        hazname = "h" * string(hazards[h].statefrom) * string(hazards[h].stateto)
         merge!(hazkeys, Dict(Symbol(hazname) => h))
 
-        # # generate the model matrix
-        # hazschema = 
-        #     apply_schema(
-        #         hazards[h].hazard, 
-        #          StatsModels.schema(
-        #              hazards[h].hazard, 
-        #              data))
+        # Parse formula and create design matrix
+        hazschema = apply_schema(hazards[h].hazard, StatsModels.schema(hazards[h].hazard, data))
+        hazdat = modelcols(hazschema, data)[2]
+        
+        # Determine family (use surrogate exponential if requested)
+        family = surrogate ? "exp" : hazards[h].family 
+        
+        # Number of covariates and parameters
+        has_covariates = size(hazdat, 2) > 1
+        ncovar = size(hazdat, 2) - 1
+        
+        # Build hazard struct based on family
+        if family == "exp"
+            # EXPONENTIAL: Markov process
+            npar_baseline = 1
+            npar_total = size(hazdat, 2)
+            
+            # Initialize parameters (zeros for now)
+            hazpars = zeros(Float64, npar_total)
+            push!(parameters, hazpars)
+            
+            # Parameter names
+            # coefnames returns (lhs_names, rhs_names) tuple
+            # For intercept-only, rhs_names is a String; otherwise it's a Vector
+            rhs_names = coefnames(hazschema)[2]
+            rhs_names_vec = rhs_names isa String ? [rhs_names] : rhs_names
+            parnames = replace.(hazname * "_" .* rhs_names_vec, "(Intercept)" => "Intercept")
+            parnames = Symbol.(parnames)
+            
+            # Generate runtime functions with name-based covariate matching
+            hazard_fn, cumhaz_fn = generate_exponential_hazard(has_covariates, parnames)
+            
+            # Create consolidated struct
+            haz_struct = MarkovHazard(
+                Symbol(hazname),
+                hazards[h].statefrom,
+                hazards[h].stateto,
+                family,
+                parnames,
+                npar_baseline,
+                npar_total,
+                hazard_fn,
+                cumhaz_fn,
+                has_covariates
+            )
+            
+        elseif family == "wei"
+            # WEIBULL: Semi-Markov process
+            npar_baseline = 2  # shape + scale
+            npar_total = npar_baseline + ncovar
+            
+            # Initialize parameters
+            hazpars = zeros(Float64, npar_total)
+            push!(parameters, hazpars)
+            
+            # Parameter names
+            rhs_names = coefnames(hazschema)[2]
+            rhs_names_vec = rhs_names isa String ? [rhs_names] : rhs_names
+            if !has_covariates
+                parnames = replace.(vec(hazname * "_" .* ["shape" "scale"] .* "_" .* rhs_names_vec), "_(Intercept)" => "")
+            else
+                parnames = vcat(
+                    hazname * "_shape",
+                    hazname * "_scale",
+                    hazname * "_" .* rhs_names_vec[Not(1)])
+            end
+            parnames = Symbol.(parnames)
+            
+            # Generate runtime functions with name-based covariate matching
+            hazard_fn, cumhaz_fn = generate_weibull_hazard(has_covariates, parnames)
+            
+            # Create consolidated struct
+            haz_struct = SemiMarkovHazard(
+                Symbol(hazname),
+                hazards[h].statefrom,
+                hazards[h].stateto,
+                family,
+                parnames,
+                npar_baseline,
+                npar_total,
+                hazard_fn,
+                cumhaz_fn,
+                has_covariates
+            )
+            
+        elseif family == "gom"
+            # GOMPERTZ: Semi-Markov process
+            npar_baseline = 2  # shape + scale
+            npar_total = npar_baseline + ncovar
+            
+            # Initialize parameters
+            hazpars = zeros(Float64, npar_total)
+            push!(parameters, hazpars)
+            
+            # Parameter names
+            rhs_names = coefnames(hazschema)[2]
+            rhs_names_vec = rhs_names isa String ? [rhs_names] : rhs_names
+            if !has_covariates
+                parnames = replace.(vec(hazname * "_" .* ["shape" "scale"] .* "_" .* rhs_names_vec), "_(Intercept)" => "")
+            else
+                parnames = vcat(
+                    hazname * "_shape",
+                    hazname * "_scale",
+                    hazname * "_" .* rhs_names_vec[Not(1)])
+            end
+            parnames = Symbol.(parnames)
+            
+            # Generate runtime functions with name-based covariate matching
+            hazard_fn, cumhaz_fn = generate_gompertz_hazard(has_covariates, parnames)
+            
+            # Create consolidated struct
+            haz_struct = SemiMarkovHazard(
+                Symbol(hazname),
+                hazards[h].statefrom,
+                hazards[h].stateto,
+                family,
+                parnames,
+                npar_baseline,
+                npar_total,
+                hazard_fn,
+                cumhaz_fn,
+                has_covariates
+            )
+            
+        elseif family == "sp"
+            # B-SPLINES: Semi-Markov with spline basis
+            # TODO: Implement spline function generation in Phase 2.x
+            error("Spline hazards not yet implemented in Phase 2 - coming soon!")
+            
+        else
+            error("Unknown hazard family: $family")
+        end
 
-        # # grab the design matrix 
-        # hazdat = modelcols(hazschema, data)[2]
-
-        # # get the family
-        # family = surrogate ? "exp" : hazards[h].family 
-
-        # # now we get the functions and other objects for the mutable struct
-        # if family == "exp"
-
-        #     # number of parameters
-        #     npars = size(hazdat)[2]
-
-        #     # vector for parameters
-        #     hazpars = zeros(Float64, npars)
-
-        #     # append to model parameters
-        #     push!(parameters, hazpars)
-
-        #     # get names
-        #     parnames = replace.(hazname*"_".*coefnames(hazschema)[2], "(Intercept)" => "Intercept")
-
-        #     # generate hazard struct
-        #     if npars == 1
-        #         haz_struct = 
-        #             _Exponential(
-        #                 Symbol(hazname),
-        #                 hazdat,
-        #                 [Symbol.(parnames)],
-        #                 hazards[h].statefrom,
-        #                 hazards[h].stateto,
-        #                 size(hazdat, 2) - 1) # make sure this is a vector
-        #     else
-        #         haz_struct = 
-        #             _ExponentialPH(
-        #                 Symbol(hazname),
-        #                 hazdat,
-        #                 Symbol.(parnames),
-        #                 hazards[h].statefrom,
-        #                 hazards[h].stateto,
-        #                 size(hazdat, 2) - 1)
-        #     end
-
-        # elseif family == "wei" 
-
-        #     # number of parameters
-        #     npars = size(hazdat, 2)
-
-        #     # vector for parameters
-        #     hazpars = zeros(Float64, 1 + npars)
-
-        #     # append to model parameters
-        #     push!(parameters, hazpars)
-
-        #     # generate hazard struct
-        #     if npars == 1
-                
-        #         # parameter names
-        #         parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "_(Intercept)" => "")
-
-        #         haz_struct = 
-        #             _Weibull(
-        #                 Symbol(hazname),
-        #                 hazdat, 
-        #                 Symbol.(parnames),
-        #                 hazards[h].statefrom,
-        #                 hazards[h].stateto,
-        #                 size(hazdat, 2) - 1)
-                        
-        #     else
-                
-        #         # parameter names
-        #         parnames = vcat(
-        #                 hazname * "_shape",
-        #                 hazname * "_scale",
-        #                 hazname*"_".*coefnames(hazschema)[2][Not(1)])
-
-        #         haz_struct = 
-        #             _WeibullPH(
-        #                 Symbol(hazname),
-        #                 hazdat,
-        #                 Symbol.(parnames),
-        #                 hazards[h].statefrom,
-        #                 hazards[h].stateto,
-        #                 size(hazdat, 2) - 1)
-        #     end
-
-        # elseif family == "gom"
-
-        #     # number of parameters
-        #     npars = size(hazdat, 2)
-
-        #     # vector for parameters
-        #     hazpars = zeros(Float64, 1 + npars)
-
-        #     # append to model parameters
-        #     push!(parameters, hazpars)
-
-        #     # generate hazard struct
-        #     if npars == 1
-                
-        #         # parameter names
-        #         parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "_(Intercept)" => "")
-
-        #         haz_struct = 
-        #             _Gompertz(
-        #                 Symbol(hazname),
-        #                 hazdat, 
-        #                 Symbol.(parnames),
-        #                 hazards[h].statefrom,
-        #                 hazards[h].stateto,
-        #                 size(hazdat, 2) - 1)
-                        
-        #     else
-                
-        #         # parameter names
-        #         parnames = vcat(
-        #                 hazname * "_shape",
-        #                 hazname * "_scale",
-        #                 hazname*"_".*coefnames(hazschema)[2][Not(1)])
-
-        #         haz_struct = 
-        #             _GompertzPH(
-        #                 Symbol(hazname),
-        #                 hazdat,
-        #                 Symbol.(parnames),
-        #                 hazards[h].statefrom,
-        #                 hazards[h].stateto,
-        #                 size(hazdat, 2) - 1)
-        #     end
-        # elseif family == "sp" # B-splines
-
-        #     # grab hazard object from splines2
-        #     hazard, cumulative_hazard, rmat, knots, timespan = spline_hazards(hazards[h], data)
-
-        #     # number of parameters
-        #     npars = size(rmat, 2) + size(hazdat, 2) - 1
-
-        #     # generate hazard struct
-        #     ### no covariates
-        #     if(size(hazdat, 2) == 1) 
-                
-        #         # parameter names
-        #         parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:length(hazard.spline.basis)))), "(Intercept)" => "Intercept")
-
-        #         # vector for parameters
-        #         hazpars = zeros(Float64, npars)
-
-        #         # append to model parameters
-        #         push!(parameters, hazpars)
-
-        #         haz_struct = _Spline(Symbol(hazname),
-        #                                 hazdat, 
-        #                                 Symbol.(parnames),
-        #                                 hazards[h].statefrom,
-        #                                 hazards[h].stateto,
-        #                                 hazards[h].degree,
-        #                                 knots,
-        #                                 hazard,
-        #                                 cumulative_hazard,
-        #                                 hazards[h].natural_spline,
-        #                                 hazards[h].monotone,
-        #                                 timespan,
-        #                                 timespan,
-        #                                 length(hazard.spline.basis),
-        #                                 size(hazdat, 2) - 1)            
-        #     else
-        #         ### proportional hazards
-        #         # parameter names
-        #         parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:length(hazard.spline.basis)))), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
-               
-        #         # vector for parameters
-        #         hazpars = zeros(Float64, npars)
-
-        #         # append to model parameters
-        #         push!(parameters, hazpars)
-
-        #         # hazard struct
-        #         haz_struct = _SplinePH(Symbol(hazname),
-        #                                 hazdat[:,Not(1)], 
-        #                                 Symbol.(parnames),
-        #                                 hazards[h].statefrom,
-        #                                 hazards[h].stateto,
-        #                                 hazards[h].degree,
-        #                                 knots,
-        #                                 hazard,
-        #                                 cumulative_hazard,
-        #                                 hazards[h].natural_spline,
-        #                                 hazards[h].monotone,
-        #                                 timespan,
-        #                                 timespan,
-        #                                 length(hazard.spline.basis),
-        #                                 size(hazdat, 2) - 1)                             
-        #     end
-        # end
-
-        # note: want a symbol that names the hazard + vector of symbols for parameters
         _hazards[h] = haz_struct
     end
 
-    return _hazards, parameters, hazkeys
+    # Phase 3: Build parameters_ph structure from parameters
+    # Note: parameters are on LOG scale, but ParameterHandling.positive() expects NATURAL scale
+    # So we need to convert log → natural before wrapping with positive()
+    params_transformed_pairs = [
+        hazname => ParameterHandling.positive(exp.(Vector{Float64}(parameters[idx])))
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    
+    params_transformed = NamedTuple(params_transformed_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    params_natural = ParameterHandling.value(params_transformed)
+    
+    parameters_ph = (
+        flat = params_flat,
+        transformed = params_transformed,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
+
+    # Phase 3: Now return parameters_ph as fourth output
+    return _hazards, parameters, parameters_ph, hazkeys
+end
+
+#=============================================================================
+OLD build_hazards (DEPRECATED - Phase 1 version)
+=============================================================================# 
+# Commented out - will be removed after Phase 2 complete
+
+"""
+    build_parameters_ph(parameters::VectorOfVectors, hazkeys::Dict{Symbol, Int64})
+
+Create a ParameterHandling.jl structure from legacy VectorOfVectors parameters.
+
+Returns a NamedTuple with fields:
+- `flat`: Vector{Float64} of all parameters in flattened form (log scale)
+- `transformed`: NamedTuple of positive() transformations for each hazard
+- `natural`: NamedTuple of Vectors for each hazard (natural scale)
+- `unflatten`: Function to reconstruct from flat vector
+
+Parameters are stored on the log scale using ParameterHandling.positive().
+"""
+function build_parameters_ph(parameters::VectorOfVectors, hazkeys::Dict{Symbol, Int64})
+    # Create a NamedTuple of Vectors for each hazard using positive() transformation
+    # This will store parameters on log scale internally
+    params_transformed_pairs = [
+        hazname => ParameterHandling.positive(Vector{Float64}(parameters[idx]))
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    
+    params_transformed = NamedTuple(params_transformed_pairs)
+    
+    # Flatten to get the flat vector and unflatten function
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    
+    # Get natural scale parameters
+    params_natural = ParameterHandling.value(params_transformed)
+    
+    # Return nested structure
+    return (
+        flat = params_flat,
+        transformed = params_transformed,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
 end
 
 ### Total hazards
@@ -434,13 +439,13 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
 
     # generate tuple for compiled hazard functions
     # _hazards is a tuple of _Hazard objects
-    _hazards, parameters, hazkeys = build_hazards(hazards...; data = data, surrogate = false)
+    _hazards, parameters, parameters_ph, hazkeys = build_hazards(hazards...; data = data, surrogate = false)
 
     # generate vector for total hazards 
     _totalhazards = build_totalhazards(_hazards, tmat)  
 
-    # build exponential surrogate hazards
-    surrogate = build_hazards(hazards...; data = data, surrogate = true)
+    # build exponential surrogate hazards (discard parameters_ph from surrogate)
+    surrogate_haz, surrogate_pars, _, _ = build_hazards(hazards...; data = data, surrogate = true)
 
     # construct multistate mode
     # exactly observed data
@@ -448,6 +453,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
         model = MultistateModel(
         data,
         parameters,
+        parameters_ph,
         _hazards,
         _totalhazards,
         tmat,
@@ -456,7 +462,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
         subjinds,
         SamplingWeights,
         CensoringPatterns,
-        MarkovSurrogate(surrogate[1], surrogate[2]),
+        MarkovSurrogate(surrogate_haz, surrogate_pars),
         modelcall)
 
     # panel data and/or exactly observed data
@@ -466,6 +472,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
             model = MultistateMarkovModel(
                 data,
                 parameters,
+                parameters_ph,
                 _hazards,
                 _totalhazards,
                 tmat,
@@ -474,13 +481,14 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
                 subjinds,
                 SamplingWeights,
                 CensoringPatterns,
-                MarkovSurrogate(surrogate[1], surrogate[2]),
+                MarkovSurrogate(surrogate_haz, surrogate_pars),
                 modelcall)
         # Semi-Markov model
         elseif any(isa.(_hazards, _SemiMarkovHazard))
             model = MultistateSemiMarkovModel(
                 data,
                 parameters,
+                parameters_ph,
                 _hazards,
                 _totalhazards,
                 tmat,
@@ -489,7 +497,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
                 subjinds,
                 SamplingWeights,
                 CensoringPatterns,
-                MarkovSurrogate(surrogate[1], surrogate[2]),
+                MarkovSurrogate(surrogate_haz, surrogate_pars),
                 modelcall)
         end
 
@@ -500,6 +508,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
             model = MultistateMarkovModelCensored(
                 data,
                 parameters,
+                parameters_ph,
                 _hazards,
                 _totalhazards,
                 tmat,
@@ -508,13 +517,14 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
                 subjinds,
                 SamplingWeights,
                 CensoringPatterns,
-                MarkovSurrogate(surrogate[1], surrogate[2]),
+                MarkovSurrogate(surrogate_haz, surrogate_pars),
                 modelcall)
         # semi-Markov model
         elseif any(isa.(_hazards, _SemiMarkovHazard))
             model = MultistateSemiMarkovModelCensored(
                 data,
                 parameters,
+                parameters_ph,
                 _hazards,
                 _totalhazards,
                 tmat,
@@ -523,7 +533,7 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
                 subjinds,
                 SamplingWeights,
                 CensoringPatterns,
-                MarkovSurrogate(surrogate[1], surrogate[2]),
+                MarkovSurrogate(surrogate_haz, surrogate_pars),
                 modelcall)
         end        
     end

@@ -16,7 +16,8 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
     samplepaths = extract_paths(model)
 
     # extract and initialize model parameters
-    parameters = flatview(model.parameters)
+    # Phase 3: Use ParameterHandling.jl flat parameters (log scale)
+    parameters = get_parameters_flat(model)
 
     # parse constraints, or not, and solve
     if isnothing(constraints) 
@@ -82,10 +83,29 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
     # compute subject-level likelihood at the estimate
     ll_subj = loglik(sol.u, ExactData(model, samplepaths); return_ll_subj = true)
 
+    # create parameters VectorOfVectors from solution
+    parameters_fitted = VectorOfVectors(sol.u, model.parameters.elem_ptr)
+    
+    # build ParameterHandling structure for fitted parameters
+    params_transformed_pairs = [
+        hazname => ParameterHandling.positive(Vector{Float64}(parameters_fitted[idx]))
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    params_transformed = NamedTuple(params_transformed_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    params_natural = ParameterHandling.value(params_transformed)
+    parameters_ph_fitted = (
+        flat = params_flat,
+        transformed = params_transformed,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
+
     # wrap results
     model_fitted = MultistateModelFitted(
         model.data,
-        VectorOfVectors(sol.u, model.parameters.elem_ptr),
+        parameters_fitted,
+        parameters_ph_fitted,
         (loglik = -sol.minimum, subj_lml = ll_subj),
         vcov,
         model.hazards,
@@ -131,7 +151,8 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     books = build_tpm_mapping(model.data)
 
     # extract and initialize model parameters
-    parameters = flatview(model.parameters)
+    # Phase 3: Use ParameterHandling.jl flat parameters (log scale)
+    parameters = get_parameters_flat(model)
 
     # number of subjects
     nsubj = length(model.subjectindices)
@@ -188,10 +209,29 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     # compute loglikelihood at the estimate
     logliks = (loglik = -sol.minimum, subj_lml = loglik(sol.u, MPanelData(model, books); return_ll_subj = true))
 
+    # create parameters VectorOfVectors from solution
+    parameters_fitted = VectorOfVectors(sol.u, model.parameters.elem_ptr)
+    
+    # build ParameterHandling structure for fitted parameters
+    params_transformed_pairs = [
+        hazname => ParameterHandling.positive(Vector{Float64}(parameters_fitted[idx]))
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    params_transformed = NamedTuple(params_transformed_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    params_natural = ParameterHandling.value(params_transformed)
+    parameters_ph_fitted = (
+        flat = params_flat,
+        transformed = params_transformed,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
+
     # wrap results
     return MultistateModelFitted(
         model.data,
-        VectorOfVectors(sol.u, model.parameters.elem_ptr),
+        parameters_fitted,
+        parameters_ph_fitted,
         logliks,
         vcov,
         model.hazards,
@@ -246,7 +286,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         _constraints = deepcopy(constraints)
         consfun_semimarkov = parse_constraints(_constraints.cons, model.hazards; consfun_name = :consfun_semimarkov)
 
-        initcons = consfun_semimarkov(zeros(length(constraints.cons)), flatview(model.parameters), nothing)
+        # Phase 3: Use ParameterHandling.jl flat parameters for constraint check
+        initcons = consfun_semimarkov(zeros(length(constraints.cons)), get_parameters_flat(model), nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
         if length(badcons) > 0
             @error "Constraints $badcons are violated at the initial parameter values."
@@ -280,7 +321,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     absorbingstates = findall(map(x -> all(x .== 0), eachrow(model.tmat)))
 
     # extract and initialize model parameters
-    params_cur = flatview(model.parameters)
+    # Phase 3: Use ParameterHandling.jl flat parameters (log scale)
+    params_cur = get_parameters_flat(model)
 
     # initialize ess target
     ess_target = ess_target_initial
@@ -322,7 +364,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # containers for traces
     mll_trace = Vector{Float64}() # marginal loglikelihood
     ess_trace = ElasticArray{Float64, 2}(undef, nsubj, 0) # effective sample size (one per subject)
-    parameters_trace = ElasticArray{Float64, 2}(undef, length(flatview(model.parameters)), 0) # parameter estimates
+    # Phase 3: Use ParameterHandling.jl flat parameter length
+    parameters_trace = ElasticArray{Float64, 2}(undef, length(get_parameters_flat(model)), 0) # parameter estimates
 
     # build surrogate
     if optimize_surrogate
@@ -624,10 +667,29 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # return sampled paths and importance weights
     ProposedPaths = return_proposed_paths ? (paths=samplepaths, weights=ImportanceWeights) : nothing
 
+    # create parameters VectorOfVectors from current parameters
+    parameters_fitted = VectorOfVectors(params_cur, model.parameters.elem_ptr)
+    
+    # build ParameterHandling structure for fitted parameters
+    params_transformed_pairs = [
+        hazname => ParameterHandling.positive(Vector{Float64}(parameters_fitted[idx]))
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    params_transformed = NamedTuple(params_transformed_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    params_natural = ParameterHandling.value(params_transformed)
+    parameters_ph_fitted = (
+        flat = params_flat,
+        transformed = params_transformed,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
+
     # wrap results
     model_fitted = MultistateModelFitted(
         data_original,
-        VectorOfVectors(params_cur, model.parameters.elem_ptr),
+        parameters_fitted,
+        parameters_ph_fitted,
         logliks,
         vcov,
         model.hazards,

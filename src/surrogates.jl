@@ -78,7 +78,8 @@ function fit_surrogate(model; surrogate_parameters = nothing, surrogate_constrai
         consfun_surrogate = parse_constraints(surrogate_constraints.cons, surrogate_model.hazards; consfun_name = :consfun_surrogate)
 
         # test the initial values
-        initcons = consfun_surrogate(zeros(length(surrogate_constraints.cons)), flatview(surrogate_model.parameters), nothing)
+        # Phase 3: Use ParameterHandling.jl flat parameters for constraint check
+        initcons = consfun_surrogate(zeros(length(surrogate_constraints.cons)), get_parameters_flat(surrogate_model), nothing)
         
         badcons = findall(initcons .< surrogate_constraints.lcons .|| initcons .> surrogate_constraints.ucons)
 

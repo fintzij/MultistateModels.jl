@@ -204,7 +204,8 @@ function aic(model::MultistateModelFitted; loglik = nothing, estimate_likelihood
     end
 
     # number of parameters
-    p = length(flatview(model.parameters))
+    # Phase 3: Use ParameterHandling.jl flat parameter length
+    p = length(get_parameters_flat(model))
 
     # loglik
     ll = if !isnothing(loglik)
@@ -238,7 +239,8 @@ function bic(model::MultistateModelFitted; loglik = nothing, estimate_likelihood
     end
 
     # number of parameters
-    p = length(flatview(model.parameters))
+    # Phase 3: Use ParameterHandling.jl flat parameter length
+    p = length(get_parameters_flat(model))
 
     # number of individuals
     n = sum(model.SamplingWeights)
