@@ -92,6 +92,7 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
     # current index
     row = 1 # row in subject's data that is incremented
     ind = subj_inds[row] # index in complete dataset
+    subjdat_row = subj_dat[row, :] # current DataFrameRow for covariate extraction
 
     # current state
     scur = subj_dat.statefrom[1]
@@ -131,13 +132,13 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
     while keep_going
         
         # calculate event probability over the next interval
-        interval_incid = (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + tstop - tcur, model.parameters, ind, model.totalhazards[scur], model.hazards, subj_dat; give_log = false))
+        interval_incid = (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + tstop - tcur, model.parameters, subjdat_row, model.totalhazards[scur], model.hazards; give_log = false))
 
         # check if event happened in the interval
         if (u < (cuminc + interval_incid)) && (u >= cuminc)
 
             # update the current time - roughly 1 millisecond must pass if time is in minutes
-            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, ind, model.totalhazards[scur], model.hazards, subj_dat; give_log = false))) - log(u))^2), delta_t, tstop - tcur, optmethod; rel_tol = rtol, abs_tol = atol)
+            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, subjdat_row, model.totalhazards[scur], model.hazards; give_log = false))) - log(u))^2), delta_t, tstop - tcur, optmethod; rel_tol = rtol, abs_tol = atol)
 
             if Optim.converged(timeincrement)
                 timeinstate += timeincrement.minimizer
@@ -146,10 +147,10 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
             end            
 
             # calculate next state transition probabilities 
-            # next_state_probs!(ns_probs, timeinstate, scur, ind, model.parameters, model.hazards, model.totalhazards, model.tmat)
+            # next_state_probs!(ns_probs, timeinstate, scur, subjdat_row, model.parameters, model.hazards, model.totalhazards, model.tmat)
 
             # sample the next state
-            scur = rand(Categorical(next_state_probs(timeinstate, scur, ind, model.parameters, model.hazards, model.totalhazards, model.tmat)))
+            scur = rand(Categorical(next_state_probs(timeinstate, scur, subjdat_row, model.parameters, model.hazards, model.totalhazards, model.tmat)))
             
             # increment time in state and cache the jump time and state
             tcur = times[end] + timeinstate
@@ -180,6 +181,7 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
                 # increment the row indices and interval endpoints
                 row  += 1
                 ind  += 1
+                subjdat_row = subj_dat[row, :]  # Update DataFrameRow for new interval
                 tcur  = subj_dat.tstart[row]
                 tstop = subj_dat.tstop[row]
 

@@ -157,11 +157,23 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             hazpars = zeros(Float64, npar_total)
             push!(parameters, hazpars)
             
-            # Parameter names
-            # coefnames returns (lhs_names, rhs_names) tuple
-            # For intercept-only, rhs_names is a String; otherwise it's a Vector
-            rhs_names = coefnames(hazschema)[2]
-            rhs_names_vec = rhs_names isa String ? [rhs_names] : rhs_names
+            # Parameter names - extract from formula terms, not from data
+            # Get the right-hand side terms from the formula
+            formula_rhs = hazards[h].hazard.rhs
+            if formula_rhs isa StatsModels.ConstantTerm
+                # Intercept-only model
+                rhs_names_vec = ["Intercept"]
+            else
+                # Extract term names from the formula (before data is applied)
+                rhs_terms = StatsModels.termvars(formula_rhs)
+                if isempty(rhs_terms)
+                    # Just intercept
+                    rhs_names_vec = ["Intercept"]
+                else
+                    # Has covariates
+                    rhs_names_vec = ["Intercept"; String.(rhs_terms)]
+                end
+            end
             parnames = replace.(hazname * "_" .* rhs_names_vec, "(Intercept)" => "Intercept")
             parnames = Symbol.(parnames)
             
@@ -191,9 +203,19 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             hazpars = zeros(Float64, npar_total)
             push!(parameters, hazpars)
             
-            # Parameter names
-            rhs_names = coefnames(hazschema)[2]
-            rhs_names_vec = rhs_names isa String ? [rhs_names] : rhs_names
+            # Parameter names - extract from formula terms directly
+            formula_rhs = hazards[h].hazard.rhs
+            if formula_rhs isa StatsModels.ConstantTerm
+                rhs_names_vec = ["Intercept"]
+            else
+                rhs_terms = StatsModels.termvars(formula_rhs)
+                if isempty(rhs_terms)
+                    rhs_names_vec = ["Intercept"]
+                else
+                    rhs_names_vec = ["Intercept"; String.(rhs_terms)]
+                end
+            end
+            
             if !has_covariates
                 parnames = replace.(vec(hazname * "_" .* ["shape" "scale"] .* "_" .* rhs_names_vec), "_(Intercept)" => "")
             else
@@ -230,9 +252,19 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             hazpars = zeros(Float64, npar_total)
             push!(parameters, hazpars)
             
-            # Parameter names
-            rhs_names = coefnames(hazschema)[2]
-            rhs_names_vec = rhs_names isa String ? [rhs_names] : rhs_names
+            # Parameter names - extract from formula terms directly
+            formula_rhs = hazards[h].hazard.rhs
+            if formula_rhs isa StatsModels.ConstantTerm
+                rhs_names_vec = ["Intercept"]
+            else
+                rhs_terms = StatsModels.termvars(formula_rhs)
+                if isempty(rhs_terms)
+                    rhs_names_vec = ["Intercept"]
+                else
+                    rhs_names_vec = ["Intercept"; String.(rhs_terms)]
+                end
+            end
+            
             if !has_covariates
                 parnames = replace.(vec(hazname * "_" .* ["shape" "scale"] .* "_" .* rhs_names_vec), "_(Intercept)" => "")
             else

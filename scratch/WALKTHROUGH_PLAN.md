@@ -1,7 +1,97 @@
 # MultistateModels.jl Infrastructure Testing Walkthrough
-**Date:** October 30, 2025  
+**Date:** October 30, 2025 (Updated: November 7, 2025)  
 **Branch:** infrastructure_changes  
 **Purpose:** Systematically validate all new infrastructure through complete workflow
+
+---
+
+## Critical Understanding: Two-Stage Type System
+
+**Stage 1: User-Facing Specification (Input)**
+- `Hazard()` constructor returns `ParametricHazard` or `SplineHazard`
+- These are **specification objects only**
+- Fields: `hazard` (formula), `family`, `statefrom`, `stateto`
+- Do NOT have: `hazard_fn`, `cumhaz_fn`, `parnames`, `npar_total`, etc.
+
+**Stage 2: Internal Execution Types (After Model Building)**
+- `multistatemodel()` calls `build_hazards()` which creates:
+  - `MarkovHazard` (for exponential family)
+  - `SemiMarkovHazard` (for Weibull, Gompertz families)
+  - Internal `SplineHazard` (for spline hazards)
+- These internal types have: `hazname`, `parnames`, `npar_total`, `hazard_fn`, `cumhaz_fn`, etc.
+- Access via: `model.hazards[i]` after building the model
+
+**Parameter Naming Convention:**
+- Parameters are prefixed with hazard identifier: `h{from}{to}_`
+- Example for hazard 1→2: `h12_Intercept`, `h12_age`, `h12_sex`
+- Example for hazard 1→3: `h13_Intercept`, `h13_age`, `h13_sex`
+- This ensures **uniqueness** across all hazards in multi-state models
+
+**Parameter Passing to Hazard Functions:**
+- Hazard functions (`hazard_fn`, `cumhaz_fn`) expect parameters as **Vector**, not NamedTuple
+- Example: `params = [-1.0, 0.02, 0.5]` for [log_baseline, coef1, coef2]
+- Baseline parameters (intercept, shape, scale) are on **LOG SCALE**
+- Covariate coefficients are on **NATURAL SCALE**
+- Functions return hazard values on **NATURAL SCALE** (not log)
+- Covariates are passed as NamedTuple: `covars = (age=45, sex=1)`
+
+**Testing Implications:**
+- Create hazard specification with `Hazard()`
+- Build model with `multistatemodel()`
+- Access internal hazard via `model.hazards[1]`
+- Then test fields and functions on internal hazard
+
+---
+
+## Important: Hazard Constructor Syntax
+
+**Correct syntax:**
+```julia
+# Intercept-only (no covariates)
+haz = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+
+# With covariates
+haz = Hazard(@formula(0 ~ age + sex), "exp", 1, 2)
+```
+
+**Key points:**
+
+- Formula comes FIRST: `@formula(0 ~ ...)` 
+- Family is SECOND: `"exp"`, `"wei"`, `"gom"`, or `"sp"`
+- Then state transitions: `from::Int`, `to::Int`
+- Use `@formula(0 ~ 1)` for intercept-only (no covariates)
+
+---
+
+## Required Data Format
+
+**All datasets must have these first 6 columns in order:**
+
+1. `id::Int` - Subject identifier (must be 1, 2, 3, ...)
+2. `tstart::Float64` - Start time of interval
+3. `tstop::Float64` - Stop time of interval
+4. `statefrom::Int` - State at start (can be `missing` for first observation)
+5. `stateto::Int` - State at end (0 for censored, `missing` for interval censored)
+6. `obstype::Int` - Observation type:
+   - `1` = Exact observation (transition observed at exact time)
+   - `2` = Interval censored (transition occurred between tstart and tstop)
+   - `>2` = Custom censoring pattern ID
+
+**Additional columns** (after the first 6) can contain covariates with names matching the formula.
+
+**Example:**
+```julia
+dat = DataFrame(
+    id = [1, 2, 3],
+    tstart = [0.0, 0.0, 0.0],
+    tstop = [1.5, 2.3, 1.8],
+    statefrom = [1, 1, 1],
+    stateto = [2, 2, 2],
+    obstype = [1, 1, 1],  # All exact observations
+    age = [45, 52, 38],   # Covariate columns after first 6
+    sex = [0, 1, 0]
+)
+```
 
 ---
 
@@ -10,6 +100,7 @@
 This document provides a step-by-step plan to walk through the entire package workflow with the new infrastructure, testing each component in isolation before proceeding to the next. We'll build from the ground up, validating at each step.
 
 **Approach:** 
+
 - Start simple (2-state exponential, no covariates)
 - Add complexity incrementally (covariates, more states, different families)
 - Test each step thoroughly before moving forward
@@ -19,8 +110,15 @@ This document provides a step-by-step plan to walk through the entire package wo
 
 ## Phase 1: Basic Model Creation (No Covariates)
 
-### Step 1.1: Create Simple 2-State Model
-**Goal:** Verify basic hazard creation and model construction work
+**Important Note on Type System:**
+- `Hazard()` creates a **ParametricHazard** (user-facing specification)
+- Only has fields: `hazard`, `family`, `statefrom`, `stateto`
+- `multistatemodel()` converts to internal types (MarkovHazard, SemiMarkovHazard, etc.)
+- Internal types have: `hazname`, `parnames`, `npar_total`, `hazard_fn`, `cumhaz_fn`, etc.
+- Access internal hazards via `model.hazards[i]` after building the model
+
+### Step 1.1: Create Simple Hazard Specification
+**Goal:** Verify basic hazard specification creation works
 
 **Test case:**
 ```julia
@@ -31,53 +129,121 @@ using DataFrames
 # Exponential hazard, no covariates
 
 # Create hazard specification
-haz_1_to_2 = hazard(1, 2, family="exp")
+haz_1_to_2 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
 
-# Inspect hazard object
+# Inspect ParametricHazard object (input specification)
 println("Hazard type: ", typeof(haz_1_to_2))
 println("Hazard family: ", haz_1_to_2.family)
-println("Has covariates: ", haz_1_to_2.has_covariates)
-println("Parameter names: ", haz_1_to_2.parnames)
-println("Baseline params: ", haz_1_to_2.npar_baseline)
-println("Total params: ", haz_1_to_2.npar_total)
+println("From state: ", haz_1_to_2.statefrom)
+println("To state: ", haz_1_to_2.stateto)
 ```
 
 **Expected output:**
-- Type: `MarkovHazard`
+- Type: `ParametricHazard` (not MarkovHazard yet!)
+- Family: `"exp"`
+- From state: `1`
+- To state: `2`
+
+**Validation:**
+- [ ] Hazard specification created without error
+- [ ] Correct type returned (ParametricHazard)
+- [ ] Fields populated correctly
+- [ ] Formula stored in `hazard` field
+
+### Step 1.2: Build Model to Access Internal Hazard
+**Goal:** Verify model construction creates internal hazard types
+
+**Test case:**
+```julia
+# Create minimal dataset first
+# Note: Must include 'obstype' column (1 = exact observation, 2 = interval censored)
+dat = DataFrame(
+    id = 1:10,
+    tstart = zeros(10),
+    tstop = rand(10) .* 2.0,
+    statefrom = ones(Int, 10),
+    stateto = fill(2, 10),
+    obstype = ones(Int, 10)  # 1 = exact observation
+)
+
+# Build model - this creates the internal hazard structures
+model = multistatemodel(haz_1_to_2; data=dat)
+
+println("Model type: ", typeof(model))
+println("Number of hazards: ", length(model.hazards))
+
+# Now we can access the internal hazard structure
+internal_haz = model.hazards[1]
+println("\nInternal hazard structure:")
+println("  Type: ", typeof(internal_haz))
+println("  Family: ", internal_haz.family)
+println("  Has covariates: ", internal_haz.has_covariates)
+println("  Parameter names: ", internal_haz.parnames)
+println("  Baseline params: ", internal_haz.npar_baseline)
+println("  Total params: ", internal_haz.npar_total)
+```
+
+**Expected output:**
+- Model type: `MultistateModel`
+- Internal hazard type: `MarkovHazard` (not ParametricHazard!)
 - Family: `"exp"`
 - Has covariates: `false`
-- Parameter names: `[:intercept]` (or similar)
+- Parameter names: `["h12_Intercept"]` (with hazard prefix!)
 - Baseline params: `1`
 - Total params: `1`
 
 **Validation:**
-- [ ] Hazard object created without error
-- [ ] Correct type returned
+- [ ] Model object created without error
+- [ ] Correct type for internal hazard (MarkovHazard)
 - [ ] Fields populated correctly
+- [ ] Parameter names include hazard prefix (h12_)
 - [ ] hazard_fn and cumhaz_fn are callable functions
 
-### Step 1.2: Test Hazard Functions
+### Step 1.3: Test Hazard Functions
+**Goal:** Verify runtime-generated functions work correctly
+
+**Test case:**
+```julia
+### Step 1.3: Test Hazard Functions
 **Goal:** Verify runtime-generated functions work correctly
 
 **Test case:**
 ```julia
 # Test hazard function evaluation
-params = (intercept = -1.0,)  # Named parameters
+# Use the internal hazard from the model
+# Parameters are passed as a VECTOR (not NamedTuple)
+# Parameters are on LOG SCALE for baseline parameters
+params = [-1.0]  # Log rate = -1.0, so hazard rate = exp(-1.0) ≈ 0.368
 t = 1.0
 covars = NamedTuple()  # Empty for no covariates
 
-# Call hazard function
-h_val = haz_1_to_2.hazard_fn(t, params, covars; give_log=false)
-log_h_val = haz_1_to_2.hazard_fn(t, params, covars; give_log=true)
+# Call hazard function (returns natural scale)
+h_val = internal_haz.hazard_fn(t, params, covars)
+log_h_val = log(h_val)  # Compute log manually
 
 println("h(1.0) = ", h_val)
 println("log h(1.0) = ", log_h_val)
 println("Expected: h = exp(-1.0) = ", exp(-1.0))
 
 # Test cumulative hazard
-cumhaz_val = haz_1_to_2.cumhaz_fn(0.0, 1.0, params, covars)
+cumhaz_val = internal_haz.cumhaz_fn(0.0, 1.0, params, covars)
 println("Cumulative hazard [0, 1] = ", cumhaz_val)
 println("Expected: ", 1.0 * exp(-1.0))
+```
+
+**Expected output:**
+- `h(1.0) ≈ 0.368` (exp(-1))
+- `log h(1.0) ≈ -1.0`
+- `cumhaz ≈ 0.368`
+
+**Validation:**
+- [ ] Hazard evaluates without error
+- [ ] Correct numerical values
+- [ ] Hazard functions return natural scale (not log)
+- [ ] Cumulative hazard correct
+- [ ] Parameters passed as Vector, not NamedTuple
+
+### Step 1.4: Initialize Parameters
 ```
 
 **Expected output:**
@@ -91,73 +257,36 @@ println("Expected: ", 1.0 * exp(-1.0))
 - [ ] log vs non-log consistent
 - [ ] Cumulative hazard correct
 
-### Step 1.3: Initialize Parameters
+### Step 1.4: Initialize Parameters
 **Goal:** Verify parameter initialization works
 
 **Test case:**
 ```julia
-# Test init_par
+# Test init_par on internal hazard
 crude_rate = 0.0
-initial_params = init_par(haz_1_to_2, crude_rate)
+initial_params = MultistateModels.init_par(internal_haz, crude_rate)
 
 println("Initial parameters: ", initial_params)
 println("Expected: [0.0] (crude log rate)")
+
+# Model's initialized parameters
+println("\nModel's initialized parameters:")
+println("  ", model.parameters)
 ```
 
 **Validation:**
 - [ ] init_par returns vector
 - [ ] Correct length (1 for exponential)
 - [ ] Reasonable values
+- [ ] Model parameters initialized
 
-### Step 1.4: Create Minimal Dataset
-**Goal:** Create smallest possible dataset for testing
+**Phase 1 Complete!**
 
-**Test case:**
-```julia
-# Minimal 2-state data: 10 subjects, all transition
-dat = DataFrame(
-    id = 1:10,
-    tstart = zeros(10),
-    tstop = rand(10) .* 2.0,  # Random event times 0-2
-    statefrom = ones(Int, 10),
-    stateto = fill(2, 10)
-)
-
-println("Sample data:")
-println(first(dat, 3))
-```
-
-**Validation:**
-- [ ] Data created without error
-- [ ] Correct structure (id, tstart, tstop, statefrom, stateto)
-- [ ] Valid transitions (all 1 → 2)
-
-### Step 1.5: Build Model Object
-**Goal:** Construct full MultistateModel
-
-**Test case:**
-```julia
-# Build model
-model = multistatemodel(haz_1_to_2; data=dat)
-
-println("Model type: ", typeof(model))
-println("Number of hazards: ", length(model.hazards))
-println("Number of subjects: ", model.nsubj)
-println("Total parameters: ", model.npar)
-```
-
-**Expected output:**
-- Model type: `MultistateModel`
-- 1 hazard
-- 10 subjects
-- 1 parameter
-
-**Validation:**
-- [ ] Model created without error
-- [ ] Correct number of hazards
-- [ ] Correct number of subjects
-- [ ] Correct total parameters
-- [ ] Model fields populated correctly
+**Key Findings:**
+- ✓ Hazard() creates ParametricHazard specification
+- ✓ multistatemodel() converts to internal MarkovHazard
+- ✓ Internal hazard has runtime-generated functions
+- ✓ Parameter names include hazard prefix (h12_Intercept)
 
 **STOP HERE IF ANY ISSUES - Debug before proceeding**
 
@@ -165,7 +294,7 @@ println("Total parameters: ", model.npar)
 
 ## Phase 2: Model Fitting (No Covariates)
 
-### Step 2.1: Test Likelihood Evaluation
+### Step 2.1: Prepare for Fitting
 **Goal:** Verify likelihood computation works
 
 **Test case:**
@@ -276,38 +405,45 @@ println("Final log-likelihood: ", -result.minimum)
 
 ## Phase 3: Add Covariates (2-State Model)
 
-### Step 3.1: Create Model with Covariates
-**Goal:** Test name-based covariate matching
+### Step 3.1: Create Hazard Specification with Covariates
+**Goal:** Test formula-based covariate specification
 
 **Test case:**
 ```julia
-# Create hazard with covariates
-haz_1_to_2_cov = hazard(1, 2, family="exp", formula=@formula(0 ~ age + sex))
+# Create hazard specification with covariates
+haz_1_to_2_cov = Hazard(@formula(0 ~ age + sex), "exp", 1, 2)
 
-println("Parameter names: ", haz_1_to_2_cov.parnames)
-println("Expected: [:intercept, :age, :sex] or similar")
-println("Covariate names: ", extract_covar_names(haz_1_to_2_cov.parnames))
+println("Type: ", typeof(haz_1_to_2_cov))
+println("Family: ", haz_1_to_2_cov.family)
+println("Formula: ", haz_1_to_2_cov.hazard)
 ```
 
 **Expected output:**
-- Parameter names include intercept + covariates
-- Covariate extraction works
+- Type: `ParametricHazard` (input specification)
+- Family: `"exp"`
+- Formula stored in hazard field
 
 **Validation:**
-- [ ] Hazard created with formula
-- [ ] Parameter names include covariates
-- [ ] Still MarkovHazard type
-- [ ] has_covariates = true
+- [ ] Hazard specification created with formula
+- [ ] Still ParametricHazard type
+- [ ] Formula preserved
 
 ### Step 3.2: Create Data with Covariates
-**Goal:** Add covariate columns
+**Goal:** Add covariate columns matching formula
 
 **Test case:**
 ```julia
 # Add covariates to data
-dat_cov = copy(dat)
-dat_cov.age = rand(10) .* 50 .+ 20  # Ages 20-70
-dat_cov.sex = rand([0, 1], 10)      # Binary
+dat_cov = DataFrame(
+    id = 1:50,
+    tstart = zeros(50),
+    tstop = rand(50) .* 5.0,
+    statefrom = ones(Int, 50),
+    stateto = fill(2, 50),
+    obstype = ones(Int, 50),     # 1 = exact observation
+    age = rand(50) .* 50 .+ 20,  # Ages 20-70
+    sex = rand([0, 1], 50)       # Binary
+)
 
 println("Data with covariates:")
 println(first(dat_cov, 3))
@@ -315,24 +451,54 @@ println(first(dat_cov, 3))
 
 **Validation:**
 - [ ] Covariate columns added
-- [ ] Column names match formula
+- [ ] Column names match formula (age, sex)
+- [ ] More subjects for stability
 
-### Step 3.3: Test Covariate Extraction
-**Goal:** Verify name-based matching
+### Step 3.3: Build Model and Check Internal Hazard
+**Goal:** Verify covariate processing during model building
+
+**Test case:**
+```julia
+# Build model with covariates
+model_cov = multistatemodel(haz_1_to_2_cov; data=dat_cov)
+
+# Access internal hazard
+internal_haz_cov = model_cov.hazards[1]
+
+println("\nInternal hazard with covariates:")
+println("  Type: ", typeof(internal_haz_cov))
+println("  Has covariates: ", internal_haz_cov.has_covariates)
+println("  Parameter names: ", internal_haz_cov.parnames)
+println("  Baseline params: ", internal_haz_cov.npar_baseline)
+println("  Total params: ", internal_haz_cov.npar_total)
+```
+
+**Expected output:**
+- Internal type: `MarkovHazard`
+- Has covariates: `true`
+- Parameter names: `["h12_Intercept", "h12_age", "h12_sex"]` (with hazard prefix!)
+- Baseline params: `1` (intercept only)
+- Total params: `3` (intercept + 2 covariates)
+
+**Validation:**
+- [ ] Model created with covariate data
+- [ ] Internal hazard has_covariates = true
+- [ ] Parameter names include all terms with prefix
+- [ ] Correct parameter counts
+
+### Step 3.4: Test Covariate Extraction
+**Goal:** Verify name-based matching works
 
 **Test case:**
 ```julia
 # Test helper function
-using DataFrames
-
 row = dat_cov[1, :]
 covar_names = [:age, :sex]
-covars = extract_covariates(row, covar_names)
+covars = MultistateModels.extract_covariates(row, covar_names)
 
 println("Row: ", row)
 println("Extracted covariates: ", covars)
 println("Type: ", typeof(covars))
-println("Expected: NamedTuple with fields age, sex")
 
 # Test accessing by name
 println("Age: ", covars.age)
@@ -341,21 +507,40 @@ println("Sex: ", covars.sex)
 
 **Validation:**
 - [ ] Covariates extracted as NamedTuple
-- [ ] Correct values
+- [ ] Correct values from data row
 - [ ] Can access by name
+- [ ] Names match exactly
 
-### Step 3.4: Test Hazard Evaluation with Covariates
+### Step 3.5: Test Hazard Evaluation with Covariates
 **Goal:** Verify runtime functions handle covariates
 
 **Test case:**
 ```julia
-# Parameters for exponential with covariates
-params_cov = (intercept = -1.0, age = 0.02, sex = 0.5)
+# Parameters for exponential with covariates (as VECTOR, not NamedTuple)
+# Order: [log_baseline, coef_age, coef_sex]
+params_cov = [-1.0, 0.02, 0.5]
 t = 1.0
 row = dat_cov[1, :]
-covars = extract_covariates(row, [:age, :sex])
+covar_names = [:age, :sex]
+covars = MultistateModels.extract_covariates(row, covar_names)
 
-# Evaluate hazard
+# Evaluate hazard using internal hazard
+h_val = internal_haz_cov.hazard_fn(t, params_cov, covars)
+
+println("Hazard with covariates: ", h_val)
+println("Covariates used: age=", covars.age, ", sex=", covars.sex)
+
+# Expected: exp(-1.0 + 0.02*age + 0.5*sex)
+expected = exp(-1.0 + 0.02*covars.age + 0.5*covars.sex)
+println("Expected: ", expected)
+println("Match: ", isapprox(h_val, expected))
+```
+
+**Validation:**
+- [ ] Hazard evaluates with covariates
+- [ ] Correct value (matches manual calculation)
+- [ ] Parameters passed as Vector (not NamedTuple)
+- [ ] Covariates passed as NamedTuple for name-based matching
 h_val = haz_1_to_2_cov.hazard_fn(t, params_cov, covars; give_log=false)
 
 # Manual calculation
@@ -400,7 +585,7 @@ println("Expected: 3 (intercept + age + sex)")
 
 ## Phase 4: Multi-State Models (3+ States)
 
-### Step 4.1: Create 3-State Illness-Death Model
+### Step 4.1: Create 3-State Illness-Death Hazard Specifications
 **Goal:** Multiple transitions, no covariates
 
 **Test case:**
@@ -408,16 +593,17 @@ println("Expected: 3 (intercept + age + sex)")
 # States: 1=Healthy, 2=Ill, 3=Dead
 # Transitions: 1→2, 1→3, 2→3
 
-haz_1_to_2 = hazard(1, 2, family="exp")
-haz_1_to_3 = hazard(1, 3, family="exp")
-haz_2_to_3 = hazard(2, 3, family="exp")
+haz_1_to_2 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+haz_1_to_3 = Hazard(@formula(0 ~ 1), "exp", 1, 3)
+haz_2_to_3 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
 
-println("Created 3 hazards")
+println("Created 3 hazard specifications")
+println("Types: ", typeof(haz_1_to_2), ", ", typeof(haz_1_to_3), ", ", typeof(haz_2_to_3))
 ```
 
 **Validation:**
-- [ ] All hazards created
-- [ ] Different hazard names/IDs
+- [ ] All hazard specifications created (ParametricHazard)
+- [ ] Different transitions specified
 
 ### Step 4.2: Create Multi-State Data
 **Goal:** Data with multiple transition types
@@ -433,7 +619,8 @@ dat_3state = DataFrame(
     tstart = [0.0,1.0, 0.0,1.5, 0.0,2.0, 0.0,1.2, 0.0,0.8,  0.0, 0.0, 0.0, 0.0, 0.0],
     tstop =  [1.0,2.0, 1.5,3.0, 2.0,3.5, 1.2,2.5, 0.8,2.0,  1.0, 1.5, 2.0, 1.8, 2.2],
     statefrom = [1,2, 1,2, 1,2, 1,2, 1,2,  1, 1, 1, 1, 1],
-    stateto =   [2,3, 2,3, 2,3, 2,3, 2,3,  3, 3, 3, 3, 3]
+    stateto =   [2,3, 2,3, 2,3, 2,3, 2,3,  3, 3, 3, 3, 3],
+    obstype = ones(Int, 15)  # All exact observations
 )
 
 println("Multi-state data:")
@@ -443,10 +630,10 @@ println(dat_3state)
 **Validation:**
 - [ ] Data structure correct
 - [ ] Multiple rows per subject
-- [ ] All transition types represented
+- [ ] All transition types represented (1→2, 1→3, 2→3)
 
-### Step 4.3: Build 3-State Model
-**Goal:** Model with multiple hazards
+### Step 4.3: Build 3-State Model and Inspect Internal Hazards
+**Goal:** Model with multiple hazards, verify parameter naming
 
 **Test case:**
 ```julia
@@ -460,20 +647,53 @@ model_3state = multistatemodel(
 println("Number of hazards: ", length(model_3state.hazards))
 println("Total parameters: ", model_3state.npar)
 println("Number of subjects: ", model_3state.nsubj)
+
+# Check internal hazards and parameter names
+println("\nInternal hazard structures:")
+for (i, haz) in enumerate(model_3state.hazards)
+    println("Hazard $i: $(haz.from)→$(haz.to)")
+    println("  Type: ", typeof(haz))
+    println("  Name: ", haz.hazname)
+    println("  Parameters: ", haz.parnames)
+end
 ```
 
 **Expected:**
-- 3 hazards
-- 3 parameters (one per hazard)
+- 3 hazards (all MarkovHazard)
+- 3 parameters total (one per hazard)
 - 10 subjects
+- Parameter names: `["h12_Intercept", "h13_Intercept", "h23_Intercept"]` (all unique!)
 
 **Validation:**
 - [ ] Model created
-- [ ] Correct hazard count
-- [ ] Correct parameter count
+- [ ] Correct hazard count (3)
+- [ ] Correct parameter count (3)
 - [ ] All transitions represented
+- [ ] Parameter names are unique with hazard-specific prefixes
 
-### Step 4.4: Fit 3-State Model
+### Step 4.4: Verify Parameter Uniqueness
+**Goal:** Confirm no name collisions
+
+**Test case:**
+```julia
+# Extract all parameter names
+all_params = model_3state.parameters
+
+println("\nAll model parameters:")
+for (name, val) in pairs(all_params)
+    println("  $name = $val")
+end
+
+# Check uniqueness
+param_names = keys(all_params) |> collect
+println("\nParameter names unique: ", length(param_names) == length(unique(param_names)))
+println("Total parameters: ", length(param_names))
+```
+
+**Validation:**
+- [ ] All parameter names unique
+- [ ] Names follow pattern: h{from}{to}_{term}
+- [ ] No collisions between hazards
 **Goal:** Optimization with multiple hazards
 
 **Test case:**
@@ -504,7 +724,7 @@ println("Number of subjects: ", model_3state.nsubj)
 **Test case:**
 ```julia
 # Create Weibull hazard
-haz_wei = hazard(1, 2, family="wei")
+haz_wei = Hazard(@formula(0 ~ 1), "wei", 1, 2)
 
 println("Type: ", typeof(haz_wei))
 println("Expected: SemiMarkovHazard")
@@ -545,7 +765,7 @@ println("Match: ", isapprox(h_val, expected_h))
 
 **Test case:**
 ```julia
-haz_gom = hazard(1, 2, family="gom")
+haz_gom = Hazard(@formula(0 ~ 1), "gom", 1, 2)
 
 println("Type: ", typeof(haz_gom))
 println("Parameters: ", haz_gom.parnames)
@@ -566,9 +786,9 @@ println("Gompertz h(1.0): ", h_val)
 **Test case:**
 ```julia
 # Illness-death with different families
-haz_1_to_2_exp = hazard(1, 2, family="exp")
-haz_1_to_3_wei = hazard(1, 3, family="wei")
-haz_2_to_3_gom = hazard(2, 3, family="gom")
+haz_1_to_2_exp = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+haz_1_to_3_wei = Hazard(@formula(0 ~ 1), "wei", 1, 3)
+haz_2_to_3_gom = Hazard(@formula(0 ~ 1), "gom", 2, 3)
 
 model_mixed = multistatemodel(
     haz_1_to_2_exp,
@@ -625,9 +845,10 @@ dat_multi_cov = DataFrame(
     treatment = rand([0, 1], 10)
 )
 
+# Create data with multiple covariates
 # Different covariates per hazard - THIS IS THE KEY TEST
-haz_1_to_2_age_sex = hazard(1, 2, family="exp", formula=@formula(0 ~ age + sex))
-haz_2_to_3_treatment = hazard(2, 3, family="exp", formula=@formula(0 ~ treatment))
+haz_1_to_2_age_sex = Hazard(@formula(0 ~ age + sex), "exp", 1, 2)
+haz_2_to_3_treatment = Hazard(@formula(0 ~ treatment), "exp", 2, 3)
 
 println("Hazard 1→2 covariates: ", extract_covar_names(haz_1_to_2_age_sex.parnames))
 println("Hazard 2→3 covariates: ", extract_covar_names(haz_2_to_3_treatment.parnames))
@@ -776,7 +997,7 @@ sim_covars = DataFrame(
 **Test case:**
 ```julia
 # Create spline hazard
-# haz_spline = hazard(1, 2, family="sp", degree=3, knots=[0.5, 1.0, 1.5, 2.0])
+# haz_spline = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree=3, knots=[0.5, 1.0, 1.5, 2.0])
 
 # println("Type: ", typeof(haz_spline))
 # println("Expected: SplineHazard")
@@ -839,8 +1060,11 @@ sim_covars = DataFrame(
 
 # Build model with:
 # - 1→2: Weibull with age + sex
+#   haz_1_2 = Hazard(@formula(0 ~ age + sex), "wei", 1, 2)
 # - 1→3: Exponential with age
+#   haz_1_3 = Hazard(@formula(0 ~ age), "exp", 1, 3)
 # - 2→3: Gompertz with treatment
+#   haz_2_3 = Hazard(@formula(0 ~ treatment), "gom", 2, 3)
 
 # Fit model
 # Check convergence

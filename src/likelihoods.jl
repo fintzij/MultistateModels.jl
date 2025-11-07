@@ -122,7 +122,8 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
             hazmat_book[t],
             pars,
             data.model.hazards,
-            data.books[1][t])
+            data.books[1][t],
+            data.model.data)
 
         # compute transition probability matrices
         compute_tmat!(

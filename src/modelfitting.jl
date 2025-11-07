@@ -22,7 +22,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
     # parse constraints, or not, and solve
     if isnothing(constraints) 
         # get estimates
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+        optf = OptimizationFunction(loglik_exact, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
 
         # solve
@@ -81,7 +81,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
     end
 
     # compute subject-level likelihood at the estimate
-    ll_subj = loglik(sol.u, ExactData(model, samplepaths); return_ll_subj = true)
+    ll_subj = loglik_exact(sol.u, ExactData(model, samplepaths); return_ll_subj = true)
 
     # create parameters VectorOfVectors from solution
     parameters_fitted = VectorOfVectors(sol.u, model.parameters.elem_ptr)
@@ -207,7 +207,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     end
 
     # compute loglikelihood at the estimate
-    logliks = (loglik = -sol.minimum, subj_lml = loglik(sol.u, MPanelData(model, books); return_ll_subj = true))
+    logliks = (loglik = -sol.minimum, subj_lml = loglik_markov(sol.u, MPanelData(model, books); return_ll_subj = true))
 
     # create parameters VectorOfVectors from solution
     parameters_fitted = VectorOfVectors(sol.u, model.parameters.elem_ptr)
@@ -398,7 +398,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # Solve Kolmogorov equations for TPMs
     for t in eachindex(books[1])
         # compute the transition intensity matrix
-        compute_hazmat!(hazmat_book_surrogate[t], surrogate.parameters, surrogate.hazards, books[1][t])
+        compute_hazmat!(hazmat_book_surrogate[t], surrogate.parameters, surrogate.hazards, books[1][t], model.data)
         # compute transition probability matrices
         compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
     end
