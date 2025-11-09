@@ -39,7 +39,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
             diffres = DiffResults.HessianResult(sol.u)
 
             # single argument function for log-likelihood            
-            ll = pars -> loglik(pars, ExactData(model, samplepaths); neg=false)
+            ll = pars -> loglik_exact(pars, ExactData(model, samplepaths); neg=false)
 
             # compute gradient and hessian
             diffres = ForwardDiff.hessian!(diffres, ll, sol.u)
@@ -87,18 +87,14 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
     parameters_fitted = VectorOfVectors(sol.u, model.parameters.elem_ptr)
     
     # build ParameterHandling structure for fitted parameters
-    params_transformed_pairs = [
-        hazname => ParameterHandling.positive(Vector{Float64}(parameters_fitted[idx]))
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
-    ]
-    params_transformed = NamedTuple(params_transformed_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    # Use the unflatten function from the model to convert flat params back to transformed
+    params_transformed = model.parameters_ph.unflatten(sol.u)
     params_natural = ParameterHandling.value(params_transformed)
     parameters_ph_fitted = (
-        flat = params_flat,
+        flat = sol.u,
         transformed = params_transformed,
         natural = params_natural,
-        unflatten = unflatten_fn
+        unflatten = model.parameters_ph.unflatten
     )
 
     # wrap results

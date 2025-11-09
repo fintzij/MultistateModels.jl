@@ -4,9 +4,16 @@
 
 ### Exactly observed sample paths ----------------------
 """
-    loglik_path(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess) 
+    loglik_path(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard}, totalhazards::Vector{<:_TotalHazard}, tmat::Array{Int,2})
 
-Log-likelihood for a single sample path. The sample path object is `path::SamplePath` and contains the subject index and the jump chain.
+Log-likelihood for a single sample path. The subject data is provided as a DataFrame with columns including:
+- `sojourn`: Time spent in current state at start of interval
+- `increment`: Time increment for this interval
+- `statefrom`: State at start of interval
+- `stateto`: State at end of interval
+- Additional covariate columns
+
+This function is called after converting a SamplePath object to DataFrame format using `make_subjdat()`.
 """
 loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard}, totalhazards::Vector{<:_TotalHazard}, tmat::Array{Int,2})
 
@@ -17,8 +24,7 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
      for i in Base.OneTo(nrow(subjectdata))
 
         # accumulate survival probabilty
-        # NOTE: survprob and total_cumulhaz still use old rowind-based interface
-        ll += survprob(subjectdata.sojourn[i], subjectdata.sojourn[i] + subjectdata.increment[i], pars, i, totalhazards[subjectdata.statefrom[i]], hazards, subjectdata[i, :]; give_log = true)
+        ll += survprob(subjectdata.sojourn[i], subjectdata.sojourn[i] + subjectdata.increment[i], pars, subjectdata[i, :], totalhazards[subjectdata.statefrom[i]], hazards; give_log = true)
  
         # accumulate hazard if there is a transition
         if subjectdata.statefrom[i] != subjectdata.stateto[i]
@@ -63,9 +69,21 @@ function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=fals
 
     if return_ll_subj
         # send each element of samplepaths to loglik
-        map((path, w) -> loglik_path(pars, path, hazards, data.model) * w, data.paths, data.model.SamplingWeights) # weighted # UPDATE
+        # Convert SamplePath to DataFrame using make_subjdat
+        map((path, w) -> begin
+            subj_inds = data.model.subjectindices[path.subj]
+            subj_dat = view(data.model.data, subj_inds, :)
+            subjdat_df = make_subjdat(path, subj_dat)
+            loglik_path(pars, subjdat_df, hazards, data.model.totalhazards, data.model.tmat) * w
+        end, data.paths, data.model.SamplingWeights)
     else
-        ll = mapreduce((path, w) -> loglik_path(pars, path, hazards, data.model) * w, +, data.paths, data.model.SamplingWeights)    # UPDATE
+        # Convert SamplePath to DataFrame using make_subjdat
+        ll = mapreduce((path, w) -> begin
+            subj_inds = data.model.subjectindices[path.subj]
+            subj_dat = view(data.model.data, subj_inds, :)
+            subjdat_df = make_subjdat(path, subj_dat)
+            loglik_path(pars, subjdat_df, hazards, data.model.totalhazards, data.model.tmat) * w
+        end, +, data.paths, data.model.SamplingWeights)
         neg ? -ll : ll
     end
 end
@@ -92,7 +110,12 @@ function loglik_AD(parameters, data::ExactDataAD; neg = true)
     end
 
     # send each element of samplepaths to loglik
-    ll = loglik_path(pars, data.path[1], hazards, data.model) * data.samplingweight[1] # need to UPDATE
+    # Convert SamplePath to DataFrame using make_subjdat
+    path = data.path[1]
+    subj_inds = data.model.subjectindices[path.subj]
+    subj_dat = view(data.model.data, subj_inds, :)
+    subjdat_df = make_subjdat(path, subj_dat)
+    ll = loglik_path(pars, subjdat_df, hazards, data.model.totalhazards, data.model.tmat) * data.samplingweight[1]
 
     neg ? -ll : ll
 end
@@ -282,7 +305,12 @@ function loglik_semi_markov(parameters, data::SMPanelData; neg = true, use_sampl
         lls = 0.0
         for j in eachindex(data.paths[i])
             # mlm: function Q in the EM
-            lls += loglik_path(pars, data.paths[i][j], hazards, data.model) * data.ImportanceWeights[i][j] # UPDATE
+            # Convert SamplePath to DataFrame using make_subjdat
+            path = data.paths[i][j]
+            subj_inds = data.model.subjectindices[path.subj]
+            subj_dat = view(data.model.data, subj_inds, :)
+            subjdat_df = make_subjdat(path, subj_dat)
+            lls += loglik_path(pars, subjdat_df, hazards, data.model.totalhazards, data.model.tmat) * data.ImportanceWeights[i][j]
         end
         if use_sampling_weight
             lls *= data.model.SamplingWeights[i]
@@ -317,7 +345,12 @@ function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
 
     for i in eachindex(data.paths)
         for j in eachindex(data.paths[i])
-            logliks[i][j] = loglik_path(pars, data.paths[i][j], hazards, data.model)
+            # Convert SamplePath to DataFrame using make_subjdat
+            path = data.paths[i][j]
+            subj_inds = data.model.subjectindices[path.subj]
+            subj_dat = view(data.model.data, subj_inds, :)
+            subjdat_df = make_subjdat(path, subj_dat)
+            logliks[i][j] = loglik_path(pars, subjdat_df, hazards, data.model.totalhazards, data.model.tmat)
         end
     end
 end

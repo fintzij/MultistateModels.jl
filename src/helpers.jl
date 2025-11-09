@@ -561,6 +561,19 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
         @error "Data contains states that are not in the state space."
     end
 
+    # warn if state labels are not contiguous (e.g., 1,2,4 instead of 1,2,3)
+    # Model creation will fail if states are not 1,2,3,...,n
+    observed_states = sort(unique(filter(!=(0), allstates)))  # Exclude state 0 (censoring)
+    if !isempty(observed_states)
+        expected_states = collect(1:maximum(observed_states))
+        if observed_states != expected_states
+            missing_states = setdiff(expected_states, observed_states)
+            if verbose
+                @warn "State labels are not contiguous. States $(missing_states) are missing. State labels must be 1, 2, ..., n for model creation to succeed."
+            end
+        end
+    end
+
     # warning if tmat specifies an allowed transition for which no such transitions were observed in the data
     n_rs = compute_number_transitions(data, tmat)
     for r in 1:size(tmat)[1]

@@ -28,16 +28,16 @@ println("=" ^ 80)
 # True parameter values (these are what we'll try to recover)
 true_params = Dict(
     # Hazard 1→2 (Healthy → Illness): depends on age and sex
-    :h12_Intercept => -2.0,  # log-scale baseline
+    :h12_Intercept => -2.0,  # log-scale baseline rate
     :h12_age => 0.03,        # age effect (per year)
     :h12_sex => 0.5,         # sex effect (male vs female)
     
     # Hazard 1→3 (Healthy → Death): depends on age only
-    :h13_Intercept => -3.0,  # log-scale baseline
+    :h13_Intercept => -3.0,  # log-scale baseline rate
     :h13_age => 0.05,        # age effect
     
     # Hazard 2→3 (Illness → Death): depends on age and treatment
-    :h23_Intercept => -1.5,  # log-scale baseline
+    :h23_Intercept => -1.5,  # log-scale baseline rate
     :h23_age => 0.04,        # age effect
     :h23_treatment => -0.6   # treatment effect (protective)
 )
@@ -161,7 +161,7 @@ println("\nFitting model using built-in fit() function...")
 fitted_result = fit(model; verbose=false)
 
 println("✓ Model fitted successfully")
-println("  Converged: ", fitted_result.optimization.converged)
+println("  Converged: ", fitted_result.ConvergenceRecords.solution.retcode == :Success)
 println("  Log-likelihood: ", round(get_loglik(fitted_result), digits=2))
 
 # ==============================================================================
@@ -178,7 +178,7 @@ fitted_params_dict = Dict{Symbol,Float64}()
 
 # Extract parameters hazard by hazard
 for haz in fitted_result.hazards
-    haz_params = fitted_params_natural[findfirst(h -> h.name == haz.name, fitted_result.hazards)]
+    haz_params = fitted_params_natural[findfirst(h -> h.hazname == haz.hazname, fitted_result.hazards)]
     for (i, pname) in enumerate(haz.parnames)
         fitted_params_dict[pname] = haz_params[i]
     end
@@ -192,7 +192,10 @@ println("\n" * "─" ^ 80)
 println(rpad("Parameter", 20), " | ", rpad("True", 10), " | ", rpad("Fitted", 10), " | ", "Difference")
 println("─" ^ 80)
 
-for pname in all_parnames
+# Flatten parameter names
+all_param_symbols = vcat([collect(pnames) for pnames in all_parnames]...)
+
+for pname in all_param_symbols
     true_val = true_params[pname]
     fitted_val = fitted_params_dict[pname]
     diff = fitted_val - true_val
@@ -205,7 +208,7 @@ end
 println("─" ^ 80)
 
 # Calculate some summary statistics
-diffs = [fitted_params_dict[pname] - true_params[pname] for pname in all_parnames]
+diffs = [fitted_params_dict[pname] - true_params[pname] for pname in all_param_symbols]
 mean_abs_diff = mean(abs.(diffs))
 max_abs_diff = maximum(abs.(diffs))
 

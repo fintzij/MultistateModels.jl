@@ -191,16 +191,13 @@ println("=" ^ 80)
 
 println("\nModel type: ", typeof(model))
 println("Number of hazards: ", length(model.hazards))
-println("Total parameters: ", model.npar)
-println("Number of subjects: ", model.nsubj)
+println("Number of subjects: ", length(unique(model.data.id)))
 
 println("\nHazard details:")
 for (i, haz) in enumerate(model.hazards)
-    println("  Hazard ", i, " (", haz.from, "→", haz.to, "):")
+    println("  Hazard ", i, " (", haz.statefrom, "→", haz.stateto, "):")
     println("    Family: ", haz.family)
-    println("    Parameters: ", haz.parnames)
-    println("    Has covariates: ", haz.has_covariates)
-    println("    Total parameters: ", haz.npar_total)
+    println("    Number of parameters: ", length(model.parameters[i]))
 end
 
 println("\nParameter names (in order):")
@@ -209,9 +206,9 @@ for (i, pname) in enumerate(all_parnames)
     println("  ", i, ". ", pname)
 end
 
-println("\nCurrent parameter values (initialized):")
+println("\nCurrent parameter values (initialized to 0.0):")
 for (i, haz) in enumerate(model.hazards)
-    println("  Hazard ", haz.from, "→", haz.to, ": ", model.parameters[i])
+    println("  Hazard ", haz.statefrom, "→", haz.stateto, ": ", model.parameters[i])
 end
 
 # ==============================================================================

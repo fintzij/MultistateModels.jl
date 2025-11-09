@@ -323,13 +323,15 @@ mutable struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
     data::DataFrame
     parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
     parameters_ph::NamedTuple  # Nested: (flat, transformed, natural, unflatten)
-    hazards::Vector{_SemiMarkovHazard}
+    hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     emat::Matrix{Int64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
     SamplingWeights::Vector{Float64}
+    CensoringPatterns::Matrix{Int64}
+    markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
 
@@ -344,7 +346,7 @@ mutable struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     data::DataFrame
     parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
     parameters_ph::NamedTuple  # Nested: (flat, transformed, natural, unflatten)
-    hazards::Vector{_SemiMarkovHazard}
+    hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     emat::Matrix{Int64}

@@ -31,7 +31,8 @@ function extract_covar_names(parnames::Vector{Symbol})
     covar_names = Symbol[]
     for pname in parnames
         pname_str = String(pname)
-        # Skip intercept, shape, and scale parameters (not covariates)
+        # Skip baseline parameters (not covariates)
+        # Exponential: "Intercept", Weibull/Gompertz: "shape" and "scale"
         if occursin("Intercept", pname_str) || occursin("shape", pname_str) || occursin("scale", pname_str)
             continue
         end

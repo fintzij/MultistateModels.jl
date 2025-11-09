@@ -61,6 +61,13 @@ function enumerate_hazards(hazards::HazardFunction...)
         hazinfo.stateto[i] = hazards[i].stateto
     end
 
+    # check for duplicate transitions
+    transition_pairs = [(hazinfo.statefrom[i], hazinfo.stateto[i]) for i in 1:n_haz]
+    if length(unique(transition_pairs)) != n_haz
+        duplicates = [tp for tp in unique(transition_pairs) if count(==(tp), transition_pairs) > 1]
+        error("Duplicate transitions detected: $(duplicates). Each transition (statefrom → stateto) should be specified only once.")
+    end
+
     # enumerate and sort hazards
     sort!(hazinfo, [:statefrom, :stateto])
     hazinfo[:,:trans] = collect(1:n_haz)

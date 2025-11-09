@@ -193,7 +193,7 @@ println("  ✓ Parameters set to true values")
 # Verify parameters
 println("\nModel parameters:")
 for (i, haz) in enumerate(model.hazards)
-    println("  Hazard ", haz.from, "→", haz.to, ":")
+    println("  Hazard ", haz.statefrom, "→", haz.stateto, ":")
     for (j, pname) in enumerate(haz.parnames)
         println("    ", pname, " = ", model.parameters[i][j])
     end
