@@ -1,27 +1,69 @@
+const _DEFAULT_HAZARD_FORMULA = StatsModels.@formula(0 ~ 1)
+
+@inline function _hazard_formula_has_intercept(rhs_term)
+    rhs_term isa StatsModels.ConstantTerm && return true
+    rhs_term isa StatsModels.InterceptTerm && return true
+    if rhs_term isa StatsModels.MatrixTerm
+        return any(_hazard_formula_has_intercept, rhs_term.terms)
+    end
+    return false
+end
+
 """
-    Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Float64, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing}, periodic::Bool = false, monotonic::Bool = false)
+        Hazard(family::Union{AbstractString,Symbol}, statefrom::Integer, stateto::Integer; kwargs...)
+        Hazard(hazard::StatsModels.FormulaTerm, family::Union{AbstractString,Symbol}, statefrom::Integer, stateto::Integer; kwargs...)
 
-Specify a parametric or semi-parametric baseline cause-specific hazard function. 
+Construct a parametric or semi-parametric cause-specific hazard specification to be
+consumed by `multistatemodel`. Provide a `StatsModels` formula only when the hazard
+has covariates; when you omit it, the constructor automatically supplies the
+intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yourself.
 
-# Arguments
-- `hazard`: StatsModels.jl FormulaTerm for the log-hazard. Covariates have a multiplicative effect on the baseline cause specific hazard. Must be specified with "0 ~" on the left hand side. 
-- `family`: one of "exp", "wei", or "gom" for exponential, Weibull, or Gompertz cause-specific baseline hazard functions, or "sp" for a semi-parametric spline basis up to degree 3 for the baseline hazard.
-- `statefrom`: integer specifying the origin state.
-- `stateto`: integer specifying the destination state.
+# Positional arguments
+- `family`: "exp", "wei", "gom", or "sp" (string or symbol, case-insensitive).
+- `statefrom` / `stateto`: integers describing the transition.
+- `hazard` *(optional)*: a `StatsModels.FormulaTerm` describing covariates that act
+    multiplicatively on the baseline hazard. Skip this argument for intercept-only hazards.
 
-# Additional arguments for semiparametric baseline hazards. Splines up to degree 3 (cubic polynomials) are supported . Spline bases are constructed via a call to the BSplineKit.jl. See [the BSplineKit.jl documentation](https://jipolanco.github.io/BSplineKit.jl/stable/) for additional details. 
-- `degree`: Degree of the spline polynomial basis, defaults to 3 for a cubic polynomial basis.
-- `knots`: Vector of interior knots.
-- `boundaryknots`: Optional vector of boundary knots, defaults to the range of possible sojourn times if not supplied.
-- `extrapolation`: Either "linear" or "flat", see the BSplineKit.jl package. 
-- `natural_spline`: Restrict the second derivative to zero at the boundaries, defaults to true.
-- `knots` argument is interpreted as interior knots. 
-- `monotone`; 0, -1, or 1 for non-monotone, monotone decreasing, or monotone increasing.
+# Keyword arguments
+- `degree`, `knots`, `boundaryknots`, `natural_spline`, `extrapolation`, `monotone`:
+    spline controls used only when `family == "sp"`. See the BSplineKit docs for details.
+- `monotone`: `0` (default) leaves the spline unconstrained, `1` enforces an increasing
+    hazard, and `-1` enforces a decreasing hazard.
+- `time_transform::Bool`: enable Tang-style shared-trajectory caching for this transition.
+- `linpred_effect::Symbol`: `:ph` (default) for proportional hazards or `:aft` for
+    accelerated-failure-time behaviour.
+
+# Examples
+```julia
+julia> Hazard("exp", 1, 2)                      # intercept only
+julia> Hazard(@formula(0 ~ age + trt), "wei", 1, 3)
+julia> @hazard begin                             # macro front-end uses the same rules
+                     family = :gom
+                     transition = 2 => 4
+                     formula = @formula(0 ~ stage)
+             end
+```
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Float64, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, natural_spline = true, extrapolation = "linear", monotone = 0)
+function Hazard(
+    hazard::StatsModels.FormulaTerm,
+    family::Union{AbstractString,Symbol},
+    statefrom::Int64,
+    stateto::Int64;
+    degree::Int64 = 3,
+    knots::Union{Vector{Float64}, Float64, Nothing} = nothing,
+    boundaryknots::Union{Vector{Float64}, Nothing} = nothing,
+    natural_spline = true,
+    extrapolation = "linear",
+    monotone = 0,
+    time_transform::Bool = false,
+    linpred_effect::Symbol = :ph)
 
-    if family != "sp"
-        h = ParametricHazard(hazard, family, statefrom, stateto)
+    metadata = HazardMetadata(time_transform = time_transform, linpred_effect = linpred_effect)
+    family_str = family isa String ? family : String(family)
+    family_key = lowercase(family_str)
+
+    if family_key != "sp"
+        h = ParametricHazard(hazard, family_key, statefrom, stateto, metadata)
     else 
         if natural_spline & (monotone != 0)
             @info "Natural boundary conditions are not currently compatible with monotone splines. The restrictions on second derivatives at the spline boundaries will be removed."
@@ -32,16 +74,28 @@ function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int6
         extrapolation = degree > 0 ? extrapolation : "flat"
         natural_spline = degree < 2 ? false : natural_spline
 
-        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots, boundaryknots, extrapolation, natural_spline, sign(monotone))
+        h = SplineHazard(hazard, family_key, statefrom, stateto, degree, knots, boundaryknots, extrapolation, natural_spline, sign(monotone), metadata)
     end
 
     return h
 end
 
-"""
-    enumerate_hazards(hazards::Hazard...)
+function Hazard(
+    family::Union{AbstractString,Symbol},
+    statefrom::Integer,
+    stateto::Integer;
+    kwargs...)
+    family_str = family isa String ? family : String(family)
+    return Hazard(_DEFAULT_HAZARD_FORMULA, family_str, Int(statefrom), Int(stateto); kwargs...)
+end
 
-Generate a matrix whose columns record the origin state, destination state, and transition number for a collection of hazards. The hazards are reordered by origin state, then by destination state. `hazards::Hazard...` is an iterable collection of user-supplied `Hazard` objects.
+"""
+    enumerate_hazards(hazards::HazardFunction...)
+
+Standardise a collection of `Hazard`/`@hazard` definitions. The result is a
+`DataFrame` with columns `statefrom`, `stateto`, `trans`, and `order`, sorted by
+origin and destination so downstream helpers (e.g. `create_tmat`) can rely on a
+stable ordering. Duplicate transitions (same origin/destination pair) raise an error.
 """
 function enumerate_hazards(hazards::HazardFunction...)
 
@@ -79,7 +133,9 @@ end
 """
     create_tmat(hazinfo::DataFrame)
 
-Generate a matrix enumerating instantaneous transitions. Origin states correspond to rows, destination states to columns, and zero entries indicate that an instantaneous state transition is not possible. Transitions are enumerated in non-zero elements of the matrix. `hazinfo` is the output of a call to `enumerate_hazards`.
+Create the familiar transition matrix that `multistatemodel` expects. Rows are
+origin states, columns are destination states, zeros mark impossible transitions,
+and the positive entries are the transition numbers assigned by `enumerate_hazards`.
 """
 function create_tmat(hazinfo::DataFrame)
     
@@ -106,28 +162,23 @@ PHASE 2: Consolidated build_hazards with Runtime Functions
 =============================================================================# 
 
 """
-    build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = false)
+        build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate::Bool = false)
 
-**PHASE 2 VERSION** - Build consolidated hazard structs with runtime-generated functions.
+Instantiate runtime hazard objects from the symbolic specifications produced by
+`Hazard` or `@hazard`. This attaches the relevant design matrices, builds the
+baseline parameter containers, and returns everything needed by `multistatemodel`.
 
-Creates one of 3 hazard types (MarkovHazard, SemiMarkovHazard, SplineHazard) instead of 8.
-Hazard structs no longer contain data - they store runtime-generated functions instead.
-Parameters managed via ParameterHandling.jl with positive() transformation.
+# Arguments
+- `hazards`: one or more hazard specifications. Formula arguments are optional for
+    intercept-only transitions, matching the `Hazard` constructor semantics.
+- `data`: `DataFrame` containing the covariates referenced by the hazard formulas.
+- `surrogate`: when `true`, force exponential baselines (useful for MCEM surrogates).
 
 # Returns
-- `_hazards`: Vector of consolidated hazard structs (callable)
-- `parameters`: Legacy VectorOfVectors (for compatibility)
-- `parameters_ph`: NamedTuple with (flat, transformed, natural, unflatten) - **Phase 3 addition**
-- `hazkeys`: Dict mapping hazard names to indices
-
-# Changes from Phase 1
-- No data stored in hazard structs
-- Runtime-generated functions for hazard/cumulative hazard
-- Consolidated 8 types → 3 types
-- Direct callable interface: hazard(t, pars, covars)
-
-# Phase 3 Update
-- Now returns `parameters_ph` as third output for ParameterHandling integration
+1. `_hazards`: callable hazard objects used internally by the simulator/likelihood.
+2. `parameters`: legacy nested vector of parameters for backwards compatibility.
+3. `parameters_ph`: the ParameterHandling.jl view (flat, natural, transforms, etc.).
+4. `hazkeys`: dictionary mapping hazard names (e.g. `:h12`) to indices in `_hazards`.
 """
 function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = false)
     
@@ -143,9 +194,23 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
         hazname = "h" * string(hazards[h].statefrom) * string(hazards[h].stateto)
         merge!(hazkeys, Dict(Symbol(hazname) => h))
 
+        metadata = hazards[h].metadata
+
         # Parse formula and create design matrix
         hazschema = apply_schema(hazards[h].hazard, StatsModels.schema(hazards[h].hazard, data))
+        has_explicit_intercept = _hazard_formula_has_intercept(hazschema.rhs)
         hazdat = modelcols(hazschema, data)[2]
+
+        if !has_explicit_intercept
+            n_obs = size(hazdat, 1)
+            coltype = eltype(hazdat)
+            intercept_col = coltype === Any ? ones(n_obs) : ones(coltype, n_obs)
+            hazdat = hcat(intercept_col, hazdat)
+        end
+
+        coef_names = StatsModels.coefnames(hazschema.rhs)
+        coef_names_vec = coef_names isa AbstractVector ? collect(coef_names) : [coef_names]
+        rhs_names_vec = has_explicit_intercept ? coef_names_vec : vcat("(Intercept)", coef_names_vec)
         
         # Determine family (use surrogate exponential if requested)
         family = surrogate ? "exp" : hazards[h].family 
@@ -154,6 +219,8 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
         has_covariates = size(hazdat, 2) > 1
         ncovar = size(hazdat, 2) - 1
         
+        shared_key = shared_baseline_key(hazards[h], family)
+
         # Build hazard struct based on family
         if family == "exp"
             # EXPONENTIAL: Markov process
@@ -165,27 +232,11 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             push!(parameters, hazpars)
             
             # Parameter names - extract from formula terms, not from data
-            # Get the right-hand side terms from the formula
-            formula_rhs = hazards[h].hazard.rhs
-            if formula_rhs isa StatsModels.ConstantTerm
-                # Intercept-only model
-                rhs_names_vec = ["Intercept"]
-            else
-                # Extract term names from the formula (before data is applied)
-                rhs_terms = StatsModels.termvars(formula_rhs)
-                if isempty(rhs_terms)
-                    # Just intercept
-                    rhs_names_vec = ["Intercept"]
-                else
-                    # Has covariates
-                    rhs_names_vec = ["Intercept"; String.(rhs_terms)]
-                end
-            end
             parnames = replace.(hazname * "_" .* rhs_names_vec, "(Intercept)" => "Intercept")
             parnames = Symbol.(parnames)
             
             # Generate runtime functions with name-based covariate matching
-            hazard_fn, cumhaz_fn = generate_exponential_hazard(has_covariates, parnames)
+            hazard_fn, cumhaz_fn = generate_exponential_hazard(parnames, metadata.linpred_effect)
             
             # Create consolidated struct
             haz_struct = MarkovHazard(
@@ -198,7 +249,9 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                 npar_total,
                 hazard_fn,
                 cumhaz_fn,
-                has_covariates
+                has_covariates,
+                metadata,
+                shared_key
             )
             
         elseif family == "wei"
@@ -211,20 +264,9 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             push!(parameters, hazpars)
             
             # Parameter names - extract from formula terms directly
-            formula_rhs = hazards[h].hazard.rhs
-            if formula_rhs isa StatsModels.ConstantTerm
-                rhs_names_vec = ["Intercept"]
-            else
-                rhs_terms = StatsModels.termvars(formula_rhs)
-                if isempty(rhs_terms)
-                    rhs_names_vec = ["Intercept"]
-                else
-                    rhs_names_vec = ["Intercept"; String.(rhs_terms)]
-                end
-            end
-            
             if !has_covariates
                 parnames = replace.(vec(hazname * "_" .* ["shape" "scale"] .* "_" .* rhs_names_vec), "_(Intercept)" => "")
+                parnames = replace.(parnames, "_Intercept" => "")
             else
                 parnames = vcat(
                     hazname * "_shape",
@@ -234,7 +276,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             parnames = Symbol.(parnames)
             
             # Generate runtime functions with name-based covariate matching
-            hazard_fn, cumhaz_fn = generate_weibull_hazard(has_covariates, parnames)
+            hazard_fn, cumhaz_fn = generate_weibull_hazard(parnames, metadata.linpred_effect)
             
             # Create consolidated struct
             haz_struct = SemiMarkovHazard(
@@ -247,7 +289,9 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                 npar_total,
                 hazard_fn,
                 cumhaz_fn,
-                has_covariates
+                has_covariates,
+                metadata,
+                shared_key
             )
             
         elseif family == "gom"
@@ -260,20 +304,9 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             push!(parameters, hazpars)
             
             # Parameter names - extract from formula terms directly
-            formula_rhs = hazards[h].hazard.rhs
-            if formula_rhs isa StatsModels.ConstantTerm
-                rhs_names_vec = ["Intercept"]
-            else
-                rhs_terms = StatsModels.termvars(formula_rhs)
-                if isempty(rhs_terms)
-                    rhs_names_vec = ["Intercept"]
-                else
-                    rhs_names_vec = ["Intercept"; String.(rhs_terms)]
-                end
-            end
-            
             if !has_covariates
                 parnames = replace.(vec(hazname * "_" .* ["shape" "scale"] .* "_" .* rhs_names_vec), "_(Intercept)" => "")
+                parnames = replace.(parnames, "_Intercept" => "")
             else
                 parnames = vcat(
                     hazname * "_shape",
@@ -283,7 +316,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
             parnames = Symbol.(parnames)
             
             # Generate runtime functions with name-based covariate matching
-            hazard_fn, cumhaz_fn = generate_gompertz_hazard(has_covariates, parnames)
+            hazard_fn, cumhaz_fn = generate_gompertz_hazard(parnames, metadata.linpred_effect)
             
             # Create consolidated struct
             haz_struct = SemiMarkovHazard(
@@ -296,7 +329,9 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
                 npar_total,
                 hazard_fn,
                 cumhaz_fn,
-                has_covariates
+                has_covariates,
+                metadata,
+                shared_key
             )
             
         elseif family == "sp"
@@ -405,9 +440,12 @@ function build_totalhazards(_hazards, tmat)
 end
 
 """
-    build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64})
+    build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64}, tmat::Matrix{Int64})
 
-Generate a matrix enumerating instantaneous transitions. Origin states correspond to rows, destination states to columns, and zero entries indicate that an instantaneous state transition is not possible. Transitions are enumerated in non-zero elements of the matrix. `hazinfo` is the output of a call to `enumerate_hazards`.
+Create the emission matrix used by the forward–backward routines. Each row
+corresponds to an observation; columns correspond to latent states. The helper
+marks which states are compatible with each observation or censoring code using
+`CensoringPatterns` (if provided) and the transition structure `tmat`.
 """
 function build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64}, tmat::Matrix{Int64})
     
@@ -432,7 +470,15 @@ end
 """
     multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights = nothing, CensoringPatterns = nothing, verbose = false)
 
-Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference. Optional keyword arguments specified in kwargs may include sampling weights and censoring patterns.
+Construct a full multistate model from a collection of hazards defined via `Hazard`
+or `@hazard`. Hazards without covariates can omit a `@formula` entirely; the helper
+will insert the intercept-only design automatically as described in `Hazard`'s docs.
+
+# Keywords
+- `data`: long-format `DataFrame` with at least `:subject`, `:statefrom`, `:stateto`, `:time`, `:obstype`.
+- `SamplingWeights`: optional per-subject weights.
+- `CensoringPatterns`: optional matrix describing which states are compatible with each censoring code.
+- `verbose`: print additional validation output.
 """
 function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights::Union{Nothing,Vector{Float64}} = nothing, CensoringPatterns::Union{Nothing,Matrix{Int64}} = nothing, verbose = false) 
 

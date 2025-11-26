@@ -3,6 +3,20 @@
 ########################################################
 
 ### Exactly observed sample paths ----------------------
+@inline function _time_transform_enabled(totalhazard::_TotalHazard, hazards::Vector{<:_Hazard})
+    if totalhazard isa _TotalHazardAbsorbing
+        return false
+    end
+
+    for idx in totalhazard.components
+        if hazards[idx].metadata.time_transform
+            return true
+        end
+    end
+
+    return false
+end
+
 """
     loglik_path(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard}, totalhazards::Vector{<:_TotalHazard}, tmat::Array{Int,2})
 
@@ -19,12 +33,26 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
 
      # initialize log likelihood
      ll = 0.0
+
+    tt_context = maybe_time_transform_context(pars, subjectdata, hazards)
  
      # recurse through the sample path
      for i in Base.OneTo(nrow(subjectdata))
 
         # accumulate survival probabilty
-        ll += survprob(subjectdata.sojourn[i], subjectdata.sojourn[i] + subjectdata.increment[i], pars, subjectdata[i, :], totalhazards[subjectdata.statefrom[i]], hazards; give_log = true)
+        origin_state = subjectdata.statefrom[i]
+        use_transform = _time_transform_enabled(totalhazards[origin_state], hazards)
+
+        ll += survprob(
+            subjectdata.sojourn[i],
+            subjectdata.sojourn[i] + subjectdata.increment[i],
+            pars,
+            subjectdata[i, :],
+            totalhazards[origin_state],
+            hazards;
+            give_log = true,
+            apply_transform = use_transform,
+            cache_context = tt_context)
  
         # accumulate hazard if there is a transition
         if subjectdata.statefrom[i] != subjectdata.stateto[i]
@@ -34,7 +62,15 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
 
             # log hazard at time of transition
             # Pass the DataFrame row for new hazard types (with name-based covariate matching)
-            ll += call_haz(subjectdata.sojourn[i] + subjectdata.increment[i], pars[transind], subjectdata[i, :], hazards[transind]; give_log = true)
+            ll += call_haz(
+                subjectdata.sojourn[i] + subjectdata.increment[i],
+                pars[transind],
+                subjectdata[i, :],
+                hazards[transind];
+                give_log = true,
+                apply_transform = hazards[transind].metadata.time_transform,
+                cache_context = tt_context,
+                hazard_slot = transind)
         end
      end
  
@@ -189,10 +225,22 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
             for i in subj_inds
                 if data.model.data.obstype[i] == 1 # exact data
                     
-                    subj_ll += survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[data.model.data.statefrom[i]], data.model.hazards; give_log = true)
+                    subj_ll += survprob(
+                        0,
+                        data.model.data.tstop[i] - data.model.data.tstart[i],
+                        pars,
+                        i,
+                        data.model.totalhazards[data.model.data.statefrom[i]],
+                        data.model.hazards;
+                        give_log = true)
                                         
                     if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
-                        subj_ll += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]], i, data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]]; give_log = true)
+                        subj_ll += call_haz(
+                            data.model.data.tstop[i] - data.model.data.tstart[i],
+                            pars[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]],
+                            i,
+                            data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]];
+                            give_log = true)
                     end
 
                 else # panel data
@@ -230,12 +278,24 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
                             q[r,r] = 0.0
                         else
                             # survival probability
-                            q[r, findall(data.model.tmat[r,:] .!= 0)] .= survprob(0, data.model.data.tstop[i] - data.model.data.tstart[i], pars, i, data.model.totalhazards[r], data.model.hazards; give_log = true) 
+                            q[r, findall(data.model.tmat[r,:] .!= 0)] .= survprob(
+                                0,
+                                data.model.data.tstop[i] - data.model.data.tstart[i],
+                                pars,
+                                i,
+                                data.model.totalhazards[r],
+                                data.model.hazards;
+                                give_log = true) 
                             
                             # hazard
                             for s in 1:S
                                 if (s != r) & (data.model.tmat[r,s] != 0)
-                                    q[r, s] += call_haz(data.model.data.tstop[i] - data.model.data.tstart[i], pars[data.model.tmat[r, s]], i, data.model.hazards[data.model.tmat[r, s]]; give_log = true)
+                                    q[r, s] += call_haz(
+                                        data.model.data.tstop[i] - data.model.data.tstart[i],
+                                        pars[data.model.tmat[r, s]],
+                                        i,
+                                        data.model.hazards[data.model.tmat[r, s]];
+                                        give_log = true)
                                 end
                             end
                         end

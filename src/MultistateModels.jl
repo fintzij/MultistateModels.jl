@@ -46,6 +46,8 @@ export
     cumulative_incidence,
     draw_paths,
     estimate_loglik,
+    enable_time_transform_cache!,
+    maybe_time_transform_context,
     fit,
     fit_surrogate,
     get_convergence_records,
@@ -58,6 +60,7 @@ export
     get_parnames,
     get_vcov,
     Hazard,
+    @hazard,
     initialize_parameters,
     initialize_parameters!,
     initialize_surrogate!,
@@ -99,6 +102,9 @@ include("modelfitting.jl")
 
 # model generation
 include("modelgeneration.jl")
+
+# declarative macros
+include("macros.jl")
 
 # model output
 include("modeloutput.jl")

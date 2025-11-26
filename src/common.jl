@@ -28,9 +28,150 @@ Abstract type for total hazards.
 """
 abstract type _TotalHazard end
 
-#=============================================================================
-PHASE 2: Consolidated Hazard Types (3 types instead of 8)
-=============================================================================# 
+# =============================================================================
+# Hazard metadata shared across analytic families
+# ============================================================================= #
+
+const _VALID_LINPRED_EFFECTS = (:ph, :aft)
+
+struct HazardMetadata
+    time_transform::Bool
+    linpred_effect::Symbol
+    function HazardMetadata(time_transform::Bool, linpred_effect::Symbol)
+        effect = Symbol(linpred_effect)
+        effect in _VALID_LINPRED_EFFECTS ||
+            throw(ArgumentError("linpred_effect must be one of $(_VALID_LINPRED_EFFECTS), got $(linpred_effect)."))
+        return new(time_transform, effect)
+    end
+end
+
+HazardMetadata(; time_transform::Bool = false, linpred_effect::Symbol = :ph) =
+    HazardMetadata(time_transform, linpred_effect)
+
+struct TangHazardKey{LinType,TimeType}
+    linpred::LinType
+    t::TimeType
+end
+
+struct TangCumulKey{LinType,TimeType}
+    linpred::LinType
+    lb::TimeType
+    ub::TimeType
+end
+
+function Base.:(==)(a::TangHazardKey, b::TangHazardKey)
+    return a.linpred == b.linpred && a.t == b.t
+end
+
+function Base.hash(a::TangHazardKey, h::UInt)
+    return hash(a.t, hash(a.linpred, h))
+end
+
+function Base.:(==)(a::TangCumulKey, b::TangCumulKey)
+    return a.linpred == b.linpred && a.lb == b.lb && a.ub == b.ub
+end
+
+function Base.hash(a::TangCumulKey, h::UInt)
+    return hash(a.ub, hash(a.lb, hash(a.linpred, h)))
+end
+
+mutable struct TimeTransformCache{LinType,TimeType}
+    hazard_values::Dict{TangHazardKey{LinType,TimeType}, LinType}
+    cumulhaz_values::Dict{TangCumulKey{LinType,TimeType}, LinType}
+end
+
+function TimeTransformCache(::Type{LinType}, ::Type{TimeType}) where {LinType,TimeType}
+    hazard_values = Dict{TangHazardKey{LinType,TimeType}, LinType}()
+    cumulhaz_values = Dict{TangCumulKey{LinType,TimeType}, LinType}()
+    return TimeTransformCache{LinType,TimeType}(hazard_values, cumulhaz_values)
+end
+
+"""
+    SharedBaselineKey
+
+Composite key describing a Tang-style shared baseline. Multiple hazards can share a
+trajectory cache when both the origin state and the hashed baseline specification
+match. The `baseline_signature` is a deterministic hash of spline degree, knot
+locations, and any other parameters that influence α(t).
+"""
+struct SharedBaselineKey
+    statefrom::Int
+    baseline_signature::UInt64
+end
+
+"""
+    SharedBaselineTable
+
+Top-level registry for Tang shared trajectories. Maps `SharedBaselineKey`s to
+`TimeTransformCache` instances that are shared by every hazard leaving a given
+state when their baselines match.
+"""
+mutable struct SharedBaselineTable{LinType,TimeType}
+    caches::Dict{SharedBaselineKey, TimeTransformCache{LinType,TimeType}}
+end
+
+function SharedBaselineTable(::Type{LinType}, ::Type{TimeType}) where {LinType,TimeType}
+    caches = Dict{SharedBaselineKey, TimeTransformCache{LinType,TimeType}}()
+    return SharedBaselineTable{LinType,TimeType}(caches)
+end
+
+mutable struct TimeTransformContext{LinType,TimeType}
+    caches::Vector{Union{Nothing,TimeTransformCache{LinType,TimeType}}}
+    shared_baselines::SharedBaselineTable{LinType,TimeType}
+end
+
+function TimeTransformContext(::Type{LinType}, ::Type{TimeType}, nhazards::Integer) where {LinType,TimeType}
+    caches = Vector{Union{Nothing,TimeTransformCache{LinType,TimeType}}}(undef, nhazards)
+    fill!(caches, nothing)
+    shared_baselines = SharedBaselineTable(LinType, TimeType)
+    return TimeTransformContext{LinType,TimeType}(caches, shared_baselines)
+end
+
+@inline function _time_column_eltype(time_data)
+    time_data === nothing && return Float64
+    if time_data isa AbstractVector
+        return Base.nonmissingtype(eltype(time_data))
+    else
+        return Base.nonmissingtype(typeof(time_data))
+    end
+end
+
+"""
+    maybe_time_transform_context(pars, subjectdata, hazards; time_column = :sojourn)
+
+Return a `TimeTransformContext` when Tang transforms are enabled for at least one
+hazard and caching remains active. Callers may override `time_column` when the
+relevant observation durations live under a different column name. When no
+hazards opt into time transforms (or caching is globally disabled), the
+function returns `nothing` so downstream code can skip the shared-cache branch.
+"""
+function maybe_time_transform_context(pars,
+                                      subjectdata,
+                                      hazards::Vector{<:_Hazard};
+                                      time_column::Symbol = :sojourn)
+    _time_transform_cache_enabled() || return nothing
+    idx = findfirst(h -> h.metadata.time_transform, hazards)
+    idx === nothing && return nothing
+
+    lin_type = eltype(pars[idx])
+    time_data = (subjectdata !== nothing && hasproperty(subjectdata, time_column)) ?
+        getproperty(subjectdata, time_column) : nothing
+    time_type = _time_column_eltype(time_data)
+    return TimeTransformContext(lin_type, time_type, length(hazards))
+end
+
+const _TIME_TRANSFORM_CACHE_ENABLED = Ref(true)
+
+function enable_time_transform_cache!(flag::Bool)
+    _TIME_TRANSFORM_CACHE_ENABLED[] = flag
+    return _TIME_TRANSFORM_CACHE_ENABLED[]
+end
+
+_time_transform_cache_enabled() = _TIME_TRANSFORM_CACHE_ENABLED[]
+
+# =============================================================================
+# PHASE 2: Consolidated Hazard Types (3 types instead of 8)
+# ============================================================================= #
 
 """
     MarkovHazard
@@ -49,6 +190,8 @@ Supports exponential family hazards with optional covariates.
 - `hazard_fn`: Runtime-generated hazard function (t, pars, covars) -> Float64
 - `cumhaz_fn`: Runtime-generated cumulative hazard function
 - `has_covariates::Bool`: Whether covariates are present
+- `metadata::HazardMetadata`: Tang/linpred metadata
+- `shared_baseline_key::Union{Nothing,SharedBaselineKey}`: identifies Tang-sharable baselines
 """
 struct MarkovHazard <: _MarkovHazard
     hazname::Symbol
@@ -61,6 +204,8 @@ struct MarkovHazard <: _MarkovHazard
     hazard_fn::Function
     cumhaz_fn::Function
     has_covariates::Bool
+    metadata::HazardMetadata
+    shared_baseline_key::Union{Nothing,SharedBaselineKey}
 end
 
 """
@@ -80,6 +225,8 @@ Supports Weibull and Gompertz families with optional covariates.
 - `hazard_fn`: Runtime-generated hazard function (t, pars, covars) -> Float64
 - `cumhaz_fn`: Runtime-generated cumulative hazard function
 - `has_covariates::Bool`: Whether covariates are present
+- `metadata::HazardMetadata`: Tang/linpred metadata
+- `shared_baseline_key::Union{Nothing,SharedBaselineKey}`
 """
 struct SemiMarkovHazard <: _SemiMarkovHazard
     hazname::Symbol
@@ -92,6 +239,8 @@ struct SemiMarkovHazard <: _SemiMarkovHazard
     hazard_fn::Function
     cumhaz_fn::Function
     has_covariates::Bool
+    metadata::HazardMetadata
+    shared_baseline_key::Union{Nothing,SharedBaselineKey}
 end
 
 """
@@ -115,6 +264,8 @@ Uses B-spline basis functions for flexible baseline hazard.
 - `knots::Vector{Float64}`: Knot locations
 - `natural_spline::Bool`: Natural spline constraint
 - `monotone::Int64`: Monotonicity constraint (0, -1, 1)
+- `metadata::HazardMetadata`: Tang/linpred metadata
+- `shared_baseline_key::Union{Nothing,SharedBaselineKey}`
 end
 """
 struct SplineHazard <: _SplineHazard
@@ -132,11 +283,13 @@ struct SplineHazard <: _SplineHazard
     knots::Vector{Float64}
     natural_spline::Bool
     monotone::Int64
+    metadata::HazardMetadata
+    shared_baseline_key::Union{Nothing,SharedBaselineKey}
 end
 
-#=============================================================================
-OLD HAZARD TYPES (Will be deprecated after Phase 2)
-=============================================================================#
+# =============================================================================
+# OLD HAZARD TYPES (Will be deprecated after Phase 2)
+# ============================================================================= #
 
 """
 Abstract type for multistate process.
@@ -169,6 +322,7 @@ struct ParametricHazard <: HazardFunction
     family::String     # one of "exp", "wei", "gom"
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
+    metadata::HazardMetadata
 end
 
 """
@@ -200,6 +354,57 @@ struct SplineHazard <: HazardFunction
     extrapolation::String
     natural_spline::Bool
     monotone::Int64
+    metadata::HazardMetadata
+end
+
+# -----------------------------------------------------------------------------
+# Baseline signature helpers (Tang shared trajectories)
+# -----------------------------------------------------------------------------
+
+@inline _hashable_tuple(x::Nothing) = nothing
+@inline _hashable_tuple(x::AbstractVector) = Tuple(x)
+@inline _hashable_tuple(x) = x
+
+baseline_signature(::HazardFunction, ::AbstractString) = nothing
+
+function baseline_signature(h::ParametricHazard, runtime_family::AbstractString)
+    parts = (:parametric, Symbol(runtime_family))
+    return UInt64(hash(parts))
+end
+
+function baseline_signature(h::SplineHazard, runtime_family::AbstractString)
+    if runtime_family != "sp"
+        return UInt64(hash((:parametric, Symbol(runtime_family))))
+    end
+    knots_repr = _hashable_tuple(h.knots)
+    boundary_repr = _hashable_tuple(h.boundaryknots)
+    parts = (
+        :spline,
+        Symbol(runtime_family),
+        h.degree,
+        knots_repr,
+        boundary_repr,
+        Symbol(h.extrapolation),
+        h.natural_spline,
+        h.monotone,
+    )
+    return UInt64(hash(parts))
+end
+
+shared_baseline_key(::HazardFunction, ::AbstractString) = nothing
+
+function shared_baseline_key(h::ParametricHazard, runtime_family::AbstractString)
+    h.metadata.time_transform || return nothing
+    sig = baseline_signature(h, runtime_family)
+    sig === nothing && return nothing
+    return SharedBaselineKey(h.statefrom, sig)
+end
+
+function shared_baseline_key(h::SplineHazard, runtime_family::AbstractString)
+    h.metadata.time_transform || return nothing
+    sig = baseline_signature(h, runtime_family)
+    sig === nothing && return nothing
+    return SharedBaselineKey(h.statefrom, sig)
 end
 
 """

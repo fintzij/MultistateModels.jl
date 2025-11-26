@@ -63,6 +63,25 @@ parnames = [:h12_Intercept, :h12_age, :h12_trt]
 extract_covariates(row, parnames)  # Returns (age=50, trt=1)
 ```
 """
+function _lookup_covariate_value(subjdat::Union{DataFrameRow,DataFrame}, cname::Symbol)
+    if hasproperty(subjdat, cname)
+        return subjdat[cname]
+    end
+
+    cname_str = String(cname)
+    if occursin("&", cname_str)
+        parts = split(cname_str, "&")
+        vals = (_lookup_covariate_value(subjdat, Symbol(strip(part))) for part in parts)
+        return prod(vals)
+    elseif occursin(":", cname_str)
+        parts = split(cname_str, ":")
+        vals = (_lookup_covariate_value(subjdat, Symbol(strip(part))) for part in parts)
+        return prod(vals)
+    else
+        throw(ArgumentError("Covariate $(cname) is not present in the data row."))
+    end
+end
+
 function extract_covariates(subjdat::Union{DataFrameRow,DataFrame}, parnames::Vector{Symbol})
     covar_names = extract_covar_names(parnames)
     
@@ -79,135 +98,240 @@ function extract_covariates(subjdat::Union{DataFrameRow,DataFrame}, parnames::Ve
         subjdat_row = subjdat
     end
     
-    values = Tuple(subjdat_row[cname] for cname in covar_names)
+    values = Tuple(_lookup_covariate_value(subjdat_row, cname) for cname in covar_names)
     return NamedTuple{Tuple(covar_names)}(values)
 end
 
+@inline function _linear_predictor(pars::AbstractVector, covars::NamedTuple, hazard::_Hazard)
+    hazard.has_covariates || return zero(eltype(pars))
+    covar_names = extract_covar_names(hazard.parnames)
+    offset = hazard.npar_baseline
+    linpred = zero(eltype(pars))
+    for (i, cname) in enumerate(covar_names)
+        val = getproperty(covars, cname)
+        coeff = pars[offset + i]
+        linpred += coeff * val
+    end
+    return linpred
+end
+
+@inline function _ensure_transform_supported(hazard::_Hazard)
+    hazard.metadata.time_transform || return
+    if hazard isa SplineHazard
+        throw(ArgumentError("time_transform=true is not yet supported for spline hazards"))
+    end
+end
+
+@inline function _time_transform_cache(context::TimeTransformContext{LinType,TimeType}, hazard_slot::Int) where {LinType,TimeType}
+    cache = context.caches[hazard_slot]
+    if cache === nothing
+        cache = TimeTransformCache(LinType, TimeType)
+        context.caches[hazard_slot] = cache
+    end
+    return cache
+end
+
+@inline function _shared_or_local_cache(context::TimeTransformContext{LinType,TimeType}, hazard_slot::Int, hazard::_Hazard) where {LinType,TimeType}
+    key = hazard.shared_baseline_key
+    if key === nothing
+        return _time_transform_cache(context, hazard_slot)
+    end
+
+    return get!(context.shared_baselines.caches, key) do
+        TimeTransformCache(LinType, TimeType)
+    end
+end
+
+@inline function _hazard_cache_key(cache::TimeTransformCache{LinType,TimeType}, linpred, t) where {LinType,TimeType}
+    return TangHazardKey{LinType,TimeType}(convert(LinType, linpred), convert(TimeType, t))
+end
+
+@inline function _cumul_cache_key(cache::TimeTransformCache{LinType,TimeType}, linpred, lb, ub) where {LinType,TimeType}
+    return TangCumulKey{LinType,TimeType}(convert(LinType, linpred), convert(TimeType, lb), convert(TimeType, ub))
+end
+
+@inline function _time_transform_hazard(hazard::MarkovHazard, pars::AbstractVector, t::Real, linpred::Real)
+    _ = t
+    if hazard.metadata.linpred_effect == :aft
+        return exp(pars[1] - linpred)
+    else
+        return exp(pars[1] + linpred)
+    end
+end
+
+@inline function _time_transform_cumhaz(hazard::MarkovHazard, pars::AbstractVector, lb::Real, ub::Real, linpred::Real)
+    rate = _time_transform_hazard(hazard, pars, ub, linpred)
+    return rate * (ub - lb)
+end
+
+@inline function _time_transform_hazard_weibull(pars::AbstractVector, linpred::Real, effect::Symbol, t::Real)
+    log_shape, log_scale = pars[1], pars[2]
+    shape = exp(log_shape)
+    scale = exp(log_scale)
+    base = log(scale) + log(shape) + (shape - 1) * log(t)
+    if effect == :aft
+        return exp(base - shape * linpred)
+    else
+        return exp(base + linpred)
+    end
+end
+
+@inline function _time_transform_cumhaz_weibull(pars::AbstractVector, linpred::Real, effect::Symbol, lb::Real, ub::Real)
+    log_shape, log_scale = pars[1], pars[2]
+    shape = exp(log_shape)
+    scale = exp(log_scale)
+    base = scale * (ub^shape - lb^shape)
+    if effect == :aft
+        return base * exp(-shape * linpred)
+    else
+        return base * exp(linpred)
+    end
+end
+
+@inline function _gompertz_baseline_cumhaz(shape::Float64, scale::Float64, lb::Real, ub::Real)
+    if abs(shape) < 1e-10
+        return scale * (ub - lb)
+    else
+        return scale * (exp(shape * ub) - exp(shape * lb))
+    end
+end
+
+@inline function _time_transform_hazard_gompertz(pars::AbstractVector, linpred::Real, effect::Symbol, t::Real)
+    log_shape, log_scale = pars[1], pars[2]
+    shape = exp(log_shape)
+    scale = exp(log_scale)
+    if effect == :aft
+        time_scale = exp(-linpred)
+        scaled_shape = shape * time_scale
+        return exp(log(scale) + log(shape) + log(time_scale) + scaled_shape * t)
+    else
+        return exp(log_scale + log_shape + shape * t + linpred)
+    end
+end
+
+@inline function _time_transform_cumhaz_gompertz(pars::AbstractVector, linpred::Real, effect::Symbol, lb::Real, ub::Real)
+    log_shape, log_scale = pars[1], pars[2]
+    shape = exp(log_shape)
+    scale = exp(log_scale)
+    if effect == :aft
+        time_scale = exp(-linpred)
+        scaled_shape = shape * time_scale
+        if abs(scaled_shape) < 1e-10
+            return scale * time_scale * (ub - lb)
+        else
+            return scale * (exp(scaled_shape * ub) - exp(scaled_shape * lb))
+        end
+    else
+        base = _gompertz_baseline_cumhaz(shape, scale, lb, ub)
+        return base * exp(linpred)
+    end
+end
+
+@inline function _time_transform_hazard(hazard::SemiMarkovHazard, pars::AbstractVector, t::Real, linpred::Real)
+    family = hazard.family
+    if family == "wei"
+        return _time_transform_hazard_weibull(pars, linpred, hazard.metadata.linpred_effect, t)
+    elseif family == "gom"
+        return _time_transform_hazard_gompertz(pars, linpred, hazard.metadata.linpred_effect, t)
+    else
+        throw(ArgumentError("time_transform=true is not implemented for family $(family)"))
+    end
+end
+
+@inline function _time_transform_cumhaz(hazard::SemiMarkovHazard, pars::AbstractVector, lb::Real, ub::Real, linpred::Real)
+    family = hazard.family
+    if family == "wei"
+        return _time_transform_cumhaz_weibull(pars, linpred, hazard.metadata.linpred_effect, lb, ub)
+    elseif family == "gom"
+        return _time_transform_cumhaz_gompertz(pars, linpred, hazard.metadata.linpred_effect, lb, ub)
+    else
+        throw(ArgumentError("time_transform=true is not implemented for family $(family)"))
+    end
+end
+
 """
-    generate_exponential_hazard(has_covariates::Bool, parnames::Vector{Symbol})
+    _build_linear_pred_expr(parnames, first_covar_index)
 
-Generate runtime function for exponential hazard with name-based covariate matching.
-
-# Arguments
-- `has_covariates`: Whether covariates are present
-- `parnames`: Vector of parameter names for name-based covariate access
-
-# Returns
-- `hazard_fn(t, pars, covars)`: Returns hazard rate on natural scale
-- `cumhaz_fn(lb, ub, pars, covars)`: Returns cumulative hazard over [lb, ub]
-
-# Parameters (LOG scale for baseline, natural scale for covariate effects)
-- Without covariates: `pars = [log_rate]`, `covars = NamedTuple()`
-  - hazard = exp(log_rate)
-- With covariates: `pars = [log_baseline, coef1, coef2, ...]`, `covars = (age=x1, trt=x2, ...)`
-  - hazard = exp(log_baseline + coef1*age + coef2*trt + ...)
+Construct an expression that evaluates the linear predictor `β'X` inside a
+runtime-generated hazard function. Falls back to zero when no covariates are
+present so analytic hazards without covariates keep working without special-casing.
 """
-function generate_exponential_hazard(has_covariates::Bool, parnames::Vector{Symbol})
-    if !has_covariates
-        # No covariates: exp(log_rate) gives constant hazard rate
+function _build_linear_pred_expr(parnames::Vector{Symbol}, first_covar_index::Int)
+    covar_names = extract_covar_names(parnames)
+    if isempty(covar_names)
+        return :(zero(eltype(pars)))
+    end
+
+    terms = Any[]
+    for (i, cname) in enumerate(covar_names)
+        idx = first_covar_index + i - 1
+        push!(terms, :(pars[$idx] * covars.$(cname)))
+    end
+
+    return length(terms) == 1 ? terms[1] : Expr(:call, :+, terms...)
+end
+
+"""
+    generate_exponential_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
+
+Generate runtime functions for exponential hazards with optional PH/AFT covariate
+effects controlled by `linpred_effect`.
+"""
+function generate_exponential_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
+    linear_pred_expr = _build_linear_pred_expr(parnames, 2)
+    if linpred_effect == :ph
         hazard_fn = @RuntimeGeneratedFunction(:(
             function(t, pars, covars)
-                return exp(pars[1])  # exp(log_rate) = rate
+                linear_pred = $linear_pred_expr
+                return exp(pars[1] + linear_pred)
             end
         ))
-        
+
         cumhaz_fn = @RuntimeGeneratedFunction(:(
             function(lb, ub, pars, covars)
-                return exp(pars[1]) * (ub - lb)  # rate * duration
+                linear_pred = $linear_pred_expr
+                return exp(pars[1] + linear_pred) * (ub - lb)
+            end
+        ))
+    elseif linpred_effect == :aft
+        hazard_fn = @RuntimeGeneratedFunction(:(
+            function(t, pars, covars)
+                linear_pred = $linear_pred_expr
+                return exp(pars[1] - linear_pred)
+            end
+        ))
+
+        cumhaz_fn = @RuntimeGeneratedFunction(:(
+            function(lb, ub, pars, covars)
+                linear_pred = $linear_pred_expr
+                return exp(pars[1] - linear_pred) * (ub - lb)
             end
         ))
     else
-        # With covariates, name-based (uses NamedTuple)
-        covar_names = extract_covar_names(parnames)
-        
-        # Build expressions for name-based access
-        # e.g., pars[2] * covars.age + pars[3] * covars.trt
-        linear_pred_terms = [:(pars[$(i+1)] * covars.$(covar_names[i])) 
-                             for i in 1:length(covar_names)]
-        linear_pred_expr = if isempty(linear_pred_terms)
-            :(zero(eltype(pars)))
-        else
-            Expr(:call, :+, linear_pred_terms...)
-        end
-        
-        hazard_fn = @RuntimeGeneratedFunction(:(
-            function(t, pars, covars)
-                log_baseline = pars[1]
-                linear_pred = $linear_pred_expr
-                return exp(log_baseline + linear_pred)
-            end
-        ))
-        
-        cumhaz_fn = @RuntimeGeneratedFunction(:(
-            function(lb, ub, pars, covars)
-                log_baseline = pars[1]
-                linear_pred = $linear_pred_expr
-                return exp(log_baseline + linear_pred) * (ub - lb)
-            end
-        ))
+        error("Unsupported linpred_effect $(linpred_effect) for exponential hazard")
     end
-    
+
     return hazard_fn, cumhaz_fn
 end
 
 """
-    generate_weibull_hazard(has_covariates::Bool, parnames::Vector{Symbol})
+    generate_weibull_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
 
-Generate runtime function for Weibull hazard with name-based covariate matching.
-
-# Arguments
-- `has_covariates`: Whether covariates are present
-- `parnames`: Vector of parameter names for name-based covariate access
-
-# Returns
-- `hazard_fn(t, pars, covars)`: Returns hazard rate at time t
-- `cumhaz_fn(lb, ub, pars, covars)`: Returns cumulative hazard over [lb, ub]
-
-# Parameters (LOG scale for shape and scale, natural scale for covariate effects)
-- Without covariates: `pars = [log_shape, log_scale]`, `covars = NamedTuple()`
-  - h(t) = shape * scale * t^(shape-1), where shape=exp(log_shape), scale=exp(log_scale)
-- With covariates: `pars = [log_shape, log_scale, coef1, coef2, ...]`, `covars = (age=x1, trt=x2, ...)`
-  - Proportional hazards on scale: h(t) = shape * t^(shape-1) * scale * exp(β'X)
+Generate runtime functions for Weibull hazards, supporting PH or AFT covariate
+effects.
 """
-function generate_weibull_hazard(has_covariates::Bool, parnames::Vector{Symbol})
-    if !has_covariates
-        # No covariates: h(t) = shape * scale * t^(shape-1)
+function generate_weibull_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
+    linear_pred_expr = _build_linear_pred_expr(parnames, 3)
+    if linpred_effect == :ph
         hazard_fn = @RuntimeGeneratedFunction(:(
             function(t, pars, covars)
-                log_shape, log_scale = pars[1], pars[2]
-                return exp(log_shape + log_scale + expm1(log_shape) * log(t))
-            end
-        ))
-        
-        cumhaz_fn = @RuntimeGeneratedFunction(:(
-            function(lb, ub, pars, covars)
                 log_shape, log_scale = pars[1], pars[2]
                 shape = exp(log_shape)
-                scale = exp(log_scale)
-                return scale * (ub^shape - lb^shape)
-            end
-        ))
-    else
-        # With covariates, name-based (uses NamedTuple)
-        covar_names = extract_covar_names(parnames)
-        
-        # Build expressions for name-based access
-        linear_pred_terms = [:(pars[$(i+2)] * covars.$(covar_names[i])) 
-                             for i in 1:length(covar_names)]
-        linear_pred_expr = if isempty(linear_pred_terms)
-            :(zero(eltype(pars)))
-        else
-            Expr(:call, :+, linear_pred_terms...)
-        end
-        
-        hazard_fn = @RuntimeGeneratedFunction(:(
-            function(t, pars, covars)
-                log_shape, log_scale = pars[1], pars[2]
                 linear_pred = $linear_pred_expr
-                return exp(log_shape + expm1(log_shape) * log(t) + log_scale + linear_pred)
+                return exp(log_scale + log_shape + (shape - 1) * log(t) + linear_pred)
             end
         ))
-        
+
         cumhaz_fn = @RuntimeGeneratedFunction(:(
             function(lb, ub, pars, covars)
                 log_shape, log_scale = pars[1], pars[2]
@@ -217,66 +341,40 @@ function generate_weibull_hazard(has_covariates::Bool, parnames::Vector{Symbol})
                 return scale * exp(linear_pred) * (ub^shape - lb^shape)
             end
         ))
-    end
-    
-    return hazard_fn, cumhaz_fn
-end
-
-"""
-    generate_gompertz_hazard(has_covariates::Bool, parnames::Vector{Symbol})
-
-Generate runtime function for Gompertz hazard with name-based covariate matching.
-
-# Arguments
-- `has_covariates`: Whether covariates are present
-- `parnames`: Vector of parameter names for name-based covariate access
-
-# Returns
-- `hazard_fn(t, pars, covars)`: Returns hazard rate at time t
-- `cumhaz_fn(lb, ub, pars, covars)`: Returns cumulative hazard over [lb, ub]
-
-# Parameters (LOG scale for shape and scale, natural scale for covariate effects)
-- Without covariates: `pars = [log_shape, log_scale]`, `covars = NamedTuple()`
-  - h(t) = scale * shape * exp(shape*t), where shape=exp(log_shape), scale=exp(log_scale)
-- With covariates: `pars = [log_shape, log_scale, coef1, coef2, ...]`, `covars = (age=x1, trt=x2, ...)`
-  - h(t) = scale * shape * exp(shape*t + β'X)
-"""
-function generate_gompertz_hazard(has_covariates::Bool, parnames::Vector{Symbol})
-    if !has_covariates
-        # No covariates: h(t) = scale * shape * exp(shape*t)
+    elseif linpred_effect == :aft
         hazard_fn = @RuntimeGeneratedFunction(:(
             function(t, pars, covars)
                 log_shape, log_scale = pars[1], pars[2]
                 shape = exp(log_shape)
-                return exp(log_scale + log_shape + shape * t)
+                linear_pred = $linear_pred_expr
+                return exp(log_scale + log_shape + (shape - 1) * log(t) - shape * linear_pred)
             end
         ))
-        
+
         cumhaz_fn = @RuntimeGeneratedFunction(:(
             function(lb, ub, pars, covars)
                 log_shape, log_scale = pars[1], pars[2]
                 shape = exp(log_shape)
                 scale = exp(log_scale)
-                if abs(shape) < 1e-10
-                    return scale * (ub - lb)
-                else
-                    return scale * (exp(shape * ub) - exp(shape * lb))
-                end
+                linear_pred = $linear_pred_expr
+                return scale * exp(-shape * linear_pred) * (ub^shape - lb^shape)
             end
         ))
     else
-        # With covariates, name-based (uses NamedTuple)
-        covar_names = extract_covar_names(parnames)
-        
-        # Build expressions for name-based access
-        linear_pred_terms = [:(pars[$(i+2)] * covars.$(covar_names[i])) 
-                             for i in 1:length(covar_names)]
-        linear_pred_expr = if isempty(linear_pred_terms)
-            :(zero(eltype(pars)))
-        else
-            Expr(:call, :+, linear_pred_terms...)
-        end
-        
+        error("Unsupported linpred_effect $(linpred_effect) for Weibull hazard")
+    end
+
+    return hazard_fn, cumhaz_fn
+end
+
+"""
+    generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
+
+Generate runtime functions for Gompertz hazards with PH/AFT covariate handling.
+"""
+function generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
+    linear_pred_expr = _build_linear_pred_expr(parnames, 3)
+    if linpred_effect == :ph
         hazard_fn = @RuntimeGeneratedFunction(:(
             function(t, pars, covars)
                 log_shape, log_scale = pars[1], pars[2]
@@ -285,7 +383,7 @@ function generate_gompertz_hazard(has_covariates::Bool, parnames::Vector{Symbol}
                 return exp(log_scale + log_shape + shape * t + linear_pred)
             end
         ))
-        
+
         cumhaz_fn = @RuntimeGeneratedFunction(:(
             function(lb, ub, pars, covars)
                 log_shape, log_scale = pars[1], pars[2]
@@ -300,8 +398,37 @@ function generate_gompertz_hazard(has_covariates::Bool, parnames::Vector{Symbol}
                 return baseline_cumhaz * exp(linear_pred)
             end
         ))
+    elseif linpred_effect == :aft
+        hazard_fn = @RuntimeGeneratedFunction(:(
+            function(t, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                shape = exp(log_shape)
+                linear_pred = $linear_pred_expr
+                time_scale = exp(-linear_pred)
+                return exp(log_scale + log_shape + shape * (t * time_scale) - linear_pred)
+            end
+        ))
+
+        cumhaz_fn = @RuntimeGeneratedFunction(:(
+            function(lb, ub, pars, covars)
+                log_shape, log_scale = pars[1], pars[2]
+                shape = exp(log_shape)
+                scale = exp(log_scale)
+                linear_pred = $linear_pred_expr
+                time_scale = exp(-linear_pred)
+                scaled_shape = shape * time_scale
+                if abs(scaled_shape) < 1e-10
+                    baseline_cumhaz = scale * time_scale * (ub - lb)
+                else
+                    baseline_cumhaz = scale * (exp(scaled_shape * ub) - exp(scaled_shape * lb))
+                end
+                return baseline_cumhaz
+            end
+        ))
+    else
+        error("Unsupported linpred_effect $(linpred_effect) for Gompertz hazard")
     end
-    
+
     return hazard_fn, cumhaz_fn
 end
 
@@ -367,43 +494,240 @@ by name using the parnames field and the provided subjdat row.
 - Both interfaces supported for backward compatibility
 """
 
-# MarkovHazard backward compatibility (with subjdat)
-function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::MarkovHazard; give_log = true)
-    covars = extract_covariates(subjdat, hazard.parnames)
-    haz = hazard(t, parameters, covars)
-    give_log ? log(haz) : haz
+function _maybe_transform_hazard(hazard::_Hazard, parameters, covars::NamedTuple, t::Real;
+                                 apply_transform::Bool,
+                                 cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                                 hazard_slot::Union{Nothing,Int}=nothing)
+    use_transform = apply_transform && hazard.metadata.time_transform
+    use_transform || return hazard(t, parameters, covars)
+
+    _ensure_transform_supported(hazard)
+    linpred = _linear_predictor(parameters, covars, hazard)
+
+    if cache_context === nothing || hazard_slot === nothing
+        return _time_transform_hazard(hazard, parameters, t, linpred)
+    end
+
+    cache = _shared_or_local_cache(cache_context, hazard_slot, hazard)
+    key = _hazard_cache_key(cache, linpred, t)
+    return get!(cache.hazard_values, key) do
+        _time_transform_hazard(hazard, parameters, t, linpred)
+    end
 end
 
-function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::MarkovHazard; give_log = true)
+function _maybe_transform_cumulhaz(hazard::_Hazard, parameters, covars::NamedTuple, lb::Real, ub::Real;
+                                   apply_transform::Bool,
+                                   cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                                   hazard_slot::Union{Nothing,Int}=nothing)
+    use_transform = apply_transform && hazard.metadata.time_transform
+    use_transform || return cumulative_hazard(hazard, lb, ub, parameters, covars)
+
+    _ensure_transform_supported(hazard)
+    linpred = _linear_predictor(parameters, covars, hazard)
+
+    if cache_context === nothing || hazard_slot === nothing
+        return _time_transform_cumhaz(hazard, parameters, lb, ub, linpred)
+    end
+
+    cache = _shared_or_local_cache(cache_context, hazard_slot, hazard)
+    key = _cumul_cache_key(cache, linpred, lb, ub)
+    return get!(cache.cumulhaz_values, key) do
+        _time_transform_cumhaz(hazard, parameters, lb, ub, linpred)
+    end
+end
+
+# MarkovHazard backward compatibility (with subjdat)
+function call_haz(t, parameters, covars::NamedTuple, hazard::MarkovHazard;
+                  give_log = true,
+                  apply_transform::Bool = false,
+                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                  hazard_slot::Union{Nothing,Int}=nothing)
+    value = _maybe_transform_hazard(
+        hazard,
+        parameters,
+        covars,
+        t;
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
+    give_log ? log(value) : value
+end
+
+function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::MarkovHazard;
+                  give_log = true,
+                  apply_transform::Bool = false,
+                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                  hazard_slot::Union{Nothing,Int}=nothing)
     covars = extract_covariates(subjdat, hazard.parnames)
-    cumhaz = cumulative_hazard(hazard, lb, ub, parameters, covars)
-    give_log ? log(cumhaz) : cumhaz
+    return call_haz(
+        t,
+        parameters,
+        covars,
+        hazard;
+        give_log = give_log,
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
+end
+
+function call_cumulhaz(lb, ub, parameters, covars::NamedTuple, hazard::MarkovHazard;
+                       give_log = true,
+                       apply_transform::Bool = false,
+                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                       hazard_slot::Union{Nothing,Int}=nothing)
+    value = _maybe_transform_cumulhaz(
+        hazard,
+        parameters,
+        covars,
+        lb,
+        ub;
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
+    give_log ? log(value) : value
+end
+
+function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::MarkovHazard;
+                       give_log = true,
+                       apply_transform::Bool = false,
+                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                       hazard_slot::Union{Nothing,Int}=nothing)
+    covars = extract_covariates(subjdat, hazard.parnames)
+    return call_cumulhaz(
+        lb,
+        ub,
+        parameters,
+        covars,
+        hazard;
+        give_log = give_log,
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
 end
 
 # SemiMarkovHazard backward compatibility (with subjdat)
-function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SemiMarkovHazard; give_log = true)
-    covars = extract_covariates(subjdat, hazard.parnames)
-    haz = hazard(t, parameters, covars)
-    give_log ? log(haz) : haz
+function call_haz(t, parameters, covars::NamedTuple, hazard::SemiMarkovHazard;
+                  give_log = true,
+                  apply_transform::Bool = false,
+                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                  hazard_slot::Union{Nothing,Int}=nothing)
+    value = _maybe_transform_hazard(
+        hazard,
+        parameters,
+        covars,
+        t;
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
+    give_log ? log(value) : value
 end
 
-function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SemiMarkovHazard; give_log = true)
+function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SemiMarkovHazard;
+                  give_log = true,
+                  apply_transform::Bool = false,
+                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                  hazard_slot::Union{Nothing,Int}=nothing)
     covars = extract_covariates(subjdat, hazard.parnames)
-    cumhaz = cumulative_hazard(hazard, lb, ub, parameters, covars)
-    give_log ? log(cumhaz) : cumhaz
+    return call_haz(
+        t,
+        parameters,
+        covars,
+        hazard;
+        give_log = give_log,
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
+end
+
+function call_cumulhaz(lb, ub, parameters, covars::NamedTuple, hazard::SemiMarkovHazard;
+                       give_log = true,
+                       apply_transform::Bool = false,
+                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                       hazard_slot::Union{Nothing,Int}=nothing)
+    value = _maybe_transform_cumulhaz(
+        hazard,
+        parameters,
+        covars,
+        lb,
+        ub;
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
+    give_log ? log(value) : value
+end
+
+function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SemiMarkovHazard;
+                       give_log = true,
+                       apply_transform::Bool = false,
+                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                       hazard_slot::Union{Nothing,Int}=nothing)
+    covars = extract_covariates(subjdat, hazard.parnames)
+    return call_cumulhaz(
+        lb,
+        ub,
+        parameters,
+        covars,
+        hazard;
+        give_log = give_log,
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
 end
 
 # SplineHazard backward compatibility (with subjdat)
-function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SplineHazard; give_log = true)
-    covars = extract_covariates(subjdat, hazard.parnames)
-    haz = hazard(t, parameters, covars)
-    give_log ? log(haz) : haz
+function call_haz(t, parameters, covars::NamedTuple, hazard::SplineHazard;
+                  give_log = true,
+                  apply_transform::Bool = false,
+                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                  hazard_slot::Union{Nothing,Int}=nothing)
+    apply_transform && _ensure_transform_supported(hazard)
+    value = hazard(t, parameters, covars)
+    give_log ? log(value) : value
 end
 
-function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SplineHazard; give_log = true)
+function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SplineHazard;
+                  give_log = true,
+                  apply_transform::Bool = false,
+                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                  hazard_slot::Union{Nothing,Int}=nothing)
     covars = extract_covariates(subjdat, hazard.parnames)
-    cumhaz = cumulative_hazard(hazard, lb, ub, parameters, covars)
-    give_log ? log(cumhaz) : cumhaz
+    return call_haz(
+        t,
+        parameters,
+        covars,
+        hazard;
+        give_log = give_log,
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
+end
+
+function call_cumulhaz(lb, ub, parameters, covars::NamedTuple, hazard::SplineHazard;
+                       give_log = true,
+                       apply_transform::Bool = false,
+                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                       hazard_slot::Union{Nothing,Int}=nothing)
+    apply_transform && _ensure_transform_supported(hazard)
+    value = cumulative_hazard(hazard, lb, ub, parameters, covars)
+    give_log ? log(value) : value
+end
+
+function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SplineHazard;
+                       give_log = true,
+                       apply_transform::Bool = false,
+                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                       hazard_slot::Union{Nothing,Int}=nothing)
+    covars = extract_covariates(subjdat, hazard.parnames)
+    return call_cumulhaz(
+        lb,
+        ub,
+        parameters,
+        covars,
+        hazard;
+        give_log = give_log,
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
 end
 
 #=============================================================================
@@ -415,10 +739,22 @@ OLD DISPATCH-BASED FUNCTIONS (Will be deprecated after Phase 2)
 
 Return the survival probability over the interval [lb, ub].
 """
-function survprob(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardTransient, _hazards; give_log = true) 
+function survprob(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardTransient, _hazards;
+                   give_log = true,
+                   apply_transform::Bool = false,
+                   cache_context::Union{Nothing,TimeTransformContext}=nothing) 
 
     # log total cumulative hazard
-    log_survprob = -total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard, _hazards; give_log = false)
+    log_survprob = -total_cumulhaz(
+        lb,
+        ub,
+        parameters,
+        subjdat_row,
+        _totalhazard,
+        _hazards;
+        give_log = false,
+        apply_transform = apply_transform,
+        cache_context = cache_context)
 
     # return survival probability or not
     give_log ? log_survprob : exp(log_survprob)
@@ -429,19 +765,25 @@ end
 
 Return the log-total cumulative hazard out of a transient state over the interval [lb, ub].
 """
-function total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardTransient, _hazards; give_log = true) 
+function total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardTransient, _hazards;
+                        give_log = true,
+                        apply_transform::Bool = false,
+                        cache_context::Union{Nothing,TimeTransformContext}=nothing) 
 
     # log total cumulative hazard
     tot_haz = 0.0
 
     for x in _totalhazard.components
         tot_haz += call_cumulhaz(
-                    lb,
-                    ub, 
-                    parameters[x],
-                    subjdat_row,  # Pass the DataFrameRow directly
-                    _hazards[x];
-                    give_log = false)
+            lb,
+            ub,
+            parameters[x],
+            subjdat_row,
+            _hazards[x];
+            give_log = false,
+            apply_transform = apply_transform,
+            cache_context = cache_context,
+            hazard_slot = x)
     end
     
     # return the log, or not
@@ -453,7 +795,10 @@ end
 
 Return zero log-total cumulative hazard over the interval [lb, ub] as the current state is absorbing.
 """
-function total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardAbsorbing, _hazards; give_log = true) 
+function total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardAbsorbing, _hazards;
+                        give_log = true,
+                        apply_transform::Bool = false,
+                        cache_context::Union{Nothing,TimeTransformContext}=nothing) 
 
     # return 0 cumulative hazard
     give_log ? -Inf : 0

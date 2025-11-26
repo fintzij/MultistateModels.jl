@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.8.22">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>model_generation_testing</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="model_generation_testing_files/libs/clipboard/clipboard.min.js"></script>
+<script src="model_generation_testing_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="model_generation_testing_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="model_generation_testing_files/libs/quarto-html/axe/axe-check.js" type="module"></script>
+<script src="model_generation_testing_files/libs/quarto-html/popper.min.js"></script>
+<script src="model_generation_testing_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="model_generation_testing_files/libs/quarto-html/anchor.min.js"></script>
+<link href="model_generation_testing_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="model_generation_testing_files/libs/quarto-html/quarto-syntax-highlighting-cd7454b418030687c631a6a7286fbe16.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="model_generation_testing_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="model_generation_testing_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="model_generation_testing_files/libs/bootstrap/bootstrap-d6a003b94517c951b2d65075d42fb01b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent quarto-light">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+
+
+
+<section id="model-generation-testing-guide" class="level1">
+<h1>Model Generation Testing Guide</h1>
+<p>This document explains the model generation process in MultistateModels.jl and how each step is unit tested.</p>
+<section id="overview" class="level2">
+<h2 class="anchored" data-anchor-id="overview">Overview</h2>
+<p>Model generation in MultistateModels.jl follows a multi-step validation and construction process. Each step has corresponding unit tests in <code>test/test_modelgeneration.jl</code> (run via <code>Pkg.test(test_args=["test_modelgeneration"])</code>). All of the model-generation-focused tests currently pass ✅.</p>
+</section>
+<section id="model-generation-process" class="level2">
+<h2 class="anchored" data-anchor-id="model-generation-process">Model Generation Process</h2>
+<section id="step-1-user-creates-hazard-objects" class="level3">
+<h3 class="anchored" data-anchor-id="step-1-user-creates-hazard-objects">STEP 1: User Creates Hazard Objects</h3>
+<p><strong>Recommended DSL (<code>@hazard</code> macro):</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>h12 <span class="op">=</span> <span class="pp">@hazard</span> <span class="cf">begin</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    family <span class="op">=</span> <span class="op">:</span>exp          <span class="co"># strings also work: "exp"</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> <span class="fl">1</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> <span class="fl">2</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>h13 <span class="op">=</span> <span class="pp">@hazard</span> <span class="cf">begin</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    family <span class="op">=</span> <span class="op">:</span>wei          <span class="co"># accepts :wei/:weibull</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    formula <span class="op">=</span> <span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> age)</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    transition <span class="op">=</span> <span class="fl">1</span> <span class="op">=&gt;</span> <span class="fl">3</span>    <span class="co"># or from = 1; to = 3; states = (1, 3)</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>h14 <span class="op">=</span> <span class="pp">@hazard</span> <span class="cf">begin</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>    family <span class="op">=</span> <span class="op">:</span>gom</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>    transition <span class="op">=</span> <span class="fl">1</span> <span class="op">=&gt;</span> <span class="fl">4</span>    <span class="co"># formula omitted ⇒ intercept-only hazard</span></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li><code>family</code> accepts case-insensitive strings or symbols for <code>exp</code>, <code>wei</code>, <code>gom</code>, and <code>sp</code>. Tags <code>:ode</code>/<code>:neural_ode</code> are reserved; the macro emits a descriptive error until those hazard types ship.</li>
+<li>Aliases <code>from</code>, <code>to</code>, <code>states</code>, or <code>transition = 1 =&gt; 2</code> map to <code>statefrom</code>/<code>stateto</code> so you can pick whatever reads best.</li>
+<li>The macro forwards every extra keyword (e.g., <code>linpred_effect = :aft</code>, <code>time_transform = true</code>) straight to the underlying <code>Hazard</code> constructor.</li>
+<li>If you omit <code>formula</code> (or <code>@formula(0 ~ ...)</code>) altogether, the macro injects the intercept-only design <code>@formula(0 ~ 1)</code> automatically. Use this for baseline-only hazards.</li>
+</ul>
+<p><strong>Constructor form (still supported):</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>h12 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> trt), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>h13 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> age), <span class="st">"wei"</span>, <span class="fl">1</span>, <span class="fl">3</span>)</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>h14 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"gom"</span>, <span class="fl">1</span>, <span class="fl">4</span>)   <span class="co"># formula omitted ⇒ intercept-only</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Both entry points automatically supply an intercept column even if you omit <code>+ 1</code> in the formula. Adding an explicit intercept term is harmless but unnecessary.</p>
+<p><strong>What it does:</strong> Creates hazard specifications for each transition: - <code>@formula(0 ~ trt)</code> = log-hazard formula; baseline hazard supplies the intercept so you list only covariates. - <code>"exp"</code> / <code>:wei</code> = hazard family (exponential, Weibull, Gompertz, spline). - <code>statefrom = 1</code>, <code>stateto = 2</code> (or aliases) = origin/destination states.</p>
+<p><strong>Unit Test:</strong> <code>test_hazard_construction</code></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>h_exp <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> trt), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>model_exp <span class="op">=</span> <span class="fu">multistatemodel</span>(h_exp; data <span class="op">=</span> dat)</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">length</span>(model_exp.parameters[<span class="fl">1</span>]) <span class="op">==</span> <span class="fl">2</span>  <span class="co"># Intercept + trt from the auto-added baseline term</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> model_exp.hazards[<span class="fl">1</span>].parnames <span class="op">==</span> [<span class="op">:</span>h12_Intercept, <span class="op">:</span>h12_trt]</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Verifies:</strong> Hazard objects create correct parameter structures and names for different hazard families while respecting the unified DSL.</p>
+<hr>
+</section>
+<section id="step-2-enumerate-and-validate-hazards" class="level3">
+<h3 class="anchored" data-anchor-id="step-2-enumerate-and-validate-hazards">STEP 2: Enumerate and Validate Hazards</h3>
+<p><strong>Code:</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>hazinfo <span class="op">=</span> <span class="fu">enumerate_hazards</span>(hazards<span class="op">...</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What it does:</strong> - Extracts <code>(statefrom, stateto)</code> pairs from all hazards - <strong>Checks for duplicate transitions</strong> - each transition should only be specified once - Sorts hazards by origin state, then destination state - Assigns transition numbers</p>
+<p><strong>Unit Test:</strong> <code>test_duplicate_transitions</code></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)  <span class="co"># DUPLICATE!</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">ErrorException</span> <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat)</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Verify error message mentions duplicate transitions</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="cf">try</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat)</span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="cn">false</span>  <span class="co"># Should not reach here</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="cf">catch</span> <span class="cn">e</span></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="fu">occursin</span>(<span class="st">"Duplicate transitions"</span>, <span class="fu">string</span>(<span class="cn">e</span>))</span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="fu">occursin</span>(<span class="st">"(1, 2)"</span>, <span class="fu">string</span>(<span class="cn">e</span>))</span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Verifies:</strong> - System catches duplicate transition definitions - Provides clear, informative error message with the duplicate transition pair</p>
+<hr>
+</section>
+<section id="step-3-create-transition-matrix" class="level3">
+<h3 class="anchored" data-anchor-id="step-3-create-transition-matrix">STEP 3: Create Transition Matrix</h3>
+<p><strong>Code:</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>tmat <span class="op">=</span> <span class="fu">create_tmat</span>(hazinfo)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What it does:</strong> Creates a matrix where <code>tmat[i,j]</code> = transition number from state i to state j. Zero entries mean no direct transition is possible.</p>
+<p><strong>Example:</strong></p>
+<pre><code>     State: 1  2  3
+State 1:    0  1  2    # Can go from 1→2 (trans 1) or 1→3 (trans 2)
+State 2:    3  0  4    # Can go from 2→1 (trans 3) or 2→3 (trans 4)
+State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
+<p><strong>Unit Test:</strong> <code>test_tmat</code></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">sort</span>(msm_expwei.tmat[[<span class="fl">2</span>,<span class="fl">4</span>,<span class="fl">7</span>,<span class="fl">8</span>]]) <span class="op">==</span> <span class="fu">collect</span>(<span class="fl">1</span><span class="op">:</span><span class="fl">4</span>)  <span class="co"># Check transition numbers</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">all</span>(msm_expwei.tmat[<span class="fu">Not</span>([<span class="fl">2</span>,<span class="fl">4</span>,<span class="fl">7</span>,<span class="fl">8</span>])] <span class="op">.==</span> <span class="fl">0</span>)       <span class="co"># Check zeros elsewhere</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Verifies:</strong> - Transition matrix has correct structure - Transitions are numbered correctly and placed in the right positions - Non-transitions are properly marked as zero</p>
+<hr>
+</section>
+<section id="step-4-data-validation" class="level3">
+<h3 class="anchored" data-anchor-id="step-4-data-validation">STEP 4: Data Validation</h3>
+<p><strong>Code:</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">check_data!</span>(data, tmat, CensoringPatterns; verbose <span class="op">=</span> verbose)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What it does:</strong> - Ensures required columns exist: <code>id</code>, <code>tstart</code>, <code>tstop</code>, <code>statefrom</code>, <code>stateto</code>, <code>obstype</code> - <strong>Checks for state 0 misuse</strong> - state 0 should not be in <code>statefrom</code> - Warns about non-contiguous states (e.g., 1, 2, 4 skipping 3) - Validates observation types and censoring patterns</p>
+<p><strong>Unit Tests:</strong></p>
+<section id="test_state_zero_in_data---state-0-can-appear-for-censoring" class="level4">
+<h4 class="anchored" data-anchor-id="test_state_zero_in_data---state-0-can-appear-for-censoring"><code>test_state_zero_in_data</code> - State 0 can appear for censoring</h4>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>, <span class="fl">1.0</span>],</span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">2.0</span>],</span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">2</span>]</span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">3</span>)</span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat)</span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">isa</span>(model, MultistateModels.MultistateProcess)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Verifies:</strong> State 0 is allowed in data for censoring purposes</p>
+</section>
+<section id="test_non_contiguous_states---non-contiguous-states-cause-issues" class="level4">
+<h4 class="anchored" data-anchor-id="test_non_contiguous_states---non-contiguous-states-cause-issues"><code>test_non_contiguous_states</code> - Non-contiguous states cause issues</h4>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">4</span>],  <span class="co"># Missing state 3</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">4</span>, <span class="fl">4</span>],</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">...</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">2</span>, <span class="fl">4</span>)</span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">BoundsError</span> <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Verifies:</strong> System catches and warns about non-contiguous state spaces (gaps in state numbering)</p>
+</section>
+<section id="test_hazard_state_zero---state-0-cannot-be-in-hazard-definitions" class="level4">
+<h4 class="anchored" data-anchor-id="test_hazard_state_zero---state-0-cannot-be-in-hazard-definitions"><code>test_hazard_state_zero</code> - State 0 cannot be in hazard definitions</h4>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>],</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>],</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>],</span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>],</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">1</span>],</span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">2</span>]</span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a>h_bad_from <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">0</span>, <span class="fl">1</span>)  <span class="co"># State 0 in statefrom</span></span>
+<span id="cb12-11"><a href="#cb12-11" aria-hidden="true" tabindex="-1"></a>h_bad_to <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">0</span>)    <span class="co"># State 0 in stateto</span></span>
+<span id="cb12-12"><a href="#cb12-12" aria-hidden="true" tabindex="-1"></a>h_good <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb12-13"><a href="#cb12-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-14"><a href="#cb12-14" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">Exception</span> <span class="fu">multistatemodel</span>(h_bad_from, h_good; data <span class="op">=</span> dat)</span>
+<span id="cb12-15"><a href="#cb12-15" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">Exception</span> <span class="fu">multistatemodel</span>(h_good, h_bad_to; data <span class="op">=</span> dat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Verifies:</strong> - Hazards cannot use state 0 in <code>statefrom</code> or <code>stateto</code> - State 0 is reserved exclusively for censoring indicators in data</p>
+<hr>
+</section>
+</section>
+<section id="step-5-build-hazard-structs" class="level3">
+<h3 class="anchored" data-anchor-id="step-5-build-hazard-structs">STEP 5: Build Hazard Structs</h3>
+<p><strong>Code:</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>_hazards, parameters, parameters_ph, hazkeys <span class="op">=</span> <span class="fu">build_hazards</span>(hazards<span class="op">...</span>; data <span class="op">=</span> data)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What it does:</strong> - Parses formulas and creates design matrices - <strong>Generates parameter names</strong> from formula terms (not from data columns) - Creates runtime-generated functions for hazard/cumulative hazard calculations - Builds consolidated structs: <code>MarkovHazard</code> (exponential) or <code>SemiMarkovHazard</code> (Weibull/Gompertz)</p>
+<p><strong>Key Logic for Parameter Naming:</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co"># StatsModels applies the schema, so coefnames reflects the actual design columns</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>coef_names <span class="op">=</span> StatsModels.<span class="fu">coefnames</span>(applied_rhs)   <span class="co"># ["(Intercept)", "trt", "age", "trt &amp; age"]</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>rhs_names <span class="op">=</span> has_explicit_intercept ? coef_names <span class="op">:</span> <span class="fu">vcat</span>(<span class="st">"(Intercept)"</span>, coef_names)</span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>parnames <span class="op">=</span> <span class="fu">Symbol</span>.(<span class="fu">replace</span>.(hazname <span class="op">*</span> <span class="st">"_"</span> <span class="op">.*</span> rhs_names, <span class="st">"(Intercept)"</span> <span class="op">=&gt;</span> <span class="st">"Intercept"</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li>Formulas without explicit <code>+ 1</code> still receive an intercept column because the constructor prepends one when needed.</li>
+<li>Interaction terms retain the StatsModels naming convention (<code>"trt &amp; age"</code>), so parameter vectors include symbols like <code>Symbol("h13_trt &amp; age")</code>.</li>
+<li>Baseline-only hazards created via <code>Hazard("exp", 1, 2)</code> or <code>@hazard</code> without a formula only emit the intercept parameter (<code>:h12_Intercept</code>).</li>
+</ul>
+<p><strong>Unit Test:</strong> <code>test_parameter_naming</code></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Exponential without covariates</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>, <span class="fl">1.0</span>],</span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">2.0</span>],</span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">2</span>]</span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-11"><a href="#cb15-11" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb15-12"><a href="#cb15-12" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> <span class="fu">multistatemodel</span>(h1; data <span class="op">=</span> dat)</span>
+<span id="cb15-13"><a href="#cb15-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-14"><a href="#cb15-14" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_Intercept <span class="kw">in</span> model.hazards[<span class="fl">1</span>].parnames</span>
+<span id="cb15-15"><a href="#cb15-15" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> !(<span class="op">:</span>h12_rate <span class="kw">in</span> model.hazards[<span class="fl">1</span>].parnames)  <span class="co"># NOT "rate"!</span></span>
+<span id="cb15-16"><a href="#cb15-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-17"><a href="#cb15-17" aria-hidden="true" tabindex="-1"></a><span class="co"># Exponential with covariates</span></span>
+<span id="cb15-18"><a href="#cb15-18" aria-hidden="true" tabindex="-1"></a>dat_cov <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
+<span id="cb15-19"><a href="#cb15-19" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb15-20"><a href="#cb15-20" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>, <span class="fl">1.0</span>],</span>
+<span id="cb15-21"><a href="#cb15-21" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">2.0</span>],</span>
+<span id="cb15-22"><a href="#cb15-22" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb15-23"><a href="#cb15-23" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb15-24"><a href="#cb15-24" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">2</span>],</span>
+<span id="cb15-25"><a href="#cb15-25" aria-hidden="true" tabindex="-1"></a>    age <span class="op">=</span> [<span class="fl">50</span>, <span class="fl">51</span>]</span>
+<span id="cb15-26"><a href="#cb15-26" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb15-27"><a href="#cb15-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-28"><a href="#cb15-28" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> age), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb15-29"><a href="#cb15-29" aria-hidden="true" tabindex="-1"></a>model2 <span class="op">=</span> <span class="fu">multistatemodel</span>(h2; data <span class="op">=</span> dat_cov)</span>
+<span id="cb15-30"><a href="#cb15-30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-31"><a href="#cb15-31" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_Intercept <span class="kw">in</span> model2.hazards[<span class="fl">1</span>].parnames</span>
+<span id="cb15-32"><a href="#cb15-32" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_age <span class="kw">in</span> model2.hazards[<span class="fl">1</span>].parnames</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Verifies:</strong> - Parameters are named “Intercept” (not “rate”) for consistency with GLM conventions - Covariate names from the formula appear in parameter names - Parameter naming works correctly for models with and without covariates</p>
+<p><strong>Unit Test:</strong> <code>linpred_effect modes</code></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="pp">@testset</span> <span class="st">"linpred_effect modes"</span> <span class="cf">begin</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>    h_exp_aft <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> x), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>; linpred_effect <span class="op">=</span> <span class="op">:</span>aft)</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>    model_exp_aft <span class="op">=</span> <span class="fu">multistatemodel</span>(h_exp_aft; data <span class="op">=</span> dat)</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">set_parameters!</span>(model_exp_aft, (h12 <span class="op">=</span> [<span class="fu">log</span>(λ<span class="fl">0</span>), β],))</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="fu">call_haz</span>(t, model_exp_aft.parameters[<span class="fl">1</span>], row, model_exp_aft.hazards[<span class="fl">1</span>]; give_log<span class="op">=</span><span class="cn">false</span>) <span class="op">≈</span> λ<span class="fl">0</span> <span class="op">*</span> <span class="fu">exp</span>(<span class="op">-</span>β <span class="op">*</span> x)</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>    <span class="co"># similar assertions for Weibull/Gompertz</span></span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Verifies:</strong> - The new <code>HazardMetadata.linpred_effect</code> flag is threaded through runtime hazard functions. - Analytic families honor per-transition PH vs AFT semantics (exponential, Weibull, and Gompertz all have closed-form AFT adjustments for both hazard and cumulative hazard evaluations). - The legacy interface (<code>call_haz</code>/<code>call_cumulhaz</code>) observes these effects without any downstream changes.</p>
+<hr>
+</section>
+<section id="step-6-build-total-hazards" class="level3">
+<h3 class="anchored" data-anchor-id="step-6-build-total-hazards">STEP 6: Build Total Hazards</h3>
+<p><strong>Code:</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>_totalhazards <span class="op">=</span> <span class="fu">build_totalhazards</span>(_hazards, tmat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What it does:</strong> - For each origin state, creates a <code>_TotalHazard</code> object - Absorbing states (no exits): <code>_TotalHazardAbsorbing()</code> - Transient states (have exits): <code>_TotalHazardTransient(transition_indices)</code> - Used for computing survival probabilities in likelihood calculations</p>
+<p><strong>Testing:</strong> No explicit unit test for this helper function alone, but implicitly tested by all model construction tests since total hazards are built for every model.</p>
+<hr>
+</section>
+<section id="step-7-build-emission-matrix" class="level3">
+<h3 class="anchored" data-anchor-id="step-7-build-emission-matrix">STEP 7: Build Emission Matrix</h3>
+<p><strong>Code:</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>emat <span class="op">=</span> <span class="fu">build_emat</span>(data, CensoringPatterns, tmat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What it does:</strong> - For each observation, indicates which states are possible - Exactly observed: <code>emat[i,state] = 1</code>, all others = 0 - Censored: <code>emat[i,:] = [1,1,1,...]</code> (all states possible) - Custom censoring: Uses <code>CensoringPatterns</code> matrix to specify which states are possible</p>
+<p><strong>Testing:</strong> No explicit unit test for this helper function alone, but it’s exercised by all model construction tests.</p>
+<hr>
+</section>
+<section id="step-8-determine-model-type" class="level3">
+<h3 class="anchored" data-anchor-id="step-8-determine-model-type">STEP 8: Determine Model Type</h3>
+<p><strong>Code:</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb19"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Check observation types and hazard types to pick correct struct</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="fu">all</span>(data.obstype <span class="op">.==</span> <span class="fl">1</span>)</span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>    model <span class="op">=</span> <span class="fu">MultistateModel</span>(<span class="op">...</span>)  <span class="co"># Exact observations only</span></span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a><span class="cf">elseif</span> <span class="fu">all</span>(<span class="fu">isa</span>.(_hazards, _MarkovHazard))</span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>    model <span class="op">=</span> <span class="fu">MultistateMarkovModel</span>(<span class="op">...</span>)  <span class="co"># Markov process</span></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a><span class="cf">elseif</span> <span class="fu">any</span>(<span class="fu">isa</span>.(_hazards, _SemiMarkovHazard))</span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a>    model <span class="op">=</span> <span class="fu">MultistateSemiMarkovModel</span>(<span class="op">...</span>)  <span class="co"># Semi-Markov process</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What it does:</strong> - Examines data: exact vs panel vs censored observations - Examines hazards: all Markov (exponential) vs any Semi-Markov (Weibull/Gompertz) - Selects appropriate model struct from 6 total types: - <code>MultistateModel</code> (exact observations) - <code>MultistateMarkovModel</code> (Markov with panel data) - <code>MultistateSemiMarkovModel</code> (Semi-Markov with panel data) - <code>MultistateMarkovModelCensored</code> (Markov with censoring) - <code>MultistateSemiMarkovModelCensored</code> (Semi-Markov with censoring)</p>
+<p><strong>Testing:</strong> Implicitly tested by all model construction tests, which create models with different data types and hazard families.</p>
+<hr>
+</section>
+</section>
+<section id="summary-of-test-coverage" class="level2">
+<h2 class="anchored" data-anchor-id="summary-of-test-coverage">Summary of Test Coverage</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 37%">
+<col style="width: 18%">
+<col style="width: 30%">
+<col style="width: 13%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Model Generation Step</th>
+<th>Unit Test</th>
+<th>What It Verifies</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Hazard creation</strong></td>
+<td><code>test_hazard_construction</code></td>
+<td>Correct parameter counts, structures, and naming (including optional formulas)</td>
+<td>✅</td>
+</tr>
+<tr class="even">
+<td><strong>Duplicate checking</strong></td>
+<td><code>test_duplicate_transitions</code></td>
+<td>Catches duplicate transitions with clear error</td>
+<td>✅</td>
+</tr>
+<tr class="odd">
+<td><strong>Transition matrix</strong></td>
+<td><code>test_tmat</code></td>
+<td>Correct structure and numbering</td>
+<td>✅</td>
+</tr>
+<tr class="even">
+<td><strong>State 0 in data</strong></td>
+<td><code>test_state_zero_in_data</code></td>
+<td>State 0 allowed for censoring</td>
+<td>✅</td>
+</tr>
+<tr class="odd">
+<td><strong>State 0 in hazards</strong></td>
+<td><code>test_hazard_state_zero</code></td>
+<td>State 0 NOT allowed in hazard definitions</td>
+<td>✅</td>
+</tr>
+<tr class="even">
+<td><strong>Non-contiguous states</strong></td>
+<td><code>test_non_contiguous_states</code></td>
+<td>Warning/error for gaps in state space</td>
+<td>✅</td>
+</tr>
+<tr class="odd">
+<td><strong>Parameter naming</strong></td>
+<td><code>test_parameter_naming</code></td>
+<td>Uses <code>Intercept</code>, includes covariate/interaction names from formulas</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Total: 19 tests passing ✅</strong></p>
+</section>
+<section id="key-design-decisions" class="level2">
+<h2 class="anchored" data-anchor-id="key-design-decisions">Key Design Decisions</h2>
+<section id="parameter-naming-convention" class="level3">
+<h3 class="anchored" data-anchor-id="parameter-naming-convention">Parameter Naming Convention</h3>
+<p>Parameters are named using <code>"Intercept"</code> rather than <code>"rate"</code> to maintain consistency with GLM conventions in Julia. This makes the package more intuitive for users familiar with regression modeling.</p>
+<p><strong>Example:</strong> - ❌ Old: <code>h12_rate</code> - ✅ New: <code>h12_Intercept</code></p>
+</section>
+<section id="state-0-reserved-for-censoring" class="level3">
+<h3 class="anchored" data-anchor-id="state-0-reserved-for-censoring">State 0 Reserved for Censoring</h3>
+<p>State 0 is reserved exclusively for censoring indicators in the data and cannot be used in hazard definitions: - ✅ Allowed: <code>stateto = 0</code> with <code>obstype</code> indicating censoring - ❌ Not allowed: <code>Hazard("exp", 0, 1)</code> - ❌ Not allowed: <code>Hazard("exp", 1, 0)</code></p>
+<p>This design ensures a clear separation between actual state transitions and censoring mechanisms.</p>
+</section>
+<section id="non-contiguous-states" class="level3">
+<h3 class="anchored" data-anchor-id="non-contiguous-states">Non-Contiguous States</h3>
+<p>While the system will attempt to construct models with non-contiguous states (e.g., states 1, 2, 4 skipping 3), this can lead to errors in indexing. The data validation step warns users about this potential issue.</p>
+</section>
+<section id="duplicate-transition-detection" class="level3">
+<h3 class="anchored" data-anchor-id="duplicate-transition-detection">Duplicate Transition Detection</h3>
+<p>The system explicitly checks for and rejects duplicate transition specifications. If a user accidentally defines the same transition twice (e.g., two hazards for 1→2), the system throws a clear error message indicating which transition was duplicated.</p>
+</section>
+</section>
+<section id="test-file-location" class="level2">
+<h2 class="anchored" data-anchor-id="test-file-location">Test File Location</h2>
+<p>All model generation tests are located in:</p>
+<pre><code>test/test_modelgeneration.jl</code></pre>
+<p>Run tests with:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb21"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Pkg</span></span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="bu">Pkg</span>.<span class="fu">test</span>(<span class="st">"MultistateModels"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Or run just model generation tests:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb22"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">include</span>(<span class="st">"test/test_modelgeneration.jl"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<hr>
+</section>
+<section id="roadmap-unified-dsl-ode-neural-hazards" class="level2">
+<h2 class="anchored" data-anchor-id="roadmap-unified-dsl-ode-neural-hazards">Roadmap: Unified DSL + ODE / Neural Hazards</h2>
+<p>This section captures the forward-looking design so Copilot (and contributors) understand how Tang-style ODE hazards, SODEN-style neural RHS, and existing analytic hazards will coexist behind one DSL. These notes guide upcoming refactors before implementation begins.</p>
+<section id="goals" class="level3">
+<h3 class="anchored" data-anchor-id="goals">Goals</h3>
+<ul>
+<li><strong>Single DSL surface</strong>: extended <code>Hazard</code> constructor (and wrappers) must express classic analytic families, Tang-type ODE models, and future neural RHS without parallel APIs.</li>
+<li><strong>Full compatibility</strong>: MCEM, path simulation, surrogate building, and likelihood code must call hazards through the same interfaces (<code>call_haz</code>, <code>call_cumulhaz</code>, <code>_TotalHazard*</code>). No algorithm should branch on hazard type.</li>
+</ul>
+</section>
+<section id="tang-style-time-transforms-current-scope" class="level3">
+<h3 class="anchored" data-anchor-id="tang-style-time-transforms-current-scope">Tang-style time transforms (current scope)</h3>
+<ul>
+<li>The <code>time_transform=true</code> flag is interpreted strictly per hazard. Runtime helpers now gate transforms behind an <code>apply_transform</code> keyword so that only code paths that explicitly opt in will ever see the modified trajectories.</li>
+<li>Exact-path likelihoods (<code>loglik_path</code>) are the only callers that currently pass <code>apply_transform=true</code>, and they do so only when the originating state’s outgoing hazards contain at least one Tang-enabled transition. This keeps shared-trajectory mechanics local to the contexts that motivated them.</li>
+<li>Markov likelihood machinery (including FFBS and other panel-data workflows) always leaves <code>apply_transform=false</code>. Those routines call hazards through the same APIs but will never touch the transformed branch, so their cached Kolmogorov / matrix-exponential logic stays valid.</li>
+<li>Exact-path likelihoods now build a short-lived <code>TimeTransformContext</code> that houses per-hazard caches keyed by the linear predictor and time bounds. The caches exist only for the duration of a <code>loglik_path</code> evaluation, so there is no mutation stored on the hazard structs themselves. Markov/FFBS paths continue to rely on their matrix-based caches and never touch the transform branch. Shared trajectory caches that span multiple hazards are still on the roadmap and will build atop this layer.</li>
+<li><code>enable_time_transform_cache!(false)</code> disables caching altogether for workflows that rely on mutation-intolerant AD backends (Zygote, Enzyme). When disabled, the exact log-likelihood still honors Tang transforms; it just recomputes the separable pieces each time.</li>
+<li><code>maybe_time_transform_context(parameters, subjectdata, hazards)</code> is exposed so callers outside the default likelihood stack can create the exact same <code>TimeTransformContext</code> without reimplementing the detection logic. Pass a DataFrame (or anything with a <code>:sojourn</code> column) plus the current parameter vectors and hazard list; receive <code>nothing</code> when no Tang-enabled hazards exist.</li>
+<li><strong>Shared-baseline metadata:</strong> Each hazard now tracks whether it can participate in a shared Tang trajectory via the tuple <code>(statefrom, baseline_signature)</code>. The signature hashes every ingredient that shapes α(t): family, spline definition, knots, and spline hyperparameters. If multiple hazards emit the same signature they can reuse a baseline trajectory cache keyed solely by the origin state. Hazards with <code>time_transform=false</code> or unique signatures continue to use the per-hazard caches only.</li>
+<li><strong>SciML-ready</strong>: integrate DifferentialEquations.jl + SciMLSensitivity incrementally, allowing numerical cumulative hazards / adjoints when analytic forms are unavailable.</li>
+<li><strong>Maintainable</strong>: keep intermediate objects (time transforms, solver caches) structured and memoized so the code base remains readable and easy to extend.</li>
+</ul>
+</section>
+<section id="unified-dsl-specification" class="level3">
+<h3 class="anchored" data-anchor-id="unified-dsl-specification">Unified DSL Specification</h3>
+<ol type="1">
+<li><p><strong>Formula-based declaration (default)</strong> <code>julia     Hazard(@formula(0 ~ age + trt), :ode, 1, 2;              baseline = :alpha_spline,              q = :exp_link,              time_transform = true,              solver = :auto)</code></p>
+<ul>
+<li><code>family</code> keyword accepts existing strings (<code>"exp"</code>, <code>"wei"</code>, <code>"gom"</code>, <code>"sp"</code>) plus symbolic tags (<code>:ode</code>, <code>:ode_neural</code>).</li>
+<li>Additional keywords choose Tang-style components (baseline α(t), q(Λ), separable time transform) and solver preferences.</li>
+<li>Legacy hazards become thin wrappers that auto-populate these keywords (e.g., exponential = <code>:ode</code> with constant α and q=1).</li>
+</ul></li>
+<li><p><strong>Programmatic declaration (for advanced users / neural RHS)</strong> <code>julia     HazardODE(         rhs = (Λ, t, covs, pars) -&gt; pars.α(t) * exp(dot(pars.β, covs)) *                                Lux.apply(pars.net, vcat(Λ, t, covs), pars.net_ps, pars.net_st)[1],         from = 1,         to = 2,         covars = (:age, :trt),         solver = (:Tsit5, abstol = 1e-8, reltol = 1e-8),         adjoint = :backsolve     )</code></p>
+<ul>
+<li>Users provide a callable (pure Julia function or Lux/DiffEqFlux neural layer) obeying the Tang/SODEN separable form when <code>time_transform=true</code>.</li>
+<li>Parameters/states stay explicit (Lux requirement) and flow through ParameterHandling/ComponentArrays.</li>
+</ul></li>
+<li><p><strong><code>linpred_effect</code> (per-transition PH vs AFT)</strong> ```julia # Proportional hazards (default) Hazard(<span class="citation" data-cites="formula">@formula</span>(0 ~ age + trt), :ode, 1, 2; linpred_effect = :ph)</p>
+<p># Accelerated failure time (per-transition override) Hazard(<span class="citation" data-cites="formula">@formula</span>(0 ~ age + trt), :ode, 1, 2; linpred_effect = :aft) ```</p>
+<ul>
+<li><code>:ph</code> multiplies the baseline hazard by <code>exp(Xβ)</code>; <code>:aft</code> rescales the time axis using <code>exp(-Xβ)</code> inside the time transform cache.</li>
+<li>The keyword is optional (default <code>:ph</code>), scoped to a single transition, and propagated through the legacy wrappers so existing exponential/Weibull helpers stay zero-config.</li>
+<li>MCEM, path simulation, and surrogate builders ignore this flag because they only observe the resulting <code>hazard_fn/cumhaz_fn</code> callables.</li>
+</ul>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 13%">
+<col style="width: 31%">
+<col style="width: 36%">
+<col style="width: 18%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Setting</th>
+<th>How covariates enter</th>
+<th>Time transform behavior</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>:ph</code> (default)</td>
+<td><code>λ(t | X) = λ₀(t) · exp(Xβ)</code></td>
+<td>Standard Tang cache; no rescaling beyond shared baseline</td>
+<td>Classic proportional hazards work, aligns with existing parametric families</td>
+</tr>
+<tr class="even">
+<td><code>:aft</code></td>
+<td><code>λ(t | X) = λ₀(t·exp(-Xβ)) · exp(-Xβ)</code></td>
+<td>Time grid scaled per subject using <code>exp(-Xβ)</code> before evaluating α(t)</td>
+<td>Per-transition accelerated failure time effects without leaving Tang solver stack</td>
+</tr>
+</tbody>
+</table>
+<blockquote class="blockquote">
+<p>The DSL keeps mention of the third option (purely neural covariate handling) as a TODO for when SODEN-style RHS are the default; see the Neural RHS section below.</p>
+</blockquote></li>
+</ol>
+</section>
+<section id="hazard-runtime-expectations" class="level3">
+<h3 class="anchored" data-anchor-id="hazard-runtime-expectations">Hazard Runtime Expectations</h3>
+<ul>
+<li><code>_Hazard</code> structs gain new fields: <code>solver_kind</code>, <code>ode_problem_builder</code>, <code>time_transformable::Bool</code>, and room for future shared-trajectory metadata once that roadmap item begins.</li>
+<li><code>build_hazards</code> detects analytic families and injects closed-form <code>hazard_fn/cumhaz_fn</code> as today. For ODE hazards it constructs <code>ODEProblem</code>s (per transition) and registers SciML solvers <strong>unless</strong> the parametric Tang-style specification signals that a closed-form cumulative hazard exists (in which case we continue to emit analytic callables).</li>
+<li>Shared DSL ensures <code>haznames</code>, parameter names, and covariate metadata remain consistent, simplifying downstream code.</li>
+</ul>
+<section id="shared-baseline-cache-design-step-1-checkpoint" class="level4">
+<h4 class="anchored" data-anchor-id="shared-baseline-cache-design-step-1-checkpoint">Shared baseline cache design (Step 1 checkpoint)</h4>
+<ul>
+<li><strong>SharedBaselineKey</strong>: <code>(statefrom::Int, baseline_signature::UInt64)</code> uniquely names the baseline trajectory that multiple hazards may reuse. The signature is deterministic for a given hazard family/degree/knots so that structurally identical hazards share a slot even across different models.</li>
+<li><strong>Shared cache selection</strong>: when a hazard advertises a <code>SharedBaselineKey</code>, the runtime routes its Tang cache lookups through the <code>SharedBaselineTable</code>, so every matching transition shares the same <code>TimeTransformCache</code>. Hazards without a key (or states with mixed baselines) continue to use their dedicated cache slots.</li>
+<li><strong>Hazard metadata attachment</strong>: <code>_Hazard</code> structs keep both the <code>SharedBaselineKey</code> (for grouping) and a boolean <code>time_transformable</code>. Builders populate these fields early so runtime code can route evaluations without inspecting hazard internals.</li>
+<li><strong>Context layout</strong>: <code>TimeTransformContext</code> now holds both the existing per-hazard caches and a <code>SharedBaselineTable</code>. Exact-path likelihoods pull from the shared table automatically whenever all prerequisites are met; the table stays short-lived (per likelihood call) to avoid global mutation.</li>
+<li><strong>Fallback guarantee</strong>: if any prerequisite is missing—mixed signatures, disabled cache flag, or hazards that skip Tang transforms—we automatically fall back to the per-hazard cache to keep behavior identical to today.</li>
+</ul>
+</section>
+</section>
+<section id="likelihood-evaluation-modes" class="level3">
+<h3 class="anchored" data-anchor-id="likelihood-evaluation-modes">Likelihood Evaluation Modes</h3>
+<ol type="1">
+<li><strong>Per-subject solves (default)</strong>
+<ul>
+<li><code>total_cumulhaz</code> composes cumulative hazards by calling either analytic integrals or solving the ODE for each subject/time interval. Solver workspaces/cache objects live inside hazard structs to avoid reallocations.</li>
+<li>MCEM/path sampling reuse the same call sites, ensuring identical numerics.</li>
+</ul></li>
+<li><strong>Shared trajectory (Tang time transform)</strong> - Applicable only when hazard RHS is separable (<code>f(t, Λ, x)=f₁(t, x)·f₂(Λ, x)</code>) and when all outgoing transitions from a state share the same baseline α(t). - Workflow: 1. Transitions with identical baselines reuse a single <code>TimeTransformCache</code> via their shared baseline key. 2. Each cache stores Tang hazard/cumulative-hazard evaluations keyed by <code>(linpred, time window)</code>, so repeated calls (across hazards or jumps) simply reuse the stored result. - Relies on the per-evaluation <code>TimeTransformContext</code> plus the new <code>SharedBaselineTable</code>. Keep these objects lightweight and rebuildable so maintenance stays simple. - Likelihood API exposes <code>likelihood_mode = :per_subject | :shared_traj</code>; automatically falls back to per-subject if constraints fail.</li>
+</ol>
+</section>
+<section id="sciml-adjoint-integration" class="level3">
+<h3 class="anchored" data-anchor-id="sciml-adjoint-integration">SciML / Adjoint Integration</h3>
+<ul>
+<li>Hazards gain solver configs referencing DifferentialEquations.jl solvers (Tsit5, Vern9, Rosenbrock23, etc.).</li>
+<li>Gradients route through SciMLSensitivity.jl adjoints (BacksolveAdjoint, QuadratureAdjoint) or ForwardDiff if faster. Each hazard declares its supported adjoint to avoid misuse.</li>
+<li>Dependencies are added progressively (initially optional). If SciML features are disabled, the DSL restricts to analytic families only.</li>
+</ul>
+</section>
+<section id="neural-rhs-soden-readiness" class="level3">
+<h3 class="anchored" data-anchor-id="neural-rhs-soden-readiness">Neural RHS (SODEN readiness)</h3>
+<ul>
+<li>Neural <code>f(t, Λ, x)</code> implemented via Lux/DiffEqFlux <code>NeuralODE</code> layers. Parameters/states reside in ComponentArrays so they interoperate with Optimization.jl and existing parameter utilities.</li>
+<li>Device selection: default CPU, but hazard definitions include <code>device = :cpu | :gpu | :auto</code>; future work can enable LuxCUDA/Reactant.</li>
+<li>Time-rescaling/batching: borrow SODEN’s strategy to align observation grids, reducing repeated solves.</li>
+<li><code>linpred_effect</code> flags are ignored once a hazard opts into <code>:ode_neural</code>; covariate effects live entirely inside the neural RHS, so the DSL simply plumbs the network outputs into the solver without assuming PH or AFT structure.</li>
+<li>TODO: document the neural-only covariate mode (the planned “third option”) with a worked example once SODEN support ships.</li>
+</ul>
+</section>
+<section id="mcem-path-simulation-compatibility" class="level3">
+<h3 class="anchored" data-anchor-id="mcem-path-simulation-compatibility">MCEM &amp; Path Simulation Compatibility</h3>
+<ul>
+<li><code>DrawSamplePaths!</code>, <code>sample_ecctmc</code>, and surrogate builders consume hazards only through exported callables. As long as hazards expose <code>hazard_fn</code>, <code>cumhaz_fn</code>, and optional <code>shared_traj</code> caches, existing sampling code works unchanged.</li>
+<li>Surrogate models: when ODE hazards are present, default surrogate may still use exponential approximations unless the user requests ODE surrogates. Document trade-offs explicitly.</li>
+<li>Importance weights: computed using the same hazard interface as likelihood evaluation to avoid bias.</li>
+</ul>
+</section>
+<section id="implementation-phases-high-level" class="level3">
+<h3 class="anchored" data-anchor-id="implementation-phases-high-level">Implementation Phases (high-level)</h3>
+<ol type="1">
+<li><strong>Infrastructure prep</strong>: refactor hazard structs/builders to accept solver metadata; no behavior change yet.</li>
+<li><strong>ODE cumulative hazards</strong>: add per-subject SciML solves + caching; prove parity with analytic hazards.</li>
+<li><strong>Shared trajectory mode</strong>: implement Tang time-transform caches; add validation and configuration hooks.</li>
+<li><strong>Neural RHS support</strong>: integrate Lux/DiffEqFlux-based RHS, including parameter handling and adjoints.</li>
+<li><strong>Documentation &amp; tests</strong>: extend unit/integration tests to cover ODE hazards, shared trajectories, and neural examples; update user guides/tutorials.</li>
+</ol>
+</section>
+<section id="notes-open-items" class="level3">
+<h3 class="anchored" data-anchor-id="notes-open-items">Notes / Open Items</h3>
+<ul>
+<li>Dependencies (DifferentialEquations.jl, SciMLSensitivity.jl, Lux.jl, DiffEqFlux.jl) are acceptable but should be introduced in the phase they are needed, possibly via package extensions to keep the base install light.</li>
+<li>Tang/SODEN separability is the most complex modeling scenario we plan to support; more exotic models (e.g., non-separable neural CDFs per Rindt/Danks) remain future work and should be revisited once the unified DSL is stable.</li>
+<li>Code simplicity remains paramount: intermediate caches (time transforms, shared baselines) must have clear ownership, minimal mutation, and strong tests to make maintenance easy.</li>
+</ul>
+</section>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+        const codeEl = trigger.previousElementSibling.cloneNode(true);
+        for (const childEl of codeEl.children) {
+          if (isCodeAnnotation(childEl)) {
+            childEl.remove();
+          }
+        }
+        return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
