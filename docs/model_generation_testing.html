@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>model_generation_testing</title>
+<title>Model Generation Testing Guide</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -66,21 +66,204 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <script src="model_generation_testing_files/libs/quarto-html/tippy.umd.min.js"></script>
 <script src="model_generation_testing_files/libs/quarto-html/anchor.min.js"></script>
 <link href="model_generation_testing_files/libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="model_generation_testing_files/libs/quarto-html/quarto-syntax-highlighting-cd7454b418030687c631a6a7286fbe16.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="model_generation_testing_files/libs/quarto-html/quarto-syntax-highlighting-0005d91a72d31ce460de95faa40600eb.css" rel="stylesheet" class="quarto-color-scheme" id="quarto-text-highlighting-styles">
+<link href="model_generation_testing_files/libs/quarto-html/quarto-syntax-highlighting-dark-0005d91a72d31ce460de95faa40600eb.css" rel="stylesheet" class="quarto-color-scheme quarto-color-alternate" id="quarto-text-highlighting-styles">
+<link href="model_generation_testing_files/libs/quarto-html/quarto-syntax-highlighting-0005d91a72d31ce460de95faa40600eb.css" rel="stylesheet" class="quarto-color-scheme-extra" id="quarto-text-highlighting-styles">
 <script src="model_generation_testing_files/libs/bootstrap/bootstrap.min.js"></script>
 <link href="model_generation_testing_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="model_generation_testing_files/libs/bootstrap/bootstrap-d6a003b94517c951b2d65075d42fb01b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="model_generation_testing_files/libs/bootstrap/bootstrap-84c1c1908de775dc10927b300d9f8a94.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme" id="quarto-bootstrap" data-mode="dark">
+<link href="model_generation_testing_files/libs/bootstrap/bootstrap-dark-84c1c1908de775dc10927b300d9f8a94.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme quarto-color-alternate" id="quarto-bootstrap" data-mode="dark">
+<link href="model_generation_testing_files/libs/bootstrap/bootstrap-84c1c1908de775dc10927b300d9f8a94.min.css" rel="stylesheet" append-hash="true" class="quarto-color-scheme-extra" id="quarto-bootstrap" data-mode="dark">
 
 
 </head>
 
-<body class="fullcontent quarto-light">
+<body class="fullcontent quarto-light"><script id="quarto-html-before-body" type="application/javascript">
+    const toggleBodyColorMode = (bsSheetEl) => {
+      const mode = bsSheetEl.getAttribute("data-mode");
+      const bodyEl = window.document.querySelector("body");
+      if (mode === "dark") {
+        bodyEl.classList.add("quarto-dark");
+        bodyEl.classList.remove("quarto-light");
+      } else {
+        bodyEl.classList.add("quarto-light");
+        bodyEl.classList.remove("quarto-dark");
+      }
+    }
+    const toggleBodyColorPrimary = () => {
+      const bsSheetEl = window.document.querySelector("link#quarto-bootstrap:not([rel=disabled-stylesheet])");
+      if (bsSheetEl) {
+        toggleBodyColorMode(bsSheetEl);
+      }
+    }
+    const setColorSchemeToggle = (alternate) => {
+      const toggles = window.document.querySelectorAll('.quarto-color-scheme-toggle');
+      for (let i=0; i < toggles.length; i++) {
+        const toggle = toggles[i];
+        if (toggle) {
+          if (alternate) {
+            toggle.classList.add("alternate");
+          } else {
+            toggle.classList.remove("alternate");
+          }
+        }
+      }
+    };
+    const toggleColorMode = (alternate) => {
+      // Switch the stylesheets
+      const primaryStylesheets = window.document.querySelectorAll('link.quarto-color-scheme:not(.quarto-color-alternate)');
+      const alternateStylesheets = window.document.querySelectorAll('link.quarto-color-scheme.quarto-color-alternate');
+      manageTransitions('#quarto-margin-sidebar .nav-link', false);
+      if (alternate) {
+        // note: dark is layered on light, we don't disable primary!
+        enableStylesheet(alternateStylesheets);
+        for (const sheetNode of alternateStylesheets) {
+          if (sheetNode.id === "quarto-bootstrap") {
+            toggleBodyColorMode(sheetNode);
+          }
+        }
+      } else {
+        disableStylesheet(alternateStylesheets);
+        enableStylesheet(primaryStylesheets)
+        toggleBodyColorPrimary();
+      }
+      manageTransitions('#quarto-margin-sidebar .nav-link', true);
+      // Switch the toggles
+      setColorSchemeToggle(alternate)
+      // Hack to workaround the fact that safari doesn't
+      // properly recolor the scrollbar when toggling (#1455)
+      if (navigator.userAgent.indexOf('Safari') > 0 && navigator.userAgent.indexOf('Chrome') == -1) {
+        manageTransitions("body", false);
+        window.scrollTo(0, 1);
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          manageTransitions("body", true);
+        }, 40);
+      }
+    }
+    const disableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        stylesheet.rel = 'disabled-stylesheet';
+      }
+    }
+    const enableStylesheet = (stylesheets) => {
+      for (let i=0; i < stylesheets.length; i++) {
+        const stylesheet = stylesheets[i];
+        if(stylesheet.rel !== 'stylesheet') { // for Chrome, which will still FOUC without this check
+          stylesheet.rel = 'stylesheet';
+        }
+      }
+    }
+    const manageTransitions = (selector, allowTransitions) => {
+      const els = window.document.querySelectorAll(selector);
+      for (let i=0; i < els.length; i++) {
+        const el = els[i];
+        if (allowTransitions) {
+          el.classList.remove('notransition');
+        } else {
+          el.classList.add('notransition');
+        }
+      }
+    }
+    const isFileUrl = () => {
+      return window.location.protocol === 'file:';
+    }
+    const hasAlternateSentinel = () => {
+      let styleSentinel = getColorSchemeSentinel();
+      if (styleSentinel !== null) {
+        return styleSentinel === "alternate";
+      } else {
+        return false;
+      }
+    }
+    const setStyleSentinel = (alternate) => {
+      const value = alternate ? "alternate" : "default";
+      if (!isFileUrl()) {
+        window.localStorage.setItem("quarto-color-scheme", value);
+      } else {
+        localAlternateSentinel = value;
+      }
+    }
+    const getColorSchemeSentinel = () => {
+      if (!isFileUrl()) {
+        const storageValue = window.localStorage.getItem("quarto-color-scheme");
+        return storageValue != null ? storageValue : localAlternateSentinel;
+      } else {
+        return localAlternateSentinel;
+      }
+    }
+    const toggleGiscusIfUsed = (isAlternate, darkModeDefault) => {
+      const baseTheme = document.querySelector('#giscus-base-theme')?.value ?? 'light';
+      const alternateTheme = document.querySelector('#giscus-alt-theme')?.value ?? 'dark';
+      let newTheme = '';
+      if(authorPrefersDark) {
+        newTheme = isAlternate ? baseTheme : alternateTheme;
+      } else {
+        newTheme = isAlternate ? alternateTheme : baseTheme;
+      }
+      const changeGiscusTheme = () => {
+        // From: https://github.com/giscus/giscus/issues/336
+        const sendMessage = (message) => {
+          const iframe = document.querySelector('iframe.giscus-frame');
+          if (!iframe) return;
+          iframe.contentWindow.postMessage({ giscus: message }, 'https://giscus.app');
+        }
+        sendMessage({
+          setConfig: {
+            theme: newTheme
+          }
+        });
+      }
+      const isGiscussLoaded = window.document.querySelector('iframe.giscus-frame') !== null;
+      if (isGiscussLoaded) {
+        changeGiscusTheme();
+      }
+    };
+    const authorPrefersDark = false;
+    const darkModeDefault = authorPrefersDark;
+      document.querySelector('link#quarto-text-highlighting-styles.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+      document.querySelector('link#quarto-bootstrap.quarto-color-scheme-extra').rel = 'disabled-stylesheet';
+    let localAlternateSentinel = darkModeDefault ? 'alternate' : 'default';
+    // Dark / light mode switch
+    window.quartoToggleColorScheme = () => {
+      // Read the current dark / light value
+      let toAlternate = !hasAlternateSentinel();
+      toggleColorMode(toAlternate);
+      setStyleSentinel(toAlternate);
+      toggleGiscusIfUsed(toAlternate, darkModeDefault);
+      window.dispatchEvent(new Event('resize'));
+    };
+    // Switch to dark mode if need be
+    if (hasAlternateSentinel()) {
+      toggleColorMode(true);
+    } else {
+      toggleColorMode(false);
+    }
+  </script>
 
 <div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
 
 <main class="content" id="quarto-document-content">
 
 
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Model Generation Testing Guide</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
 
 
 <section id="model-generation-testing-guide" class="level1">
@@ -88,7 +271,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <p>This document explains the model generation process in MultistateModels.jl and how each step is unit tested.</p>
 <section id="overview" class="level2">
 <h2 class="anchored" data-anchor-id="overview">Overview</h2>
-<p>Model generation in MultistateModels.jl follows a multi-step validation and construction process. Each step has corresponding unit tests in <code>test/test_modelgeneration.jl</code> (run via <code>Pkg.test(test_args=["test_modelgeneration"])</code>). All of the model-generation-focused tests currently pass ✅.</p>
+<p>Model generation in MultistateModels.jl follows a multi-step validation and construction process. Each step has corresponding unit tests in <code>test/test_modelgeneration.jl</code> (run via <code>Pkg.test(test_args=["test_modelgeneration"])</code>). All of the model-generation-focused tests currently pass ✅. Status last verified on <strong>2025-11-25</strong> by running <code>julia --project -e 'using Pkg; Pkg.test(test_args=["test_modelgeneration"])'</code> on branch <code>infrastructure_changes</code>.</p>
 </section>
 <section id="model-generation-process" class="level2">
 <h2 class="anchored" data-anchor-id="model-generation-process">Model Generation Process</h2>
@@ -116,6 +299,47 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <li>Aliases <code>from</code>, <code>to</code>, <code>states</code>, or <code>transition = 1 =&gt; 2</code> map to <code>statefrom</code>/<code>stateto</code> so you can pick whatever reads best.</li>
 <li>The macro forwards every extra keyword (e.g., <code>linpred_effect = :aft</code>, <code>time_transform = true</code>) straight to the underlying <code>Hazard</code> constructor.</li>
 <li>If you omit <code>formula</code> (or <code>@formula(0 ~ ...)</code>) altogether, the macro injects the intercept-only design <code>@formula(0 ~ 1)</code> automatically. Use this for baseline-only hazards.</li>
+</ul>
+<p><strong><code>@hazard</code> macro cheat sheet</strong></p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 45%">
+<col style="width: 37%">
+<col style="width: 16%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Field in macro block</th>
+<th>Accepted aliases</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>family</code></td>
+<td>Case-insensitive strings or symbols (<code>"exp"</code>, <code>:wei</code>, <code>:gom</code>, <code>:sp</code>)</td>
+<td>Passed directly to <code>Hazard</code> and validated the same way.</td>
+</tr>
+<tr class="even">
+<td><code>statefrom</code>, <code>stateto</code></td>
+<td><code>from</code>, <code>to</code>, <code>states = (f, t)</code>, <code>transition = f =&gt; t</code></td>
+<td>Normalized to integer origin/destination states.</td>
+</tr>
+<tr class="odd">
+<td><code>formula</code></td>
+<td><code>hazard = @formula(...)</code></td>
+<td>Injected as the first positional argument; defaults to <code>@formula(0 ~ 1)</code> when omitted.</td>
+</tr>
+<tr class="even">
+<td>Additional keywords</td>
+<td><code>linpred_effect</code>, <code>time_transform</code>, spline controls, solver hints, etc.</td>
+<td>Forwarded verbatim to the constructor so Tang/ODE settings stay consistent.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>The macro raises an <code>ArgumentError</code> if you forget to supply either <code>(statefrom, stateto)</code> or <code>transition</code>, or if you pick an unsupported <code>family</code> (e.g., future <code>:ode</code> tags that are not yet implemented).</li>
+<li>Prefer <code>@hazard</code> in tests and docs because the structured block stays readable as we add Tang/ODE knobs; fall back to the raw constructor when you need to metaprogram or generate hazards dynamically.</li>
 </ul>
 <p><strong>Constructor form (still supported):</strong></p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>h12 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> trt), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
@@ -182,16 +406,18 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>, <span class="fl">1.0</span>],</span>
 <span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">2.0</span>],</span>
 <span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
-<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
-<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">2</span>]</span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">0</span>],   <span class="co"># second row ends in state 0 to indicate censoring</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">3</span>]    <span class="co"># obstype 3 is described by the censoring matrix below</span></span>
 <span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>)</span>
 <span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
-<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">3</span>)</span>
-<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat)</span>
-<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">isa</span>(model, MultistateModels.MultistateProcess)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p><strong>Verifies:</strong> State 0 is allowed in data for censoring purposes</p>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>CensoringPatterns <span class="op">=</span> <span class="dt">Int64</span>[<span class="fl">3</span> <span class="fl">0</span> <span class="fl">1</span> <span class="fl">1</span>]  <span class="co"># pattern 3 allows states 2 or 3 at interval end</span></span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">3</span>)</span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat, CensoringPatterns <span class="op">=</span> CensoringPatterns)</span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">isa</span>(model, MultistateModels.MultistateProcess)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Verifies:</strong> State 0 is allowed in the <strong>data</strong> (not hazards) when paired with a <code>CensoringPatterns</code> row that enumerates the states compatible with each censoring code.</p>
 </section>
 <section id="test_non_contiguous_states---non-contiguous-states-cause-issues" class="level4">
 <h4 class="anchored" data-anchor-id="test_non_contiguous_states---non-contiguous-states-cause-issues"><code>test_non_contiguous_states</code> - Non-contiguous states cause issues</h4>
@@ -275,8 +501,13 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <span id="cb15-29"><a href="#cb15-29" aria-hidden="true" tabindex="-1"></a>model2 <span class="op">=</span> <span class="fu">multistatemodel</span>(h2; data <span class="op">=</span> dat_cov)</span>
 <span id="cb15-30"><a href="#cb15-30" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb15-31"><a href="#cb15-31" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_Intercept <span class="kw">in</span> model2.hazards[<span class="fl">1</span>].parnames</span>
-<span id="cb15-32"><a href="#cb15-32" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_age <span class="kw">in</span> model2.hazards[<span class="fl">1</span>].parnames</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p><strong>Verifies:</strong> - Parameters are named “Intercept” (not “rate”) for consistency with GLM conventions - Covariate names from the formula appear in parameter names - Parameter naming works correctly for models with and without covariates</p>
+<span id="cb15-32"><a href="#cb15-32" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_age <span class="kw">in</span> model2.hazards[<span class="fl">1</span>].parnames</span>
+<span id="cb15-33"><a href="#cb15-33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-34"><a href="#cb15-34" aria-hidden="true" tabindex="-1"></a><span class="co"># Interaction terms keep StatsModels' literal naming (including spaces and "&amp;")</span></span>
+<span id="cb15-35"><a href="#cb15-35" aria-hidden="true" tabindex="-1"></a>h3 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> trt <span class="op">&amp;</span> age), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb15-36"><a href="#cb15-36" aria-hidden="true" tabindex="-1"></a>model3 <span class="op">=</span> <span class="fu">multistatemodel</span>(h3; data <span class="op">=</span> dat_cov)</span>
+<span id="cb15-37"><a href="#cb15-37" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">Symbol</span>(<span class="st">"h12_trt &amp; age"</span>) <span class="kw">in</span> model3.hazards[<span class="fl">1</span>].parnames</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Verifies:</strong> - Parameters are named “Intercept” (not “rate”) for consistency with GLM conventions - Covariate names from the formula appear in parameter names - Parameter naming works correctly for models with and without covariates, including interaction terms whose symbols match the StatsModels schema exactly</p>
 <p><strong>Unit Test:</strong> <code>linpred_effect modes</code></p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="pp">@testset</span> <span class="st">"linpred_effect modes"</span> <span class="cf">begin</span></span>
 <span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>    h_exp_aft <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> x), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>; linpred_effect <span class="op">=</span> <span class="op">:</span>aft)</span>
@@ -293,7 +524,7 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <p><strong>Code:</strong></p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>_totalhazards <span class="op">=</span> <span class="fu">build_totalhazards</span>(_hazards, tmat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>What it does:</strong> - For each origin state, creates a <code>_TotalHazard</code> object - Absorbing states (no exits): <code>_TotalHazardAbsorbing()</code> - Transient states (have exits): <code>_TotalHazardTransient(transition_indices)</code> - Used for computing survival probabilities in likelihood calculations</p>
-<p><strong>Testing:</strong> No explicit unit test for this helper function alone, but implicitly tested by all model construction tests since total hazards are built for every model.</p>
+<p><strong>Testing:</strong> No dedicated unit test yet, but <code>_TotalHazard*</code> structs are instantiated in every <code>multistatemodel</code> call that the suite exercises. The shared-baseline cache regression tests in <code>test/test_hazards.jl</code> (“Shared baseline caches are reused across hazards from the same origin”) plus the builder coverage in <code>test/test_modelgeneration.jl</code> exercise both absorbing and transient branches. TODO: add a lightweight direct test once we expand fixture coverage in FC2.</p>
 <hr>
 </section>
 <section id="step-7-build-emission-matrix" class="level3">
@@ -301,7 +532,7 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <p><strong>Code:</strong></p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>emat <span class="op">=</span> <span class="fu">build_emat</span>(data, CensoringPatterns, tmat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>What it does:</strong> - For each observation, indicates which states are possible - Exactly observed: <code>emat[i,state] = 1</code>, all others = 0 - Censored: <code>emat[i,:] = [1,1,1,...]</code> (all states possible) - Custom censoring: Uses <code>CensoringPatterns</code> matrix to specify which states are possible</p>
-<p><strong>Testing:</strong> No explicit unit test for this helper function alone, but it’s exercised by all model construction tests.</p>
+<p><strong>Testing:</strong> <code>build_emat</code> is exercised by the panel-data and censoring suites (<code>test_state_zero_in_data</code>, <code>test_non_contiguous_states</code>, and the Tang cache regression tests). A stand-alone test would still be useful once we promote the shared fixture module to FC2 coverage.</p>
 <hr>
 </section>
 <section id="step-8-determine-model-type" class="level3">
@@ -418,6 +649,15 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <section id="roadmap-unified-dsl-ode-neural-hazards" class="level2">
 <h2 class="anchored" data-anchor-id="roadmap-unified-dsl-ode-neural-hazards">Roadmap: Unified DSL + ODE / Neural Hazards</h2>
 <p>This section captures the forward-looking design so Copilot (and contributors) understand how Tang-style ODE hazards, SODEN-style neural RHS, and existing analytic hazards will coexist behind one DSL. These notes guide upcoming refactors before implementation begins.</p>
+<section id="current-status-nov-25-2025" class="level4">
+<h4 class="anchored" data-anchor-id="current-status-nov-25-2025">Current Status (Nov 25, 2025)</h4>
+<ul>
+<li>✅ Shared baseline metadata + cache plumbing landed on <code>infrastructure_changes</code> and is exercised via <code>test/test_hazards.jl</code>.</li>
+<li>✅ Tang time-transform gating + <code>TimeTransformContext</code> helpers are live in exact-path likelihoods; Markov panels still bypass transforms.</li>
+<li>🚧 Dedicated ODE solves + SciML adjoints: design settled, implementation deferred to FC3 after the model-generation test suite is broadened.</li>
+<li>💤 Neural RHS integration remains on the roadmap only; no code yet.</li>
+</ul>
+</section>
 <section id="goals" class="level3">
 <h3 class="anchored" data-anchor-id="goals">Goals</h3>
 <ul>
@@ -560,6 +800,43 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <li><strong>Documentation &amp; tests</strong>: extend unit/integration tests to cover ODE hazards, shared trajectories, and neural examples; update user guides/tutorials.</li>
 </ol>
 </section>
+</section>
+<section id="tracking-checklist" class="level2">
+<h2 class="anchored" data-anchor-id="tracking-checklist">Tracking Checklist</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 35%">
+<col style="width: 38%">
+<col style="width: 25%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Plan Item</th>
+<th>Issue / PR</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>FC1 – Relocate legacy longtests</td>
+<td>Draft PR <code>infrastructure_changes -&gt; main</code> (includes deprecated test move)</td>
+<td>✅ Completed locally; ship with the next PR</td>
+</tr>
+<tr class="even">
+<td>FC2 – Shared fixtures + expanded model-generation coverage</td>
+<td>GitHub issue <strong>TBD-fc2-shared-fixtures</strong> (open before merging)</td>
+<td>🚧 In progress (fixtures landed; more suites to port)</td>
+</tr>
+<tr class="odd">
+<td>FC3 – Simulation transforms + ODE/neural hazards</td>
+<td>GitHub issue <strong>TBD-fc3-simulation-transforms</strong> (blocked on FC2)</td>
+<td>⏳ Not started; depends on FC2 sign-off</td>
+</tr>
+</tbody>
+</table>
+<blockquote class="blockquote">
+<p>Replace the <code>TBD-*</code> placeholders with real issue numbers/links once you create the tickets so this table stays authoritative.</p>
+</blockquote>
 <section id="notes-open-items" class="level3">
 <h3 class="anchored" data-anchor-id="notes-open-items">Notes / Open Items</h3>
 <ul>
@@ -575,6 +852,19 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <!-- /main column -->
 <script id="quarto-html-after-body" type="application/javascript">
   window.document.addEventListener("DOMContentLoaded", function (event) {
+    // Ensure there is a toggle, if there isn't float one in the top right
+    if (window.document.querySelector('.quarto-color-scheme-toggle') === null) {
+      const a = window.document.createElement('a');
+      a.classList.add('top-right');
+      a.classList.add('quarto-color-scheme-toggle');
+      a.href = "";
+      a.onclick = function() { try { window.quartoToggleColorScheme(); } catch {} return false; };
+      const i = window.document.createElement("i");
+      i.classList.add('bi');
+      a.appendChild(i);
+      window.document.body.appendChild(a);
+    }
+    setColorSchemeToggle(hasAlternateSentinel())
     const icon = "";
     const anchorJS = new window.AnchorJS();
     anchorJS.options = {

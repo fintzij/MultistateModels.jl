@@ -1,3 +1,14 @@
+---
+title: "Model Generation Testing Guide"
+format:
+    html:
+        theme:
+            light: darkly
+            dark: darkly
+        prefer-dark: true
+        highlight-style: atom-one-dark
+---
+
 # Model Generation Testing Guide
 
 This document explains the model generation process in MultistateModels.jl and how each step is unit tested.
@@ -34,6 +45,18 @@ end
 - Aliases `from`, `to`, `states`, or `transition = 1 => 2` map to `statefrom`/`stateto` so you can pick whatever reads best.
 - The macro forwards every extra keyword (e.g., `linpred_effect = :aft`, `time_transform = true`) straight to the underlying `Hazard` constructor.
 - If you omit `formula` (or `@formula(0 ~ ...)`) altogether, the macro injects the intercept-only design `@formula(0 ~ 1)` automatically. Use this for baseline-only hazards.
+
+**`@hazard` macro cheat sheet**
+
+| Field in macro block | Accepted aliases | Effect |
+|----------------------|------------------|--------|
+| `family`             | Case-insensitive strings or symbols (`"exp"`, `:wei`, `:gom`, `:sp`) | Passed directly to `Hazard` and validated the same way. |
+| `statefrom`, `stateto` | `from`, `to`, `states = (f, t)`, `transition = f => t` | Normalized to integer origin/destination states. |
+| `formula`             | `hazard = @formula(...)` | Injected as the first positional argument; defaults to `@formula(0 ~ 1)` when omitted. |
+| Additional keywords  | `linpred_effect`, `time_transform`, spline controls, solver hints, etc. | Forwarded verbatim to the constructor so Tang/ODE settings stay consistent. |
+
+- The macro raises an `ArgumentError` if you forget to supply either `(statefrom, stateto)` or `transition`, or if you pick an unsupported `family` (e.g., future `:ode` tags that are not yet implemented).
+- Prefer `@hazard` in tests and docs because the structured block stays readable as we add Tang/ODE knobs; fall back to the raw constructor when you need to metaprogram or generate hazards dynamically.
 
 **Constructor form (still supported):**
 ```julia
