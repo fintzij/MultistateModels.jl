@@ -13,6 +13,8 @@ include("setup_3state_expwei.jl")
 include("setup_3state_weiph.jl")
 include("setup_2state_trans.jl")
 include("setup_gompertz.jl")
+include("fixtures/TestFixtures.jl")
+using .TestFixtures
 # include("setup_splines.jl")  # TODO: Splines not yet implemented in infrastructure_changes
 include("test_miscellaneous.jl")
 
