@@ -653,7 +653,7 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <h4 class="anchored" data-anchor-id="current-status-nov-25-2025">Current Status (Nov 25, 2025)</h4>
 <ul>
 <li>✅ Shared baseline metadata + cache plumbing landed on <code>infrastructure_changes</code> and is exercised via <code>test/test_hazards.jl</code>.</li>
-<li>✅ Tang time-transform gating + <code>TimeTransformContext</code> helpers are live in exact-path likelihoods; Markov panels still bypass transforms.</li>
+<li>✅ Time transformation gating + <code>TimeTransformContext</code> helpers are live in exact-path likelihoods; Markov panels still bypass transforms.</li>
 <li>🚧 Dedicated ODE solves + SciML adjoints: design settled, implementation deferred to FC3 after the model-generation test suite is broadened.</li>
 <li>💤 Neural RHS integration remains on the roadmap only; no code yet.</li>
 </ul>
@@ -761,7 +761,7 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <li><code>total_cumulhaz</code> composes cumulative hazards by calling either analytic integrals or solving the ODE for each subject/time interval. Solver workspaces/cache objects live inside hazard structs to avoid reallocations.</li>
 <li>MCEM/path sampling reuse the same call sites, ensuring identical numerics.</li>
 </ul></li>
-<li><strong>Shared trajectory (Tang time transform)</strong> - Applicable only when hazard RHS is separable (<code>f(t, Λ, x)=f₁(t, x)·f₂(Λ, x)</code>) and when all outgoing transitions from a state share the same baseline α(t). - Workflow: 1. Transitions with identical baselines reuse a single <code>TimeTransformCache</code> via their shared baseline key. 2. Each cache stores Tang hazard/cumulative-hazard evaluations keyed by <code>(linpred, time window)</code>, so repeated calls (across hazards or jumps) simply reuse the stored result. - Relies on the per-evaluation <code>TimeTransformContext</code> plus the new <code>SharedBaselineTable</code>. Keep these objects lightweight and rebuildable so maintenance stays simple. - Likelihood API exposes <code>likelihood_mode = :per_subject | :shared_traj</code>; automatically falls back to per-subject if constraints fail.</li>
+<li><strong>Shared trajectory (time transformation)</strong> - Applicable only when hazard RHS is separable (<code>f(t, Λ, x)=f₁(t, x)·f₂(Λ, x)</code>) and when all outgoing transitions from a state share the same baseline α(t). - Workflow: 1. Transitions with identical baselines reuse a single <code>TimeTransformCache</code> via their shared baseline key. 2. Each cache stores Tang hazard/cumulative-hazard evaluations keyed by <code>(linpred, time window)</code>, so repeated calls (across hazards or jumps) simply reuse the stored result. - Relies on the per-evaluation <code>TimeTransformContext</code> plus the new <code>SharedBaselineTable</code>. Keep these objects lightweight and rebuildable so maintenance stays simple. - Likelihood API exposes <code>likelihood_mode = :per_subject | :shared_traj</code>; automatically falls back to per-subject if constraints fail.</li>
 </ol>
 </section>
 <section id="sciml-adjoint-integration" class="level3">
@@ -795,7 +795,7 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <ol type="1">
 <li><strong>Infrastructure prep</strong>: refactor hazard structs/builders to accept solver metadata; no behavior change yet.</li>
 <li><strong>ODE cumulative hazards</strong>: add per-subject SciML solves + caching; prove parity with analytic hazards.</li>
-<li><strong>Shared trajectory mode</strong>: implement Tang time-transform caches; add validation and configuration hooks.</li>
+<li><strong>Shared trajectory mode</strong>: implement time transformation caches; add validation and configuration hooks.</li>
 <li><strong>Neural RHS support</strong>: integrate Lux/DiffEqFlux-based RHS, including parameter handling and adjoints.</li>
 <li><strong>Documentation &amp; tests</strong>: extend unit/integration tests to cover ODE hazards, shared trajectories, and neural examples; update user guides/tutorials.</li>
 </ol>

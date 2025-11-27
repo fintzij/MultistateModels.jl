@@ -156,7 +156,7 @@ Arguments
 function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true, return_logliks = false)
 
     # if exact data just return the loglik and subj_lml from the model fit
-    if all(model.data.obstype .== 1)
+    if model isa MultistateModelFitted && all(model.data.obstype .== 1)
         return (loglik = model.loglik.loglik,
                 subj_lml = model.loglik.subj_lml)
     end
@@ -333,7 +333,7 @@ Arguments
 function draw_paths(model::MultistateProcess, npaths; paretosmooth = true, return_logliks = false)
 
     # if exact data just return the loglik and subj_lml from the model fit
-    if all(model.data.obstype .== 1)
+    if model isa MultistateModelFitted && all(model.data.obstype .== 1)
         return (loglik = model.loglik.loglik,
                 subj_lml = model.loglik.subj_lml)
     end
@@ -411,7 +411,7 @@ function draw_paths(model::MultistateProcess, npaths; paretosmooth = true, retur
             # subject data
             subj_tpm_map = view(books[2], subj_inds, :)
             subj_emat    = view(model.emat, subj_inds, :)
-            ForwardFiltering!(fbmats[i], subj_dat, tpm_book_surrogate, subj_tpm_map, subj_emat)
+            ForwardFiltering!(fbmats[i], subj_dat, tpm_book, subj_tpm_map, subj_emat)
         end
 
         # sample new paths and compute log likelihoods
@@ -473,11 +473,10 @@ function draw_paths(model::MultistateProcess, npaths; paretosmooth = true, retur
     end
 
     # normalize importance weights
-    # normalize!.(ImportanceWeights, 1)
     ImportanceWeightsNormalized = normalize.(ImportanceWeights, 1)
 
     if return_logliks
-        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights, subj_pareto_k)
+        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights)
     else
         return (; samplepaths, ImportanceWeightsNormalized)
     end

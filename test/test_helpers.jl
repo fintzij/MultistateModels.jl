@@ -1,4 +1,13 @@
-# Test parameter setting function
+# =============================================================================
+# Helper Utility Tests
+# =============================================================================
+#
+# Exercises low-level helper functions that mutation-heavy code paths depend on.
+# Shared fixtures provide reusable datasets for helper checks so each testset
+# isolates a single helper.
+using .TestFixtures
+
+# --- Parameter setters ----------------------------------------------------------
 @testset "test_set_parameters!" begin
 
     # vector
@@ -32,13 +41,13 @@
     @test all(msm_expwei.parameters[4] .== named_tuple[4])
 end
 
-# Test function for converting vector of subject IDs to vector of vector of indices 
-
+# --- Subject index construction -------------------------------------------------
 @testset "test_get_subjinds" begin
-    
-    sidv = [1, 2, 2, 3, 3, 3, 42, 42]
-    sidvv = [[1], [2, 3], [4, 5, 6], [7, 8]]
+    sid_df = subject_id_df()
+    expected_groups = subject_id_groups()
 
-    @test MultistateModels.get_subjinds(DataFrame(id = sidv))[1] == sidvv
-    @test MultistateModels.get_subjinds(DataFrame(id = sidv))[2] == 4
+    subjinds, nsubj = MultistateModels.get_subjinds(sid_df)
+
+    @test subjinds == expected_groups
+    @test nsubj == length(expected_groups)
 end

@@ -1,4 +1,5 @@
 # simulation functions
+using Random
 # simone_path: simulates a single sample path
 # sim_paths: wrapper around simeone_path to simulate nsamples x nids number of paths
 # simulate: wrapper around sim_paths and maybe other stuff to simulate new data, also incorporates censoring, etc.
@@ -15,8 +16,9 @@ Simulate `n` datasets or collections of sample paths from a multistate model. If
 - `paths`: boolean; if false then continuous-time sample paths not returned
 - `delta_u`: minimum cumulative incidence increment per-jump, defaults to the larger of (1 / #subjects)^2 or sqrt(eps())
 - `delta_t`: minimum time increment per-jump, defaults to sqrt(eps())
+ - `time_transform`: toggle Tang-style shared-trajectory solver. When `true` (default) the simulator reuses the same caches used by the exact-path likelihood; set to `false` to force the legacy cumulative-hazard path even for Tang-enabled hazards.
 """
-function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false, delta_u = sqrt(eps()), delta_t = sqrt(eps()))
+function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false, delta_u = sqrt(eps()), delta_t = sqrt(eps()), time_transform::Bool = true)
 
     # throw an error if neither paths nor data are asked for
     if paths == false && data == false
@@ -40,7 +42,7 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
         for j in Base.OneTo(nsubj)
             
             # simulate a path for subject j
-            samplepath = simulate_path(model, j, delta_u, delta_t)
+            samplepath = simulate_path(model, j, delta_u, delta_t; time_transform = time_transform)
 
             # save path if requested
             if paths == true
@@ -74,16 +76,84 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
     end
 end
 
+const _JUMP_SOLVER_MAX_ITERS = 80
+
+@inline function _materialize_covariates(row::DataFrameRow, hazards::AbstractVector{<:_Hazard})
+    cache = Vector{NamedTuple}(undef, length(hazards))
+    for (i, hazard) in enumerate(hazards)
+        cache[i] = extract_covariates(row, hazard.parnames)
+    end
+    return cache
+end
+
 """
-simulate_path(model::MultistateProcess, subj::Int64, deltamin)
+    _find_jump_time_bisection(gap_fn, lo, hi, delta_t;
+                              value_tol = 1e-10,
+                              max_iters = _JUMP_SOLVER_MAX_ITERS)
+
+Solve `gap_fn(t) = 0` on `[lo, hi]` via bisection. The caller guarantees
+`gap_fn(lo) ≤ 0` and `gap_fn(hi) ≥ 0`. Returns the midpoint once either the
+function value drops below `value_tol` or the bracket width shrinks beneath
+`max(delta_t, value_tol)`.
+"""
+function _find_jump_time_bisection(gap_fn, lo, hi, delta_t;
+                                   value_tol = 1e-10,
+                                   max_iters = _JUMP_SOLVER_MAX_ITERS)
+    lo >= hi && return hi
+    initial_lo, initial_hi = lo, hi
+    lo_val = gap_fn(lo)
+    lo_val > 0 && return lo
+    hi_val = gap_fn(hi)
+    hi_val < 0 && error("simulate_path failed to bracket jump time on interval [$initial_lo, $initial_hi]")
+
+    for iter in 1:max_iters
+        mid = 0.5 * (lo + hi)
+        mid_val = gap_fn(mid)
+
+        if !isfinite(mid_val)
+            error("simulate_path encountered non-finite objective while locating jump time on interval [$initial_lo, $initial_hi]")
+        end
+
+        if abs(mid_val) <= value_tol || (hi - lo) <= max(delta_t, value_tol)
+            return mid
+        elseif mid_val > 0
+            hi = mid
+        else
+            lo = mid
+        end
+    end
+
+    error("simulate_path failed to locate jump time after $(max_iters) bisection iterations on interval [$initial_lo, $initial_hi]")
+end
+
+@inline function _sample_next_state(rng::AbstractRNG, probs::AbstractVector{Float64}, trans_inds::AbstractVector{Int})
+    threshold = rand(rng)
+    cumulative = 0.0
+    for idx in trans_inds
+        cumulative += probs[idx]
+        if threshold <= cumulative
+            return idx
+        end
+    end
+    return trans_inds[end]
+end
+
+"""
+    simulate_path(model::MultistateProcess, subj::Int64, deltamin; optimize_fn = Optim.optimize)
 
 Simulate a single sample path.
 
 # Arguments 
-- model: multistate model object
-- subj: subject index
+- `model`: multistate model object
+- `subj`: subject index
+- `optimize_fn`: function with the same signature as `Optim.optimize` used to locate jump times (primarily for testing)
+- `time_transform`: toggle Tang-style shared-trajectory solver. Defaults to `true` so the simulator matches exact-path likelihood mechanics but can be disabled for regression tests or debugging.
+- `rng`: optional random-number generator. Defaults to the task-local RNG so callers can supply thread-local or reproducible generators.
 """
-function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
+function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t;
+                       optimize_fn = Optim.optimize,
+                       time_transform::Bool = true,
+                       rng::AbstractRNG = Random.default_rng())
 
     # subject data
     subj_inds = model.subjectindices[subj]
@@ -93,9 +163,12 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
     row = 1 # row in subject's data that is incremented
     ind = subj_inds[row] # index in complete dataset
     subjdat_row = subj_dat[row, :] # current DataFrameRow for covariate extraction
+    covars_cache = _materialize_covariates(subjdat_row, model.hazards)
 
     # current state
     scur = subj_dat.statefrom[1]
+
+    tt_context = time_transform ? maybe_time_transform_context(model.parameters, subj_dat, model.hazards; time_column = :tstop) : nothing
 
     # tcur and tstop
     tcur    = subj_dat.tstart[1]
@@ -108,7 +181,8 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
 
     # vector for next state transition probabilities
     nstates  = size(model.tmat, 2)
-    # ns_probs = zeros(nstates)
+    ns_probs = zeros(Float64, nstates)
+    transitions_by_state = [findall(model.tmat[row, :] .!= 0) for row in 1:nstates]
 
     # initialize sample path
     times  = [tcur]; sizehint!(times, nstates * 2)
@@ -125,32 +199,85 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
     
     # sample the cumulative incidence if transient
     if keep_going
-        u = maximum([rand(1)[1], delta_u])
+        u = max(rand(rng), delta_u)
     end
 
     # simulate path
     while keep_going
+        use_transform = time_transform && _time_transform_enabled(model.totalhazards[scur], model.hazards)
         
         # calculate event probability over the next interval
-        interval_incid = (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + tstop - tcur, model.parameters, subjdat_row, model.totalhazards[scur], model.hazards; give_log = false))
+        interval_incid = (1 - cuminc) * (1 - survprob(
+            timeinstate,
+            timeinstate + tstop - tcur,
+            model.parameters,
+            covars_cache,
+            model.totalhazards[scur],
+            model.hazards;
+            give_log = false,
+            apply_transform = use_transform,
+            cache_context = tt_context))
 
         # check if event happened in the interval
         if (u < (cuminc + interval_incid)) && (u >= cuminc)
 
-            # update the current time - roughly 1 millisecond must pass if time is in minutes
-            timeincrement = optimize(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(timeinstate, timeinstate + t[1], model.parameters, subjdat_row, model.totalhazards[scur], model.hazards; give_log = false))) - log(u))^2), delta_t, tstop - tcur, optmethod; rel_tol = rtol, abs_tol = atol)
+            interval_len = tstop - tcur
+            current_timeinstate = timeinstate
+            gap_fn = t -> begin
+                surv = survprob(
+                    current_timeinstate,
+                    current_timeinstate + t,
+                    model.parameters,
+                    covars_cache,
+                    model.totalhazards[scur],
+                    model.hazards;
+                    give_log = false,
+                    apply_transform = use_transform,
+                    cache_context = tt_context)
+                cuminc + (1 - cuminc) * (1 - surv) - u
+            end
 
-            if Optim.converged(timeincrement)
-                timeinstate += timeincrement.minimizer
+            if optimize_fn === Optim.optimize
+                timeincrement = _find_jump_time_bisection(gap_fn, delta_t, interval_len, delta_t)
             else
-                error("Failed to converge in $(Optim.iterations(nexttime)) iterations")
-            end            
+                result = optimize_fn(t -> ((log(cuminc + (1 - cuminc) * (1 - survprob(
+                    current_timeinstate,
+                    current_timeinstate + t[1],
+                    model.parameters,
+                    covars_cache,
+                    model.totalhazards[scur],
+                    model.hazards;
+                    give_log = false,
+                    apply_transform = use_transform,
+                    cache_context = tt_context))) - log(u))^2), delta_t, interval_len, optmethod; rel_tol = rtol, abs_tol = atol)
+
+                if Optim.converged(result)
+                    timeincrement = result.minimizer
+                else
+                    iters = Optim.iterations(result)
+                    bracket = (delta_t, interval_len)
+                    error("simulate_path failed to locate jump time after $iters iterations on interval $bracket")
+                end
+            end
+
+            timeinstate += timeincrement
 
             # calculate next state transition probabilities 
             # next_state_probs!(ns_probs, timeinstate, scur, subjdat_row, model.parameters, model.hazards, model.totalhazards, model.tmat)
 
-            # sample the next state
-            scur = rand(Categorical(next_state_probs(timeinstate, scur, subjdat_row, model.parameters, model.hazards, model.totalhazards, model.tmat)))
+            trans_inds = transitions_by_state[scur]
+            next_state_probs!(
+                ns_probs,
+                trans_inds,
+                timeinstate,
+                scur,
+                covars_cache,
+                model.parameters,
+                model.hazards,
+                model.totalhazards;
+                apply_transform = time_transform,
+                cache_context = tt_context)
+            scur = _sample_next_state(rng, ns_probs, trans_inds)
             
             # increment time in state and cache the jump time and state
             tcur = times[end] + timeinstate
@@ -162,7 +289,7 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
 
             # draw new cumulative incidence, reset cuminc and time in state
             if keep_going
-                u           = maximum([rand(1)[1], delta_u]) # sample cumulative incidence
+                u           = max(rand(rng), delta_u) # sample cumulative incidence
                 cuminc      = 0.0 # reset cuminc
                 timeinstate = 0.0 # reset time in state
             end
@@ -182,6 +309,7 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t)
                 row  += 1
                 ind  += 1
                 subjdat_row = subj_dat[row, :]  # Update DataFrameRow for new interval
+                covars_cache = _materialize_covariates(subjdat_row, model.hazards)
                 tcur  = subj_dat.tstart[row]
                 tstop = subj_dat.tstop[row]
 

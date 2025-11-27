@@ -64,6 +64,7 @@ export
     initialize_parameters,
     initialize_parameters!,
     initialize_surrogate!,
+    loglik,
     loglik_exact,
     loglik_markov,
     loglik_semi_markov,

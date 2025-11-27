@@ -78,6 +78,26 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
      return ll
 end
 
+"""
+    loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess)
+
+Convenience wrapper that evaluates the log-likelihood of a single sample path using the
+current model definition. Accepts either a `VectorOfVectors` or flat parameter vector and
+reuses `loglik_path` for the heavy lifting.
+"""
+function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess)
+
+    # normalize parameter representation for downstream hazard calls
+    pars = parameters isa VectorOfVectors ? parameters : VectorOfVectors(parameters, model.parameters.elem_ptr)
+
+    # build a subject-level dataframe aligned with the sample path
+    subj_inds = model.subjectindices[path.subj]
+    subj_dat = view(model.data, subj_inds, :)
+    subjdat_df = make_subjdat(path, subj_dat)
+
+    return loglik_path(pars, subjdat_df, hazards, model.totalhazards, model.tmat)
+end
+
 ########################################################
 ##################### Wrappers #########################
 ########################################################

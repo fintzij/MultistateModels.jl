@@ -17,6 +17,157 @@ This document explains the model generation process in MultistateModels.jl and h
 
 Model generation in MultistateModels.jl follows a multi-step validation and construction process. Each step has corresponding unit tests in `test/test_modelgeneration.jl` (run via `Pkg.test(test_args=["test_modelgeneration"])`). All of the model-generation-focused tests currently pass ✅. Status last verified on **2025-11-25** by running `julia --project -e 'using Pkg; Pkg.test(test_args=["test_modelgeneration"])'` on branch `infrastructure_changes`.
 
+## Expanded Diagnostics Matrix
+
+Every analytic hazard family (exponential, Weibull, Gompertz) is now exercised under both `linpred_effect` settings (PH/AFT) and both covariate regimes (baseline-only vs. a single covariate `x = 1.5`). For each of the 12 scenarios we regenerate two plots under `test/diagnostics/assets/`:
+
+- **Function panels** overlay the analytic hazard/cumulative hazard/survival curves with `call_haz`, `call_cumulhaz`, and `survprob` outputs (with and without the time transformation enabled).
+- **Simulation panels** draw 40k paths with and without the time transformation, compare the ECDF against the closed-form target distribution, and display both the ECDF residual and the ECDF difference `ΔF(t) = F_tt(t) − F_fb(t)` to certify parity. Histogram/PDF overlays confirm that `simulate_path` obeys the target density.
+
+All figures come from `test/diagnostics/generate_model_diagnostics.jl`:
+
+```bash
+julia --project=test/diagnostics test/diagnostics/generate_model_diagnostics.jl
+```
+
+| Scenario | Function panel | Simulation panel |
+| --- | --- | --- |
+| Exp · PH · baseline | `../test/diagnostics/assets/function_panel_exp_ph_baseline.png` | `../test/diagnostics/assets/simulation_panel_exp_ph_baseline.png` |
+| Exp · PH · covariate | `../test/diagnostics/assets/function_panel_exp_ph_covariate.png` | `../test/diagnostics/assets/simulation_panel_exp_ph_covariate.png` |
+| Exp · AFT · baseline | `../test/diagnostics/assets/function_panel_exp_aft_baseline.png` | `../test/diagnostics/assets/simulation_panel_exp_aft_baseline.png` |
+| Exp · AFT · covariate | `../test/diagnostics/assets/function_panel_exp_aft_covariate.png` | `../test/diagnostics/assets/simulation_panel_exp_aft_covariate.png` |
+| Wei · PH · baseline | `../test/diagnostics/assets/function_panel_wei_ph_baseline.png` | `../test/diagnostics/assets/simulation_panel_wei_ph_baseline.png` |
+| Wei · PH · covariate | `../test/diagnostics/assets/function_panel_wei_ph_covariate.png` | `../test/diagnostics/assets/simulation_panel_wei_ph_covariate.png` |
+| Wei · AFT · baseline | `../test/diagnostics/assets/function_panel_wei_aft_baseline.png` | `../test/diagnostics/assets/simulation_panel_wei_aft_baseline.png` |
+| Wei · AFT · covariate | `../test/diagnostics/assets/function_panel_wei_aft_covariate.png` | `../test/diagnostics/assets/simulation_panel_wei_aft_covariate.png` |
+| Gom · PH · baseline | `../test/diagnostics/assets/function_panel_gom_ph_baseline.png` | `../test/diagnostics/assets/simulation_panel_gom_ph_baseline.png` |
+| Gom · PH · covariate | `../test/diagnostics/assets/function_panel_gom_ph_covariate.png` | `../test/diagnostics/assets/simulation_panel_gom_ph_covariate.png` |
+| Gom · AFT · baseline | `../test/diagnostics/assets/function_panel_gom_aft_baseline.png` | `../test/diagnostics/assets/simulation_panel_gom_aft_baseline.png` |
+| Gom · AFT · covariate | `../test/diagnostics/assets/function_panel_gom_aft_covariate.png` | `../test/diagnostics/assets/simulation_panel_gom_aft_covariate.png` |
+
+Below are the same plots inlined with short takeaways. In every case the function panels show the `call_*` outputs lying directly on top of the analytic curves, and the simulation panels keep `ΔF(t)` numerically at zero (see generator logs for the reported max `|ΔF|`).
+
+### Exponential Family
+
+#### PH · baseline-only
+
+![Exp PH baseline function panel](../test/diagnostics/assets/function_panel_exp_ph_baseline.png)
+
+![Exp PH baseline simulation panel](../test/diagnostics/assets/simulation_panel_exp_ph_baseline.png)
+
+- Constant hazard from `call_haz` matches the analytic rate `λ₀ = 0.35`; cumulative hazard and survival stay exactly on the closed form.
+- The simulated ECDF sits on the theoretical exponential CDF while the residual remains at floating-point noise.
+- `ΔF(t)` stays at zero, confirming the time transformation leaves simulated event times unchanged.
+
+#### PH · covariate
+
+![Exp PH covariate function panel](../test/diagnostics/assets/function_panel_exp_ph_covariate.png)
+
+![Exp PH covariate simulation panel](../test/diagnostics/assets/simulation_panel_exp_ph_covariate.png)
+
+- Adding `x = 1.5` with `β = 0.6` shifts the hazard to `λ = 0.35·exp(0.9)`; `call_haz` and `call_cumulhaz` follow the new intercept exactly.
+- Simulation residuals remain flat, and the histogram/PDF overlay shows the higher-rate exponential density being recovered.
+- ECDF parity between Tang-enabled and fallback solvers remains exact.
+
+#### AFT · baseline-only
+
+![Exp AFT baseline function panel](../test/diagnostics/assets/function_panel_exp_aft_baseline.png)
+
+![Exp AFT baseline simulation panel](../test/diagnostics/assets/simulation_panel_exp_aft_baseline.png)
+
+- Accelerated-failure-time mode collapses to the same constant hazard as the PH baseline case (no covariate), and both solver branches agree with the analytic line.
+- Duration draws again track the exponential reference distribution with negligible ECDF residual.
+- `ΔF(t)` stays pinned at zero.
+
+#### AFT · covariate
+
+![Exp AFT covariate function panel](../test/diagnostics/assets/function_panel_exp_aft_covariate.png)
+
+![Exp AFT covariate simulation panel](../test/diagnostics/assets/simulation_panel_exp_aft_covariate.png)
+
+- The covariate now rescales time by `exp(-βx)`, and the plotted `call_*` outputs follow the analytic AFT curves exactly.
+- Simulation diagnostics show the slower event-time distribution (hazard reduced by `exp(-0.9)`), and ECDF differences remain numerically zero.
+
+### Weibull Family
+
+#### PH · baseline-only
+
+![Wei PH baseline function panel](../test/diagnostics/assets/function_panel_wei_ph_baseline.png)
+
+![Wei PH baseline simulation panel](../test/diagnostics/assets/simulation_panel_wei_ph_baseline.png)
+
+- Shape 1.35 / scale 0.4 baseline reproduces the flared hazard perfectly under both solver modes.
+- ECDF residuals stay within the ±3×10⁻³ band over the plotted support.
+- Time-transform parity plot is flat, so the Tang caches do not perturb Weibull draws.
+
+#### PH · covariate
+
+![Wei PH covariate function panel](../test/diagnostics/assets/function_panel_wei_ph_covariate.png)
+
+![Wei PH covariate simulation panel](../test/diagnostics/assets/simulation_panel_wei_ph_covariate.png)
+
+- Covariate effects tilt both the hazard and the cumulative hazard; `call_haz` lines remain indistinguishable from the analytic expectations.
+- Simulation histograms match the heavier right tail implied by `exp(βx)`.
+- `ΔF(t)` remains identically zero.
+
+#### AFT · baseline-only
+
+![Wei AFT baseline function panel](../test/diagnostics/assets/function_panel_wei_aft_baseline.png)
+
+![Wei AFT baseline simulation panel](../test/diagnostics/assets/simulation_panel_wei_aft_baseline.png)
+
+- AFT mode collapses to the baseline hazard (no covariate), so analytic and empirical curves coincide as expected.
+- ECDF residuals remain negligible; histogram vs. pdf overlays the canonical Weibull density.
+- Time-transform parity stays flat.
+
+#### AFT · covariate
+
+![Wei AFT covariate function panel](../test/diagnostics/assets/function_panel_wei_aft_covariate.png)
+
+![Wei AFT covariate simulation panel](../test/diagnostics/assets/simulation_panel_wei_aft_covariate.png)
+
+- Time-axis scaling by `exp(-shape·βx)` visibly compresses the hazard curves; both solver branches match the analytic result.
+- Simulated durations follow the rescaled Weibull CDF, and the ECDF difference remains at 0 within floating-point tolerance.
+
+### Gompertz Family
+
+#### PH · baseline-only
+
+![Gom PH baseline function panel](../test/diagnostics/assets/function_panel_gom_ph_baseline.png)
+
+![Gom PH baseline simulation panel](../test/diagnostics/assets/simulation_panel_gom_ph_baseline.png)
+
+- The exponentially increasing hazard from `call_haz` sits directly on top of the analytic Gompertz curve.
+- ECDF residuals confirm that `simulate_path` reproduces the Gompertz distribution across the plotting grid.
+- `ΔF(t)` is identically zero, so Tang caches preserve path statistics.
+
+#### PH · covariate
+
+![Gom PH covariate function panel](../test/diagnostics/assets/function_panel_gom_ph_covariate.png)
+
+![Gom PH covariate simulation panel](../test/diagnostics/assets/simulation_panel_gom_ph_covariate.png)
+
+- Covariate shifts accelerate the hazard growth rate, and analytic vs. computed curves remain indistinguishable.
+- Simulation panel shows the heavier right tail along with flat ECDF residual and parity trace.
+
+#### AFT · baseline-only
+
+![Gom AFT baseline function panel](../test/diagnostics/assets/function_panel_gom_aft_baseline.png)
+
+![Gom AFT baseline simulation panel](../test/diagnostics/assets/simulation_panel_gom_aft_baseline.png)
+
+- Without covariates, the AFT setting matches the PH baseline, so curves overlap exactly.
+- ECDF/pdp comparisons mirror the PH baseline case with ΔF(t) at zero.
+
+#### AFT · covariate
+
+![Gom AFT covariate function panel](../test/diagnostics/assets/function_panel_gom_aft_covariate.png)
+
+![Gom AFT covariate simulation panel](../test/diagnostics/assets/simulation_panel_gom_aft_covariate.png)
+
+- Time scaling by `exp(-βx)` stretches the Gompertz hazard, and both solver modes stay glued to the analytic reference.
+- Simulation diagnostics confirm the stretched distribution and keep the ECDF difference curve at numerical zero.
+
 ## Model Generation Process
 
 ### STEP 1: User Creates Hazard Objects
@@ -459,7 +610,7 @@ This section captures the forward-looking design so Copilot (and contributors) u
 #### Current Status (Nov 25, 2025)
 
 - ✅ Shared baseline metadata + cache plumbing landed on `infrastructure_changes` and is exercised via `test/test_hazards.jl`.
-- ✅ Tang time-transform gating + `TimeTransformContext` helpers are live in exact-path likelihoods; Markov panels still bypass transforms.
+- ✅ Time transformation gating + `TimeTransformContext` helpers are live in exact-path likelihoods; Markov panels still bypass transforms.
 - 🚧 Dedicated ODE solves + SciML adjoints: design settled, implementation deferred to FC3 after the model-generation test suite is broadened.
 - 💤 Neural RHS integration remains on the roadmap only; no code yet.
 
@@ -550,7 +701,7 @@ This section captures the forward-looking design so Copilot (and contributors) u
     - `total_cumulhaz` composes cumulative hazards by calling either analytic integrals or solving the ODE for each subject/time interval. Solver workspaces/cache objects live inside hazard structs to avoid reallocations.
     - MCEM/path sampling reuse the same call sites, ensuring identical numerics.
 
-2. **Shared trajectory (Tang time transform)**
+2. **Shared trajectory (time transformation)**
         - Applicable only when hazard RHS is separable (`f(t, Λ, x)=f₁(t, x)·f₂(Λ, x)`) and when all outgoing transitions from a state share the same baseline α(t).
         - Workflow:
             1. Transitions with identical baselines reuse a single `TimeTransformCache` via their shared baseline key.
@@ -582,7 +733,7 @@ This section captures the forward-looking design so Copilot (and contributors) u
 
 1. **Infrastructure prep**: refactor hazard structs/builders to accept solver metadata; no behavior change yet.
 2. **ODE cumulative hazards**: add per-subject SciML solves + caching; prove parity with analytic hazards.
-3. **Shared trajectory mode**: implement Tang time-transform caches; add validation and configuration hooks.
+3. **Shared trajectory mode**: implement time transformation caches; add validation and configuration hooks.
 4. **Neural RHS support**: integrate Lux/DiffEqFlux-based RHS, including parameter handling and adjoints.
 5. **Documentation & tests**: extend unit/integration tests to cover ODE hazards, shared trajectories, and neural examples; update user guides/tutorials.
 

@@ -1,28 +1,32 @@
-# 1. State changes occur (from the path)
-# 2. Covariate values change (when multiple rows and covariates present)
-# The function handles three cases:
-# - Multiple rows with covariates: includes both state change and covariate change times
-# - Single row with covariates OR no covariates: uses only path times
-# - Returns appropriate columns based on whether covariates exist
+# =============================================================================
+# make_subjdat Tests
+# =============================================================================
+#
+# Validates that `make_subjdat` emits interval-level data whenever either
+# 1) state changes occur (from the sampled path) or 2) covariate values change.
+# The helper should:
+#   * splice covariate-change times only when multiple rows exist,
+#   * fall back to raw path times with single rows or no covariates, and
+#   * return the correct column set depending on available covariates.
 using MultistateModels: SamplePath, make_subjdat
+using .TestFixtures:
+    make_subjdat_covariate_panel,
+    make_subjdat_baseline_panel,
+    make_subjdat_single_observation_panel,
+    make_subjdat_exact_match_panel,
+    make_subjdat_constant_covariates_panel,
+    make_subjdat_single_row_full_panel,
+    make_subjdat_sojourn_panel
 
 @testset "test_make_subjdat" begin
     
+    # --- Covariate-responsive intervals ---------------------------------------
     @testset "Basic functionality with covariates" begin
         # Setup hazards with covariates for this test
         h12 = Hazard(@formula(0 ~ 1 + trt + age), "exp", 1, 2)
         h21 = Hazard(@formula(0 ~ 1 + trt + age), "wei", 2, 1)
         # Test case from the scratch file - data with covariate changes
-        dat = DataFrame(
-            id = [1,1,1,1,1],
-            tstart = [0.0, 3.0, 7.0, 12.0, 18.0],
-            tstop = [3.0, 7.0, 12.0, 18.0, 25.0],
-            statefrom = [1, 1, 1, 1, 1],
-            stateto = [1, 1, 1, 1, 1],
-            obstype = [2, 2, 2, 2, 2],
-            trt = [0, 1, 1, 0, 1],
-            age = [50, 50, 55, 55, 60]
-        )
+        dat = make_subjdat_covariate_panel()
         
         model = multistatemodel(h12, h21; data = dat)
         subjectdata = view(model.data, model.data.id .== 1, :)
@@ -62,20 +66,14 @@ using MultistateModels: SamplePath, make_subjdat
         @test result.sojourn ≈ expected_sojourns
     end
     
+    # --- Baseline-only panels --------------------------------------------------
     @testset "Data without covariates" begin
         # Setup hazards without covariates for this test
         h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
         h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1)
         
         # Test with only the basic 6 columns - should use else branch and return only subjdat_lik
-        dat_no_cov = DataFrame(
-            id = [1,1,1],
-            tstart = [0.0, 5.0, 15.0],
-            tstop = [5.0, 15.0, 25.0],
-            statefrom = [1, 1, 1],
-            stateto = [1, 1, 1],
-            obstype = [2, 2, 2]
-        )
+        dat_no_cov = make_subjdat_baseline_panel()
         
         model = multistatemodel(h12, h21; data = dat_no_cov)
         subjectdata = view(model.data, model.data.id .== 1, :)
@@ -102,21 +100,14 @@ using MultistateModels: SamplePath, make_subjdat
         @test result.stateto == [2, 1, 1]
     end
     
+    # --- Edge cases -----------------------------------------------------------
     @testset "Edge cases" begin
         # Setup hazards with covariates for this test
         h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
         h21 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 1)
         
         # Test single observation with covariates
-        dat_single = DataFrame(
-            id = [1],
-            tstart = [0.0],
-            tstop = [10.0],
-            statefrom = [1],
-            stateto = [1],
-            obstype = [2],
-            trt = [1]
-        )
+        dat_single = make_subjdat_single_observation_panel()
         
         model = multistatemodel(h12, h21; data = dat_single)
         subjectdata = view(model.data, model.data.id .== 1, :)
@@ -132,15 +123,7 @@ using MultistateModels: SamplePath, make_subjdat
         @test result_times ≈ expected_times
         
         # Test when path times exactly match covariate change times
-        dat_exact = DataFrame(
-            id = [1,1],
-            tstart = [0.0, 5.0],
-            tstop = [5.0, 10.0],
-            statefrom = [1, 1],
-            stateto = [1, 1],
-            obstype = [2, 2],
-            trt = [0, 1]
-        )
+        dat_exact = make_subjdat_exact_match_panel()
         
         model = multistatemodel(h12, h21; data = dat_exact)
         subjectdata = view(model.data, model.data.id .== 1, :)
@@ -156,21 +139,14 @@ using MultistateModels: SamplePath, make_subjdat
         @test result.trt == [0, 1]  # should reflect the covariate change
     end
     
+    # --- Constant covariates --------------------------------------------------
     @testset "Constant covariates (no changes)" begin
         # Setup hazards with covariates for this test
         h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
         h21 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 1)
         
         # Test case where covariates are present but don't change
-        dat_constant = DataFrame(
-            id = [1,1,1,1],
-            tstart = [0.0, 5.0, 10.0, 15.0],
-            tstop = [5.0, 10.0, 15.0, 20.0],
-            statefrom = [1, 1, 1, 1],
-            stateto = [1, 1, 1, 1],
-            obstype = [2, 2, 2, 2],
-            trt = [1, 1, 1, 1]  # constant covariate
-        )
+        dat_constant = make_subjdat_constant_covariates_panel()
         
         model = multistatemodel(h12, h21; data = dat_constant)
         subjectdata = view(model.data, model.data.id .== 1, :)
@@ -194,6 +170,7 @@ using MultistateModels: SamplePath, make_subjdat
         @test result.stateto == [2, 1, 1]
     end
     
+    # --- Single-row panels ----------------------------------------------------
     @testset "Single row with covariates" begin
         # Setup hazards with covariates for this test
         h12 = Hazard(@formula(0 ~ 1 + trt + age), "exp", 1, 2)
@@ -201,16 +178,7 @@ using MultistateModels: SamplePath, make_subjdat
         
         # Test the specific case that was causing the bug: covariates present but only one row
         # This should now use the else branch (path.times only) rather than trying to find covariate changes
-        dat_single_cov = DataFrame(
-            id = [1],
-            tstart = [0.0],
-            tstop = [15.0],
-            statefrom = [1],
-            stateto = [1],
-            obstype = [2],
-            trt = [0],
-            age = [45]
-        )
+        dat_single_cov = make_subjdat_single_row_full_panel()
         
         model = multistatemodel(h12, h21; data = dat_single_cov)
         subjectdata = view(model.data, model.data.id .== 1, :)
@@ -235,21 +203,14 @@ using MultistateModels: SamplePath, make_subjdat
         @test result.stateto == [2, 1, 2]
     end
     
+    # --- Sojourn accumulation -------------------------------------------------
     @testset "Sojourn time calculations" begin
         # Setup hazards with covariates for this test
         h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
         h21 = Hazard(@formula(0 ~ 1 + trt), "wei", 2, 1)
         
         # Test specific sojourn time calculations
-        dat = DataFrame(
-            id = [1,1,1],
-            tstart = [0.0, 10.0, 20.0],
-            tstop = [10.0, 20.0, 30.0],
-            statefrom = [1, 1, 1],
-            stateto = [1, 1, 1],
-            obstype = [2, 2, 2],
-            trt = [0, 0, 1]  # covariate change at t=20
-        )
+        dat = make_subjdat_sojourn_panel()
         
         model = multistatemodel(h12, h21; data = dat)
         subjectdata = view(model.data, model.data.id .== 1, :)

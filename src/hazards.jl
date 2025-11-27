@@ -102,6 +102,42 @@ function extract_covariates(subjdat::Union{DataFrameRow,DataFrame}, parnames::Ve
     return NamedTuple{Tuple(covar_names)}(values)
 end
 
+@inline _covariate_entry(covars_cache::AbstractVector{<:NamedTuple}, hazard_slot::Int) = covars_cache[hazard_slot]
+@inline _covariate_entry(covars_cache, ::Int) = covars_cache
+
+@inline function _call_haz_with_covars(t, parameters, covars_cache, hazard::_Hazard, hazard_slot;
+                                       give_log = true,
+                                       apply_transform::Bool = false,
+                                       cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    covars = _covariate_entry(covars_cache, hazard_slot)
+    return call_haz(
+        t,
+        parameters,
+        covars,
+        hazard;
+        give_log = give_log,
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
+end
+
+@inline function _call_cumulhaz_with_covars(lb, ub, parameters, covars_cache, hazard::_Hazard, hazard_slot;
+                                            give_log = true,
+                                            apply_transform::Bool = false,
+                                            cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    covars = _covariate_entry(covars_cache, hazard_slot)
+    return call_cumulhaz(
+        lb,
+        ub,
+        parameters,
+        covars,
+        hazard;
+        give_log = give_log,
+        apply_transform = apply_transform,
+        cache_context = cache_context,
+        hazard_slot = hazard_slot)
+end
+
 @inline function _linear_predictor(pars::AbstractVector, covars::NamedTuple, hazard::_Hazard)
     hazard.has_covariates || return zero(eltype(pars))
     covar_names = extract_covar_names(hazard.parnames)
@@ -790,6 +826,28 @@ function total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHaz
     give_log ? log(tot_haz) : tot_haz
 end
 
+function total_cumulhaz(lb, ub, parameters, covars_cache::AbstractVector{<:NamedTuple}, _totalhazard::_TotalHazardTransient, _hazards;
+                        give_log = true,
+                        apply_transform::Bool = false,
+                        cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    tot_haz = 0.0
+
+    for x in _totalhazard.components
+        tot_haz += _call_cumulhaz_with_covars(
+            lb,
+            ub,
+            parameters[x],
+            covars_cache,
+            _hazards[x],
+            x;
+            give_log = false,
+            apply_transform = apply_transform,
+            cache_context = cache_context)
+    end
+
+    give_log ? log(tot_haz) : tot_haz
+end
+
 """
     total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardAbsorbing, _hazards; give_log = true) 
 
@@ -805,48 +863,102 @@ function total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHaz
 
 end
 
-"""
-    next_state_probs(t, scur, subjdat_row, parameters, hazards, totalhazards, tmat)
+function total_cumulhaz(lb, ub, parameters, covars_cache::AbstractVector{<:NamedTuple}, _totalhazard::_TotalHazardAbsorbing, _hazards;
+                        give_log = true,
+                        apply_transform::Bool = false,
+                        cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    give_log ? -Inf : 0
+end
 
-Return a vector ns_probs with probabilities of transitioning to each state based on hazards from current state. 
+function survprob(lb, ub, parameters, covars_cache::AbstractVector{<:NamedTuple}, _totalhazard::_TotalHazardTransient, _hazards;
+                  give_log = true,
+                  apply_transform::Bool = false,
+                  cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    log_survprob = -total_cumulhaz(
+        lb,
+        ub,
+        parameters,
+        covars_cache,
+        _totalhazard,
+        _hazards;
+        give_log = false,
+        apply_transform = apply_transform,
+        cache_context = cache_context)
+
+    give_log ? log_survprob : exp(log_survprob)
+end
+
+"""
+    next_state_probs(t, scur, subjdat_row, parameters, hazards, totalhazards, tmat;
+                     apply_transform = false,
+                     cache_context = nothing)
+
+Return a vector `ns_probs` with probabilities of transitioning to each state based on hazards from the current state.
 
 # Arguments 
-- t: time at which hazards should be calculated
-- scur: current state
-- subjdat_row: DataFrame row containing subject covariates
-- parameters: vector of vectors of model parameters
-- hazards: vector of cause-specific hazards
-- totalhazards: vector of total hazards
-- tmat: transition matrix
+- `t`: time at which hazards should be calculated
+- `scur`: current state
+- `subjdat_row`: DataFrame row containing subject covariates
+- `parameters`: vector of vectors of model parameters
+- `hazards`: vector of cause-specific hazards
+- `totalhazards`: vector of total hazards
+- `tmat`: transition matrix
+- `apply_transform`: pass `true` to allow Tang-enabled hazards to reuse cached trajectories
+- `cache_context`: optional `TimeTransformContext` shared across hazards
 """
-function next_state_probs(t, scur, subjdat_row, parameters, hazards, totalhazards, tmat)
-
-    # initialize vector of next state transition probabilities
-    ns_probs = zeros(size(tmat, 2))
-
-    # indices for possible destination states
-    trans_inds = findall(tmat[scur,:] .!= 0.0)
+function _next_state_probs!(ns_probs::AbstractVector{Float64}, trans_inds::AbstractVector{Int}, t, scur, covars_cache, parameters, hazards, totalhazards;
+                           apply_transform::Bool,
+                           cache_context::Union{Nothing,TimeTransformContext})
+    fill!(ns_probs, 0.0)
+    isempty(trans_inds) && return ns_probs
 
     if length(trans_inds) == 1
-        ns_probs[trans_inds] .= 1.0
-    else
-        ns_probs[trans_inds] = softmax(map(x -> call_haz(t, parameters[x], subjdat_row, hazards[x]), totalhazards[scur].components))
+        ns_probs[trans_inds[1]] = 1.0
+        return ns_probs
     end
 
-    # catch for numerical instabilities (weird edge case)
-    if all(isnan.(ns_probs[trans_inds]))
-        ns_probs[trans_inds] .= 1 / length(trans_inds)
-    elseif any(isnan.(ns_probs[trans_inds]))
-        pisnan = findall(isnan.(ns_probs[trans_inds]))
+    vals = map(x -> _call_haz_with_covars(
+            t,
+            parameters[x],
+            covars_cache,
+            hazards[x],
+            x;
+            apply_transform = apply_transform && hazards[x].metadata.time_transform,
+            cache_context = cache_context),
+        totalhazards[scur].components)
+    ns_probs[trans_inds] = softmax(vals)
+
+    local_probs = view(ns_probs, trans_inds)
+    if all(isnan.(local_probs))
+        local_probs .= 1 / length(trans_inds)
+    elseif any(isnan.(local_probs))
+        pisnan = findall(isnan.(local_probs))
         if length(pisnan) == 1
-            ns_probs[trans_inds][pisnan] = 1 - sum(ns_probs[trans_inds][Not(pisnan)])
+            local_probs[pisnan] = 1 - sum(local_probs[Not(pisnan)])
         else
-            ns_probs[trans_inds][pisnan] .= 1 - sum(ns_probs[trans_inds][Not(pisnan)])/length(pisnan)
-        end        
+            local_probs[pisnan] .= (1 - sum(local_probs[Not(pisnan)])) / length(pisnan)
+        end
     end
 
-    # return the next state probabilities
     return ns_probs
+end
+
+function next_state_probs!(ns_probs::AbstractVector{Float64}, trans_inds::AbstractVector{Int}, t, scur, subjdat_row, parameters, hazards, totalhazards;
+                           apply_transform::Bool = false,
+                           cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    return _next_state_probs!(ns_probs, trans_inds, t, scur, subjdat_row, parameters, hazards, totalhazards;
+        apply_transform = apply_transform,
+        cache_context = cache_context)
+end
+
+function next_state_probs(t, scur, subjdat_row, parameters, hazards, totalhazards, tmat;
+                          apply_transform::Bool = false,
+                          cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    ns_probs = zeros(size(tmat, 2))
+    trans_inds = findall(tmat[scur,:] .!= 0.0)
+    return next_state_probs!(ns_probs, trans_inds, t, scur, subjdat_row, parameters, hazards, totalhazards;
+        apply_transform = apply_transform,
+        cache_context = cache_context)
 end
 
 ########################################################

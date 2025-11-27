@@ -602,6 +602,32 @@ struct SamplePath
     SamplePath(subj, times, states) = length(times) != length(states) ? error("Number of times in a jump chain must equal the number of states.") : new(subj, times, states)
 end
 
+@inline function Base.:(==)(lhs::SamplePath, rhs::SamplePath)
+    lhs.subj == rhs.subj || return false
+    lhs.times == rhs.times || return false
+    return lhs.states == rhs.states
+end
+
+@inline function Base.isequal(lhs::SamplePath, rhs::SamplePath)
+    lhs.subj == rhs.subj || return false
+    _vector_isequal(lhs.times, rhs.times) || return false
+    return _vector_isequal(lhs.states, rhs.states)
+end
+
+@inline function Base.hash(path::SamplePath, h::UInt)
+    h = hash(path.subj, h)
+    h = hash(path.times, h)
+    return hash(path.states, h)
+end
+
+@inline function _vector_isequal(x::Vector, y::Vector)
+    length(x) == length(y) || return false
+    for (xi, yi) in zip(x, y)
+        isequal(xi, yi) || return false
+    end
+    return true
+end
+
 """
     ExactData(model::MultistateProcess, samplepaths::Array{SamplePath})
 

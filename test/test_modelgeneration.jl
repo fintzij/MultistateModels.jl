@@ -1,8 +1,14 @@
-# Tests for model generation functionality
-# Tests multistatemodel() construction, Hazard validation, and data checks
+# =============================================================================
+# Model Generation Tests
+# =============================================================================
+#
+# Guards `multistatemodel` construction logic, Hazard validation, and input
+# hygiene before downstream likelihood machinery runs. Each testset documents
+# one failure mode so regressions are easy to trace.
 
 using .TestFixtures
 
+# --- Transition matrix structure -------------------------------------------------
 @testset "test_tmat" begin
     # Validate the transition matrix structure
     # Check that primary order is by origin state and secondary order is by destination
@@ -10,6 +16,7 @@ using .TestFixtures
     @test all(msm_expwei.tmat[Not([2,4,7,8])] .== 0)
 end
 
+# --- Duplicate transition detection ---------------------------------------------
 @testset "test_duplicate_transitions" begin
     # Test that duplicate transitions are detected and throw error
     dat = duplicate_transition_data()
@@ -29,6 +36,7 @@ end
     end
 end
 
+# --- State numbering hygiene ----------------------------------------------------
 @testset "test_non_contiguous_states" begin
     # Test that non-contiguous states (e.g., 1,2,4) produce warning
     # Note: Model will fail with BoundsError, but warning should appear first
@@ -41,6 +49,7 @@ end
     @test_throws BoundsError multistatemodel(h1, h2; data = dat)
 end
 
+# --- State 0 handling -----------------------------------------------------------
 @testset "test_state_zero_in_data" begin
     # Test that state 0 can appear in data (for censoring) without error
     # Fixture places state 0 in `stateto` with censored observation types
@@ -55,6 +64,7 @@ end
     @test isa(model, MultistateModels.MultistateProcess)
 end
 
+# --- Hazard boundaries ----------------------------------------------------------
 @testset "test_hazard_state_zero" begin
     # Test that hazards cannot have state 0 in statefrom or stateto
     # State 0 is reserved for censoring indicators in data, not for transitions
@@ -71,6 +81,7 @@ end
     @test_throws Exception multistatemodel(h_good, h_bad_to; data = dat)
 end
 
+# --- Parameter naming -----------------------------------------------------------
 @testset "test_parameter_naming" begin
     # Test that exponential hazards use "Intercept" not "rate"
     dat = baseline_exact_data()
@@ -95,6 +106,7 @@ end
     @test !(:h12_rate in model2.hazards[1].parnames)
 end
 
+# --- Hazard constructors --------------------------------------------------------
 @testset "test_hazard_construction" begin
     # Test that different hazard types construct properly
     dat = baseline_exact_covariates()
@@ -120,6 +132,7 @@ end
     # @test :h12_scale in model_gom.hazards[1].parnames
 end
 
+# --- Hazard macro parity --------------------------------------------------------
 @testset "@hazard macro" begin
     base_formula = @formula(0 ~ 1 + trt)
 
