@@ -7,6 +7,62 @@
 # one failure mode so regressions are easy to trace.
 
 using .TestFixtures
+using MultistateModels: _covariate_labels, _prefixed_symbols
+
+# --- Hazard builder helper tests ------------------------------------------------
+@testset "hazard builder helpers" begin
+    # _covariate_labels extracts non-intercept names
+    rhs_names = ["(Intercept)", "age", "trt"]
+    labels = _covariate_labels(rhs_names)
+    @test labels == ["age", "trt"]
+
+    # Empty when only intercept
+    @test _covariate_labels(["(Intercept)"]) == String[]
+
+    # _prefixed_symbols creates hazard-prefixed symbols
+    symbols = _prefixed_symbols(:h12, labels)
+    @test symbols == [:h12_age, :h12_trt]
+
+    # Handles intercept replacement
+    symbols_with_intercept = _prefixed_symbols(:h21, ["(Intercept)", "x"])
+    @test symbols_with_intercept == [:h21_Intercept, :h21_x]
+
+    # Empty input
+    @test _prefixed_symbols(:h12, String[]) == Symbol[]
+end
+
+# --- HazardBuildContext accessor tests -----------------------------------------
+# These tests verify the computed accessors for HazardBuildContext without
+# needing to construct the full struct (which requires internal types).
+# We test _ncovar and _has_covariates behavior through integration tests.
+@testset "HazardBuildContext accessors (via integration)" begin
+    # The accessors _ncovar and _has_covariates are tested indirectly:
+    # - With covariates: creates parameters for those covariates
+    # - Without covariates: creates only baseline parameters
+    
+    # Two-state model without covariates
+    dat_nocov = DataFrame(id = [1, 1], tstart = [0.0, 5.0], tstop = [5.0, 10.0],
+                          statefrom = [1, 1], stateto = [2, 2], obstype = [1, 1])
+    h_nocov = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+    model_nocov = multistatemodel(h_nocov, data = dat_nocov)
+    
+    # Should have only baseline parameter (h12_Intercept)
+    @test length(model_nocov.hazards[1].parnames) == 1
+    @test :h12_Intercept in model_nocov.hazards[1].parnames
+    
+    # Two-state model with covariates
+    dat_cov = DataFrame(id = [1, 1], tstart = [0.0, 5.0], tstop = [5.0, 10.0],
+                        statefrom = [1, 1], stateto = [2, 2], obstype = [1, 1],
+                        age = [50, 50], trt = [1, 1])
+    h_cov = Hazard(@formula(0 ~ 1 + age + trt), "exp", 1, 2)
+    model_cov = multistatemodel(h_cov, data = dat_cov)
+    
+    # Should have baseline + 2 covariate parameters
+    @test length(model_cov.hazards[1].parnames) == 3
+    @test :h12_Intercept in model_cov.hazards[1].parnames
+    @test :h12_age in model_cov.hazards[1].parnames
+    @test :h12_trt in model_cov.hazards[1].parnames
+end
 
 # --- Transition matrix structure -------------------------------------------------
 @testset "test_tmat" begin

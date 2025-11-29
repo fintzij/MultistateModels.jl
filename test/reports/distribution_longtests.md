@@ -19,7 +19,7 @@ Model generation in MultistateModels.jl follows a multi-step validation and cons
 
 ## Expanded Diagnostics Matrix
 
-Every analytic hazard family (exponential, Weibull, Gompertz) is now exercised under both `linpred_effect` settings (PH/AFT) and both covariate regimes (baseline-only vs. a single covariate `x = 1.5`). For each of the 12 scenarios we regenerate two plots under `test/diagnostics/assets/`:
+Every analytic hazard family (exponential, Weibull, Gompertz) is now exercised under both `linpred_effect` settings (PH/AFT) and both covariate regimes (baseline-only vs. a single covariate `x = 1.5`). Additionally, time-varying covariate (TVC) scenarios are included for exponential and Weibull PH models. For each of the 14 scenarios we regenerate two plots under `./assets/`:
 
 - **Function panels** overlay the analytic hazard/cumulative hazard/survival curves with `call_haz`, `call_cumulhaz`, and `survprob` outputs (with and without the time transformation enabled).
 - **Simulation panels** draw 40k paths with and without the time transformation, compare the ECDF against the closed-form target distribution, and display both the ECDF residual and the ECDF difference `ΔF(t) = F_tt(t) − F_fb(t)` to certify parity. Histogram/PDF overlays confirm that `simulate_path` obeys the target density.
@@ -32,18 +32,20 @@ julia --project=test/diagnostics test/diagnostics/generate_model_diagnostics.jl
 
 | Scenario | Function panel | Simulation panel |
 | --- | --- | --- |
-| Exp · PH · baseline | `../test/diagnostics/assets/function_panel_exp_ph_baseline.png` | `../test/diagnostics/assets/simulation_panel_exp_ph_baseline.png` |
-| Exp · PH · covariate | `../test/diagnostics/assets/function_panel_exp_ph_covariate.png` | `../test/diagnostics/assets/simulation_panel_exp_ph_covariate.png` |
-| Exp · AFT · baseline | `../test/diagnostics/assets/function_panel_exp_aft_baseline.png` | `../test/diagnostics/assets/simulation_panel_exp_aft_baseline.png` |
-| Exp · AFT · covariate | `../test/diagnostics/assets/function_panel_exp_aft_covariate.png` | `../test/diagnostics/assets/simulation_panel_exp_aft_covariate.png` |
-| Wei · PH · baseline | `../test/diagnostics/assets/function_panel_wei_ph_baseline.png` | `../test/diagnostics/assets/simulation_panel_wei_ph_baseline.png` |
-| Wei · PH · covariate | `../test/diagnostics/assets/function_panel_wei_ph_covariate.png` | `../test/diagnostics/assets/simulation_panel_wei_ph_covariate.png` |
-| Wei · AFT · baseline | `../test/diagnostics/assets/function_panel_wei_aft_baseline.png` | `../test/diagnostics/assets/simulation_panel_wei_aft_baseline.png` |
-| Wei · AFT · covariate | `../test/diagnostics/assets/function_panel_wei_aft_covariate.png` | `../test/diagnostics/assets/simulation_panel_wei_aft_covariate.png` |
-| Gom · PH · baseline | `../test/diagnostics/assets/function_panel_gom_ph_baseline.png` | `../test/diagnostics/assets/simulation_panel_gom_ph_baseline.png` |
-| Gom · PH · covariate | `../test/diagnostics/assets/function_panel_gom_ph_covariate.png` | `../test/diagnostics/assets/simulation_panel_gom_ph_covariate.png` |
-| Gom · AFT · baseline | `../test/diagnostics/assets/function_panel_gom_aft_baseline.png` | `../test/diagnostics/assets/simulation_panel_gom_aft_baseline.png` |
-| Gom · AFT · covariate | `../test/diagnostics/assets/function_panel_gom_aft_covariate.png` | `../test/diagnostics/assets/simulation_panel_gom_aft_covariate.png` |
+| Exp · PH · baseline | `./assets/function_panel_exp_ph_baseline.png` | `./assets/simulation_panel_exp_ph_baseline.png` |
+| Exp · PH · covariate | `./assets/function_panel_exp_ph_covariate.png` | `./assets/simulation_panel_exp_ph_covariate.png` |
+| Exp · PH · TVC | `./assets/function_panel_exp_ph_tvc.png` | `./assets/simulation_panel_exp_ph_tvc.png` |
+| Exp · AFT · baseline | `./assets/function_panel_exp_aft_baseline.png` | `./assets/simulation_panel_exp_aft_baseline.png` |
+| Exp · AFT · covariate | `./assets/function_panel_exp_aft_covariate.png` | `./assets/simulation_panel_exp_aft_covariate.png` |
+| Wei · PH · baseline | `./assets/function_panel_wei_ph_baseline.png` | `./assets/simulation_panel_wei_ph_baseline.png` |
+| Wei · PH · covariate | `./assets/function_panel_wei_ph_covariate.png` | `./assets/simulation_panel_wei_ph_covariate.png` |
+| Wei · PH · TVC | `./assets/function_panel_wei_ph_tvc.png` | `./assets/simulation_panel_wei_ph_tvc.png` |
+| Wei · AFT · baseline | `./assets/function_panel_wei_aft_baseline.png` | `./assets/simulation_panel_wei_aft_baseline.png` |
+| Wei · AFT · covariate | `./assets/function_panel_wei_aft_covariate.png` | `./assets/simulation_panel_wei_aft_covariate.png` |
+| Gom · PH · baseline | `./assets/function_panel_gom_ph_baseline.png` | `./assets/simulation_panel_gom_ph_baseline.png` |
+| Gom · PH · covariate | `./assets/function_panel_gom_ph_covariate.png` | `./assets/simulation_panel_gom_ph_covariate.png` |
+| Gom · AFT · baseline | `./assets/function_panel_gom_aft_baseline.png` | `./assets/simulation_panel_gom_aft_baseline.png` |
+| Gom · AFT · covariate | `./assets/function_panel_gom_aft_covariate.png` | `./assets/simulation_panel_gom_aft_covariate.png` |
 
 Below are the same plots inlined with short takeaways. In every case the function panels show the `call_*` outputs lying directly on top of the analytic curves, and the simulation panels keep `ΔF(t)` numerically at zero (see generator logs for the reported max `|ΔF|`).
 
@@ -51,9 +53,9 @@ Below are the same plots inlined with short takeaways. In every case the functio
 
 #### PH · baseline-only
 
-![Exp PH baseline function panel](../test/diagnostics/assets/function_panel_exp_ph_baseline.png)
+![Exp PH baseline function panel](./assets/function_panel_exp_ph_baseline.png)
 
-![Exp PH baseline simulation panel](../test/diagnostics/assets/simulation_panel_exp_ph_baseline.png)
+![Exp PH baseline simulation panel](./assets/simulation_panel_exp_ph_baseline.png)
 
 - Constant hazard from `call_haz` matches the analytic rate `λ₀ = 0.35`; cumulative hazard and survival stay exactly on the closed form.
 - The simulated ECDF sits on the theoretical exponential CDF while the residual remains at floating-point noise.
@@ -61,19 +63,32 @@ Below are the same plots inlined with short takeaways. In every case the functio
 
 #### PH · covariate
 
-![Exp PH covariate function panel](../test/diagnostics/assets/function_panel_exp_ph_covariate.png)
+![Exp PH covariate function panel](./assets/function_panel_exp_ph_covariate.png)
 
-![Exp PH covariate simulation panel](../test/diagnostics/assets/simulation_panel_exp_ph_covariate.png)
+![Exp PH covariate simulation panel](./assets/simulation_panel_exp_ph_covariate.png)
 
 - Adding `x = 1.5` with `β = 0.6` shifts the hazard to `λ = 0.35·exp(0.9)`; `call_haz` and `call_cumulhaz` follow the new intercept exactly.
 - Simulation residuals remain flat, and the histogram/PDF overlay shows the higher-rate exponential density being recovered.
 - ECDF parity between Tang-enabled and fallback solvers remains exact.
 
+#### PH · time-varying covariate
+
+![Exp PH TVC function panel](./assets/function_panel_exp_ph_tvc.png)
+
+![Exp PH TVC simulation panel](./assets/simulation_panel_exp_ph_tvc.png)
+
+- Covariate `x` changes at multiple time points: `t_changes = [1.5, 3.0]` with `x_values = [0.5, 1.5, 2.5]`.
+- The hazard shows step changes at each boundary as the covariate effect shifts.
+- `call_haz` and `call_cumulhaz` correctly track the piecewise analytic curves across all covariate changes.
+- The survival function shows characteristic kinks at each transition point.
+- Simulation ECDF matches the piecewise exponential distribution; `ΔF(t)` remains at zero.
+- **Note:** The `longtest_simulation_tvc.jl` suite provides comprehensive KS-based validation with 10,000 samples per scenario for all TVC configurations.
+
 #### AFT · baseline-only
 
-![Exp AFT baseline function panel](../test/diagnostics/assets/function_panel_exp_aft_baseline.png)
+![Exp AFT baseline function panel](./assets/function_panel_exp_aft_baseline.png)
 
-![Exp AFT baseline simulation panel](../test/diagnostics/assets/simulation_panel_exp_aft_baseline.png)
+![Exp AFT baseline simulation panel](./assets/simulation_panel_exp_aft_baseline.png)
 
 - Accelerated-failure-time mode collapses to the same constant hazard as the PH baseline case (no covariate), and both solver branches agree with the analytic line.
 - Duration draws again track the exponential reference distribution with negligible ECDF residual.
@@ -81,9 +96,9 @@ Below are the same plots inlined with short takeaways. In every case the functio
 
 #### AFT · covariate
 
-![Exp AFT covariate function panel](../test/diagnostics/assets/function_panel_exp_aft_covariate.png)
+![Exp AFT covariate function panel](./assets/function_panel_exp_aft_covariate.png)
 
-![Exp AFT covariate simulation panel](../test/diagnostics/assets/simulation_panel_exp_aft_covariate.png)
+![Exp AFT covariate simulation panel](./assets/simulation_panel_exp_aft_covariate.png)
 
 - The covariate now rescales time by `exp(-βx)`, and the plotted `call_*` outputs follow the analytic AFT curves exactly.
 - Simulation diagnostics show the slower event-time distribution (hazard reduced by `exp(-0.9)`), and ECDF differences remain numerically zero.
@@ -92,9 +107,9 @@ Below are the same plots inlined with short takeaways. In every case the functio
 
 #### PH · baseline-only
 
-![Wei PH baseline function panel](../test/diagnostics/assets/function_panel_wei_ph_baseline.png)
+![Wei PH baseline function panel](./assets/function_panel_wei_ph_baseline.png)
 
-![Wei PH baseline simulation panel](../test/diagnostics/assets/simulation_panel_wei_ph_baseline.png)
+![Wei PH baseline simulation panel](./assets/simulation_panel_wei_ph_baseline.png)
 
 - Shape 1.35 / scale 0.4 baseline reproduces the flared hazard perfectly under both solver modes.
 - ECDF residuals stay within the ±3×10⁻³ band over the plotted support.
@@ -102,19 +117,32 @@ Below are the same plots inlined with short takeaways. In every case the functio
 
 #### PH · covariate
 
-![Wei PH covariate function panel](../test/diagnostics/assets/function_panel_wei_ph_covariate.png)
+![Wei PH covariate function panel](./assets/function_panel_wei_ph_covariate.png)
 
-![Wei PH covariate simulation panel](../test/diagnostics/assets/simulation_panel_wei_ph_covariate.png)
+![Wei PH covariate simulation panel](./assets/simulation_panel_wei_ph_covariate.png)
 
 - Covariate effects tilt both the hazard and the cumulative hazard; `call_haz` lines remain indistinguishable from the analytic expectations.
 - Simulation histograms match the heavier right tail implied by `exp(βx)`.
 - `ΔF(t)` remains identically zero.
 
+#### PH · time-varying covariate
+
+![Wei PH TVC function panel](./assets/function_panel_wei_ph_tvc.png)
+
+![Wei PH TVC simulation panel](./assets/simulation_panel_wei_ph_tvc.png)
+
+- Covariate `x` changes at multiple time points: `t_changes = [1.5, 3.0]` with `x_values = [0.5, 1.5, 2.5]`.
+- The Weibull hazard (shape > 1) already increases with time, and each covariate change adds an additional multiplicative shift.
+- Both solver branches correctly handle the piecewise integration across all covariate boundaries.
+- For Weibull PH with TVC, the cumulative hazard is computed as: `Λ(t) = Σᵢ scale·exp(β·xᵢ)·(tᵢ^shape - tᵢ₋₁^shape)`.
+- Simulation diagnostics confirm the multi-interval piecewise Weibull distribution with flat ECDF residuals and time-transform parity.
+- **Note:** The `longtest_simulation_tvc.jl` suite validates Weibull TVC with both PH and AFT effects using KS tests.
+
 #### AFT · baseline-only
 
-![Wei AFT baseline function panel](../test/diagnostics/assets/function_panel_wei_aft_baseline.png)
+![Wei AFT baseline function panel](./assets/function_panel_wei_aft_baseline.png)
 
-![Wei AFT baseline simulation panel](../test/diagnostics/assets/simulation_panel_wei_aft_baseline.png)
+![Wei AFT baseline simulation panel](./assets/simulation_panel_wei_aft_baseline.png)
 
 - AFT mode collapses to the baseline hazard (no covariate), so analytic and empirical curves coincide as expected.
 - ECDF residuals remain negligible; histogram vs. pdf overlays the canonical Weibull density.
@@ -122,9 +150,9 @@ Below are the same plots inlined with short takeaways. In every case the functio
 
 #### AFT · covariate
 
-![Wei AFT covariate function panel](../test/diagnostics/assets/function_panel_wei_aft_covariate.png)
+![Wei AFT covariate function panel](./assets/function_panel_wei_aft_covariate.png)
 
-![Wei AFT covariate simulation panel](../test/diagnostics/assets/simulation_panel_wei_aft_covariate.png)
+![Wei AFT covariate simulation panel](./assets/simulation_panel_wei_aft_covariate.png)
 
 - Time-axis scaling by `exp(-shape·βx)` visibly compresses the hazard curves; both solver branches match the analytic result.
 - Simulated durations follow the rescaled Weibull CDF, and the ECDF difference remains at 0 within floating-point tolerance.
@@ -133,9 +161,9 @@ Below are the same plots inlined with short takeaways. In every case the functio
 
 #### PH · baseline-only
 
-![Gom PH baseline function panel](../test/diagnostics/assets/function_panel_gom_ph_baseline.png)
+![Gom PH baseline function panel](./assets/function_panel_gom_ph_baseline.png)
 
-![Gom PH baseline simulation panel](../test/diagnostics/assets/simulation_panel_gom_ph_baseline.png)
+![Gom PH baseline simulation panel](./assets/simulation_panel_gom_ph_baseline.png)
 
 - The exponentially increasing hazard from `call_haz` sits directly on top of the analytic Gompertz curve.
 - ECDF residuals confirm that `simulate_path` reproduces the Gompertz distribution across the plotting grid.
@@ -143,27 +171,27 @@ Below are the same plots inlined with short takeaways. In every case the functio
 
 #### PH · covariate
 
-![Gom PH covariate function panel](../test/diagnostics/assets/function_panel_gom_ph_covariate.png)
+![Gom PH covariate function panel](./assets/function_panel_gom_ph_covariate.png)
 
-![Gom PH covariate simulation panel](../test/diagnostics/assets/simulation_panel_gom_ph_covariate.png)
+![Gom PH covariate simulation panel](./assets/simulation_panel_gom_ph_covariate.png)
 
 - Covariate shifts accelerate the hazard growth rate, and analytic vs. computed curves remain indistinguishable.
 - Simulation panel shows the heavier right tail along with flat ECDF residual and parity trace.
 
 #### AFT · baseline-only
 
-![Gom AFT baseline function panel](../test/diagnostics/assets/function_panel_gom_aft_baseline.png)
+![Gom AFT baseline function panel](./assets/function_panel_gom_aft_baseline.png)
 
-![Gom AFT baseline simulation panel](../test/diagnostics/assets/simulation_panel_gom_aft_baseline.png)
+![Gom AFT baseline simulation panel](./assets/simulation_panel_gom_aft_baseline.png)
 
 - Without covariates, the AFT setting matches the PH baseline, so curves overlap exactly.
 - ECDF/pdp comparisons mirror the PH baseline case with ΔF(t) at zero.
 
 #### AFT · covariate
 
-![Gom AFT covariate function panel](../test/diagnostics/assets/function_panel_gom_aft_covariate.png)
+![Gom AFT covariate function panel](./assets/function_panel_gom_aft_covariate.png)
 
-![Gom AFT covariate simulation panel](../test/diagnostics/assets/simulation_panel_gom_aft_covariate.png)
+![Gom AFT covariate simulation panel](./assets/simulation_panel_gom_aft_covariate.png)
 
 - Time scaling by `exp(-βx)` stretches the Gompertz hazard, and both solver modes stay glued to the analytic reference.
 - Simulation diagnostics confirm the stretched distribution and keep the ECDF difference curve at numerical zero.

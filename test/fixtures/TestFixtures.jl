@@ -18,16 +18,23 @@ export baseline_exact_data,
        toy_expwei_model,
        toy_gompertz_model,
        toy_two_state_transition_model,
-    toy_two_state_exp_model,
-    toy_absorbing_start_model,
-    toy_fitted_exact_model,
+       toy_two_state_exp_model,
+       toy_absorbing_start_model,
+       toy_fitted_exact_model,
        make_subjdat_covariate_panel,
        make_subjdat_baseline_panel,
        make_subjdat_single_observation_panel,
        make_subjdat_exact_match_panel,
        make_subjdat_constant_covariates_panel,
        make_subjdat_single_row_full_panel,
-       make_subjdat_sojourn_panel
+       make_subjdat_sojourn_panel,
+       # TVC fixtures
+       toy_tvc_exp_model,
+       toy_tvc_wei_model,
+       toy_tvc_gom_model,
+       toy_illness_death_tvc_model,
+       toy_semi_markov_tvc_model,
+       TVC_MULTI_CHANGE_CONFIG
 
 const INTERCEPT_ONLY = @formula(0 ~ 1)
 
@@ -138,14 +145,18 @@ function toy_fitted_exact_model()
         base_model.parameters,
         base_model.parameters_ph,
         stored_loglik,
-        nothing,
+        nothing,  # vcov
+        nothing,  # ij_vcov
+        nothing,  # jk_vcov
+        nothing,  # subject_gradients
         base_model.hazards,
         base_model.totalhazards,
         base_model.tmat,
         base_model.emat,
         base_model.hazkeys,
         base_model.subjectindices,
-        base_model.SamplingWeights,
+        base_model.SubjectWeights,
+        base_model.ObservationWeights,
         base_model.CensoringPatterns,
         base_model.markovsurrogate,
         nothing,
@@ -204,7 +215,7 @@ function toy_two_state_transition_model()
     return (; model, data, paths = (path1 = path1, path2 = path2))
 end
 
-"""Simple two-state exponential model with adjustable rate, horizon, and optional Tang toggle."""
+"""Simple two-state exponential model with adjustable rate, horizon, and optional time_transform toggle on the hazard."""
 function toy_two_state_exp_model(; rate = 0.2, horizon = 50.0, time_transform::Bool = false)
     data = DataFrame(
         id = [1],
@@ -321,6 +332,216 @@ function make_subjdat_sojourn_panel()
         obstype = fill(2, 3),
         trt = [0, 0, 1]
     )
+end
+
+#==============================================================================#
+#                     TIME-VARYING COVARIATE (TVC) FIXTURES                    #
+#==============================================================================#
+
+"""
+Standard TVC configuration with multiple covariate change points.
+- t_changes: times at which covariate changes
+- x_values: covariate values in each interval [0, t_changes[1]), [t_changes[1], t_changes[2]), ...
+- horizon: maximum observation time
+"""
+const TVC_MULTI_CHANGE_CONFIG = (
+    t_changes = [1.5, 3.0],
+    x_values = [0.5, 1.5, 2.5],
+    horizon = 5.0,
+    # Hazard parameters for different families
+    exp_rate = 0.35,
+    wei_shape = 1.35,
+    wei_scale = 0.4,
+    gom_shape = 0.6,
+    gom_scale = 0.4,
+    beta = 0.6,  # covariate coefficient
+)
+
+"""
+Build TVC data with multiple covariate change points.
+Returns DataFrame with one row per interval.
+"""
+function _build_tvc_data(; 
+    t_changes::Vector{Float64} = TVC_MULTI_CHANGE_CONFIG.t_changes,
+    x_values::Vector{Float64} = Float64.(TVC_MULTI_CHANGE_CONFIG.x_values),
+    horizon::Float64 = TVC_MULTI_CHANGE_CONFIG.horizon,
+    n_subjects::Int = 1
+)
+    @assert length(x_values) == length(t_changes) + 1 "x_values should have one more element than t_changes"
+    
+    # Build time grid: [0, t_changes[1]], [t_changes[1], t_changes[2]], ..., [t_changes[end], horizon]
+    tstart_grid = vcat(0.0, t_changes)
+    tstop_grid = vcat(t_changes, horizon)
+    n_intervals = length(tstart_grid)
+    
+    rows = []
+    for subj in 1:n_subjects
+        for i in 1:n_intervals
+            push!(rows, (
+                id = subj,
+                tstart = tstart_grid[i],
+                tstop = tstop_grid[i],
+                statefrom = 1,
+                stateto = 1,  # will be updated by simulation
+                obstype = 1,
+                x = x_values[i]
+            ))
+        end
+    end
+    
+    return DataFrame(rows)
+end
+
+"""
+Two-state exponential model with time-varying covariate (multiple change points).
+Default uses PH effect; set `linpred_effect=:aft` for AFT.
+"""
+function toy_tvc_exp_model(; 
+    linpred_effect::Symbol = :ph,
+    t_changes::Vector{Float64} = TVC_MULTI_CHANGE_CONFIG.t_changes,
+    x_values::Vector{Float64} = Float64.(TVC_MULTI_CHANGE_CONFIG.x_values),
+    horizon::Float64 = TVC_MULTI_CHANGE_CONFIG.horizon,
+    rate::Float64 = TVC_MULTI_CHANGE_CONFIG.exp_rate,
+    beta::Float64 = TVC_MULTI_CHANGE_CONFIG.beta
+)
+    data = _build_tvc_data(; t_changes, x_values, horizon)
+    
+    h12 = Hazard(@formula(0 ~ x), "exp", 1, 2; linpred_effect = linpred_effect, time_transform = true)
+    model = multistatemodel(h12; data = data)
+    set_parameters!(model, (h12 = [log(rate), beta],))
+    
+    return (; model, data, config = (; t_changes, x_values, horizon, rate, beta, linpred_effect))
+end
+
+"""
+Two-state Weibull model with time-varying covariate (multiple change points).
+Default uses PH effect; set `linpred_effect=:aft` for AFT.
+"""
+function toy_tvc_wei_model(;
+    linpred_effect::Symbol = :ph,
+    t_changes::Vector{Float64} = TVC_MULTI_CHANGE_CONFIG.t_changes,
+    x_values::Vector{Float64} = Float64.(TVC_MULTI_CHANGE_CONFIG.x_values),
+    horizon::Float64 = TVC_MULTI_CHANGE_CONFIG.horizon,
+    shape::Float64 = TVC_MULTI_CHANGE_CONFIG.wei_shape,
+    scale::Float64 = TVC_MULTI_CHANGE_CONFIG.wei_scale,
+    beta::Float64 = TVC_MULTI_CHANGE_CONFIG.beta
+)
+    data = _build_tvc_data(; t_changes, x_values, horizon)
+    
+    h12 = Hazard(@formula(0 ~ x), "wei", 1, 2; linpred_effect = linpred_effect, time_transform = true)
+    model = multistatemodel(h12; data = data)
+    set_parameters!(model, (h12 = [log(shape), log(scale), beta],))
+    
+    return (; model, data, config = (; t_changes, x_values, horizon, shape, scale, beta, linpred_effect))
+end
+
+"""
+Two-state Gompertz model with time-varying covariate (multiple change points).
+Default uses PH effect; set `linpred_effect=:aft` for AFT.
+"""
+function toy_tvc_gom_model(;
+    linpred_effect::Symbol = :ph,
+    t_changes::Vector{Float64} = TVC_MULTI_CHANGE_CONFIG.t_changes,
+    x_values::Vector{Float64} = Float64.(TVC_MULTI_CHANGE_CONFIG.x_values),
+    horizon::Float64 = TVC_MULTI_CHANGE_CONFIG.horizon,
+    shape::Float64 = TVC_MULTI_CHANGE_CONFIG.gom_shape,
+    scale::Float64 = TVC_MULTI_CHANGE_CONFIG.gom_scale,
+    beta::Float64 = TVC_MULTI_CHANGE_CONFIG.beta
+)
+    data = _build_tvc_data(; t_changes, x_values, horizon)
+    
+    h12 = Hazard(@formula(0 ~ x), "gom", 1, 2; linpred_effect = linpred_effect, time_transform = true)
+    model = multistatemodel(h12; data = data)
+    set_parameters!(model, (h12 = [log(shape), log(scale), beta],))
+    
+    return (; model, data, config = (; t_changes, x_values, horizon, shape, scale, beta, linpred_effect))
+end
+
+"""
+Illness-death model (3-state) with time-varying covariate.
+States: 1 (healthy) → 2 (ill) → 3 (dead), and 1 → 3 directly.
+"""
+function toy_illness_death_tvc_model(;
+    linpred_effect::Symbol = :ph,
+    t_changes::Vector{Float64} = TVC_MULTI_CHANGE_CONFIG.t_changes,
+    x_values::Vector{Float64} = Float64.(TVC_MULTI_CHANGE_CONFIG.x_values),
+    horizon::Float64 = TVC_MULTI_CHANGE_CONFIG.horizon
+)
+    # Build data with TVC
+    tstart_grid = vcat(0.0, t_changes)
+    tstop_grid = vcat(t_changes, horizon)
+    n_intervals = length(tstart_grid)
+    
+    rows = []
+    for i in 1:n_intervals
+        push!(rows, (
+            id = 1,
+            tstart = tstart_grid[i],
+            tstop = tstop_grid[i],
+            statefrom = 1,
+            stateto = 1,
+            obstype = 1,
+            x = x_values[i]
+        ))
+    end
+    data = DataFrame(rows)
+    
+    # Define hazards for illness-death model
+    h12 = Hazard(@formula(0 ~ x), "exp", 1, 2; linpred_effect = linpred_effect)
+    h13 = Hazard(@formula(0 ~ x), "wei", 1, 3; linpred_effect = linpred_effect)
+    h23 = Hazard(@formula(0 ~ x), "exp", 2, 3; linpred_effect = linpred_effect)
+    
+    model = multistatemodel(h12, h13, h23; data = data)
+    set_parameters!(model, (
+        h12 = [log(0.3), 0.4],   # exp: log(rate), beta
+        h13 = [log(1.2), log(0.2), 0.3],  # wei: log(shape), log(scale), beta
+        h23 = [log(0.5), 0.2]    # exp: log(rate), beta
+    ))
+    
+    return (; model, data, config = (; t_changes, x_values, horizon, linpred_effect))
+end
+
+"""
+Semi-Markov model with time-varying covariate.
+Tests sojourn time reset interaction with TVC.
+Uses Weibull hazard (shape != 1) to verify sojourn time handling.
+"""
+function toy_semi_markov_tvc_model(;
+    linpred_effect::Symbol = :ph,
+    t_changes::Vector{Float64} = [2.0, 4.0],
+    x_values::Vector{Float64} = [0.5, 1.0, 1.5],
+    horizon::Float64 = 6.0
+)
+    # Build data: subject starts in state 1 with TVC
+    tstart_grid = vcat(0.0, t_changes)
+    tstop_grid = vcat(t_changes, horizon)
+    n_intervals = length(tstart_grid)
+    
+    rows = []
+    for i in 1:n_intervals
+        push!(rows, (
+            id = 1,
+            tstart = tstart_grid[i],
+            tstop = tstop_grid[i],
+            statefrom = 1,
+            stateto = 1,
+            obstype = 1,
+            x = x_values[i]
+        ))
+    end
+    data = DataFrame(rows)
+    
+    # Two-state reversible model with Weibull (semi-Markov) hazards
+    h12 = Hazard(@formula(0 ~ x), "wei", 1, 2; linpred_effect = linpred_effect)
+    h21 = Hazard(@formula(0 ~ x), "wei", 2, 1; linpred_effect = linpred_effect)
+    
+    model = multistatemodel(h12, h21; data = data)
+    set_parameters!(model, (
+        h12 = [log(1.5), log(0.5), 0.3],  # wei: log(shape), log(scale), beta
+        h21 = [log(1.3), log(0.4), 0.2]   # wei: log(shape), log(scale), beta
+    ))
+    
+    return (; model, data, config = (; t_changes, x_values, horizon, linpred_effect))
 end
 
 end # module

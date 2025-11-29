@@ -273,27 +273,358 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <h2 class="anchored" data-anchor-id="overview">Overview</h2>
 <p>Model generation in MultistateModels.jl follows a multi-step validation and construction process. Each step has corresponding unit tests in <code>test/test_modelgeneration.jl</code> (run via <code>Pkg.test(test_args=["test_modelgeneration"])</code>). All of the model-generation-focused tests currently pass ✅. Status last verified on <strong>2025-11-25</strong> by running <code>julia --project -e 'using Pkg; Pkg.test(test_args=["test_modelgeneration"])'</code> on branch <code>infrastructure_changes</code>.</p>
 </section>
+<section id="expanded-diagnostics-matrix" class="level2">
+<h2 class="anchored" data-anchor-id="expanded-diagnostics-matrix">Expanded Diagnostics Matrix</h2>
+<p>Every analytic hazard family (exponential, Weibull, Gompertz) is now exercised under both <code>linpred_effect</code> settings (PH/AFT) and both covariate regimes (baseline-only vs.&nbsp;a single covariate <code>x = 1.5</code>). For each of the 12 scenarios we regenerate two plots under <code>test/diagnostics/assets/</code>:</p>
+<ul>
+<li><strong>Function panels</strong> overlay the analytic hazard/cumulative hazard/survival curves with <code>call_haz</code>, <code>call_cumulhaz</code>, and <code>survprob</code> outputs (with and without the time transformation enabled).</li>
+<li><strong>Simulation panels</strong> draw 40k paths with and without the time transformation, compare the ECDF against the closed-form target distribution, and display both the ECDF residual and the ECDF difference <code>ΔF(t) = F_tt(t) − F_fb(t)</code> to certify parity. Histogram/PDF overlays confirm that <code>simulate_path</code> obeys the target density.</li>
+</ul>
+<p>All figures come from <code>test/diagnostics/generate_model_diagnostics.jl</code>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">julia</span> <span class="at">--project</span><span class="op">=</span>test/diagnostics test/diagnostics/generate_model_diagnostics.jl</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Scenario</th>
+<th>Function panel</th>
+<th>Simulation panel</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Exp · PH · baseline</td>
+<td><code>../test/diagnostics/assets/function_panel_exp_ph_baseline.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_exp_ph_baseline.png</code></td>
+</tr>
+<tr class="even">
+<td>Exp · PH · covariate</td>
+<td><code>../test/diagnostics/assets/function_panel_exp_ph_covariate.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_exp_ph_covariate.png</code></td>
+</tr>
+<tr class="odd">
+<td>Exp · AFT · baseline</td>
+<td><code>../test/diagnostics/assets/function_panel_exp_aft_baseline.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_exp_aft_baseline.png</code></td>
+</tr>
+<tr class="even">
+<td>Exp · AFT · covariate</td>
+<td><code>../test/diagnostics/assets/function_panel_exp_aft_covariate.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_exp_aft_covariate.png</code></td>
+</tr>
+<tr class="odd">
+<td>Wei · PH · baseline</td>
+<td><code>../test/diagnostics/assets/function_panel_wei_ph_baseline.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_wei_ph_baseline.png</code></td>
+</tr>
+<tr class="even">
+<td>Wei · PH · covariate</td>
+<td><code>../test/diagnostics/assets/function_panel_wei_ph_covariate.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_wei_ph_covariate.png</code></td>
+</tr>
+<tr class="odd">
+<td>Wei · AFT · baseline</td>
+<td><code>../test/diagnostics/assets/function_panel_wei_aft_baseline.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_wei_aft_baseline.png</code></td>
+</tr>
+<tr class="even">
+<td>Wei · AFT · covariate</td>
+<td><code>../test/diagnostics/assets/function_panel_wei_aft_covariate.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_wei_aft_covariate.png</code></td>
+</tr>
+<tr class="odd">
+<td>Gom · PH · baseline</td>
+<td><code>../test/diagnostics/assets/function_panel_gom_ph_baseline.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_gom_ph_baseline.png</code></td>
+</tr>
+<tr class="even">
+<td>Gom · PH · covariate</td>
+<td><code>../test/diagnostics/assets/function_panel_gom_ph_covariate.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_gom_ph_covariate.png</code></td>
+</tr>
+<tr class="odd">
+<td>Gom · AFT · baseline</td>
+<td><code>../test/diagnostics/assets/function_panel_gom_aft_baseline.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_gom_aft_baseline.png</code></td>
+</tr>
+<tr class="even">
+<td>Gom · AFT · covariate</td>
+<td><code>../test/diagnostics/assets/function_panel_gom_aft_covariate.png</code></td>
+<td><code>../test/diagnostics/assets/simulation_panel_gom_aft_covariate.png</code></td>
+</tr>
+</tbody>
+</table>
+<p>Below are the same plots inlined with short takeaways. In every case the function panels show the <code>call_*</code> outputs lying directly on top of the analytic curves, and the simulation panels keep <code>ΔF(t)</code> numerically at zero (see generator logs for the reported max <code>|ΔF|</code>).</p>
+<section id="exponential-family" class="level3">
+<h3 class="anchored" data-anchor-id="exponential-family">Exponential Family</h3>
+<section id="ph-baseline-only" class="level4">
+<h4 class="anchored" data-anchor-id="ph-baseline-only">PH · baseline-only</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_exp_ph_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Exp PH baseline function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_exp_ph_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Exp PH baseline simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>Constant hazard from <code>call_haz</code> matches the analytic rate <code>λ₀ = 0.35</code>; cumulative hazard and survival stay exactly on the closed form.</li>
+<li>The simulated ECDF sits on the theoretical exponential CDF while the residual remains at floating-point noise.</li>
+<li><code>ΔF(t)</code> stays at zero, confirming the time transformation leaves simulated event times unchanged.</li>
+</ul>
+</section>
+<section id="ph-covariate" class="level4">
+<h4 class="anchored" data-anchor-id="ph-covariate">PH · covariate</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_exp_ph_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Exp PH covariate function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_exp_ph_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Exp PH covariate simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>Adding <code>x = 1.5</code> with <code>β = 0.6</code> shifts the hazard to <code>λ = 0.35·exp(0.9)</code>; <code>call_haz</code> and <code>call_cumulhaz</code> follow the new intercept exactly.</li>
+<li>Simulation residuals remain flat, and the histogram/PDF overlay shows the higher-rate exponential density being recovered.</li>
+<li>ECDF parity between Tang-enabled and fallback solvers remains exact.</li>
+</ul>
+</section>
+<section id="aft-baseline-only" class="level4">
+<h4 class="anchored" data-anchor-id="aft-baseline-only">AFT · baseline-only</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_exp_aft_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Exp AFT baseline function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_exp_aft_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Exp AFT baseline simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>Accelerated-failure-time mode collapses to the same constant hazard as the PH baseline case (no covariate), and both solver branches agree with the analytic line.</li>
+<li>Duration draws again track the exponential reference distribution with negligible ECDF residual.</li>
+<li><code>ΔF(t)</code> stays pinned at zero.</li>
+</ul>
+</section>
+<section id="aft-covariate" class="level4">
+<h4 class="anchored" data-anchor-id="aft-covariate">AFT · covariate</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_exp_aft_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Exp AFT covariate function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_exp_aft_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Exp AFT covariate simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>The covariate now rescales time by <code>exp(-βx)</code>, and the plotted <code>call_*</code> outputs follow the analytic AFT curves exactly.</li>
+<li>Simulation diagnostics show the slower event-time distribution (hazard reduced by <code>exp(-0.9)</code>), and ECDF differences remain numerically zero.</li>
+</ul>
+</section>
+</section>
+<section id="weibull-family" class="level3">
+<h3 class="anchored" data-anchor-id="weibull-family">Weibull Family</h3>
+<section id="ph-baseline-only-1" class="level4">
+<h4 class="anchored" data-anchor-id="ph-baseline-only-1">PH · baseline-only</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_wei_ph_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Wei PH baseline function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_wei_ph_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Wei PH baseline simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>Shape 1.35 / scale 0.4 baseline reproduces the flared hazard perfectly under both solver modes.</li>
+<li>ECDF residuals stay within the ±3×10⁻³ band over the plotted support.</li>
+<li>Time-transform parity plot is flat, so the Tang caches do not perturb Weibull draws.</li>
+</ul>
+</section>
+<section id="ph-covariate-1" class="level4">
+<h4 class="anchored" data-anchor-id="ph-covariate-1">PH · covariate</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_wei_ph_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Wei PH covariate function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_wei_ph_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Wei PH covariate simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>Covariate effects tilt both the hazard and the cumulative hazard; <code>call_haz</code> lines remain indistinguishable from the analytic expectations.</li>
+<li>Simulation histograms match the heavier right tail implied by <code>exp(βx)</code>.</li>
+<li><code>ΔF(t)</code> remains identically zero.</li>
+</ul>
+</section>
+<section id="aft-baseline-only-1" class="level4">
+<h4 class="anchored" data-anchor-id="aft-baseline-only-1">AFT · baseline-only</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_wei_aft_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Wei AFT baseline function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_wei_aft_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Wei AFT baseline simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>AFT mode collapses to the baseline hazard (no covariate), so analytic and empirical curves coincide as expected.</li>
+<li>ECDF residuals remain negligible; histogram vs.&nbsp;pdf overlays the canonical Weibull density.</li>
+<li>Time-transform parity stays flat.</li>
+</ul>
+</section>
+<section id="aft-covariate-1" class="level4">
+<h4 class="anchored" data-anchor-id="aft-covariate-1">AFT · covariate</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_wei_aft_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Wei AFT covariate function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_wei_aft_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Wei AFT covariate simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>Time-axis scaling by <code>exp(-shape·βx)</code> visibly compresses the hazard curves; both solver branches match the analytic result.</li>
+<li>Simulated durations follow the rescaled Weibull CDF, and the ECDF difference remains at 0 within floating-point tolerance.</li>
+</ul>
+</section>
+</section>
+<section id="gompertz-family" class="level3">
+<h3 class="anchored" data-anchor-id="gompertz-family">Gompertz Family</h3>
+<section id="ph-baseline-only-2" class="level4">
+<h4 class="anchored" data-anchor-id="ph-baseline-only-2">PH · baseline-only</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_gom_ph_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Gom PH baseline function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_gom_ph_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Gom PH baseline simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>The exponentially increasing hazard from <code>call_haz</code> sits directly on top of the analytic Gompertz curve.</li>
+<li>ECDF residuals confirm that <code>simulate_path</code> reproduces the Gompertz distribution across the plotting grid.</li>
+<li><code>ΔF(t)</code> is identically zero, so Tang caches preserve path statistics.</li>
+</ul>
+</section>
+<section id="ph-covariate-2" class="level4">
+<h4 class="anchored" data-anchor-id="ph-covariate-2">PH · covariate</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_gom_ph_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Gom PH covariate function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_gom_ph_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Gom PH covariate simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>Covariate shifts accelerate the hazard growth rate, and analytic vs.&nbsp;computed curves remain indistinguishable.</li>
+<li>Simulation panel shows the heavier right tail along with flat ECDF residual and parity trace.</li>
+</ul>
+</section>
+<section id="aft-baseline-only-2" class="level4">
+<h4 class="anchored" data-anchor-id="aft-baseline-only-2">AFT · baseline-only</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_gom_aft_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Gom AFT baseline function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_gom_aft_baseline.png" class="img-fluid figure-img"></p>
+<figcaption>Gom AFT baseline simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>Without covariates, the AFT setting matches the PH baseline, so curves overlap exactly.</li>
+<li>ECDF/pdp comparisons mirror the PH baseline case with ΔF(t) at zero.</li>
+</ul>
+</section>
+<section id="aft-covariate-2" class="level4">
+<h4 class="anchored" data-anchor-id="aft-covariate-2">AFT · covariate</h4>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/function_panel_gom_aft_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Gom AFT covariate function panel</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="../test/diagnostics/assets/simulation_panel_gom_aft_covariate.png" class="img-fluid figure-img"></p>
+<figcaption>Gom AFT covariate simulation panel</figcaption>
+</figure>
+</div>
+<ul>
+<li>Time scaling by <code>exp(-βx)</code> stretches the Gompertz hazard, and both solver modes stay glued to the analytic reference.</li>
+<li>Simulation diagnostics confirm the stretched distribution and keep the ECDF difference curve at numerical zero.</li>
+</ul>
+</section>
+</section>
+</section>
 <section id="model-generation-process" class="level2">
 <h2 class="anchored" data-anchor-id="model-generation-process">Model Generation Process</h2>
 <section id="step-1-user-creates-hazard-objects" class="level3">
 <h3 class="anchored" data-anchor-id="step-1-user-creates-hazard-objects">STEP 1: User Creates Hazard Objects</h3>
 <p><strong>Recommended DSL (<code>@hazard</code> macro):</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>h12 <span class="op">=</span> <span class="pp">@hazard</span> <span class="cf">begin</span></span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    family <span class="op">=</span> <span class="op">:</span>exp          <span class="co"># strings also work: "exp"</span></span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> <span class="fl">1</span></span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> <span class="fl">2</span></span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>h13 <span class="op">=</span> <span class="pp">@hazard</span> <span class="cf">begin</span></span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    family <span class="op">=</span> <span class="op">:</span>wei          <span class="co"># accepts :wei/:weibull</span></span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    formula <span class="op">=</span> <span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> age)</span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    transition <span class="op">=</span> <span class="fl">1</span> <span class="op">=&gt;</span> <span class="fl">3</span>    <span class="co"># or from = 1; to = 3; states = (1, 3)</span></span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
-<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>h14 <span class="op">=</span> <span class="pp">@hazard</span> <span class="cf">begin</span></span>
-<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>    family <span class="op">=</span> <span class="op">:</span>gom</span>
-<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>    transition <span class="op">=</span> <span class="fl">1</span> <span class="op">=&gt;</span> <span class="fl">4</span>    <span class="co"># formula omitted ⇒ intercept-only hazard</span></span>
-<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>h12 <span class="op">=</span> <span class="pp">@hazard</span> <span class="cf">begin</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    family <span class="op">=</span> <span class="op">:</span>exp          <span class="co"># strings also work: "exp"</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> <span class="fl">1</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> <span class="fl">2</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>h13 <span class="op">=</span> <span class="pp">@hazard</span> <span class="cf">begin</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    family <span class="op">=</span> <span class="op">:</span>wei          <span class="co"># accepts :wei/:weibull</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    formula <span class="op">=</span> <span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> age)</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>    transition <span class="op">=</span> <span class="fl">1</span> <span class="op">=&gt;</span> <span class="fl">3</span>    <span class="co"># or from = 1; to = 3; states = (1, 3)</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>h14 <span class="op">=</span> <span class="pp">@hazard</span> <span class="cf">begin</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>    family <span class="op">=</span> <span class="op">:</span>gom</span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>    transition <span class="op">=</span> <span class="fl">1</span> <span class="op">=&gt;</span> <span class="fl">4</span>    <span class="co"># formula omitted ⇒ intercept-only hazard</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <ul>
 <li><code>family</code> accepts case-insensitive strings or symbols for <code>exp</code>, <code>wei</code>, <code>gom</code>, and <code>sp</code>. Tags <code>:ode</code>/<code>:neural_ode</code> are reserved; the macro emits a descriptive error until those hazard types ship.</li>
 <li>Aliases <code>from</code>, <code>to</code>, <code>states</code>, or <code>transition = 1 =&gt; 2</code> map to <code>statefrom</code>/<code>stateto</code> so you can pick whatever reads best.</li>
@@ -342,45 +673,45 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <li>Prefer <code>@hazard</code> in tests and docs because the structured block stays readable as we add Tang/ODE knobs; fall back to the raw constructor when you need to metaprogram or generate hazards dynamically.</li>
 </ul>
 <p><strong>Constructor form (still supported):</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>h12 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> trt), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>h13 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> age), <span class="st">"wei"</span>, <span class="fl">1</span>, <span class="fl">3</span>)</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>h14 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"gom"</span>, <span class="fl">1</span>, <span class="fl">4</span>)   <span class="co"># formula omitted ⇒ intercept-only</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>h12 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> trt), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>h13 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> age), <span class="st">"wei"</span>, <span class="fl">1</span>, <span class="fl">3</span>)</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>h14 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"gom"</span>, <span class="fl">1</span>, <span class="fl">4</span>)   <span class="co"># formula omitted ⇒ intercept-only</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>Both entry points automatically supply an intercept column even if you omit <code>+ 1</code> in the formula. Adding an explicit intercept term is harmless but unnecessary.</p>
 <p><strong>What it does:</strong> Creates hazard specifications for each transition: - <code>@formula(0 ~ trt)</code> = log-hazard formula; baseline hazard supplies the intercept so you list only covariates. - <code>"exp"</code> / <code>:wei</code> = hazard family (exponential, Weibull, Gompertz, spline). - <code>statefrom = 1</code>, <code>stateto = 2</code> (or aliases) = origin/destination states.</p>
 <p><strong>Unit Test:</strong> <code>test_hazard_construction</code></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>h_exp <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> trt), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>model_exp <span class="op">=</span> <span class="fu">multistatemodel</span>(h_exp; data <span class="op">=</span> dat)</span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">length</span>(model_exp.parameters[<span class="fl">1</span>]) <span class="op">==</span> <span class="fl">2</span>  <span class="co"># Intercept + trt from the auto-added baseline term</span></span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> model_exp.hazards[<span class="fl">1</span>].parnames <span class="op">==</span> [<span class="op">:</span>h12_Intercept, <span class="op">:</span>h12_trt]</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>h_exp <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> trt), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>model_exp <span class="op">=</span> <span class="fu">multistatemodel</span>(h_exp; data <span class="op">=</span> dat)</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">length</span>(model_exp.parameters[<span class="fl">1</span>]) <span class="op">==</span> <span class="fl">2</span>  <span class="co"># Intercept + trt from the auto-added baseline term</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> model_exp.hazards[<span class="fl">1</span>].parnames <span class="op">==</span> [<span class="op">:</span>h12_Intercept, <span class="op">:</span>h12_trt]</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Verifies:</strong> Hazard objects create correct parameter structures and names for different hazard families while respecting the unified DSL.</p>
 <hr>
 </section>
 <section id="step-2-enumerate-and-validate-hazards" class="level3">
 <h3 class="anchored" data-anchor-id="step-2-enumerate-and-validate-hazards">STEP 2: Enumerate and Validate Hazards</h3>
 <p><strong>Code:</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>hazinfo <span class="op">=</span> <span class="fu">enumerate_hazards</span>(hazards<span class="op">...</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>hazinfo <span class="op">=</span> <span class="fu">enumerate_hazards</span>(hazards<span class="op">...</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>What it does:</strong> - Extracts <code>(statefrom, stateto)</code> pairs from all hazards - <strong>Checks for duplicate transitions</strong> - each transition should only be specified once - Sorts hazards by origin state, then destination state - Assigns transition numbers</p>
 <p><strong>Unit Test:</strong> <code>test_duplicate_transitions</code></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)  <span class="co"># DUPLICATE!</span></span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">ErrorException</span> <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat)</span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Verify error message mentions duplicate transitions</span></span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="cf">try</span></span>
-<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat)</span>
-<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="cn">false</span>  <span class="co"># Should not reach here</span></span>
-<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="cf">catch</span> <span class="cn">e</span></span>
-<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="fu">occursin</span>(<span class="st">"Duplicate transitions"</span>, <span class="fu">string</span>(<span class="cn">e</span>))</span>
-<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="fu">occursin</span>(<span class="st">"(1, 2)"</span>, <span class="fu">string</span>(<span class="cn">e</span>))</span>
-<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)  <span class="co"># DUPLICATE!</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">ErrorException</span> <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat)</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Verify error message mentions duplicate transitions</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="cf">try</span></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat)</span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="cn">false</span>  <span class="co"># Should not reach here</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a><span class="cf">catch</span> <span class="cn">e</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="fu">occursin</span>(<span class="st">"Duplicate transitions"</span>, <span class="fu">string</span>(<span class="cn">e</span>))</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="fu">occursin</span>(<span class="st">"(1, 2)"</span>, <span class="fu">string</span>(<span class="cn">e</span>))</span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Verifies:</strong> - System catches duplicate transition definitions - Provides clear, informative error message with the duplicate transition pair</p>
 <hr>
 </section>
 <section id="step-3-create-transition-matrix" class="level3">
 <h3 class="anchored" data-anchor-id="step-3-create-transition-matrix">STEP 3: Create Transition Matrix</h3>
 <p><strong>Code:</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>tmat <span class="op">=</span> <span class="fu">create_tmat</span>(hazinfo)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>tmat <span class="op">=</span> <span class="fu">create_tmat</span>(hazinfo)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>What it does:</strong> Creates a matrix where <code>tmat[i,j]</code> = transition number from state i to state j. Zero entries mean no direct transition is possible.</p>
 <p><strong>Example:</strong></p>
 <pre><code>     State: 1  2  3
@@ -388,68 +719,68 @@ State 1:    0  1  2    # Can go from 1→2 (trans 1) or 1→3 (trans 2)
 State 2:    3  0  4    # Can go from 2→1 (trans 3) or 2→3 (trans 4)
 State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <p><strong>Unit Test:</strong> <code>test_tmat</code></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">sort</span>(msm_expwei.tmat[[<span class="fl">2</span>,<span class="fl">4</span>,<span class="fl">7</span>,<span class="fl">8</span>]]) <span class="op">==</span> <span class="fu">collect</span>(<span class="fl">1</span><span class="op">:</span><span class="fl">4</span>)  <span class="co"># Check transition numbers</span></span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">all</span>(msm_expwei.tmat[<span class="fu">Not</span>([<span class="fl">2</span>,<span class="fl">4</span>,<span class="fl">7</span>,<span class="fl">8</span>])] <span class="op">.==</span> <span class="fl">0</span>)       <span class="co"># Check zeros elsewhere</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">sort</span>(msm_expwei.tmat[[<span class="fl">2</span>,<span class="fl">4</span>,<span class="fl">7</span>,<span class="fl">8</span>]]) <span class="op">==</span> <span class="fu">collect</span>(<span class="fl">1</span><span class="op">:</span><span class="fl">4</span>)  <span class="co"># Check transition numbers</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">all</span>(msm_expwei.tmat[<span class="fu">Not</span>([<span class="fl">2</span>,<span class="fl">4</span>,<span class="fl">7</span>,<span class="fl">8</span>])] <span class="op">.==</span> <span class="fl">0</span>)       <span class="co"># Check zeros elsewhere</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Verifies:</strong> - Transition matrix has correct structure - Transitions are numbered correctly and placed in the right positions - Non-transitions are properly marked as zero</p>
 <hr>
 </section>
 <section id="step-4-data-validation" class="level3">
 <h3 class="anchored" data-anchor-id="step-4-data-validation">STEP 4: Data Validation</h3>
 <p><strong>Code:</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">check_data!</span>(data, tmat, CensoringPatterns; verbose <span class="op">=</span> verbose)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">check_data!</span>(data, tmat, CensoringPatterns; verbose <span class="op">=</span> verbose)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>What it does:</strong> - Ensures required columns exist: <code>id</code>, <code>tstart</code>, <code>tstop</code>, <code>statefrom</code>, <code>stateto</code>, <code>obstype</code> - <strong>Checks for state 0 misuse</strong> - state 0 should not be in <code>statefrom</code> - Warns about non-contiguous states (e.g., 1, 2, 4 skipping 3) - Validates observation types and censoring patterns</p>
 <p><strong>Unit Tests:</strong></p>
 <section id="test_state_zero_in_data---state-0-can-appear-for-censoring" class="level4">
 <h4 class="anchored" data-anchor-id="test_state_zero_in_data---state-0-can-appear-for-censoring"><code>test_state_zero_in_data</code> - State 0 can appear for censoring</h4>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
-<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
-<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>, <span class="fl">1.0</span>],</span>
-<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">2.0</span>],</span>
-<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
-<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">0</span>],   <span class="co"># second row ends in state 0 to indicate censoring</span></span>
-<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">3</span>]    <span class="co"># obstype 3 is described by the censoring matrix below</span></span>
-<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>CensoringPatterns <span class="op">=</span> <span class="dt">Int64</span>[<span class="fl">3</span> <span class="fl">0</span> <span class="fl">1</span> <span class="fl">1</span>]  <span class="co"># pattern 3 allows states 2 or 3 at interval end</span></span>
-<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
-<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">3</span>)</span>
-<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat, CensoringPatterns <span class="op">=</span> CensoringPatterns)</span>
-<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">isa</span>(model, MultistateModels.MultistateProcess)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>, <span class="fl">1.0</span>],</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">2.0</span>],</span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">0</span>],   <span class="co"># second row ends in state 0 to indicate censoring</span></span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">3</span>]    <span class="co"># obstype 3 is described by the censoring matrix below</span></span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a>CensoringPatterns <span class="op">=</span> <span class="dt">Int64</span>[<span class="fl">3</span> <span class="fl">0</span> <span class="fl">1</span> <span class="fl">1</span>]  <span class="co"># pattern 3 allows states 2 or 3 at interval end</span></span>
+<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-12"><a href="#cb11-12" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb11-13"><a href="#cb11-13" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">3</span>)</span>
+<span id="cb11-14"><a href="#cb11-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-15"><a href="#cb11-15" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat, CensoringPatterns <span class="op">=</span> CensoringPatterns)</span>
+<span id="cb11-16"><a href="#cb11-16" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">isa</span>(model, MultistateModels.MultistateProcess)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Verifies:</strong> State 0 is allowed in the <strong>data</strong> (not hazards) when paired with a <code>CensoringPatterns</code> row that enumerates the states compatible with each censoring code.</p>
 </section>
 <section id="test_non_contiguous_states---non-contiguous-states-cause-issues" class="level4">
 <h4 class="anchored" data-anchor-id="test_non_contiguous_states---non-contiguous-states-cause-issues"><code>test_non_contiguous_states</code> - Non-contiguous states cause issues</h4>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
-<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">4</span>],  <span class="co"># Missing state 3</span></span>
-<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">4</span>, <span class="fl">4</span>],</span>
-<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">...</span></span>
-<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
-<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">2</span>, <span class="fl">4</span>)</span>
-<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">BoundsError</span> <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">4</span>],  <span class="co"># Missing state 3</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">4</span>, <span class="fl">4</span>],</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">...</span></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">2</span>, <span class="fl">4</span>)</span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">BoundsError</span> <span class="fu">multistatemodel</span>(h1, h2; data <span class="op">=</span> dat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Verifies:</strong> System catches and warns about non-contiguous state spaces (gaps in state numbering)</p>
 </section>
 <section id="test_hazard_state_zero---state-0-cannot-be-in-hazard-definitions" class="level4">
 <h4 class="anchored" data-anchor-id="test_hazard_state_zero---state-0-cannot-be-in-hazard-definitions"><code>test_hazard_state_zero</code> - State 0 cannot be in hazard definitions</h4>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
-<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>],</span>
-<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>],</span>
-<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>],</span>
-<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>],</span>
-<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">1</span>],</span>
-<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">2</span>]</span>
-<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a>h_bad_from <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">0</span>, <span class="fl">1</span>)  <span class="co"># State 0 in statefrom</span></span>
-<span id="cb12-11"><a href="#cb12-11" aria-hidden="true" tabindex="-1"></a>h_bad_to <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">0</span>)    <span class="co"># State 0 in stateto</span></span>
-<span id="cb12-12"><a href="#cb12-12" aria-hidden="true" tabindex="-1"></a>h_good <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
-<span id="cb12-13"><a href="#cb12-13" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-14"><a href="#cb12-14" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">Exception</span> <span class="fu">multistatemodel</span>(h_bad_from, h_good; data <span class="op">=</span> dat)</span>
-<span id="cb12-15"><a href="#cb12-15" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">Exception</span> <span class="fu">multistatemodel</span>(h_good, h_bad_to; data <span class="op">=</span> dat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>],</span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>],</span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>],</span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>],</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">1</span>],</span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">2</span>]</span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a>h_bad_from <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">0</span>, <span class="fl">1</span>)  <span class="co"># State 0 in statefrom</span></span>
+<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a>h_bad_to <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">0</span>)    <span class="co"># State 0 in stateto</span></span>
+<span id="cb13-12"><a href="#cb13-12" aria-hidden="true" tabindex="-1"></a>h_good <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb13-13"><a href="#cb13-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-14"><a href="#cb13-14" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">Exception</span> <span class="fu">multistatemodel</span>(h_bad_from, h_good; data <span class="op">=</span> dat)</span>
+<span id="cb13-15"><a href="#cb13-15" aria-hidden="true" tabindex="-1"></a><span class="pp">@test_throws</span> <span class="dt">Exception</span> <span class="fu">multistatemodel</span>(h_good, h_bad_to; data <span class="op">=</span> dat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Verifies:</strong> - Hazards cannot use state 0 in <code>statefrom</code> or <code>stateto</code> - State 0 is reserved exclusively for censoring indicators in data</p>
 <hr>
 </section>
@@ -457,72 +788,72 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <section id="step-5-build-hazard-structs" class="level3">
 <h3 class="anchored" data-anchor-id="step-5-build-hazard-structs">STEP 5: Build Hazard Structs</h3>
 <p><strong>Code:</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>_hazards, parameters, parameters_ph, hazkeys <span class="op">=</span> <span class="fu">build_hazards</span>(hazards<span class="op">...</span>; data <span class="op">=</span> data)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>_hazards, parameters, parameters_ph, hazkeys <span class="op">=</span> <span class="fu">build_hazards</span>(hazards<span class="op">...</span>; data <span class="op">=</span> data)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>What it does:</strong> - Parses formulas and creates design matrices - <strong>Generates parameter names</strong> from formula terms (not from data columns) - Creates runtime-generated functions for hazard/cumulative hazard calculations - Builds consolidated structs: <code>MarkovHazard</code> (exponential) or <code>SemiMarkovHazard</code> (Weibull/Gompertz)</p>
 <p><strong>Key Logic for Parameter Naming:</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co"># StatsModels applies the schema, so coefnames reflects the actual design columns</span></span>
-<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>coef_names <span class="op">=</span> StatsModels.<span class="fu">coefnames</span>(applied_rhs)   <span class="co"># ["(Intercept)", "trt", "age", "trt &amp; age"]</span></span>
-<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>rhs_names <span class="op">=</span> has_explicit_intercept ? coef_names <span class="op">:</span> <span class="fu">vcat</span>(<span class="st">"(Intercept)"</span>, coef_names)</span>
-<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>parnames <span class="op">=</span> <span class="fu">Symbol</span>.(<span class="fu">replace</span>.(hazname <span class="op">*</span> <span class="st">"_"</span> <span class="op">.*</span> rhs_names, <span class="st">"(Intercept)"</span> <span class="op">=&gt;</span> <span class="st">"Intercept"</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="co"># StatsModels applies the schema, so coefnames reflects the actual design columns</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>coef_names <span class="op">=</span> StatsModels.<span class="fu">coefnames</span>(applied_rhs)   <span class="co"># ["(Intercept)", "trt", "age", "trt &amp; age"]</span></span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>rhs_names <span class="op">=</span> has_explicit_intercept ? coef_names <span class="op">:</span> <span class="fu">vcat</span>(<span class="st">"(Intercept)"</span>, coef_names)</span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>parnames <span class="op">=</span> <span class="fu">Symbol</span>.(<span class="fu">replace</span>.(hazname <span class="op">*</span> <span class="st">"_"</span> <span class="op">.*</span> rhs_names, <span class="st">"(Intercept)"</span> <span class="op">=&gt;</span> <span class="st">"Intercept"</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <ul>
 <li>Formulas without explicit <code>+ 1</code> still receive an intercept column because the constructor prepends one when needed.</li>
 <li>Interaction terms retain the StatsModels naming convention (<code>"trt &amp; age"</code>), so parameter vectors include symbols like <code>Symbol("h13_trt &amp; age")</code>.</li>
 <li>Baseline-only hazards created via <code>Hazard("exp", 1, 2)</code> or <code>@hazard</code> without a formula only emit the intercept parameter (<code>:h12_Intercept</code>).</li>
 </ul>
 <p><strong>Unit Test:</strong> <code>test_parameter_naming</code></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Exponential without covariates</span></span>
-<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
-<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
-<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>, <span class="fl">1.0</span>],</span>
-<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">2.0</span>],</span>
-<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
-<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
-<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">2</span>]</span>
-<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb15-11"><a href="#cb15-11" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
-<span id="cb15-12"><a href="#cb15-12" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> <span class="fu">multistatemodel</span>(h1; data <span class="op">=</span> dat)</span>
-<span id="cb15-13"><a href="#cb15-13" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb15-14"><a href="#cb15-14" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_Intercept <span class="kw">in</span> model.hazards[<span class="fl">1</span>].parnames</span>
-<span id="cb15-15"><a href="#cb15-15" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> !(<span class="op">:</span>h12_rate <span class="kw">in</span> model.hazards[<span class="fl">1</span>].parnames)  <span class="co"># NOT "rate"!</span></span>
-<span id="cb15-16"><a href="#cb15-16" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb15-17"><a href="#cb15-17" aria-hidden="true" tabindex="-1"></a><span class="co"># Exponential with covariates</span></span>
-<span id="cb15-18"><a href="#cb15-18" aria-hidden="true" tabindex="-1"></a>dat_cov <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
-<span id="cb15-19"><a href="#cb15-19" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
-<span id="cb15-20"><a href="#cb15-20" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>, <span class="fl">1.0</span>],</span>
-<span id="cb15-21"><a href="#cb15-21" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">2.0</span>],</span>
-<span id="cb15-22"><a href="#cb15-22" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
-<span id="cb15-23"><a href="#cb15-23" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
-<span id="cb15-24"><a href="#cb15-24" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">2</span>],</span>
-<span id="cb15-25"><a href="#cb15-25" aria-hidden="true" tabindex="-1"></a>    age <span class="op">=</span> [<span class="fl">50</span>, <span class="fl">51</span>]</span>
-<span id="cb15-26"><a href="#cb15-26" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb15-27"><a href="#cb15-27" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb15-28"><a href="#cb15-28" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> age), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
-<span id="cb15-29"><a href="#cb15-29" aria-hidden="true" tabindex="-1"></a>model2 <span class="op">=</span> <span class="fu">multistatemodel</span>(h2; data <span class="op">=</span> dat_cov)</span>
-<span id="cb15-30"><a href="#cb15-30" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb15-31"><a href="#cb15-31" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_Intercept <span class="kw">in</span> model2.hazards[<span class="fl">1</span>].parnames</span>
-<span id="cb15-32"><a href="#cb15-32" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_age <span class="kw">in</span> model2.hazards[<span class="fl">1</span>].parnames</span>
-<span id="cb15-33"><a href="#cb15-33" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb15-34"><a href="#cb15-34" aria-hidden="true" tabindex="-1"></a><span class="co"># Interaction terms keep StatsModels' literal naming (including spaces and "&amp;")</span></span>
-<span id="cb15-35"><a href="#cb15-35" aria-hidden="true" tabindex="-1"></a>h3 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> trt <span class="op">&amp;</span> age), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
-<span id="cb15-36"><a href="#cb15-36" aria-hidden="true" tabindex="-1"></a>model3 <span class="op">=</span> <span class="fu">multistatemodel</span>(h3; data <span class="op">=</span> dat_cov)</span>
-<span id="cb15-37"><a href="#cb15-37" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">Symbol</span>(<span class="st">"h12_trt &amp; age"</span>) <span class="kw">in</span> model3.hazards[<span class="fl">1</span>].parnames</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Exponential without covariates</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>dat <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>, <span class="fl">1.0</span>],</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">2.0</span>],</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">2</span>]</span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a>h1 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>model <span class="op">=</span> <span class="fu">multistatemodel</span>(h1; data <span class="op">=</span> dat)</span>
+<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_Intercept <span class="kw">in</span> model.hazards[<span class="fl">1</span>].parnames</span>
+<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> !(<span class="op">:</span>h12_rate <span class="kw">in</span> model.hazards[<span class="fl">1</span>].parnames)  <span class="co"># NOT "rate"!</span></span>
+<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a><span class="co"># Exponential with covariates</span></span>
+<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a>dat_cov <span class="op">=</span> <span class="fu">DataFrame</span>(</span>
+<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a>    id <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb16-20"><a href="#cb16-20" aria-hidden="true" tabindex="-1"></a>    tstart <span class="op">=</span> [<span class="fl">0.0</span>, <span class="fl">1.0</span>],</span>
+<span id="cb16-21"><a href="#cb16-21" aria-hidden="true" tabindex="-1"></a>    tstop <span class="op">=</span> [<span class="fl">1.0</span>, <span class="fl">2.0</span>],</span>
+<span id="cb16-22"><a href="#cb16-22" aria-hidden="true" tabindex="-1"></a>    statefrom <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb16-23"><a href="#cb16-23" aria-hidden="true" tabindex="-1"></a>    stateto <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">1</span>],</span>
+<span id="cb16-24"><a href="#cb16-24" aria-hidden="true" tabindex="-1"></a>    obstype <span class="op">=</span> [<span class="fl">2</span>, <span class="fl">2</span>],</span>
+<span id="cb16-25"><a href="#cb16-25" aria-hidden="true" tabindex="-1"></a>    age <span class="op">=</span> [<span class="fl">50</span>, <span class="fl">51</span>]</span>
+<span id="cb16-26"><a href="#cb16-26" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb16-27"><a href="#cb16-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-28"><a href="#cb16-28" aria-hidden="true" tabindex="-1"></a>h2 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> age), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb16-29"><a href="#cb16-29" aria-hidden="true" tabindex="-1"></a>model2 <span class="op">=</span> <span class="fu">multistatemodel</span>(h2; data <span class="op">=</span> dat_cov)</span>
+<span id="cb16-30"><a href="#cb16-30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-31"><a href="#cb16-31" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_Intercept <span class="kw">in</span> model2.hazards[<span class="fl">1</span>].parnames</span>
+<span id="cb16-32"><a href="#cb16-32" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="op">:</span>h12_age <span class="kw">in</span> model2.hazards[<span class="fl">1</span>].parnames</span>
+<span id="cb16-33"><a href="#cb16-33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-34"><a href="#cb16-34" aria-hidden="true" tabindex="-1"></a><span class="co"># Interaction terms keep StatsModels' literal naming (including spaces and "&amp;")</span></span>
+<span id="cb16-35"><a href="#cb16-35" aria-hidden="true" tabindex="-1"></a>h3 <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> trt <span class="op">&amp;</span> age), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>)</span>
+<span id="cb16-36"><a href="#cb16-36" aria-hidden="true" tabindex="-1"></a>model3 <span class="op">=</span> <span class="fu">multistatemodel</span>(h3; data <span class="op">=</span> dat_cov)</span>
+<span id="cb16-37"><a href="#cb16-37" aria-hidden="true" tabindex="-1"></a><span class="pp">@test</span> <span class="fu">Symbol</span>(<span class="st">"h12_trt &amp; age"</span>) <span class="kw">in</span> model3.hazards[<span class="fl">1</span>].parnames</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Verifies:</strong> - Parameters are named “Intercept” (not “rate”) for consistency with GLM conventions - Covariate names from the formula appear in parameter names - Parameter naming works correctly for models with and without covariates, including interaction terms whose symbols match the StatsModels schema exactly</p>
 <p><strong>Unit Test:</strong> <code>linpred_effect modes</code></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="pp">@testset</span> <span class="st">"linpred_effect modes"</span> <span class="cf">begin</span></span>
-<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>    h_exp_aft <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> x), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>; linpred_effect <span class="op">=</span> <span class="op">:</span>aft)</span>
-<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>    model_exp_aft <span class="op">=</span> <span class="fu">multistatemodel</span>(h_exp_aft; data <span class="op">=</span> dat)</span>
-<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">set_parameters!</span>(model_exp_aft, (h12 <span class="op">=</span> [<span class="fu">log</span>(λ<span class="fl">0</span>), β],))</span>
-<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="fu">call_haz</span>(t, model_exp_aft.parameters[<span class="fl">1</span>], row, model_exp_aft.hazards[<span class="fl">1</span>]; give_log<span class="op">=</span><span class="cn">false</span>) <span class="op">≈</span> λ<span class="fl">0</span> <span class="op">*</span> <span class="fu">exp</span>(<span class="op">-</span>β <span class="op">*</span> x)</span>
-<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>    <span class="co"># similar assertions for Weibull/Gompertz</span></span>
-<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="pp">@testset</span> <span class="st">"linpred_effect modes"</span> <span class="cf">begin</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>    h_exp_aft <span class="op">=</span> <span class="fu">Hazard</span>(<span class="pp">@formula</span>(<span class="fl">0</span> <span class="op">~</span> x), <span class="st">"exp"</span>, <span class="fl">1</span>, <span class="fl">2</span>; linpred_effect <span class="op">=</span> <span class="op">:</span>aft)</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>    model_exp_aft <span class="op">=</span> <span class="fu">multistatemodel</span>(h_exp_aft; data <span class="op">=</span> dat)</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">set_parameters!</span>(model_exp_aft, (h12 <span class="op">=</span> [<span class="fu">log</span>(λ<span class="fl">0</span>), β],))</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>    <span class="pp">@test</span> <span class="fu">call_haz</span>(t, model_exp_aft.parameters[<span class="fl">1</span>], row, model_exp_aft.hazards[<span class="fl">1</span>]; give_log<span class="op">=</span><span class="cn">false</span>) <span class="op">≈</span> λ<span class="fl">0</span> <span class="op">*</span> <span class="fu">exp</span>(<span class="op">-</span>β <span class="op">*</span> x)</span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>    <span class="co"># similar assertions for Weibull/Gompertz</span></span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Verifies:</strong> - The new <code>HazardMetadata.linpred_effect</code> flag is threaded through runtime hazard functions. - Analytic families honor per-transition PH vs AFT semantics (exponential, Weibull, and Gompertz all have closed-form AFT adjustments for both hazard and cumulative hazard evaluations). - The legacy interface (<code>call_haz</code>/<code>call_cumulhaz</code>) observes these effects without any downstream changes.</p>
 <hr>
 </section>
 <section id="step-6-build-total-hazards" class="level3">
 <h3 class="anchored" data-anchor-id="step-6-build-total-hazards">STEP 6: Build Total Hazards</h3>
 <p><strong>Code:</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>_totalhazards <span class="op">=</span> <span class="fu">build_totalhazards</span>(_hazards, tmat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>_totalhazards <span class="op">=</span> <span class="fu">build_totalhazards</span>(_hazards, tmat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>What it does:</strong> - For each origin state, creates a <code>_TotalHazard</code> object - Absorbing states (no exits): <code>_TotalHazardAbsorbing()</code> - Transient states (have exits): <code>_TotalHazardTransient(transition_indices)</code> - Used for computing survival probabilities in likelihood calculations</p>
 <p><strong>Testing:</strong> No dedicated unit test yet, but <code>_TotalHazard*</code> structs are instantiated in every <code>multistatemodel</code> call that the suite exercises. The shared-baseline cache regression tests in <code>test/test_hazards.jl</code> (“Shared baseline caches are reused across hazards from the same origin”) plus the builder coverage in <code>test/test_modelgeneration.jl</code> exercise both absorbing and transient branches. TODO: add a lightweight direct test once we expand fixture coverage in FC2.</p>
 <hr>
@@ -530,7 +861,7 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <section id="step-7-build-emission-matrix" class="level3">
 <h3 class="anchored" data-anchor-id="step-7-build-emission-matrix">STEP 7: Build Emission Matrix</h3>
 <p><strong>Code:</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>emat <span class="op">=</span> <span class="fu">build_emat</span>(data, CensoringPatterns, tmat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb19"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>emat <span class="op">=</span> <span class="fu">build_emat</span>(data, CensoringPatterns, tmat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>What it does:</strong> - For each observation, indicates which states are possible - Exactly observed: <code>emat[i,state] = 1</code>, all others = 0 - Censored: <code>emat[i,:] = [1,1,1,...]</code> (all states possible) - Custom censoring: Uses <code>CensoringPatterns</code> matrix to specify which states are possible</p>
 <p><strong>Testing:</strong> <code>build_emat</code> is exercised by the panel-data and censoring suites (<code>test_state_zero_in_data</code>, <code>test_non_contiguous_states</code>, and the Tang cache regression tests). A stand-alone test would still be useful once we promote the shared fixture module to FC2 coverage.</p>
 <hr>
@@ -538,13 +869,13 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <section id="step-8-determine-model-type" class="level3">
 <h3 class="anchored" data-anchor-id="step-8-determine-model-type">STEP 8: Determine Model Type</h3>
 <p><strong>Code:</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb19"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Check observation types and hazard types to pick correct struct</span></span>
-<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="fu">all</span>(data.obstype <span class="op">.==</span> <span class="fl">1</span>)</span>
-<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>    model <span class="op">=</span> <span class="fu">MultistateModel</span>(<span class="op">...</span>)  <span class="co"># Exact observations only</span></span>
-<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a><span class="cf">elseif</span> <span class="fu">all</span>(<span class="fu">isa</span>.(_hazards, _MarkovHazard))</span>
-<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>    model <span class="op">=</span> <span class="fu">MultistateMarkovModel</span>(<span class="op">...</span>)  <span class="co"># Markov process</span></span>
-<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a><span class="cf">elseif</span> <span class="fu">any</span>(<span class="fu">isa</span>.(_hazards, _SemiMarkovHazard))</span>
-<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a>    model <span class="op">=</span> <span class="fu">MultistateSemiMarkovModel</span>(<span class="op">...</span>)  <span class="co"># Semi-Markov process</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb20"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Check observation types and hazard types to pick correct struct</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="fu">all</span>(data.obstype <span class="op">.==</span> <span class="fl">1</span>)</span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>    model <span class="op">=</span> <span class="fu">MultistateModel</span>(<span class="op">...</span>)  <span class="co"># Exact observations only</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="cf">elseif</span> <span class="fu">all</span>(<span class="fu">isa</span>.(_hazards, _MarkovHazard))</span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>    model <span class="op">=</span> <span class="fu">MultistateMarkovModel</span>(<span class="op">...</span>)  <span class="co"># Markov process</span></span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a><span class="cf">elseif</span> <span class="fu">any</span>(<span class="fu">isa</span>.(_hazards, _SemiMarkovHazard))</span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>    model <span class="op">=</span> <span class="fu">MultistateSemiMarkovModel</span>(<span class="op">...</span>)  <span class="co"># Semi-Markov process</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>What it does:</strong> - Examines data: exact vs panel vs censored observations - Examines hazards: all Markov (exponential) vs any Semi-Markov (Weibull/Gompertz) - Selects appropriate model struct from 6 total types: - <code>MultistateModel</code> (exact observations) - <code>MultistateMarkovModel</code> (Markov with panel data) - <code>MultistateSemiMarkovModel</code> (Semi-Markov with panel data) - <code>MultistateMarkovModelCensored</code> (Markov with censoring) - <code>MultistateSemiMarkovModelCensored</code> (Semi-Markov with censoring)</p>
 <p><strong>Testing:</strong> Implicitly tested by all model construction tests, which create models with different data types and hazard families.</p>
 <hr>
@@ -640,10 +971,10 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <p>All model generation tests are located in:</p>
 <pre><code>test/test_modelgeneration.jl</code></pre>
 <p>Run tests with:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb21"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Pkg</span></span>
-<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="bu">Pkg</span>.<span class="fu">test</span>(<span class="st">"MultistateModels"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb22"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="im">using</span> <span class="bu">Pkg</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a><span class="bu">Pkg</span>.<span class="fu">test</span>(<span class="st">"MultistateModels"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>Or run just model generation tests:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb22"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">include</span>(<span class="st">"test/test_modelgeneration.jl"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb23"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="fu">include</span>(<span class="st">"test/test_modelgeneration.jl"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <hr>
 </section>
 <section id="roadmap-unified-dsl-ode-neural-hazards" class="level2">

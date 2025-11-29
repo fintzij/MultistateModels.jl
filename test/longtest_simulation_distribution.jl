@@ -13,7 +13,7 @@ using Base.Threads
 using DataFrames
 using Distributions
 using HypothesisTests
-using MultistateModels: Hazard, multistatemodel, set_parameters!, simulate_path
+using MultistateModels: Hazard, multistatemodel, set_parameters!, simulate_path, CachedTransformStrategy, DirectTransformStrategy
 using QuadGK
 using Random
 using Statistics
@@ -82,7 +82,7 @@ function scenario_metrics(scenario::SimulationScenario)
     target_mean = truncated_mean(base_dist, 0.0, scenario.horizon)
 
     baseline_rng = Random.MersenneTwister(scenario.seed)
-    baseline_durations = collect_event_durations(model, scenario.sample_size; time_transform = false, rng = baseline_rng)
+    baseline_durations = collect_event_durations(model, scenario.sample_size; use_cached_strategy = false, rng = baseline_rng)
     empirical_mean = mean(baseline_durations)
     quantile_vec = quantile_probability_errors(baseline_durations, target_dist, QUANTILES)
     ks_pvalue = pvalue(ApproximateOneSampleKSTest(baseline_durations, target_dist))
@@ -90,9 +90,9 @@ function scenario_metrics(scenario::SimulationScenario)
 
     tt_model = build_scenario_model(scenario; time_transform = true)
     tt_rng = Random.MersenneTwister(scenario.seed)
-    tt_durations = collect_event_durations(tt_model, scenario.sample_size; time_transform = true, rng = tt_rng)
+    tt_durations = collect_event_durations(tt_model, scenario.sample_size; use_cached_strategy = true, rng = tt_rng)
     fallback_rng = Random.MersenneTwister(scenario.seed)
-    fallback_durations = collect_event_durations(tt_model, scenario.sample_size; time_transform = false, rng = fallback_rng)
+    fallback_durations = collect_event_durations(tt_model, scenario.sample_size; use_cached_strategy = false, rng = fallback_rng)
     parity_maxdiff = maximum(abs.(tt_durations .- fallback_durations))
     parity_pvalue = pvalue(ApproximateTwoSampleKSTest(tt_durations, fallback_durations))
 
@@ -258,17 +258,18 @@ function build_scenario_model(s::SimulationScenario; time_transform::Bool = fals
 end
 
 """Collect uncensored event durations by repeatedly sampling paths."""
-function collect_event_durations(model, nsamples; time_transform::Bool = false, rng::AbstractRNG = Random.default_rng())
+function collect_event_durations(model, nsamples; use_cached_strategy::Bool = false, rng::AbstractRNG = Random.default_rng())
     durations = Vector{Float64}(undef, nsamples)
     collected = 0
     attempts = 0
     max_attempts = nsamples * 5
+    strategy = use_cached_strategy ? CachedTransformStrategy() : DirectTransformStrategy()
 
     while collected < nsamples
         attempts += 1
         attempts <= max_attempts || error("Insufficient uncensored sample paths; consider increasing PANEL_HORIZON.")
 
-        path = simulate_path(model, 1, DELTA_U, DELTA_T; time_transform = time_transform, rng = rng)
+        path = simulate_path(model, 1, DELTA_U, DELTA_T; strategy = strategy, rng = rng)
         if path.states[end] != path.states[1]
             collected += 1
             durations[collected] = path.times[end] - path.times[1]
@@ -284,7 +285,7 @@ end
 
 fixture = toy_two_state_exp_model(rate = EVENT_RATE, horizon = PANEL_HORIZON, time_transform = true)
 base_rng = Random.MersenneTwister(RNG_SEED)
-durations = collect_event_durations(fixture.model, SAMPLE_SIZE; time_transform = false, rng = base_rng)
+durations = collect_event_durations(fixture.model, SAMPLE_SIZE; use_cached_strategy = false, rng = base_rng)
 base_dist = Exponential(1 / EVENT_RATE)
 target_dist = Truncated(base_dist, 0.0, PANEL_HORIZON)
 
@@ -302,11 +303,11 @@ ks_test = ApproximateOneSampleKSTest(durations, target_dist)
     @test pvalue(ks_test) > 0.05
 end
 
-@testset "simulate_path time_transform parity (baseline)" begin
+@testset "simulate_path strategy parity (baseline)" begin
     tt_rng = Random.MersenneTwister(PARITY_SEED)
-    tt_sample = collect_event_durations(fixture.model, SAMPLE_SIZE; time_transform = true, rng = tt_rng)
+    tt_sample = collect_event_durations(fixture.model, SAMPLE_SIZE; use_cached_strategy = true, rng = tt_rng)
     fallback_rng = Random.MersenneTwister(PARITY_SEED)
-    fallback_sample = collect_event_durations(fixture.model, SAMPLE_SIZE; time_transform = false, rng = fallback_rng)
+    fallback_sample = collect_event_durations(fixture.model, SAMPLE_SIZE; use_cached_strategy = false, rng = fallback_rng)
 
     @test all(isapprox.(tt_sample, fallback_sample; atol = 1e-12, rtol = 0.0))
 

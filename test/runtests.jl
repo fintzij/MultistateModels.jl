@@ -31,4 +31,5 @@ using .TestFixtures
     include("test_helpers.jl")
     include("test_make_subjdat.jl")
     include("test_simulation.jl")
+    include("test_ncv.jl")
 end

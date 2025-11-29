@@ -1,103 +1,6 @@
 """
     set_parameters!(model::MultistateProcess, newvalues::Vector{Float64})
 
-Set model parameters given a vector of values. Copies `newvalues`` to `model.parameters`.
-"""
-function set_parameters(model::MultistateProcess, newvalues::Union{VectorOfVectors,Vector{Vector{Float64}}})
-
-    model = deepcopy(model)
-    
-    # check that we have the right number of parameters
-    if(length(model.parameters) != length(newvalues))
-        error("New values and model parameters are not of the same length.")
-    end
-
-    for i in eachindex(model.parameters)
-        if(length(model.parameters[i]) != length(newvalues[i]))
-            @error "New values for hazard $i and model parameters for that hazard are not of the same length."
-        end
-        copyto!(model.parameters[i], newvalues[i])
-
-        # remake if a spline hazard
-        if isa(model.hazards[i], _SplineHazard) 
-            remake_splines!(model.hazards[i], newvalues[i])
-            set_riskperiod!(model.hazards[i])
-        end
-    end
-
-    return model
-end
-
-"""
-    set_parameters!(model::MultistateProcess, newvalues::Tuple)
-
-Set model parameters given a tuple of vectors parameterizing transition intensities. Assigns new values to `model.parameters[i]`, where `i` indexes the transition intensities in the order they appear in the model object.
-"""
-function set_parameters(model::MultistateProcess, newvalues::Tuple)
-
-    model = deepcopy(model)
-
-    # check that there is a vector of parameters for each cause-specific hazard
-    if(length(model.parameters) != length(newvalues))
-        error("Number of supplied parameter vectors not equal to number of transition intensities.")
-    end
-
-    for i in eachindex(newvalues)
-        # check that we have the right number of parameters
-        if(length(model.parameters[i]) != length(newvalues[i]))
-            @error "New values and parameters for cause-specific hazard $i are not of the same length."
-        end
-
-        copyto!(model.parameters[i], newvalues[i])    
-        
-        # remake if a spline hazard
-        if isa(model.hazards[i], _SplineHazard)
-            remake_splines!(model.hazards[i], newvalues[i])
-            set_riskperiod!(model.hazards[i])
-        end
-    end
-
-    return model
-end
-
-"""
-    set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
-
-Set model parameters given a tuple of vectors parameterizing transition intensities. Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.  
-"""
-function set_parameters(model::MultistateProcess, newvalues::NamedTuple)
-
-    model = deepcopy(model)
-    
-    # get keys for the new values
-    value_keys = keys(newvalues)
-
-    for k in eachindex(value_keys)
-
-        vind = value_keys[k]
-        mind = model.hazkeys[vind]
-
-        # check length of supplied parameters
-        if length(newvalues[vind]) != length(model.parameters[mind])
-            error("The new parameter values for $vind are not the expected length.")
-        end
-
-        copyto!(model.parameters[mind], newvalues[vind])
-
-        # remake if a spline hazard
-        if isa(model.hazards[mind], _SplineHazard)
-            remake_splines!(model.hazards[mind], newvalues[vind])
-            set_riskperiod!(model.hazards[mind])
-        end
-    end
-
-    return model
-end
-
-
-"""
-    set_parameters!(model::MultistateProcess, newvalues::Vector{Float64})
-
 Set model parameters given a vector of values. Copies `newvalues` to `model.parameters`.
 
 # Phase 3 Update: Now automatically updates `model.parameters_ph` to keep both representations synchronized.
@@ -491,11 +394,11 @@ function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natur
 end
 
 """
-    check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{Int64}; verbose = true)
+    check_data!(data::DataFrame, tmat::Matrix, emat::Matrix{<:Real}; verbose = true)
 
 Validate a user-supplied data frame to ensure that it conforms to MultistateModels.jl requirements.
 """
-function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{Int64}; verbose = true)
+function check_data!(data::DataFrame, tmat::Matrix, emat::Matrix{<:Real}; verbose = true)
 
     # validate column names and order
     if any(names(data)[1:6] .!== ["id", "tstart", "tstop", "statefrom", "stateto", "obstype"])
@@ -555,7 +458,8 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
     end
 
     # error if data includes states not in the unique states
-    statespace = sort(vcat(0, collect(1:size(tmat,1)), CensoringPatterns[:,1]))
+    emat_ids = Int64.(emat[:,1])
+    statespace = sort(vcat(0, collect(1:size(tmat,1)), emat_ids))
     allstates = sort(vcat(unique(data.stateto), unique(data.statefrom)))
     if !all(allstates .∈ Ref(statespace))
         @error "Data contains states that are not in the state space."
@@ -586,9 +490,9 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
 
     # check that obstype is one of the allowed censoring schemes
     if any(data.obstype .∉ Ref([1,2]))
-        CensoringPatterns_id = CensoringPatterns[:,1]
-        if any(data.obstype .∉ Ref([[1,2]; CensoringPatterns_id]))
-            error("obstype should be one of 1, 2, or a censoring id from CensoringPatterns.")
+        emat_id = Int64.(emat[:,1])
+        if any(data.obstype .∉ Ref([[1,2]; emat_id]))
+            error("obstype should be one of 1, 2, or a censoring id from emat.")
         end
     end
 
@@ -611,24 +515,69 @@ function check_data!(data::DataFrame, tmat::Matrix, CensoringPatterns::Matrix{In
 
 end
 
-function check_SamplingWeights(SamplingWeights::Vector{Float64}, data::DataFrame)
+"""
+    check_SubjectWeights(SubjectWeights::Vector{Float64}, data::DataFrame)
+
+Check that subject-level weights are properly specified.
+"""
+function check_SubjectWeights(SubjectWeights::Vector{Float64}, data::DataFrame)
     
-    # check that the number of sampling weights is correct
-    if length(SamplingWeights) != length(unique(data.id))
-        error("The length of SamplingWeights is not equal to the number of subjects.")
+    # check that the number of subject weights is correct
+    if length(SubjectWeights) != length(unique(data.id))
+        error("The length of SubjectWeights is not equal to the number of subjects.")
     end
 
-    # check that the sampling weights are non-negative
-    if any(SamplingWeights .<= 0)
-        error("The elements of SamplingWeights should be non-negative.")
+    # check that the subject weights are non-negative
+    if any(SubjectWeights .<= 0)
+        error("The elements of SubjectWeights should be positive.")
     end
 end
-"""
-check_CensoringPatterns(data::DataFrame, emat::Matrix)
 
-Validate a user-supplied data frame to ensure that it conforms to MultistateModels.jl requirements.
 """
-function check_CensoringPatterns(CensoringPatterns::Matrix{Int64}, tmat::Matrix)
+    check_ObservationWeights(ObservationWeights::Vector{Float64}, data::DataFrame)
+
+Check that observation-level weights are properly specified.
+"""
+function check_ObservationWeights(ObservationWeights::Vector{Float64}, data::DataFrame)
+    
+    # check that the number of observation weights is correct
+    if length(ObservationWeights) != nrow(data)
+        error("The length of ObservationWeights ($(length(ObservationWeights))) is not equal to the number of observations ($(nrow(data))).")
+    end
+
+    # check that the observation weights are non-negative
+    if any(ObservationWeights .<= 0)
+        error("The elements of ObservationWeights should be positive.")
+    end
+end
+
+"""
+    check_weight_exclusivity(SubjectWeights, ObservationWeights, nsubj::Int64)
+
+Check that SubjectWeights and ObservationWeights are mutually exclusive and handle defaults.
+Returns (SubjectWeights, ObservationWeights) where at most one is non-nothing.
+"""
+function check_weight_exclusivity(SubjectWeights, ObservationWeights, nsubj::Int64)
+    
+    # Check mutual exclusivity
+    if !isnothing(SubjectWeights) && !isnothing(ObservationWeights)
+        error("SubjectWeights and ObservationWeights are mutually exclusive. Specify only one.")
+    end
+    
+    # If both are nothing, set default SubjectWeights to ones
+    if isnothing(SubjectWeights) && isnothing(ObservationWeights)
+        SubjectWeights = ones(Float64, nsubj)
+    end
+    
+    return (SubjectWeights, ObservationWeights)
+end
+"""
+    check_CensoringPatterns(CensoringPatterns::Matrix, tmat::Matrix)
+
+Validate a user-supplied censoring patterns matrix to ensure it conforms to MultistateModels.jl requirements.
+Accepts both Int64 (binary 0/1) and Float64 (emission probabilities in [0,1]).
+"""
+function check_CensoringPatterns(CensoringPatterns::Matrix{T}, tmat::Matrix) where T <: Real
     
     nrow, ncol = size(CensoringPatterns)
 
@@ -642,9 +591,9 @@ function check_CensoringPatterns(CensoringPatterns::Matrix{Int64}, tmat::Matrix)
         error("The first column of the matrix `CensoringPatterns` must be of the form (3, 4, ...) .")
     end
 
-    # censoring patterns must be binary
-    if any(CensoringPatterns[:,2:ncol] .∉ Ref([0,1]))
-        error("Columns 2, 3, ... of CensoringPatterns must be binary.")
+    # check that values are in [0, 1]
+    if any(CensoringPatterns[:,2:ncol] .< 0) || any(CensoringPatterns[:,2:ncol] .> 1)
+        error("Columns 2, 3, ... of CensoringPatterns must have values in [0, 1].")
     end
 
     # censoring patterns must indicate the presence/absence of each state
@@ -661,7 +610,7 @@ function check_CensoringPatterns(CensoringPatterns::Matrix{Int64}, tmat::Matrix)
         if all(CensoringPatterns[i,2:ncol] .== 1)
             println("All states are allowed in censoring pattern $(2+i).")
         end
-        if sum(CensoringPatterns[i,2:ncol]) .== 1
+        if sum(CensoringPatterns[i,2:ncol] .> 0) .== 1
             println("Censoring pattern $i has only one allowed state; if these observations are not censored there is no need to use a censoring pattern.")
         end
     end
@@ -795,11 +744,11 @@ function build_fbmats(model)
 end
 
 """
-    collapse_data(data::DataFrame; SamplingWeights::Vector{Float64} = ones(unique(data.id)))
+    collapse_data(data::DataFrame; SubjectWeights::Vector{Float64} = ones(unique(data.id)))
 
-Collapse subjects to create an internal representation of a dataset and optionally recompute a vector of sampling weights.
+Collapse subjects to create an internal representation of a dataset and optionally recompute a vector of subject weights.
 """
-function collapse_data(data::DataFrame; SamplingWeights::Vector{Float64} = ones(Float64, length(unique(data.id))))
+function collapse_data(data::DataFrame; SubjectWeights::Vector{Float64} = ones(Float64, length(unique(data.id))))
     
     # find unique subjects
     ids = unique(data.id)
@@ -812,8 +761,8 @@ function collapse_data(data::DataFrame; SamplingWeights::Vector{Float64} = ones(
     # find the collapsed dataset for each individual
     inds = map(x -> findfirst(_DataCollapsed .== Ref(x)), _data)
 
-    # tabulate the SamplingWeights
-    SamplingWeightsCollapsed = map(x -> sum(SamplingWeights[findall(inds .== x)]), unique(inds))
+    # tabulate the SubjectWeights
+    SubjectWeightsCollapsed = map(x -> sum(SubjectWeights[findall(inds .== x)]), unique(inds))
 
     # add a fake id variable to the collapsed datasets (for purchasing alcohol)
     for k in 1:length(_DataCollapsed)
@@ -823,7 +772,7 @@ function collapse_data(data::DataFrame; SamplingWeights::Vector{Float64} = ones(
     # vcat
     DataCollapsed = reduce(vcat, _DataCollapsed)
        
-    return DataCollapsed, SamplingWeightsCollapsed
+    return DataCollapsed, SubjectWeightsCollapsed
 end
 
 """

@@ -155,6 +155,170 @@ function create_tmat(hazinfo::DataFrame)
 end
 
 
+# hazard build orchestration -------------------------------------------------
+
+struct HazardBuildContext
+    hazard::HazardFunction
+    hazname::Symbol
+    family::String
+    metadata::HazardMetadata
+    rhs_names::Vector{String}
+    shared_baseline_key::Union{Nothing,SharedBaselineKey}
+end
+
+# Computed accessors for HazardBuildContext - avoids storing redundant data
+_ncovar(ctx::HazardBuildContext) = max(length(ctx.rhs_names) - 1, 0)
+_has_covariates(ctx::HazardBuildContext) = length(ctx.rhs_names) > 1
+
+const _HAZARD_BUILDERS = Dict{String,Function}()
+
+function register_hazard_family!(name::AbstractString, builder::Function)
+    _HAZARD_BUILDERS[lowercase(String(name))] = builder
+    return builder
+end
+
+function _hazard_rhs_names(hazschema)
+    has_intercept = _hazard_formula_has_intercept(hazschema.rhs)
+    coef_names = StatsModels.coefnames(hazschema.rhs)
+    coef_vec = coef_names isa AbstractVector ? collect(coef_names) : [coef_names]
+    return has_intercept ? coef_vec : vcat("(Intercept)", coef_vec)
+end
+
+@inline function _hazard_name(hazard::HazardFunction)
+    return Symbol("h$(hazard.statefrom)$(hazard.stateto)")
+end
+
+function _prepare_hazard_context(hazard::HazardFunction,
+                                 data::DataFrame;
+                                 surrogate::Bool = false)
+    schema = StatsModels.schema(hazard.hazard, data)
+    hazschema = apply_schema(hazard.hazard, schema)
+    modelcols(hazschema, data) # validate design matrix construction
+    rhs_names = _hazard_rhs_names(hazschema)
+    runtime_family = surrogate ? "exp" : lowercase(hazard.family)
+    hazname = _hazard_name(hazard)
+    shared_key = shared_baseline_key(hazard, runtime_family)
+    return HazardBuildContext(
+        hazard,
+        hazname,
+        runtime_family,
+        hazard.metadata,
+        rhs_names,
+        shared_key,
+    )
+end
+
+@inline function _covariate_labels(rhs_names::Vector{String})
+    if length(rhs_names) <= 1
+        return String[]
+    end
+    return rhs_names[2:end]
+end
+
+@inline function _prefixed_symbols(hazname::Symbol, labels::Vector{String})
+    prefix = string(hazname) * "_"
+    clean = replace.(labels, "(Intercept)" => "Intercept")
+    return Symbol.(prefix .* clean)
+end
+
+function _build_exponential_hazard(ctx::HazardBuildContext)
+    parnames = _prefixed_symbols(ctx.hazname, ctx.rhs_names)
+    hazard_fn, cumhaz_fn = generate_exponential_hazard(parnames, ctx.metadata.linpred_effect)
+    npar_baseline = 1
+    ncovar = _ncovar(ctx)
+    npar_total = 1 + ncovar
+    covar_names = Symbol.(_covariate_labels(ctx.rhs_names))
+    haz_struct = MarkovHazard(
+        ctx.hazname,
+        ctx.hazard.statefrom,
+        ctx.hazard.stateto,
+        ctx.family,
+        parnames,
+        npar_baseline,
+        npar_total,
+        hazard_fn,
+        cumhaz_fn,
+        _has_covariates(ctx),
+        covar_names,
+        ctx.metadata,
+        ctx.shared_baseline_key,
+    )
+    return haz_struct, zeros(Float64, npar_total)
+end
+
+function _baseline_parnames(hazname::Symbol, labels::Vector{String})
+    return _prefixed_symbols(hazname, labels)
+end
+
+function _semimarkov_covariate_parnames(ctx::HazardBuildContext)
+    covars = _covariate_labels(ctx.rhs_names)
+    return _prefixed_symbols(ctx.hazname, covars)
+end
+
+function _build_weibull_hazard(ctx::HazardBuildContext)
+    baseline = Symbol[Symbol(string(ctx.hazname), "_shape"), Symbol(string(ctx.hazname), "_scale")]
+    covar_pars = _semimarkov_covariate_parnames(ctx)
+    parnames = vcat(baseline, covar_pars)
+    hazard_fn, cumhaz_fn = generate_weibull_hazard(parnames, ctx.metadata.linpred_effect)
+    npar_baseline = 2
+    ncovar = _ncovar(ctx)
+    npar_total = npar_baseline + ncovar
+    covar_names = Symbol.(_covariate_labels(ctx.rhs_names))
+    haz_struct = SemiMarkovHazard(
+        ctx.hazname,
+        ctx.hazard.statefrom,
+        ctx.hazard.stateto,
+        ctx.family,
+        parnames,
+        npar_baseline,
+        npar_total,
+        hazard_fn,
+        cumhaz_fn,
+        _has_covariates(ctx),
+        covar_names,
+        ctx.metadata,
+        ctx.shared_baseline_key,
+    )
+    return haz_struct, zeros(Float64, npar_total)
+end
+
+function _build_gompertz_hazard(ctx::HazardBuildContext)
+    baseline = Symbol[Symbol(string(ctx.hazname), "_shape"), Symbol(string(ctx.hazname), "_scale")]
+    covar_pars = _semimarkov_covariate_parnames(ctx)
+    parnames = vcat(baseline, covar_pars)
+    hazard_fn, cumhaz_fn = generate_gompertz_hazard(parnames, ctx.metadata.linpred_effect)
+    npar_baseline = 2
+    ncovar = _ncovar(ctx)
+    npar_total = npar_baseline + ncovar
+    covar_names = Symbol.(_covariate_labels(ctx.rhs_names))
+    haz_struct = SemiMarkovHazard(
+        ctx.hazname,
+        ctx.hazard.statefrom,
+        ctx.hazard.stateto,
+        ctx.family,
+        parnames,
+        npar_baseline,
+        npar_total,
+        hazard_fn,
+        cumhaz_fn,
+        _has_covariates(ctx),
+        covar_names,
+        ctx.metadata,
+        ctx.shared_baseline_key,
+    )
+    return haz_struct, zeros(Float64, npar_total)
+end
+
+function _build_spline_hazard(::HazardBuildContext)
+    error("Spline hazards are not yet supported. Please use 'exp', 'wei', or 'gom' families.")
+end
+
+register_hazard_family!("exp", _build_exponential_hazard)
+register_hazard_family!("wei", _build_weibull_hazard)
+register_hazard_family!("gom", _build_gompertz_hazard)
+register_hazard_family!("sp", _build_spline_hazard)
+
+
 # mutable structs
 
 #=============================================================================
@@ -181,198 +345,24 @@ baseline parameter containers, and returns everything needed by `multistatemodel
 4. `hazkeys`: dictionary mapping hazard names (e.g. `:h12`) to indices in `_hazards`.
 """
 function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = false)
-    
-    # Initialize arrays
+    contexts = [_prepare_hazard_context(h, data; surrogate = surrogate) for h in hazards]
+
     _hazards = Vector{_Hazard}(undef, length(hazards))
     parameters = VectorOfVectors{Float64}()
     hazkeys = Dict{Symbol, Int64}()
 
-    # Build each hazard
-    for h in eachindex(hazards) 
-
-        # Hazard name
-        hazname = "h" * string(hazards[h].statefrom) * string(hazards[h].stateto)
-        merge!(hazkeys, Dict(Symbol(hazname) => h))
-
-        metadata = hazards[h].metadata
-
-        # Parse formula and create design matrix
-        hazschema = apply_schema(hazards[h].hazard, StatsModels.schema(hazards[h].hazard, data))
-        has_explicit_intercept = _hazard_formula_has_intercept(hazschema.rhs)
-        hazdat = modelcols(hazschema, data)[2]
-
-        if !has_explicit_intercept
-            n_obs = size(hazdat, 1)
-            coltype = eltype(hazdat)
-            intercept_col = coltype === Any ? ones(n_obs) : ones(coltype, n_obs)
-            hazdat = hcat(intercept_col, hazdat)
-        end
-
-        coef_names = StatsModels.coefnames(hazschema.rhs)
-        coef_names_vec = coef_names isa AbstractVector ? collect(coef_names) : [coef_names]
-        rhs_names_vec = has_explicit_intercept ? coef_names_vec : vcat("(Intercept)", coef_names_vec)
-        
-        # Determine family (use surrogate exponential if requested)
-        family = surrogate ? "exp" : hazards[h].family 
-        
-        # Number of covariates and parameters
-        has_covariates = size(hazdat, 2) > 1
-        ncovar = size(hazdat, 2) - 1
-        
-        shared_key = shared_baseline_key(hazards[h], family)
-
-        # Build hazard struct based on family
-        if family == "exp"
-            # EXPONENTIAL: Markov process
-            npar_baseline = 1
-            npar_total = size(hazdat, 2)
-            
-            # Initialize parameters (zeros for now)
-            hazpars = zeros(Float64, npar_total)
-            push!(parameters, hazpars)
-            
-            # Parameter names - extract from formula terms, not from data
-            parnames = replace.(hazname * "_" .* rhs_names_vec, "(Intercept)" => "Intercept")
-            parnames = Symbol.(parnames)
-            
-            # Generate runtime functions with name-based covariate matching
-            hazard_fn, cumhaz_fn = generate_exponential_hazard(parnames, metadata.linpred_effect)
-            
-            # Create consolidated struct
-            haz_struct = MarkovHazard(
-                Symbol(hazname),
-                hazards[h].statefrom,
-                hazards[h].stateto,
-                family,
-                parnames,
-                npar_baseline,
-                npar_total,
-                hazard_fn,
-                cumhaz_fn,
-                has_covariates,
-                metadata,
-                shared_key
-            )
-            
-        elseif family == "wei"
-            # WEIBULL: Semi-Markov process
-            npar_baseline = 2  # shape + scale
-            npar_total = npar_baseline + ncovar
-            
-            # Initialize parameters
-            hazpars = zeros(Float64, npar_total)
-            push!(parameters, hazpars)
-            
-            # Parameter names - extract from formula terms directly
-            if !has_covariates
-                parnames = replace.(vec(hazname * "_" .* ["shape" "scale"] .* "_" .* rhs_names_vec), "_(Intercept)" => "")
-                parnames = replace.(parnames, "_Intercept" => "")
-            else
-                parnames = vcat(
-                    hazname * "_shape",
-                    hazname * "_scale",
-                    hazname * "_" .* rhs_names_vec[Not(1)])
-            end
-            parnames = Symbol.(parnames)
-            
-            # Generate runtime functions with name-based covariate matching
-            hazard_fn, cumhaz_fn = generate_weibull_hazard(parnames, metadata.linpred_effect)
-            
-            # Create consolidated struct
-            haz_struct = SemiMarkovHazard(
-                Symbol(hazname),
-                hazards[h].statefrom,
-                hazards[h].stateto,
-                family,
-                parnames,
-                npar_baseline,
-                npar_total,
-                hazard_fn,
-                cumhaz_fn,
-                has_covariates,
-                metadata,
-                shared_key
-            )
-            
-        elseif family == "gom"
-            # GOMPERTZ: Semi-Markov process
-            npar_baseline = 2  # shape + scale
-            npar_total = npar_baseline + ncovar
-            
-            # Initialize parameters
-            hazpars = zeros(Float64, npar_total)
-            push!(parameters, hazpars)
-            
-            # Parameter names - extract from formula terms directly
-            if !has_covariates
-                parnames = replace.(vec(hazname * "_" .* ["shape" "scale"] .* "_" .* rhs_names_vec), "_(Intercept)" => "")
-                parnames = replace.(parnames, "_Intercept" => "")
-            else
-                parnames = vcat(
-                    hazname * "_shape",
-                    hazname * "_scale",
-                    hazname * "_" .* rhs_names_vec[Not(1)])
-            end
-            parnames = Symbol.(parnames)
-            
-            # Generate runtime functions with name-based covariate matching
-            hazard_fn, cumhaz_fn = generate_gompertz_hazard(parnames, metadata.linpred_effect)
-            
-            # Create consolidated struct
-            haz_struct = SemiMarkovHazard(
-                Symbol(hazname),
-                hazards[h].statefrom,
-                hazards[h].stateto,
-                family,
-                parnames,
-                npar_baseline,
-                npar_total,
-                hazard_fn,
-                cumhaz_fn,
-                has_covariates,
-                metadata,
-                shared_key
-            )
-            
-        elseif family == "sp"
-            # B-SPLINES: Semi-Markov with spline basis
-            # TODO: Implement spline function generation in Phase 2.x
-            error("Spline hazards not yet implemented in Phase 2 - coming soon!")
-            
-        else
-            error("Unknown hazard family: $family")
-        end
-
-        _hazards[h] = haz_struct
+    for (idx, ctx) in enumerate(contexts)
+        hazkeys[ctx.hazname] = idx
+        builder = get(_HAZARD_BUILDERS, ctx.family, nothing)
+        builder === nothing && error("Unknown hazard family: $(ctx.family)")
+        hazard_struct, hazpars = builder(ctx)
+        _hazards[idx] = hazard_struct
+        push!(parameters, hazpars)
     end
 
-    # Phase 3: Build parameters_ph structure from parameters
-    # Note: parameters are on LOG scale, but ParameterHandling.positive() expects NATURAL scale
-    # So we need to convert log → natural before wrapping with positive()
-    params_transformed_pairs = [
-        hazname => ParameterHandling.positive(exp.(Vector{Float64}(parameters[idx])))
-        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
-    ]
-    
-    params_transformed = NamedTuple(params_transformed_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
-    params_natural = ParameterHandling.value(params_transformed)
-    
-    parameters_ph = (
-        flat = params_flat,
-        transformed = params_transformed,
-        natural = params_natural,
-        unflatten = unflatten_fn
-    )
-
-    # Phase 3: Now return parameters_ph as fourth output
+    parameters_ph = build_parameters_ph(parameters, hazkeys)
     return _hazards, parameters, parameters_ph, hazkeys
 end
-
-#=============================================================================
-OLD build_hazards (DEPRECATED - Phase 1 version)
-=============================================================================# 
-# Commented out - will be removed after Phase 2 complete
 
 """
     build_parameters_ph(parameters::VectorOfVectors, hazkeys::Dict{Symbol, Int64})
@@ -388,13 +378,11 @@ Returns a NamedTuple with fields:
 Parameters are stored on the log scale using ParameterHandling.positive().
 """
 function build_parameters_ph(parameters::VectorOfVectors, hazkeys::Dict{Symbol, Int64})
-    # Create a NamedTuple of Vectors for each hazard using positive() transformation
-    # This will store parameters on log scale internally
     params_transformed_pairs = [
-        hazname => ParameterHandling.positive(Vector{Float64}(parameters[idx]))
+        hazname => ParameterHandling.positive(exp.(Vector{Float64}(parameters[idx])))
         for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
     ]
-    
+
     params_transformed = NamedTuple(params_transformed_pairs)
     
     # Flatten to get the flat vector and unflatten function
@@ -440,25 +428,48 @@ function build_totalhazards(_hazards, tmat)
 end
 
 """
-    build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64}, tmat::Matrix{Int64})
+    build_emat(data::DataFrame, CensoringPatterns::Matrix{Float64}, EmissionMatrix::Union{Nothing, Matrix{Float64}}, tmat::Matrix{Int64})
 
 Create the emission matrix used by the forward–backward routines. Each row
 corresponds to an observation; columns correspond to latent states. The helper
 marks which states are compatible with each observation or censoring code using
 `CensoringPatterns` (if provided) and the transition structure `tmat`.
+
+If `EmissionMatrix` is provided, it is used directly (allowing observation-specific emission probabilities).
+Otherwise, the emission matrix is constructed from `CensoringPatterns` and observation types.
+
+Values represent P(observation | state): 0 means impossible, 1 means certain, values in (0,1) 
+represent soft evidence.
 """
-function build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64}, tmat::Matrix{Int64})
+function build_emat(data::DataFrame, CensoringPatterns::Matrix{Float64}, EmissionMatrix::Union{Nothing, Matrix{Float64}}, tmat::Matrix{Int64})
     
-    # initialize the emission matrix
     n_obs = nrow(data)
     n_states = size(tmat, 1)
-    emat = zeros(Int64, n_obs, n_states)
+    
+    # If EmissionMatrix is provided, validate and use it directly
+    if !isnothing(EmissionMatrix)
+        if size(EmissionMatrix) != (n_obs, n_states)
+            error("EmissionMatrix must have dimensions ($(n_obs), $(n_states)), got $(size(EmissionMatrix)).")
+        end
+        if any(EmissionMatrix .< 0) || any(EmissionMatrix .> 1)
+            error("EmissionMatrix values must be in [0, 1].")
+        end
+        for i in 1:n_obs
+            if all(EmissionMatrix[i,:] .== 0)
+                error("EmissionMatrix row $i has no allowed states (all zeros).")
+            end
+        end
+        return EmissionMatrix
+    end
+    
+    # Otherwise, build from CensoringPatterns
+    emat = zeros(Float64, n_obs, n_states)
 
     for i in 1:n_obs
         if data.obstype[i] ∈ [1, 2] # observation not censored
-            emat[i,data.stateto[i]] = 1
-        elseif data.obstype[i] == 0 # observation censored, all state are possible
-            emat[i,:] = ones(n_states)
+            emat[i,data.stateto[i]] = 1.0
+        elseif data.obstype[i] == 0 # observation censored, all states are possible
+            emat[i,:] .= 1.0
         else
             emat[i,:] .= CensoringPatterns[data.obstype[i] - 2, 2:n_states+1]
         end 
@@ -467,8 +478,91 @@ function build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64}, tmat::Mat
     return emat
 end
 
+@inline function _normalize_subject_weights(SubjectWeights, nsubj)
+    return isnothing(SubjectWeights) ? ones(Float64, nsubj) : SubjectWeights
+end
+
+@inline function _normalize_observation_weights(ObservationWeights)
+    return ObservationWeights  # nothing stays nothing, vector stays vector
+end
+
+@inline function _prepare_censoring_patterns(CensoringPatterns, n_states)
+    return isnothing(CensoringPatterns) ? Matrix{Float64}(undef, 0, n_states) : Float64.(CensoringPatterns)
+end
+
+function _validate_inputs!(data::DataFrame,
+                           tmat::Matrix{Int64},
+                           CensoringPatterns::Matrix{Float64},
+                           SubjectWeights,
+                           ObservationWeights;
+                           verbose::Bool)
+    check_data!(data, tmat, CensoringPatterns; verbose = verbose)
+    
+    # Validate weights
+    if !isnothing(SubjectWeights)
+        check_SubjectWeights(SubjectWeights, data)
+    end
+    if !isnothing(ObservationWeights)
+        check_ObservationWeights(ObservationWeights, data)
+    end
+    
+    if any(data.obstype .∉ Ref([1, 2]))
+        check_CensoringPatterns(CensoringPatterns, tmat)
+    end
+end
+
+@inline function _observation_mode(data::DataFrame)
+    if all(data.obstype .== 1)
+        return :exact
+    elseif all(data.obstype .∈ Ref([1, 2]))
+        return :panel
+    else
+        return :censored
+    end
+end
+
+@inline function _process_class(hazards::Vector{<:_Hazard})
+    return all(isa.(hazards, _MarkovHazard)) ? :markov : :semi_markov
+end
+
+@inline function _model_constructor(mode::Symbol, process::Symbol)
+    if mode == :exact
+        return MultistateModel
+    elseif mode == :panel
+        return process == :markov ? MultistateMarkovModel : MultistateSemiMarkovModel
+    elseif mode == :censored
+        return process == :markov ? MultistateMarkovModelCensored : MultistateSemiMarkovModelCensored
+    else
+        error("Unknown observation mode $(mode)")
+    end
+end
+
+function _assemble_model(mode::Symbol,
+                         process::Symbol,
+                         components::NamedTuple,
+                         surrogate::MarkovSurrogate,
+                         modelcall)
+    ctor = _model_constructor(mode, process)
+    return ctor(
+        components.data,
+        components.parameters,
+        components.parameters_ph,
+        components.hazards,
+        components.totalhazards,
+        components.tmat,
+        components.emat,
+        components.hazkeys,
+        components.subjinds,
+        components.SubjectWeights,
+        components.ObservationWeights,
+        components.CensoringPatterns,
+        surrogate,
+        modelcall,
+    )
+end
+
 """
-    multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights = nothing, CensoringPatterns = nothing, verbose = false)
+    multistatemodel(hazards::HazardFunction...; data::DataFrame, SubjectWeights = nothing, ObservationWeights = nothing, CensoringPatterns = nothing, EmissionMatrix = nothing, verbose = false)
 
 Construct a full multistate model from a collection of hazards defined via `Hazard`
 or `@hazard`. Hazards without covariates can omit a `@formula` entirely; the helper
@@ -476,14 +570,22 @@ will insert the intercept-only design automatically as described in `Hazard`'s d
 
 # Keywords
 - `data`: long-format `DataFrame` with at least `:subject`, `:statefrom`, `:stateto`, `:time`, `:obstype`.
-- `SamplingWeights`: optional per-subject weights.
-- `CensoringPatterns`: optional matrix describing which states are compatible with each censoring code.
+- `SubjectWeights`: optional per-subject weights (length = number of subjects). Mutually exclusive with `ObservationWeights`.
+- `ObservationWeights`: optional per-observation weights (length = number of rows in data). Mutually exclusive with `SubjectWeights`.
+- `CensoringPatterns`: optional matrix describing which states are compatible with each censoring code. Values in [0,1].
+- `EmissionMatrix`: optional matrix of emission probabilities (nrow(data) × nstates). Values are P(observation|state).
 - `verbose`: print additional validation output.
 """
-function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights::Union{Nothing,Vector{Float64}} = nothing, CensoringPatterns::Union{Nothing,Matrix{Int64}} = nothing, verbose = false) 
+function multistatemodel(hazards::HazardFunction...; 
+                        data::DataFrame, 
+                        SubjectWeights::Union{Nothing,Vector{Float64}} = nothing, 
+                        ObservationWeights::Union{Nothing,Vector{Float64}} = nothing,
+                        CensoringPatterns::Union{Nothing,Matrix{<:Real}} = nothing, 
+                        EmissionMatrix::Union{Nothing,Matrix{Float64}} = nothing,
+                        verbose = false) 
 
     # catch the model call
-    modelcall = (hazards = hazards, data = data, SamplingWeights = SamplingWeights, CensoringPatterns = CensoringPatterns)
+    modelcall = (hazards = hazards, data = data, SubjectWeights = SubjectWeights, ObservationWeights = ObservationWeights, CensoringPatterns = CensoringPatterns, EmissionMatrix = EmissionMatrix)
 
     # get indices for each subject in the dataset
     subjinds, nsubj = get_subjinds(data)
@@ -498,130 +600,38 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
     # compile matrix enumerating instantaneous state transitions
     tmat = create_tmat(hazinfo)
 
-    # initialize SamplingWeights if none supplied
-    if isnothing(SamplingWeights)
-        SamplingWeights = ones(Float64, nsubj)
-    end
+    # Handle weight exclusivity and defaults
+    SubjectWeights, ObservationWeights = check_weight_exclusivity(SubjectWeights, ObservationWeights, nsubj)
+    
+    # Prepare patterns
+    CensoringPatterns = _prepare_censoring_patterns(CensoringPatterns, size(tmat, 1))
 
-    # initialize censoring patterns if none supplied
-    if isnothing(CensoringPatterns)
-        CensoringPatterns = Matrix{Int64}(undef, 0, size(tmat, 1))
-    end
+    _validate_inputs!(data, tmat, CensoringPatterns, SubjectWeights, ObservationWeights; verbose = verbose)
+    emat = build_emat(data, CensoringPatterns, EmissionMatrix, tmat)
 
-    # check data formatting
-    check_data!(data, tmat, CensoringPatterns; verbose = verbose)
-
-    # check SamplingWeights
-    check_SamplingWeights(SamplingWeights, data)
-
-    # check CensoringPatterns and build emission matrix
-    if any(data.obstype .∉ Ref([1,2]))
-        check_CensoringPatterns(CensoringPatterns, tmat)
-    end
-
-    # build emission matrix
-    emat = build_emat(data, CensoringPatterns, tmat)
-
-    # generate tuple for compiled hazard functions
-    # _hazards is a tuple of _Hazard objects
     _hazards, parameters, parameters_ph, hazkeys = build_hazards(hazards...; data = data, surrogate = false)
+    _totalhazards = build_totalhazards(_hazards, tmat)
 
-    # generate vector for total hazards 
-    _totalhazards = build_totalhazards(_hazards, tmat)  
-
-    # build exponential surrogate hazards (discard parameters_ph from surrogate)
     surrogate_haz, surrogate_pars, _, _ = build_hazards(hazards...; data = data, surrogate = true)
+    surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars)
 
-    # construct multistate mode
-    # exactly observed data
-    if all(data.obstype .== 1)        
-        model = MultistateModel(
-        data,
-        parameters,
-        parameters_ph,
-        _hazards,
-        _totalhazards,
-        tmat,
-        emat,
-        hazkeys,
-        subjinds,
-        SamplingWeights,
-        CensoringPatterns,
-        MarkovSurrogate(surrogate_haz, surrogate_pars),
-        modelcall)
+    components = (
+        data = data,
+        parameters = parameters,
+        parameters_ph = parameters_ph,
+        hazards = _hazards,
+        totalhazards = _totalhazards,
+        tmat = tmat,
+        emat = emat,
+        hazkeys = hazkeys,
+        subjinds = subjinds,
+        SubjectWeights = SubjectWeights,
+        ObservationWeights = ObservationWeights,
+        CensoringPatterns = CensoringPatterns,
+    )
 
-    # panel data and/or exactly observed data
-    elseif all(data.obstype .∈ Ref([1,2]))
-        # Markov model
-        if all(isa.(_hazards, _MarkovHazard))
-            model = MultistateMarkovModel(
-                data,
-                parameters,
-                parameters_ph,
-                _hazards,
-                _totalhazards,
-                tmat,
-                emat,
-                hazkeys,
-                subjinds,
-                SamplingWeights,
-                CensoringPatterns,
-                MarkovSurrogate(surrogate_haz, surrogate_pars),
-                modelcall)
-        # Semi-Markov model
-        elseif any(isa.(_hazards, _SemiMarkovHazard))
-            model = MultistateSemiMarkovModel(
-                data,
-                parameters,
-                parameters_ph,
-                _hazards,
-                _totalhazards,
-                tmat,
-                emat,
-                hazkeys,
-                subjinds,
-                SamplingWeights,
-                CensoringPatterns,
-                MarkovSurrogate(surrogate_haz, surrogate_pars),
-                modelcall)
-        end
+    mode = _observation_mode(data)
+    process = _process_class(_hazards)
 
-    # censored states and/or panel data and/or exactly observed data
-    elseif !all(data.obstype .∈ Ref([1,2]))
-        # Markov model
-        if all(isa.(_hazards, _MarkovHazard))
-            model = MultistateMarkovModelCensored(
-                data,
-                parameters,
-                parameters_ph,
-                _hazards,
-                _totalhazards,
-                tmat,
-                emat,
-                hazkeys,
-                subjinds,
-                SamplingWeights,
-                CensoringPatterns,
-                MarkovSurrogate(surrogate_haz, surrogate_pars),
-                modelcall)
-        # semi-Markov model
-        elseif any(isa.(_hazards, _SemiMarkovHazard))
-            model = MultistateSemiMarkovModelCensored(
-                data,
-                parameters,
-                parameters_ph,
-                _hazards,
-                _totalhazards,
-                tmat,
-                emat,
-                hazkeys,
-                subjinds,
-                SamplingWeights,
-                CensoringPatterns,
-                MarkovSurrogate(surrogate_haz, surrogate_pars),
-                modelcall)
-        end        
-    end
-
-    return model
+    return _assemble_model(mode, process, components, surrogate, modelcall)
 end

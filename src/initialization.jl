@@ -103,11 +103,11 @@ function initialize_parameters!(model::MultistateProcess; constraints = nothing,
 end
 
 """
-    compute_suff_stats(dat, tmat, SamplingWeights)
+    compute_suff_stats(dat, tmat, SubjectWeights)
 
 Return a matrix in same format as tmat with observed transition counts, and a vector of time spent in each state. Used for checking data and calculating crude initialization rates.
 """
-function compute_suff_stats(data, tmat, SamplingWeights)
+function compute_suff_stats(data, tmat, SubjectWeights)
     # matrix to store number of transitions from state r to state s, stored using same convention as model.tmat
     n_rs = zeros(size(tmat))
 
@@ -119,12 +119,12 @@ function compute_suff_stats(data, tmat, SamplingWeights)
         # track how much time has been spent in state
         #T_r_accumulator += r.tstop - r.tstart
         if rd.statefrom>0
-            T_r[rd.statefrom] += (rd.tstop - rd.tstart) * SamplingWeights[rd.id]
+            T_r[rd.statefrom] += (rd.tstop - rd.tstart) * SubjectWeights[rd.id]
         end        
         # if a state transition happens then increment transition by 1 in n_rs
         if rd.statefrom != rd.stateto
             if rd.statefrom>0 && rd.stateto>0
-                n_rs[rd.statefrom, rd.stateto] += SamplingWeights[rd.id]
+                n_rs[rd.statefrom, rd.stateto] += SubjectWeights[rd.id]
             end
         end
     end
@@ -170,7 +170,7 @@ Accept a MultistateProcess object.
 function calculate_crude(model::MultistateProcess)
     # n_rs is matrix like tmat except each entry is number of transitions from state r to s
     # T_r is vector of length number of states
-    n_rs, T_r = compute_suff_stats(model.data, model.tmat, model.SamplingWeights)
+    n_rs, T_r = compute_suff_stats(model.data, model.tmat, model.SubjectWeights)
 
     # crude fix to avoid taking the log of zero (for pairs of states with no observed transitions) by turning zeros to 0.5. Also check_data!() should have thrown an error during model generation if this is the case.
     n_rs = max.(n_rs, 0.5)

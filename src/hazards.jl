@@ -102,6 +102,25 @@ function extract_covariates(subjdat::Union{DataFrameRow,DataFrame}, parnames::Ve
     return NamedTuple{Tuple(covar_names)}(values)
 end
 
+"""
+    extract_covariates_fast(subjdat::DataFrameRow, covar_names::Vector{Symbol})
+
+Fast covariate extraction using pre-computed covariate names from hazard struct.
+Avoids regex parsing of parameter names on every call.
+
+# Arguments
+- `subjdat::DataFrameRow`: current observation row
+- `covar_names::Vector{Symbol}`: pre-extracted covariate names from hazard.covar_names
+
+# Returns
+- `NamedTuple`: covariate values keyed by name
+"""
+@inline function extract_covariates_fast(subjdat::DataFrameRow, covar_names::Vector{Symbol})
+    isempty(covar_names) && return NamedTuple()
+    values = Tuple(_lookup_covariate_value(subjdat, cname) for cname in covar_names)
+    return NamedTuple{Tuple(covar_names)}(values)
+end
+
 @inline _covariate_entry(covars_cache::AbstractVector{<:NamedTuple}, hazard_slot::Int) = covars_cache[hazard_slot]
 @inline _covariate_entry(covars_cache, ::Int) = covars_cache
 
@@ -140,7 +159,7 @@ end
 
 @inline function _linear_predictor(pars::AbstractVector, covars::NamedTuple, hazard::_Hazard)
     hazard.has_covariates || return zero(eltype(pars))
-    covar_names = extract_covar_names(hazard.parnames)
+    covar_names = hazard.covar_names  # Use pre-cached covar_names
     offset = hazard.npar_baseline
     linpred = zero(eltype(pars))
     for (i, cname) in enumerate(covar_names)
@@ -868,6 +887,18 @@ function total_cumulhaz(lb, ub, parameters, covars_cache::AbstractVector{<:Named
                         apply_transform::Bool = false,
                         cache_context::Union{Nothing,TimeTransformContext}=nothing)
     give_log ? -Inf : 0
+end
+
+"""
+    survprob(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardAbsorbing, _hazards; give_log = true)
+
+Return survival probability = 1.0 (log = 0.0) for absorbing states, since no transitions can occur.
+"""
+function survprob(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardAbsorbing, _hazards;
+                  give_log = true,
+                  apply_transform::Bool = false,
+                  cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    give_log ? 0.0 : 1.0
 end
 
 function survprob(lb, ub, parameters, covars_cache::AbstractVector{<:NamedTuple}, _totalhazard::_TotalHazardTransient, _hazards;

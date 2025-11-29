@@ -190,6 +190,7 @@ Supports exponential family hazards with optional covariates.
 - `hazard_fn`: Runtime-generated hazard function (t, pars, covars) -> Float64
 - `cumhaz_fn`: Runtime-generated cumulative hazard function
 - `has_covariates::Bool`: Whether covariates are present
+- `covar_names::Vector{Symbol}`: Pre-extracted covariate names for fast lookup
 - `metadata::HazardMetadata`: Tang/linpred metadata
 - `shared_baseline_key::Union{Nothing,SharedBaselineKey}`: identifies Tang-sharable baselines
 """
@@ -204,6 +205,7 @@ struct MarkovHazard <: _MarkovHazard
     hazard_fn::Function
     cumhaz_fn::Function
     has_covariates::Bool
+    covar_names::Vector{Symbol}
     metadata::HazardMetadata
     shared_baseline_key::Union{Nothing,SharedBaselineKey}
 end
@@ -225,6 +227,7 @@ Supports Weibull and Gompertz families with optional covariates.
 - `hazard_fn`: Runtime-generated hazard function (t, pars, covars) -> Float64
 - `cumhaz_fn`: Runtime-generated cumulative hazard function
 - `has_covariates::Bool`: Whether covariates are present
+- `covar_names::Vector{Symbol}`: Pre-extracted covariate names for fast lookup
 - `metadata::HazardMetadata`: Tang/linpred metadata
 - `shared_baseline_key::Union{Nothing,SharedBaselineKey}`
 """
@@ -239,6 +242,7 @@ struct SemiMarkovHazard <: _SemiMarkovHazard
     hazard_fn::Function
     cumhaz_fn::Function
     has_covariates::Bool
+    covar_names::Vector{Symbol}
     metadata::HazardMetadata
     shared_baseline_key::Union{Nothing,SharedBaselineKey}
 end
@@ -260,13 +264,13 @@ Uses B-spline basis functions for flexible baseline hazard.
 - `hazard_fn`: Runtime-generated hazard function (t, pars, covars) -> Float64
 - `cumhaz_fn`: Runtime-generated cumulative hazard function
 - `has_covariates::Bool`: Whether covariates are present
+- `covar_names::Vector{Symbol}`: Pre-extracted covariate names for fast lookup
 - `degree::Int64`: Spline degree
 - `knots::Vector{Float64}`: Knot locations
 - `natural_spline::Bool`: Natural spline constraint
 - `monotone::Int64`: Monotonicity constraint (0, -1, 1)
 - `metadata::HazardMetadata`: Tang/linpred metadata
 - `shared_baseline_key::Union{Nothing,SharedBaselineKey}`
-end
 """
 struct SplineHazard <: _SplineHazard
     hazname::Symbol
@@ -279,6 +283,7 @@ struct SplineHazard <: _SplineHazard
     hazard_fn::Function
     cumhaz_fn::Function
     has_covariates::Bool
+    covar_names::Vector{Symbol}
     degree::Int64
     knots::Vector{Float64}
     natural_spline::Bool
@@ -462,11 +467,12 @@ mutable struct MultistateModel <: MultistateProcess
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-    emat::Matrix{Int64}
+    emat::Matrix{Float64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    SamplingWeights::Vector{Float64}
-    CensoringPatterns::Matrix{Int64}
+    SubjectWeights::Vector{Float64}
+    ObservationWeights::Union{Nothing, Vector{Float64}}
+    CensoringPatterns::Matrix{Float64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -485,11 +491,12 @@ mutable struct MultistateMarkovModel <: MultistateMarkovProcess
     hazards::Vector{_MarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-    emat::Matrix{Int64}
+    emat::Matrix{Float64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    SamplingWeights::Vector{Float64}
-    CensoringPatterns::Matrix{Int64}
+    SubjectWeights::Vector{Float64}
+    ObservationWeights::Union{Nothing, Vector{Float64}}
+    CensoringPatterns::Matrix{Float64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -508,11 +515,12 @@ mutable struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     hazards::Vector{_MarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-    emat::Matrix{Int64}
+    emat::Matrix{Float64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    SamplingWeights::Vector{Float64}
-    CensoringPatterns::Matrix{Int64}
+    SubjectWeights::Vector{Float64}
+    ObservationWeights::Union{Nothing, Vector{Float64}}
+    CensoringPatterns::Matrix{Float64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -531,11 +539,12 @@ mutable struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
     hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-    emat::Matrix{Int64}
+    emat::Matrix{Float64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    SamplingWeights::Vector{Float64}
-    CensoringPatterns::Matrix{Int64}
+    SubjectWeights::Vector{Float64}
+    ObservationWeights::Union{Nothing, Vector{Float64}}
+    CensoringPatterns::Matrix{Float64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -554,11 +563,12 @@ mutable struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-    emat::Matrix{Int64}
+    emat::Matrix{Float64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    SamplingWeights::Vector{Float64}
-    CensoringPatterns::Matrix{Int64}
+    SubjectWeights::Vector{Float64}
+    ObservationWeights::Union{Nothing, Vector{Float64}}
+    CensoringPatterns::Matrix{Float64}
     markovsurrogate::MarkovSurrogate
     modelcall::NamedTuple
 end
@@ -576,14 +586,18 @@ mutable struct MultistateModelFitted <: MultistateProcess
     parameters_ph::NamedTuple  # NEW Phase 3: (flat, transformed, natural, unflatten)
     loglik::NamedTuple
     vcov::Union{Nothing,Matrix{Float64}}
+    ij_vcov::Union{Nothing,Matrix{Float64}}  # Infinitesimal jackknife variance-covariance
+    jk_vcov::Union{Nothing,Matrix{Float64}}  # Jackknife variance-covariance
+    subject_gradients::Union{Nothing,Matrix{Float64}}  # Subject-level score vectors (p × n)
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-    emat::Matrix{Int64}
+    emat::Matrix{Float64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}
-    SamplingWeights::Vector{Float64}
-    CensoringPatterns::Matrix{Int64}
+    SubjectWeights::Vector{Float64}
+    ObservationWeights::Union{Nothing, Vector{Float64}}
+    CensoringPatterns::Matrix{Float64}
     markovsurrogate::MarkovSurrogate
     ConvergenceRecords::Union{Nothing, NamedTuple, Optim.OptimizationResults, Optim.MultivariateOptimizationResults}
     ProposedPaths::Union{Nothing, NamedTuple}

@@ -19,7 +19,7 @@ function make_surrogate_model(model::Union{MultistateModel, MultistateMarkovMode
         model.emat,
         model.hazkeys,
         model.subjectindices,
-        model.SamplingWeights,
+        model.SubjectWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
         model.modelcall)
@@ -44,7 +44,7 @@ function make_surrogate_model(model::Union{MultistateMarkovModelCensored,Multist
         model.emat,
         model.hazkeys,
         model.subjectindices,
-        model.SamplingWeights,
+        model.SubjectWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
         model.modelcall)

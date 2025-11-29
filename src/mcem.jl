@@ -1,30 +1,30 @@
 """
-    mcem_mll(logliks, ImportanceWeights, SamplingWeights)
+    mcem_mll(logliks, ImportanceWeights, SubjectWeights)
 
 Compute the marginal log likelihood for MCEM.
 """
-function mcem_mll(logliks, ImportanceWeights, SamplingWeights)
+function mcem_mll(logliks, ImportanceWeights, SubjectWeights)
 
     obj = 0.0
     
     for i in eachindex(logliks)
-        obj += dot(logliks[i], ImportanceWeights[i]) * SamplingWeights[i]
+        obj += dot(logliks[i], ImportanceWeights[i]) * SubjectWeights[i]
     end
 
     return obj
 end
 
 """
-    mcem_mll(logliks, ImportanceWeights, SamplingWeights)
+    mcem_lml(logliks, ImportanceWeights, SubjectWeights)
 
 Compute the log marginal likelihood for MCEM.
 """
-function mcem_lml(logliks, ImportanceWeights, SamplingWeights)
+function mcem_lml(logliks, ImportanceWeights, SubjectWeights)
 
     obj = 0.0
     
     for i in eachindex(logliks)
-        obj += log(dot(exp.(logliks[i]), ImportanceWeights[i])) * SamplingWeights[i]
+        obj += log(dot(exp.(logliks[i]), ImportanceWeights[i])) * SubjectWeights[i]
     end
 
     return obj
@@ -63,16 +63,16 @@ function var_ris(l, w)
 end
 
 """
-    mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, SamplingWeights)
+    mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, SubjectWeights)
 
 Asymptotic standard error of the change in the MCEM objective function.
 """
-function mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, SamplingWeights)
+function mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, SubjectWeights)
 
     VarRis = 0.0
-    for i in eachindex(SamplingWeights)
+    for i in eachindex(SubjectWeights)
         if length(ImportanceWeights[i]) != 1
-            VarRis += var_ris(loglik_target_prop[i] - loglik_target_cur[i], ImportanceWeights[i]) * SamplingWeights[i]^2
+            VarRis += var_ris(loglik_target_prop[i] - loglik_target_cur[i], ImportanceWeights[i]) * SubjectWeights[i]^2
         end
     end
 

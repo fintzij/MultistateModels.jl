@@ -10,14 +10,14 @@ format:
 
 # Test Coverage
 
-_Last updated: 2025-11-26 16:40 UTC_
+_Last updated: 2025-11-28 16:40 UTC_
 
 ## Overview
 - `Pkg.test()` loads fixtures via `test/runtests.jl`, so every `include("test_*.jl")` automatically participates in CI.
-- The suites below focus on infrastructure-critical surfaces (hazard math, subject data construction, helper utilities, and model builders) used by higher-level likelihood code.
+- The suites below focus on infrastructure-critical surfaces (hazard math, subject data construction, helper utilities, likelihood computation, and model builders) used by higher-level fitting code.
 - Long-run simulation or integration tests live under `test/longtest_*.jl`; they provide probabilistic sanity checks but are not the focus of this documentation.
 - Update this document whenever a new suite is introduced or existing coverage materially changes.
-- Latest status: `julia --project test/runtests.jl` (2025-11-26 16:30 UTC, Julia 1.12.1, 10.2 s wall time) reported **278/278 tests passing** across the suites listed here.
+- Latest status: `julia --project test/runtests.jl` (2025-11-28 16:30 UTC, Julia 1.12.1) reported **400/400 tests passing** across the suites listed here.
 
 ## Suite Details
 ### `test_modelgeneration.jl`
@@ -34,8 +34,13 @@ _Last updated: 2025-11-26 16:40 UTC_
 - **Latest run:** green in the 2025-11-26 `Pkg.test()` sweep.
 
 ### `test_helpers.jl`
-- **Scope:** helper utilities that mutate models (`set_parameters!`, `set_covariates!`) plus data iterators.
+- **Scope:** helper utilities that mutate models (`set_parameters!`, `set_covariates!`) plus data iterators, and batched likelihood computation.
 - **Key assertions:** vector/tuple/named tuple parameter updates propagate without reallocations; `get_subjinds` and related accessors return contiguous spans even with ragged subject panels.
+- **Batched likelihood tests (`loglik_exact_batched`):** validates hazard-centric batched likelihood computation matches sequential path-by-path computation for:
+  - Two-state exp/wei model with covariates
+  - Three-state illness-death model (exp/wei/gom hazards)
+  - Weighted subjects (non-uniform SubjectWeights)
+  - Negation parameter handling
 - **Latest run:** exercised via `Pkg.test()` with no failures.
 
 ### `test_make_subjdat.jl`
@@ -70,9 +75,32 @@ _Last updated: 2025-11-26 16:40 UTC_
   | Hardware | Apple M2 Max, 12 threads enabled |
 - **Notes:** scenario seeds pin each million-draw workload; parity checks reuse identical RNG streams to ensure reproducibility when new transforms land.
 
+### `longtest_simulation_tvc.jl`
+- Validates simulation correctness for time-varying covariates (TVC) with multiple covariate change points within observation intervals.
+- Draws 10,000 sample paths per scenario and compares simulated event time ECDFs against piecewise analytic CDFs using Kolmogorov-Smirnov tests.
+- Tests use conditional CDFs (conditioned on event occurring before horizon) since only uncensored observations are compared.
+- Scenario grid: {exp, wei, gom} × {PH, AFT} with TVC configuration `t_changes = [1.5, 3.0]`, `x_values = [0.5, 1.5, 2.5]`, `horizon = 5.0`.
+- **Additional tests:**
+  - Semi-Markov sojourn reset: verifies clock resets to 0 after state transitions in semi-Markov models with TVC.
+  - Multi-state illness-death: confirms competing risks work correctly with TVC (1→2→3 and 1→3 pathways).
+  - Reproducibility: same RNG seed produces identical paths.
+  - Cache/Direct parity: `CachedTransformStrategy` and `DirectTransformStrategy` yield identical results.
+- **Fixtures used:** `toy_tvc_exp_model`, `toy_tvc_wei_model`, `toy_tvc_gom_model`, `toy_illness_death_tvc_model`, `toy_semi_markov_tvc_model` from `TestFixtures.jl`.
+- **Latest run (2025-11-28, Julia 1.12.1, ~10 s total)**
+
+  | Check | Result |
+  | --- | --- |
+  | KS tests (6 scenarios) | 6 / 6 passing |
+  | Semi-Markov sojourn reset | 9,688 / 10,000 paths with 1→2→1 pattern verified |
+  | Illness-death pathways | direct=4,008, via-illness=5,435, censored=557 |
+  | Reproducibility | 2 / 2 passing |
+  | Cache/Direct parity | 2 / 2 passing |
+  | **Total assertions** | **9,702 / 9,702 passing** |
+
 ### Setup / Fixture Files
 - `test/setup_*.jl` scripts assemble toy models used across suites; each script is scoped to the corresponding suite (e.g., `setup_3state_expwei.jl`).
 - `test/fixtures/TestFixtures.jl` exports reusable builders like `toy_expwei_model()`; updates here should be reflected wherever fixtures power assertions.
+- **TVC fixtures (added 2025-11-28):** `toy_tvc_exp_model`, `toy_tvc_wei_model`, `toy_tvc_gom_model`, `toy_illness_death_tvc_model`, `toy_semi_markov_tvc_model` provide models with time-varying covariates for testing piecewise hazard computation.
 
 ### Retired Suites
 - The legacy `test/deprecated` folder (manual long tests predating the time transformation solver plus obsolete likelihood/pathfunction suites) has been removed. Recreate those scripts locally if historical behavior must be reproduced.

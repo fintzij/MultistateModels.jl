@@ -1,16 +1,68 @@
 """
     fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
 
-Fit a multistate model to continuously observed data.
+Fit a multistate model to continuously observed (exact) data.
+
+Uses L-BFGS optimization for unconstrained problems (5-6× faster than interior-point methods)
+and Ipopt for constrained problems by default.
 
 # Arguments
-- model: multistate model object
-- constraints: constraints on model parameters
-- verbose: print messages, defaults to true
-- compute_vcov: defaults to true
-- vcov_threshold: if true, the variance covariance matrix calculation only inverts singular values of the fisher information matrix that are greater than 1 / sqrt(log(n) * k) where k is the number of parameters and n is the number of subjects in the dataset. otherwise, the absolute tolerance is set to the square root of eps(). 
+- `model::MultistateModel`: multistate model object with exact observation times
+- `constraints`: parameter constraints (see Constraints documentation)
+- `verbose::Bool=true`: print optimization messages
+- `solver`: optimization solver to use. Default is `nothing`, which uses:
+  - `Optim.LBFGS()` for unconstrained problems (fast, gradient-based)
+  - `Ipopt.Optimizer()` for constrained problems (interior-point method)
+  Users can specify any solver compatible with Optimization.jl, e.g.:
+  - `Optim.BFGS()`, `Optim.NelderMead()` for unconstrained
+  - `Ipopt.Optimizer()` for constrained
+- `compute_vcov::Bool=true`: compute model-based variance-covariance matrix (H⁻¹).
+  Useful for diagnostics by comparing to robust variance.
+- `vcov_threshold::Bool=true`: if true, uses adaptive threshold `1/√(log(n)·p)` for pseudo-inverse 
+  of Fisher information; otherwise uses `√eps()`. Helps with near-singular Hessians.
+- `compute_ij_vcov::Bool=true`: compute infinitesimal jackknife (sandwich/robust) variance H⁻¹KH⁻¹.
+  **This is the recommended variance for inference** as it remains valid under model misspecification.
+- `compute_jk_vcov::Bool=false`: compute jackknife variance ((n-1)/n)·Σᵢ ΔᵢΔᵢᵀ
+- `loo_method::Symbol=:direct`: method for leave-one-out perturbations:
+  - `:direct`: compute H⁻¹ once, multiply by each gᵢ (faster for n >> p)
+  - `:cholesky`: use Cholesky rank-k downdates (more stable, slower)
+
+# Returns
+- `MultistateModelFitted`: fitted model object with estimates, standard errors, and diagnostics
+
+# Variance Estimation (Default Behavior)
+
+By default, both model-based and IJ (sandwich) variance are computed:
+- **IJ/Sandwich variance** (`compute_ij_vcov=true`): **Primary for inference**. Robust variance
+  H⁻¹KH⁻¹ that remains valid even under model misspecification.
+- **Model-based variance** (`compute_vcov=true`): **For diagnostics**. Standard MLE variance H⁻¹,
+  valid only under correct model specification. Compare to IJ variance to assess model adequacy.
+
+Use `compare_variance_estimates(fitted)` to diagnose potential model misspecification.
+
+# Example
+```julia
+# Default fit: computes both model-based and robust (IJ) variance
+fitted = fit(model)
+
+# Get robust standard errors for inference
+robust_se = sqrt.(diag(get_ij_vcov(fitted)))
+
+# Compare model-based and robust SEs to check model specification
+result = compare_variance_estimates(fitted)
+# If SE_robust >> SE_model, model may be misspecified
+
+# Fit with model-based variance only (faster, but less robust)
+fitted = fit(model; compute_ij_vcov=false)
+
+# Use a custom solver (e.g., BFGS instead of L-BFGS)
+using Optim
+fitted = fit(model; solver=Optim.BFGS())
+```
+
+See also: [`get_vcov`](@ref), [`get_ij_vcov`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, vcov_threshold = true, kwargs...)
+function fit(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # initialize array of sample paths
     samplepaths = extract_paths(model)
@@ -21,12 +73,13 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
 
     # parse constraints, or not, and solve
     if isnothing(constraints) 
-        # get estimates
+        # get estimates - use L-BFGS for unconstrained (5-6x faster than Ipopt)
         optf = OptimizationFunction(loglik_exact, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
 
-        # solve
-        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
+        # solve with user-specified solver or default L-BFGS
+        _solver = isnothing(solver) ? Optim.LBFGS() : solver
+        sol  = solve(prob, _solver)
 
         # rectify spline coefs
         if any(isa.(model.hazards, _SplineHazard))
@@ -66,7 +119,10 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
 
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_multistate)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths), lcons = constraints.lcons, ucons = constraints.ucons)
-        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
+        
+        # solve with user-specified solver or default Ipopt
+        _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
+        sol  = solve(prob, _solver; print_level = 0)
 
         # rectify spline coefs
         if any(isa.(model.hazards, _SplineHazard))
@@ -82,6 +138,25 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
 
     # compute subject-level likelihood at the estimate
     ll_subj = loglik_exact(sol.u, ExactData(model, samplepaths); return_ll_subj = true)
+
+    # compute robust variance estimates if requested
+    ij_variance = nothing
+    jk_variance = nothing
+    subject_grads = nothing
+    
+    if (compute_ij_vcov || compute_jk_vcov) && !isnothing(vcov) && isnothing(constraints)
+        if verbose
+            println("Computing robust variance estimates...")
+        end
+        robust_result = compute_robust_vcov(sol.u, model, samplepaths;
+                                           compute_ij = compute_ij_vcov,
+                                           compute_jk = compute_jk_vcov,
+                                           loo_method = loo_method,
+                                           vcov_threshold = vcov_threshold)
+        ij_variance = robust_result.ij_vcov
+        jk_variance = robust_result.jk_vcov
+        subject_grads = robust_result.subject_gradients
+    end
 
     # create parameters VectorOfVectors from solution
     parameters_fitted = VectorOfVectors(sol.u, model.parameters.elem_ptr)
@@ -104,13 +179,17 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, comp
         parameters_ph_fitted,
         (loglik = -sol.minimum, subj_lml = ll_subj),
         vcov,
+        isnothing(ij_variance) ? nothing : Matrix(ij_variance),
+        isnothing(jk_variance) ? nothing : Matrix(jk_variance),
+        subject_grads,
         model.hazards,
         model.totalhazards,
         model.tmat,
         model.emat,
         model.hazkeys,
         model.subjectindices,
-        model.SamplingWeights,
+        model.SubjectWeights,
+        model.ObservationWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
         (solution = sol,), # ConvergenceRecords::Union{Nothing, NamedTuple}
@@ -133,15 +212,59 @@ end
 """
     fit(model::MultistateMarkovModel; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
 
-Fit a multistate markov model to interval censored data or a mix of panel data and exact jump times.
+Fit a Markov multistate model to interval-censored or panel data.
 
-- model: multistate Markov model, possibly with censoring.
-- constraints: constraints on model parameters.
-- verbose: print messages, defaults to true.
-- compute_vcov: compute variance-covariance matrix, defaults to true if no constraints or false otherwise.
-- vcov_threshold: if true, the variance covariance matrix calculation only inverts singular values of the fisher information matrix that are greater than 1 / sqrt(log(n) * k) where k is the number of parameters and n is the number of subjects in the dataset. otherwise, the absolute tolerance is set to the square root of eps(). 
+Uses L-BFGS optimization for unconstrained problems (5-6× faster than interior-point methods)
+and Ipopt for constrained problems by default.
+
+# Arguments
+- `model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}`: Markov model with panel observations
+- `constraints`: parameter constraints (see Constraints documentation)
+- `verbose::Bool=true`: print optimization messages
+- `solver`: optimization solver to use. Default is `nothing`, which uses:
+  - `Optim.LBFGS()` for unconstrained problems
+  - `Ipopt.Optimizer()` for constrained problems
+  Users can specify any solver compatible with Optimization.jl.
+- `compute_vcov::Bool=true`: compute model-based variance-covariance matrix (for diagnostics)
+- `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse of Fisher information
+- `compute_ij_vcov::Bool=true`: compute infinitesimal jackknife (sandwich/robust) variance.
+  **This is the recommended variance for inference.**
+- `compute_jk_vcov::Bool=false`: compute jackknife variance
+- `loo_method::Symbol=:direct`: method for LOO perturbations (`:direct` or `:cholesky`)
+
+# Returns
+- `MultistateModelFitted`: fitted model with estimates and variance matrices
+
+# Variance Estimation (Default Behavior)
+
+By default, both model-based and IJ (sandwich) variance are computed:
+- **IJ variance** (`compute_ij_vcov=true`): Primary for inference (robust to misspecification)
+- **Model-based** (`compute_vcov=true`): For diagnostics (compare SE ratios)
+
+# Notes
+- For Markov models, the likelihood involves matrix exponentials of the intensity matrix
+- Censored state observations are handled via marginalization over possible states
+- IJ/JK variance estimation works for both censored and uncensored Markov models
+
+# Example
+```julia
+# Default fit: robust and model-based variance computed
+fitted = fit(markov_model)
+
+# Use robust SEs for inference
+robust_se = sqrt.(diag(get_ij_vcov(fitted)))
+
+# Diagnose model specification
+result = compare_variance_estimates(fitted)
+
+# Use a custom solver
+using Optim
+fitted = fit(markov_model; solver=Optim.BFGS())
+```
+
+See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, compute_vcov = true, vcov_threshold = true, kwargs...)
+function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, solver = nothing, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -155,10 +278,13 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
     # parse constraints, or not, and solve
     if isnothing(constraints)
-        # get estimates
+        # get estimates - use L-BFGS for unconstrained (5-6x faster than Ipopt)
         optf = OptimizationFunction(loglik_markov, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
-        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
+        
+        # solve with user-specified solver or default L-BFGS
+        _solver = isnothing(solver) ? Optim.LBFGS() : solver
+        sol  = solve(prob, _solver)
 
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success)
@@ -193,7 +319,10 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
         optf = OptimizationFunction(loglik_markov, Optimization.AutoForwardDiff(), cons = consfun_markov)
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books), lcons = constraints.lcons, ucons = constraints.ucons)
-        sol  = solve(prob, Ipopt.Optimizer(); print_level = 0)
+        
+        # solve with user-specified solver or default Ipopt
+        _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
+        sol  = solve(prob, _solver; print_level = 0)
 
         # no hessian when there are constraints
         if compute_vcov == true
@@ -204,6 +333,25 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
     # compute loglikelihood at the estimate
     logliks = (loglik = -sol.minimum, subj_lml = loglik_markov(sol.u, MPanelData(model, books); return_ll_subj = true))
+
+    # compute robust variance estimates if requested
+    ij_variance = nothing
+    jk_variance = nothing
+    subject_grads = nothing
+    
+    if (compute_ij_vcov || compute_jk_vcov) && !isnothing(vcov) && isnothing(constraints)
+        if verbose
+            println("Computing robust variance estimates...")
+        end
+        robust_result = compute_robust_vcov(sol.u, model, books;
+                                           compute_ij = compute_ij_vcov,
+                                           compute_jk = compute_jk_vcov,
+                                           loo_method = loo_method,
+                                           vcov_threshold = vcov_threshold)
+        ij_variance = robust_result.ij_vcov
+        jk_variance = robust_result.jk_vcov
+        subject_grads = robust_result.subject_gradients
+    end
 
     # create parameters VectorOfVectors from solution
     parameters_fitted = VectorOfVectors(sol.u, model.parameters.elem_ptr)
@@ -230,13 +378,17 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         parameters_ph_fitted,
         logliks,
         vcov,
+        isnothing(ij_variance) ? nothing : Matrix(ij_variance),
+        isnothing(jk_variance) ? nothing : Matrix(jk_variance),
+        subject_grads,
         model.hazards,
         model.totalhazards,
         model.tmat,
         model.emat,
         model.hazkeys,
         model.subjectindices,
-        model.SamplingWeights,
+        model.SubjectWeights,
+        model.ObservationWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
         (solution = sol,), # ConvergenceRecords::Union{Nothing, NamedTuple}
@@ -246,32 +398,88 @@ end
 
 
 """
-fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing,  maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 1.5, ess_target_initial = 100, max_sampling_effort = 20, npaths_additional = 10, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, kwargs...)
+    fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; kwargs...)
 
-Fit a semi-Markov model to panel data via Monte Carlo EM.
+Fit a semi-Markov model to panel data via Monte Carlo EM (MCEM).
+
+Uses L-BFGS optimization for unconstrained M-steps (5-6× faster than interior-point methods)
+and Ipopt for constrained M-steps by default.
 
 # Arguments
 
-- model: multistate model object
-- optimize_surrogate: should the parameters Markov surrogate for proposing paths be set to the MLE? defaults to true
-- constraints: tuple for specifying parameter constraints
-- surrogate_constraints: tuple for specifying parameter constraints for the Markov surrogate
-- maxiter: maximum number of MCEM iterations
-- tol: tolerance for the change in the MLL, i.e., upper bound of the stopping rule to be ruled out. Defaults to 0.01.
-- ascent_threshold: standard normal quantile for asymptotic lower bound for ascent
-- stopping_threshold: standard normal quantile for stopping the MCEM algorithm
-- ess_increase: Inflation factor for target ESS per person, ESS_new = ESS_cur * ess_increase
-- ess_target_initial: initial number of particles per participant for MCEM
-- max_ess: maximum ess after which the mcem is stopped for nonconvergence
-- max_sampling_effort: factor of the ESS at which to break the loop for sampling additional paths
-- npaths_additional: increment for number of additional paths when augmenting the pool of paths
-- verbose: print status
-- return_convergence_records: save history throughout the run
-- return_proposed_paths save latent paths and importance weights
-- compute_vcov: should the variance-covariance matrix be computed at the final estimates? defaults to true.
-- vcov_threshold: if true, the variance covariance matrix calculation only inverts singular values of the fisher information matrix that are greater than 1 / sqrt(log(n) * k) where k is the number of parameters and n is the number of subjects in the dataset. otherwise, the absolute tolerance is set to the square root of eps(). 
+**Model and constraints:**
+- `model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}`: semi-Markov model
+- `optimize_surrogate::Bool=true`: optimize Markov surrogate parameters for path proposal
+- `constraints`: parameter constraints tuple
+- `surrogate_constraints`: constraints for Markov surrogate optimization
+- `surrogate_parameters`: initial surrogate parameters (if not optimizing)
+
+**Optimization:**
+- `solver`: optimization solver for M-step. Default is `nothing`, which uses:
+  - `Optim.LBFGS()` for unconstrained problems
+  - `Ipopt.Optimizer()` for constrained problems
+  Users can specify any solver compatible with Optimization.jl.
+
+**MCEM algorithm control:**
+- `maxiter::Int=100`: maximum MCEM iterations
+- `tol::Float64=1e-2`: tolerance for MLL change in stopping rule
+- `ascent_threshold::Float64=0.1`: standard normal quantile for ascent lower bound
+- `stopping_threshold::Float64=0.1`: standard normal quantile for stopping criterion
+- `ess_increase::Float64=2.0`: ESS inflation factor when more paths needed
+- `ess_target_initial::Int=50`: initial effective sample size target per subject
+- `max_ess::Int=10000`: maximum ESS before stopping for non-convergence
+- `max_sampling_effort::Int=20`: maximum factor of ESS for additional path sampling
+- `npaths_additional::Int=10`: increment for additional paths when augmenting
+
+**Output control:**
+- `verbose::Bool=true`: print progress messages
+- `return_convergence_records::Bool=true`: save iteration history
+- `return_proposed_paths::Bool=false`: save latent paths and importance weights
+
+**Variance estimation:**
+- `compute_vcov::Bool=true`: compute model-based variance via Louis's identity (for diagnostics)
+- `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse
+- `compute_ij_vcov::Bool=true`: compute IJ/sandwich variance (robust, **recommended for inference**)
+- `compute_jk_vcov::Bool=false`: compute jackknife variance
+- `loo_method::Symbol=:direct`: method for LOO perturbations
+
+# Returns
+- `MultistateModelFitted`: fitted model with MCEM solution and variance estimates
+
+# Variance Estimation (Default Behavior)
+
+By default, both model-based and IJ (sandwich) variance are computed:
+- **IJ variance** (`compute_ij_vcov=true`): Primary for inference (robust to misspecification)
+- **Model-based** (`compute_vcov=true`): For diagnostics via Louis's identity
+
+For semi-Markov models, the observed Fisher information is computed using Louis's identity,
+which accounts for the missing data (unobserved paths):
+```
+I_obs = E[I_comp | Y] - Var[S_comp | Y]
+```
+
+# Example
+```julia
+# Default fit: robust and model-based variance computed
+fitted = fit(semimarkov_model; ess_target_initial=100, verbose=true)
+
+# Use robust SEs for inference
+robust_se = sqrt.(diag(get_ij_vcov(fitted)))
+
+# Diagnose model specification
+result = compare_variance_estimates(fitted)
+
+# Check convergence
+records = get_convergence_records(fitted)
+
+# Use a custom solver for the M-step
+using Optim
+fitted = fit(semimarkov_model; solver=Optim.BFGS())
+```
+
+See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # copy of data
     data_original = deepcopy(model.data)
@@ -425,7 +633,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         absorbingstates = absorbingstates)
     
     # get current estimate of marginal log likelihood
-    mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SamplingWeights)
+    mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SubjectWeights)
 
     # generate optimization problem
     if isnothing(constraints)
@@ -458,15 +666,22 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # increment the iteration
         iter += 1
         
-        params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), Ipopt.Optimizer(); print_level = 0)
+        # solve M-step: use user-specified solver or default (L-BFGS for unconstrained, Ipopt for constrained)
+        if isnothing(constraints)
+            _solver = isnothing(solver) ? Optim.LBFGS() : solver
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), _solver)
+        else
+            _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), _solver; print_level = 0)
+        end
         params_prop = params_prop_optim.u
 
         # calculate the log likelihoods for the proposed parameters
         loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights))
         
         # calculate the marginal log likelihood 
-        mll_cur  = mcem_mll(loglik_target_cur , ImportanceWeights, model.SamplingWeights)
-        mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, model.SamplingWeights)
+        mll_cur  = mcem_mll(loglik_target_cur , ImportanceWeights, model.SubjectWeights)
+        mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, model.SubjectWeights)
 
         # compute the ALB and AUB
         if params_prop != params_cur
@@ -475,7 +690,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             mll_change = mll_prop - mll_cur
     
             # calculate the ASE for ΔQ
-            ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, model.SamplingWeights)
+            ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, model.SubjectWeights)
     
             # calculate the lower bound for ΔQ
             ascent_lb = quantile(Normal(mll_change, ase), ascent_threshold)
@@ -590,60 +805,158 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         path = Array{SamplePath}(undef, 1)
         samplingweight = Vector{Float64}(undef, 1)
         
-        # initialize Fisher information matrix containers
-        fishinf = zeros(Float64, length(params_cur), length(params_cur))
-        fish_i1 = zeros(Float64, length(params_cur), length(params_cur))
-        fish_i2 = similar(fish_i1)
+        # Get hazard parameter blocks from elem_ptr
+        # elem_ptr[i] gives the start index for hazard i (1-indexed into flat parameter vector)
+        elem_ptr = model.parameters.elem_ptr
+        nhaz = length(elem_ptr) - 1
+        blocks = [elem_ptr[k]:(elem_ptr[k+1]-1) for k in 1:nhaz]
         
-        # container for gradient and hessian
-        diffres = DiffResults.HessianResult(params_cur)
-    
-        ll = pars -> (loglik_AD(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
+        # initialize Fisher information matrix containers
+        nparams = length(params_cur)
+        fishinf = zeros(Float64, nparams, nparams)
+        
+        # The Hessian of the log-likelihood is BLOCK-DIAGONAL with blocks corresponding to 
+        # each hazard's parameters. This is because:
+        #   log L = Σᵢ [-Λ₁(t) - Λ₂(t) - ... + log hₖ(t)]  (for path with transition via hazard k)
+        # Each hazard's parameters only appear in its own cumulative hazard Λₖ and log-hazard,
+        # so ∂²L/∂θₐ∂θᵦ = 0 when θₐ and θᵦ belong to different hazards.
+        #
+        # Note: This block-diagonal structure holds because we skip vcov computation when 
+        # there are constraints (constraints could couple parameters across hazards).
+        # For constrained problems, one would need to compute the bordered Hessian or use
+        # SparseDiffTools.jl with automatic sparsity detection.
+        #
+        # We exploit this structure by computing each block's Hessian separately, which is
+        # O(Σᵢ bᵢ²) instead of O(n²) for a dense Hessian (where bᵢ = size of block i, n = total params).
+        
+        # Decide whether to use block-diagonal or dense Hessian computation
+        # Due to function call overhead, we only use block-diagonal when theoretical speedup > 2.5
+        block_sizes = [length(b) for b in blocks]
+        sum_block_sq = sum(bs^2 for bs in block_sizes)
+        theoretical_speedup = nparams^2 / sum_block_sq
+        use_block_diagonal = theoretical_speedup > 2.5 && nhaz > 1
+        
+        # Full likelihood function
+        ll_full = pars -> (loglik_AD(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
 
-        # accumulate Fisher information
-        for i in 1:nsubj
-
-            # set importance weight
-            samplingweight[1] = model.SamplingWeights[i]
-
-            # number of paths
-            npaths = length(samplepaths[i])
-
-            # for accumulating gradients and hessians
-            grads = Array{Float64}(undef, length(params_cur), length(samplepaths[i]))
-
-            # reset matrices for accumulating Fisher info contributions
-            fill!(fish_i1, 0.0)
-            fill!(fish_i2, 0.0)
-
-            # calculate gradient and hessian for paths
-            for j in 1:npaths
-                path[1] = samplepaths[i][j]
-                diffres = ForwardDiff.hessian!(diffres, ll, params_cur)
-
-                # grab hessian and gradient
-                grads[:,j] = DiffResults.gradient(diffres)
-
-                # just to be safe wrt nans or infs
-                if !all(isfinite, DiffResults.hessian(diffres))
-                    fill!(DiffResults.hessian(diffres), 0.0)
+        if use_block_diagonal
+            # Block-diagonal Hessian computation (faster for models with many hazards)
+            
+            # Pre-allocate containers for each block
+            diffres_blocks = [DiffResults.HessianResult(zeros(bs)) for bs in block_sizes]
+            fish_i1_blocks = [zeros(Float64, bs, bs) for bs in block_sizes]
+            
+            # Create block likelihood functions (one per hazard)
+            # These compute likelihood as a function of only that block's parameters
+            params_base = copy(params_cur)
+            ll_blocks = Vector{Function}(undef, nhaz)
+            for k in 1:nhaz
+                block = blocks[k]
+                ll_blocks[k] = function(θ_block)
+                    T = eltype(θ_block)
+                    θ_full = T.(params_base)
+                    θ_full[block] = θ_block
+                    return ll_full(θ_full)
                 end
-
-                if !all(isfinite, DiffResults.gradient(diffres))
-                    fill!(DiffResults.gradient(diffres), 0.0)
-                end
-
-                fish_i1 .+= ImportanceWeights[i][j] * (-DiffResults.hessian(diffres) - DiffResults.gradient(diffres) * transpose(DiffResults.gradient(diffres)))
             end
+            
+            # accumulate Fisher information
+            for i in 1:nsubj
 
-            # sum of outer products of gradients
-            for j in 1:npaths
-                for k in 1:npaths
-                    fish_i2 .+= ImportanceWeights[i][j] * ImportanceWeights[i][k] * grads[:,j] * transpose(grads[:,k])
+                # set importance weight
+                samplingweight[1] = model.SubjectWeights[i]
+
+                # number of paths
+                npaths = length(samplepaths[i])
+
+                # for accumulating gradients (full parameter vector)
+                grads = zeros(Float64, nparams, npaths)
+                
+                # Process each block independently (exploiting block-diagonal Hessian structure)
+                for (k, block) in enumerate(blocks)
+                    bs = block_sizes[k]
+                    fill!(fish_i1_blocks[k], 0.0)
+                    grads_block = zeros(Float64, bs, npaths)
+                    
+                    # calculate gradient and hessian for paths (block k only)
+                    for j in 1:npaths
+                        path[1] = samplepaths[i][j]
+                        diffres_blocks[k] = ForwardDiff.hessian!(diffres_blocks[k], ll_blocks[k], params_cur[block])
+
+                        # grab block hessian and gradient
+                        g_block = DiffResults.gradient(diffres_blocks[k])
+                        H_block = DiffResults.hessian(diffres_blocks[k])
+                        
+                        grads_block[:, j] = g_block
+                        grads[block, j] = g_block
+
+                        # just to be safe wrt nans or infs
+                        if !all(isfinite, H_block)
+                            fill!(H_block, 0.0)
+                        end
+
+                        if !all(isfinite, g_block)
+                            fill!(g_block, 0.0)
+                            grads_block[:, j] .= 0.0
+                            grads[block, j] .= 0.0
+                        end
+
+                        fish_i1_blocks[k] .+= ImportanceWeights[i][j] * (-H_block - g_block * transpose(g_block))
+                    end
+                    
+                    # Block contribution to fish_i2: (Σⱼ wⱼgⱼ)(Σⱼ wⱼgⱼ)ᵀ for this block
+                    g_weighted_block = grads_block * ImportanceWeights[i]
+                    fish_i2_block = g_weighted_block * transpose(g_weighted_block)
+                    
+                    fishinf[block, block] .+= fish_i1_blocks[k] .+ fish_i2_block
                 end
             end
+        else
+            # Dense Hessian computation (faster for models with few hazards/parameters)
+            fish_i1 = zeros(Float64, nparams, nparams)
+            diffres = DiffResults.HessianResult(params_cur)
+            
+            # accumulate Fisher information
+            for i in 1:nsubj
 
-            fishinf += fish_i1 + fish_i2
+                # set importance weight
+                samplingweight[1] = model.SubjectWeights[i]
+
+                # number of paths
+                npaths = length(samplepaths[i])
+
+                # for accumulating gradients and hessians
+                grads = Array{Float64}(undef, nparams, npaths)
+
+                # reset matrices for accumulating Fisher info contributions
+                fill!(fish_i1, 0.0)
+
+                # calculate gradient and hessian for paths
+                for j in 1:npaths
+                    path[1] = samplepaths[i][j]
+                    diffres = ForwardDiff.hessian!(diffres, ll_full, params_cur)
+
+                    # grab hessian and gradient
+                    grads[:,j] = DiffResults.gradient(diffres)
+
+                    # just to be safe wrt nans or infs
+                    if !all(isfinite, DiffResults.hessian(diffres))
+                        fill!(DiffResults.hessian(diffres), 0.0)
+                    end
+
+                    if !all(isfinite, DiffResults.gradient(diffres))
+                        fill!(DiffResults.gradient(diffres), 0.0)
+                    end
+
+                    fish_i1 .+= ImportanceWeights[i][j] * (-DiffResults.hessian(diffres) - DiffResults.gradient(diffres) * transpose(DiffResults.gradient(diffres)))
+                end
+
+                # Optimized: Σⱼ Σₖ wⱼwₖ gⱼgₖᵀ = (Σⱼ wⱼgⱼ)(Σₖ wₖgₖ)ᵀ = g_weighted * g_weighted'
+                g_weighted = grads * ImportanceWeights[i]
+                fish_i2 = g_weighted * transpose(g_weighted)
+
+                fishinf .+= fish_i1 .+ fish_i2
+            end
         end
 
         # get the variance-covariance matrix
@@ -656,6 +969,25 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
     # subject marginal likelihood
     logliks = compute_loglik(model, loglik_surrog, loglik_target_cur, NormConstantProposal)
+
+    # compute robust variance estimates if requested
+    ij_variance = nothing
+    jk_variance = nothing
+    subject_grads = nothing
+    
+    if (compute_ij_vcov || compute_jk_vcov) && !isnothing(vcov) && isnothing(constraints) && convergence
+        if verbose
+            println("Computing robust variance estimates...")
+        end
+        robust_result = compute_robust_vcov(params_cur, model, samplepaths, ImportanceWeights;
+                                           compute_ij = compute_ij_vcov,
+                                           compute_jk = compute_jk_vcov,
+                                           loo_method = loo_method,
+                                           vcov_threshold = vcov_threshold)
+        ij_variance = robust_result.ij_vcov
+        jk_variance = robust_result.jk_vcov
+        subject_grads = robust_result.subject_gradients
+    end
 
     # return convergence records
     ConvergenceRecords = return_convergence_records ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
@@ -688,13 +1020,17 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         parameters_ph_fitted,
         logliks,
         vcov,
+        isnothing(ij_variance) ? nothing : Matrix(ij_variance),
+        isnothing(jk_variance) ? nothing : Matrix(jk_variance),
+        subject_grads,
         model.hazards,
         model.totalhazards,
         model.tmat,
         model.emat,
         model.hazkeys,
         model.subjectindices,
-        model.SamplingWeights,
+        model.SubjectWeights,
+        model.ObservationWeights,
         model.CensoringPatterns,
         surrogate,
         ConvergenceRecords,

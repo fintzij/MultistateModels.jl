@@ -16,6 +16,7 @@ using MacroTools
 using Optim # for simulation - keep
 using Optimization # for fitting - keep
 using OptimizationMOI
+using OptimizationOptimJL
 using OrderedCollections
 using ParameterHandling
 using ParetoSmooth
@@ -44,6 +45,7 @@ export
     compute_cumulative_hazard,
     collapse_data,
     cumulative_incidence,
+    truncate_distribution,
     draw_paths,
     estimate_loglik,
     enable_time_transform_cache!,
@@ -59,13 +61,48 @@ export
     get_unflatten_fn,
     get_parnames,
     get_vcov,
+    get_ij_vcov,
+    get_jk_vcov,
+    get_subject_gradients,
+    get_loo_perturbations,
+    get_jk_pseudovalues,
+    get_ij_pseudovalues,
+    get_influence_functions,
+    compare_variance_estimates,
+    ij_vcov,
+    jk_vcov,
+    loo_perturbations_direct,
+    loo_perturbations_cholesky,
+    compute_robust_vcov,
+    # NCV exports
+    NCVState,
+    cholesky_downdate!,
+    cholesky_downdate_copy,
+    ncv_loo_perturbation_cholesky,
+    ncv_loo_perturbation_woodbury,
+    ncv_loo_perturbation_direct,
+    compute_ncv_perturbations!,
+    ncv_criterion,
+    ncv_criterion_quadratic,
+    ncv_criterion_derivatives,
+    ncv_degeneracy_test,
+    ncv_get_loo_estimates,
+    ncv_get_perturbations,
+    ncv_vcov,
     Hazard,
     @hazard,
     initialize_parameters,
     initialize_parameters!,
     initialize_surrogate!,
+    # Batched likelihood infrastructure
+    is_separable,
+    cache_path_data,
+    CachedPathData,
+    BatchedODEData,
+    StackedHazardData,
     loglik,
     loglik_exact,
+    loglik_exact_batched,
     loglik_markov,
     loglik_semi_markov,
     make_constraints,
@@ -73,6 +110,15 @@ export
     set_parameters,
     set_parameters!,
     simulate,
+    simulate_data,
+    simulate_paths,
+    OptimJumpSolver,
+    BisectionJumpSolver,
+    CachedTransformStrategy,
+    DirectTransformStrategy,
+    # Legacy aliases (deprecated, use CachedTransformStrategy/DirectTransformStrategy)
+    TangTransformStrategy,
+    LegacyTransformStrategy,
     # statetable,
     summary,
     __init__
@@ -82,6 +128,9 @@ include("common.jl")
 
 # helpers
 include("helpers.jl")
+
+# shared stats utilities
+include("statsutils.jl")
 
 # hazard related functions
 include("hazards.jl")
@@ -124,5 +173,8 @@ include("smooths.jl")
 
 # surrogate
 include("surrogates.jl")
+
+# cross-validation and robust covariance estimation
+include("crossvalidation.jl")
 
 end
