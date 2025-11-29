@@ -53,9 +53,9 @@ end
 end
 
 # --- Batched likelihood vs sequential likelihood --------------------------------
-@testset "test_loglik_exact_batched" begin
+@testset "test_loglik_exact" begin
     using ArraysOfArrays: flatview
-    using MultistateModels: ExactData, loglik_exact, loglik_exact_batched
+    using MultistateModels: ExactData, loglik_exact, loglik_exact
     
     # Test 1: Two-state model with exp/wei hazards
     @testset "two-state exp/wei model" begin
@@ -80,7 +80,7 @@ end
         pars = flatview(model.parameters)
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
-        ll_bat = loglik_exact_batched(pars, exact_data; neg=false)
+        ll_bat = loglik_exact(pars, exact_data; neg=false)
         
         @test isapprox(ll_seq, ll_bat, rtol=1e-12)
     end
@@ -108,7 +108,7 @@ end
         pars = flatview(model.parameters)
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
-        ll_bat = loglik_exact_batched(pars, exact_data; neg=false)
+        ll_bat = loglik_exact(pars, exact_data; neg=false)
         
         @test isapprox(ll_seq, ll_bat, rtol=1e-12)
     end
@@ -136,7 +136,7 @@ end
         pars = flatview(model.parameters)
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
-        ll_bat = loglik_exact_batched(pars, exact_data; neg=false)
+        ll_bat = loglik_exact(pars, exact_data; neg=false)
         
         @test isapprox(ll_seq, ll_bat, rtol=1e-12)
     end
@@ -161,8 +161,8 @@ end
         exact_data = ExactData(model, paths)
         pars = flatview(model.parameters)
         
-        ll_neg = loglik_exact_batched(pars, exact_data; neg=true)
-        ll_pos = loglik_exact_batched(pars, exact_data; neg=false)
+        ll_neg = loglik_exact(pars, exact_data; neg=true)
+        ll_pos = loglik_exact(pars, exact_data; neg=false)
         
         @test ll_neg == -ll_pos
     end
@@ -272,7 +272,7 @@ end
         pars = flatview(model.parameters)
         
         # Both methods should produce identical results
-        ll_bat = loglik_exact_batched(pars, exact_data; neg=false)
+        ll_bat = loglik_exact(pars, exact_data; neg=false)
         ll_seq = loglik_exact(pars, exact_data; neg=false)
         
         @test isapprox(ll_bat, ll_seq, rtol=1e-12)
@@ -449,7 +449,7 @@ end
 # --- Batched vs sequential parity with time_transform ----------------------------
 @testset "test_batched_time_transform_parity" begin
     using ArraysOfArrays: flatview
-    using MultistateModels: ExactData, loglik_exact, loglik_exact_batched
+    using MultistateModels: ExactData, loglik_exact, loglik_exact
     
     # Test 1: PH hazards with time_transform=true
     @testset "PH hazards with time_transform" begin
@@ -476,7 +476,7 @@ end
         pars = flatview(model.parameters)
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
-        ll_bat = loglik_exact_batched(pars, exact_data; neg=false)
+        ll_bat = loglik_exact(pars, exact_data; neg=false)
         
         @test isapprox(ll_seq, ll_bat, rtol=1e-12)
     end
@@ -504,7 +504,7 @@ end
         pars = flatview(model.parameters)
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
-        ll_bat = loglik_exact_batched(pars, exact_data; neg=false)
+        ll_bat = loglik_exact(pars, exact_data; neg=false)
         
         @test isapprox(ll_seq, ll_bat, rtol=1e-12)
     end
@@ -539,7 +539,7 @@ end
         pars = flatview(model.parameters)
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
-        ll_bat = loglik_exact_batched(pars, exact_data; neg=false)
+        ll_bat = loglik_exact(pars, exact_data; neg=false)
         
         @test isapprox(ll_seq, ll_bat, rtol=1e-12)
     end
@@ -567,9 +567,220 @@ end
         pars = flatview(model.parameters)
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
-        ll_bat = loglik_exact_batched(pars, exact_data; neg=false)
+        ll_bat = loglik_exact(pars, exact_data; neg=false)
         
         @test isapprox(ll_seq, ll_bat, rtol=1e-12)
+    end
+end
+
+# --- Fused likelihood tests (loglik_exact, loglik_exact) ---
+@testset "test_fused_likelihood_parity" begin
+    using ArraysOfArrays: flatview
+    using MultistateModels: ExactData, loglik_exact, loglik_exact, loglik_exact
+    using ForwardDiff
+    
+    @testset "basic parity with loglik_exact" begin
+        # Simple exponential model
+        h12 = Hazard(@formula(0 ~ 1 + age), "exp", 1, 2)
+        
+        dat = DataFrame(
+            id = [1, 2, 3],
+            tstart = [0.0, 0.0, 0.0],
+            tstop = [5.0, 7.0, 4.0],
+            statefrom = [1, 1, 1],
+            stateto = [2, 2, 2],
+            obstype = [1, 1, 1],
+            age = [30.0, 50.0, 70.0]
+        )
+        
+        model = multistatemodel(h12; data = dat)
+        set_parameters!(model, (h12 = [log(0.1), 0.02],))
+        
+        paths = MultistateModels.extract_paths(model)
+        exact_data = ExactData(model, paths)
+        pars = flatview(model.parameters)
+        
+        ll_orig = loglik_exact(pars, exact_data; neg=false)
+        ll_fused = loglik_exact(pars, exact_data; neg=false)
+        ll_fast = loglik_exact(pars, exact_data; neg=false)
+        
+        @test isapprox(ll_orig, ll_fused, rtol=1e-12)
+        @test isapprox(ll_orig, ll_fast, rtol=1e-12)
+    end
+    
+    @testset "time_transform models" begin
+        # Weibull with time_transform
+        h12 = Hazard(@formula(0 ~ 1 + age), "wei", 1, 2; 
+                     linpred_effect = :ph, time_transform = true)
+        
+        dat = DataFrame(
+            id = [1, 1, 2, 2],
+            tstart = [0.0, 5.0, 0.0, 3.0],
+            tstop = [5.0, 10.0, 3.0, 8.0],
+            statefrom = [1, 1, 1, 1],
+            stateto = [1, 2, 1, 2],
+            obstype = [1, 1, 1, 1],
+            age = [50.0, 50.0, 60.0, 60.0]
+        )
+        
+        model = multistatemodel(h12; data = dat)
+        set_parameters!(model, (h12 = [log(0.01), log(1.2), 0.02],))
+        
+        paths = MultistateModels.extract_paths(model)
+        exact_data = ExactData(model, paths)
+        pars = flatview(model.parameters)
+        
+        ll_orig = loglik_exact(pars, exact_data; neg=false)
+        ll_fused = loglik_exact(pars, exact_data; neg=false)
+        ll_fast = loglik_exact(pars, exact_data; neg=false)
+        
+        @test isapprox(ll_orig, ll_fused, rtol=1e-10)
+        @test isapprox(ll_orig, ll_fast, rtol=1e-10)
+    end
+    
+    @testset "time-varying covariates" begin
+        # Data with covariate changes
+        dat_tvc = DataFrame(
+            id = [1, 1, 1, 2, 2],
+            tstart = [0.0, 3.0, 7.0, 0.0, 4.0],
+            tstop = [3.0, 7.0, 12.0, 4.0, 9.0],
+            statefrom = [1, 1, 1, 1, 1],
+            stateto = [1, 1, 2, 1, 2],
+            obstype = [1, 1, 1, 1, 1],
+            trt = [0, 1, 1, 0, 0]
+        )
+        
+        h12_tvc = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
+        model_tvc = multistatemodel(h12_tvc; data = dat_tvc)
+        set_parameters!(model_tvc, (h12 = [log(0.1), 0.5],))
+        
+        paths_tvc = MultistateModels.extract_paths(model_tvc)
+        exact_data_tvc = ExactData(model_tvc, paths_tvc)
+        pars_tvc = flatview(model_tvc.parameters)
+        
+        ll_orig_tvc = loglik_exact(pars_tvc, exact_data_tvc; neg=false)
+        ll_fused_tvc = loglik_exact(pars_tvc, exact_data_tvc; neg=false)
+        ll_fast_tvc = loglik_exact(pars_tvc, exact_data_tvc; neg=false)
+        
+        @test isapprox(ll_orig_tvc, ll_fused_tvc, rtol=1e-10)
+        @test isapprox(ll_orig_tvc, ll_fast_tvc, rtol=1e-10)
+    end
+    
+    @testset "ForwardDiff gradients" begin
+        h12 = Hazard(@formula(0 ~ 1 + age), "wei", 1, 2)
+        
+        dat = DataFrame(
+            id = [1, 2],
+            tstart = [0.0, 0.0],
+            tstop = [5.0, 7.0],
+            statefrom = [1, 1],
+            stateto = [2, 2],
+            obstype = [1, 1],
+            age = [30.0, 50.0]
+        )
+        
+        model = multistatemodel(h12; data = dat)
+        set_parameters!(model, (h12 = [log(0.1), log(1.0), 0.01],))
+        
+        paths = MultistateModels.extract_paths(model)
+        exact_data = ExactData(model, paths)
+        pars = flatview(model.parameters)
+        
+        grad_orig = ForwardDiff.gradient(p -> loglik_exact(p, exact_data; neg=false), pars)
+        grad_fused = ForwardDiff.gradient(p -> loglik_exact(p, exact_data; neg=false), pars)
+        grad_fast = ForwardDiff.gradient(p -> loglik_exact(p, exact_data; neg=false), pars)
+        
+        @test isapprox(grad_orig, grad_fused, rtol=1e-8)
+        @test isapprox(grad_orig, grad_fast, rtol=1e-8)
+    end
+    
+    @testset "ForwardDiff Hessians" begin
+        h12 = Hazard(@formula(0 ~ 1 + trt), "exp", 1, 2)
+        
+        dat = DataFrame(
+            id = [1, 2, 3],
+            tstart = [0.0, 0.0, 0.0],
+            tstop = [4.0, 6.0, 3.0],
+            statefrom = [1, 1, 1],
+            stateto = [2, 2, 2],
+            obstype = [1, 1, 1],
+            trt = [0.0, 1.0, 0.0]
+        )
+        
+        model = multistatemodel(h12; data = dat)
+        set_parameters!(model, (h12 = [log(0.2), 0.3],))
+        
+        paths = MultistateModels.extract_paths(model)
+        exact_data = ExactData(model, paths)
+        pars = flatview(model.parameters)
+        
+        hess_orig = ForwardDiff.hessian(p -> loglik_exact(p, exact_data; neg=false), pars)
+        hess_fused = ForwardDiff.hessian(p -> loglik_exact(p, exact_data; neg=false), pars)
+        
+        @test isapprox(hess_orig, hess_fused, rtol=1e-6)
+    end
+    
+    @testset "illness-death model" begin
+        # Complex model with multiple hazards
+        dat = DataFrame(
+            id = [1, 1, 2, 2, 3],
+            tstart = [0.0, 3.0, 0.0, 2.0, 0.0],
+            tstop = [3.0, 7.0, 2.0, 5.0, 6.0],
+            statefrom = [1, 2, 1, 1, 1],
+            stateto = [2, 3, 1, 3, 3],
+            obstype = [1, 1, 1, 1, 1],
+            age = [40.0, 40.0, 50.0, 50.0, 60.0]
+        )
+        
+        h12 = Hazard(@formula(0 ~ 1 + age), "wei", 1, 2)
+        h13 = Hazard(@formula(0 ~ 1), "exp", 1, 3)
+        h23 = Hazard(@formula(0 ~ 1 + age), "gom", 2, 3)
+        
+        model = multistatemodel(h12, h13, h23; data = dat)
+        set_parameters!(model, (
+            h12 = [log(0.1), log(1.2), 0.01],
+            h13 = [log(0.05)],
+            h23 = [log(0.15), 0.02, 0.01]
+        ))
+        
+        paths = MultistateModels.extract_paths(model)
+        exact_data = ExactData(model, paths)
+        pars = flatview(model.parameters)
+        
+        ll_orig = loglik_exact(pars, exact_data; neg=false)
+        ll_fused = loglik_exact(pars, exact_data; neg=false)
+        ll_fast = loglik_exact(pars, exact_data; neg=false)
+        
+        @test isapprox(ll_orig, ll_fused, rtol=1e-12)
+        @test isapprox(ll_orig, ll_fast, rtol=1e-12)
+    end
+    
+    @testset "return_ll_subj option" begin
+        h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+        
+        dat = DataFrame(
+            id = [1, 2, 3],
+            tstart = [0.0, 0.0, 0.0],
+            tstop = [5.0, 7.0, 4.0],
+            statefrom = [1, 1, 1],
+            stateto = [2, 2, 2],
+            obstype = [1, 1, 1]
+        )
+        
+        model = multistatemodel(h12; data = dat)
+        set_parameters!(model, (h12 = [log(0.1)],))
+        
+        paths = MultistateModels.extract_paths(model)
+        exact_data = ExactData(model, paths)
+        pars = flatview(model.parameters)
+        
+        ll_subj_orig = loglik_exact(pars, exact_data; neg=false, return_ll_subj=true)
+        ll_subj_fused = loglik_exact(pars, exact_data; neg=false, return_ll_subj=true)
+        ll_subj_fast = loglik_exact(pars, exact_data; neg=false, return_ll_subj=true)
+        
+        @test length(ll_subj_orig) == length(ll_subj_fused) == length(ll_subj_fast)
+        @test isapprox(ll_subj_orig, ll_subj_fused, rtol=1e-12)
+        @test isapprox(ll_subj_orig, ll_subj_fast, rtol=1e-12)
     end
 end
 

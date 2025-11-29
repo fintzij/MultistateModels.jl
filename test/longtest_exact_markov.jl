@@ -9,18 +9,17 @@ This test suite verifies:
 5. Emission probabilities: censored observations handled correctly
 
 These tests take longer to run (~2-5 minutes) but provide statistical validation.
+
+Note: When running standalone, ensure MultistateModels, DataFrames, Test, Random, etc. are loaded first.
 """
 
-using DataFrames
-using Distributions
-using LinearAlgebra
-using MultistateModels
-using MultistateModels: Hazard, multistatemodel, fit, set_parameters!, simulate, 
+# Import internal types - assumes MultistateModels is already loaded by runtests.jl or manually
+# Use import (not using) to avoid conflicts with other test files
+import MultistateModels: Hazard, multistatemodel, fit, set_parameters!, simulate, 
     ExactData, MPanelData, loglik_exact, loglik_markov, build_tpm_mapping
-using Random
-using Statistics
-using StatsModels
-using Test
+
+# For standalone execution, add these at REPL:
+# using DataFrames, Distributions, LinearAlgebra, MultistateModels, Random, Statistics, StatsModels, Test
 
 const RNG_SEED = 0x12345678
 const N_SUBJECTS = 500

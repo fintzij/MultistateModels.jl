@@ -91,7 +91,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
             # preallocate the hessian matrix
             diffres = DiffResults.HessianResult(sol.u)
 
-            # single argument function for log-likelihood            
+            # single argument function for log-likelihood
             ll = pars -> loglik_exact(pars, ExactData(model, samplepaths); neg=false)
 
             # compute gradient and hessian
@@ -405,6 +405,28 @@ Fit a semi-Markov model to panel data via Monte Carlo EM (MCEM).
 Uses L-BFGS optimization for unconstrained M-steps (5-6× faster than interior-point methods)
 and Ipopt for constrained M-steps by default.
 
+# Algorithm
+
+The MCEM algorithm iterates between:
+1. **E-step**: Sample latent paths via importance sampling from a Markov surrogate
+2. **M-step**: Maximize the expected complete-data log-likelihood
+
+Convergence is assessed using the ascent-based stopping rule from Caffo et al. (2005),
+with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
+
+# References
+
+- Morsomme, R., Liang, C. J., Mateja, A., Follmann, D. A., O'Brien, M. P., Wang, C.,
+  & Fintzi, J. (2025). Assessing treatment efficacy for interval-censored endpoints
+  using multistate semi-Markov models fit to multiple data streams. Biostatistics,
+  26(1), kxaf038. https://doi.org/10.1093/biostatistics/kxaf038
+- Wei, G. C., & Tanner, M. A. (1990). A Monte Carlo implementation of the 
+  EM algorithm and the poor man's data augmentation algorithms. JASA, 85(411), 699-704.
+- Caffo, B. S., Jank, W., & Jones, G. L. (2005). Ascent-based Monte Carlo 
+  expectation-maximization. JRSS-B, 67(2), 235-251.
+- Vehtari, A., Simpson, D., Gelman, A., Yao, Y., & Gabry, J. (2024). 
+  Pareto Smoothed Importance Sampling. JMLR, 25(72), 1-58.
+
 # Arguments
 
 **Model and constraints:**
@@ -430,6 +452,8 @@ and Ipopt for constrained M-steps by default.
 - `max_ess::Int=10000`: maximum ESS before stopping for non-convergence
 - `max_sampling_effort::Int=20`: maximum factor of ESS for additional path sampling
 - `npaths_additional::Int=10`: increment for additional paths when augmenting
+- `viterbi_init::Bool=true`: initialize MCEM with Viterbi MAP path per subject for warm start
+- `block_hessian_speedup::Float64=2.0`: minimum speedup factor to use block-diagonal Hessian
 
 **Output control:**
 - `verbose::Bool=true`: print progress messages
@@ -479,7 +503,7 @@ fitted = fit(semimarkov_model; solver=Optim.BFGS())
 
 See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, viterbi_init = true, block_hessian_speedup = 2.0, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # copy of data
     data_original = deepcopy(model.data)
@@ -610,6 +634,47 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # compute normalizing constant of Markov proposal
     NormConstantProposal = surrogate_fitted.loglik.loglik
 
+    # Viterbi MAP warm start initialization
+    #
+    # By initializing with the marginal posterior mode (Viterbi MAP) path for each
+    # subject, the first M-step can take a large step toward the mode of the
+    # likelihood surface, accelerating MCEM convergence.
+    if viterbi_init
+        if verbose println("Initializing with Viterbi MAP paths...\n") end
+        
+        for i in 1:nsubj
+            # Get subject data indices
+            subj_inds = model.subjectindices[i]
+            
+            # Skip subjects with only exact observations (obstype == 1)
+            # For these subjects, the path is fully determined by the data
+            if all(model.data.obstype[subj_inds] .== 1)
+                continue
+            end
+            
+            # compute Viterbi MAP path for subject i
+            map_path = viterbi_map_path(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2], fbmats, absorbingstates)
+            
+            # initialize containers with single MAP path
+            push!(samplepaths[i], map_path)
+            
+            # compute log-likelihoods
+            ll_surrog = loglik(surrogate.parameters, map_path, surrogate.hazards, model)
+            ll_target = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), map_path, model.hazards, model)
+            
+            push!(loglik_surrog[i], ll_surrog)
+            push!(loglik_target_cur[i], ll_target)
+            push!(loglik_target_prop[i], 0.0)  # will be updated in M-step
+            push!(_logImportanceWeights[i], ll_target - ll_surrog)
+            push!(ImportanceWeights[i], 1.0)  # single path gets weight 1
+            
+            # set initial ESS to 1 (will be augmented by DrawSamplePaths!)
+            ess_cur[i] = 1.0
+        end
+        
+        if verbose println("Viterbi MAP initialization complete. Drawing additional paths...\n") end
+    end
+
     # draw sample paths until the target ess is reached 
     if verbose  println("Initializing sample paths ...\n") end
     DrawSamplePaths!(model; 
@@ -712,6 +777,9 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         # increment log importance weights, importance weights, effective sample size and pareto shape parameter
         ComputeImportanceWeightsESS!(loglik_target_cur, loglik_surrog, _logImportanceWeights, ImportanceWeights, ess_cur, ess_target, psis_pareto_k)
+
+        # Note: psis_pareto_k > 0.7 indicates unreliable importance weights (Vehtari et al., 2024)
+        # The values are stored in the returned convergence_records for diagnostic purposes
 
         # print update
         if verbose
@@ -830,11 +898,12 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # O(Σᵢ bᵢ²) instead of O(n²) for a dense Hessian (where bᵢ = size of block i, n = total params).
         
         # Decide whether to use block-diagonal or dense Hessian computation
-        # Due to function call overhead, we only use block-diagonal when theoretical speedup > 2.5
+        # Due to function call overhead, we only use block-diagonal when theoretical speedup
+        # exceeds the threshold (default 2.0× speedup required)
         block_sizes = [length(b) for b in blocks]
         sum_block_sq = sum(bs^2 for bs in block_sizes)
         theoretical_speedup = nparams^2 / sum_block_sq
-        use_block_diagonal = theoretical_speedup > 2.5 && nhaz > 1
+        use_block_diagonal = theoretical_speedup > block_hessian_speedup && nhaz > 1
         
         # Full likelihood function
         ll_full = pars -> (loglik_AD(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))

@@ -1,7 +1,40 @@
+# =============================================================================
+# MCEM Helper Functions
+# =============================================================================
+#
+# This module provides helper functions for Monte Carlo EM (MCEM) estimation
+# of semi-Markov multistate models. The MCEM algorithm iterates between:
+#
+#   E-step: Estimate E[Q(θ|θ') | Y] via importance sampling from Markov surrogate
+#   M-step: Maximize Q(θ|θ') = Σᵢ Σⱼ wᵢⱼ ℓᵢⱼ(θ) w.r.t. θ
+#
+# where wᵢⱼ are normalized importance weights and ℓᵢⱼ is the complete-data
+# log-likelihood for path j of subject i.
+#
+# # References
+#
+# - Morsomme, R., Liang, C. J., Mateja, A., Follmann, D. A., O'Brien, M. P., Wang, C.,
+#   & Fintzi, J. (2025). Assessing treatment efficacy for interval-censored endpoints
+#   using multistate semi-Markov models fit to multiple data streams. Biostatistics,
+#   26(1), kxaf038. https://doi.org/10.1093/biostatistics/kxaf038
+# - Wei, G. C., & Tanner, M. A. (1990). A Monte Carlo implementation of the 
+#   EM algorithm and the poor man's data augmentation algorithms. JASA, 85(411), 699-704.
+# - Caffo, B. S., Jank, W., & Jones, G. L. (2005). Ascent-based Monte Carlo 
+#   expectation-maximization. JRSS-B, 67(2), 235-251.
+#
+# =============================================================================
+
 """
     mcem_mll(logliks, ImportanceWeights, SubjectWeights)
 
-Compute the marginal log likelihood for MCEM.
+Compute the marginal log likelihood Q(θ|θ') for MCEM.
+
+This is the importance-weighted expected complete-data log-likelihood:
+```math
+Q(θ|θ') = Σᵢ SubjectWeights[i] × Σⱼ ImportanceWeights[i][j] × logliks[i][j]
+```
+
+See also: [`mcem_ase`](@ref), [`mcem_lml`](@ref)
 """
 function mcem_mll(logliks, ImportanceWeights, SubjectWeights)
 

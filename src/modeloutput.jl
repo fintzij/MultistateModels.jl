@@ -484,15 +484,22 @@ function summary(model::MultistateModelFitted; compute_se = true, confidence_lev
     haznames = map(x -> model.hazards[x].hazname, collect(1:length(model.hazards)))
     summary_table = (;zip(haznames, summary_table)...)
     
-    # log likelihood
-    ll = estimate_likelihood ? estimate_loglik(model; min_ess = min_ess) : get_loglik(model; ll = "loglik")
+    # log likelihood  
+    if estimate_likelihood
+        ll_result = estimate_loglik(model; min_ess = min_ess)
+        ll = ll_result.loglik
+        mcse = ll_result.mcse_loglik
+    else
+        ll = get_loglik(model; ll = "loglik")
+        mcse = nothing
+    end
 
     # information criteria
-    AIC = MultistateModels.aic(model; loglik = ll.loglik)
+    AIC = MultistateModels.aic(model; loglik = ll)
 
-    BIC = MultistateModels.bic(model; loglik = ll.loglik)
+    BIC = MultistateModels.bic(model; loglik = ll)
 
-    return (summary = summary_table, loglik = ll.loglik, AIC = AIC, BIC = BIC, MCSE_loglik = ll.mcse_loglik)
+    return (summary = summary_table, loglik = ll, AIC = AIC, BIC = BIC, MCSE_loglik = mcse)
 end
 
 """

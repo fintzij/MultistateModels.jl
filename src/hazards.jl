@@ -785,9 +785,18 @@ function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame
         hazard_slot = hazard_slot)
 end
 
-#=============================================================================
-OLD DISPATCH-BASED FUNCTIONS (Will be deprecated after Phase 2)
-=============================================================================#
+# =============================================================================
+# Total Hazard and Survival Probability Functions
+# =============================================================================
+#
+# These functions compute survival probabilities and total cumulative hazards
+# by dispatching on the _TotalHazard type. They are used by:
+# - loglik_path: For sample path likelihood computation
+# - loglik_markov: For Markov model panel data likelihood
+# - simulation.jl: For cumulative incidence calculations
+# - next_state_probs: For transition probability computation
+#
+# =============================================================================
 
 """
     survprob(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardTransient, _hazards; give_log = true) 

@@ -221,14 +221,27 @@ end
     return Symbol.(prefix .* clean)
 end
 
-function _build_exponential_hazard(ctx::HazardBuildContext)
-    parnames = _prefixed_symbols(ctx.hazname, ctx.rhs_names)
-    hazard_fn, cumhaz_fn = generate_exponential_hazard(parnames, ctx.metadata.linpred_effect)
-    npar_baseline = 1
+"""
+    _build_parametric_hazard_common(ctx, baseline_names, generator_fn, hazard_type)
+
+Common logic for building parametric hazard structs. Reduces duplication across
+exponential, Weibull, and Gompertz builders.
+"""
+function _build_parametric_hazard_common(
+    ctx::HazardBuildContext,
+    baseline_names::Vector{Symbol},
+    generator_fn::Function,
+    ::Type{HazType}
+) where {HazType <: _Hazard}
+    covar_pars = _semimarkov_covariate_parnames(ctx)
+    parnames = vcat(baseline_names, covar_pars)
+    hazard_fn, cumhaz_fn = generator_fn(parnames, ctx.metadata.linpred_effect)
+    npar_baseline = length(baseline_names)
     ncovar = _ncovar(ctx)
-    npar_total = 1 + ncovar
+    npar_total = npar_baseline + ncovar
     covar_names = Symbol.(_covariate_labels(ctx.rhs_names))
-    haz_struct = MarkovHazard(
+    
+    haz_struct = HazType(
         ctx.hazname,
         ctx.hazard.statefrom,
         ctx.hazard.stateto,
@@ -244,6 +257,11 @@ function _build_exponential_hazard(ctx::HazardBuildContext)
         ctx.shared_baseline_key,
     )
     return haz_struct, zeros(Float64, npar_total)
+end
+
+function _build_exponential_hazard(ctx::HazardBuildContext)
+    baseline = Symbol[Symbol(string(ctx.hazname), "_Intercept")]
+    return _build_parametric_hazard_common(ctx, baseline, generate_exponential_hazard, MarkovHazard)
 end
 
 function _baseline_parnames(hazname::Symbol, labels::Vector{String})
@@ -257,56 +275,12 @@ end
 
 function _build_weibull_hazard(ctx::HazardBuildContext)
     baseline = Symbol[Symbol(string(ctx.hazname), "_shape"), Symbol(string(ctx.hazname), "_scale")]
-    covar_pars = _semimarkov_covariate_parnames(ctx)
-    parnames = vcat(baseline, covar_pars)
-    hazard_fn, cumhaz_fn = generate_weibull_hazard(parnames, ctx.metadata.linpred_effect)
-    npar_baseline = 2
-    ncovar = _ncovar(ctx)
-    npar_total = npar_baseline + ncovar
-    covar_names = Symbol.(_covariate_labels(ctx.rhs_names))
-    haz_struct = SemiMarkovHazard(
-        ctx.hazname,
-        ctx.hazard.statefrom,
-        ctx.hazard.stateto,
-        ctx.family,
-        parnames,
-        npar_baseline,
-        npar_total,
-        hazard_fn,
-        cumhaz_fn,
-        _has_covariates(ctx),
-        covar_names,
-        ctx.metadata,
-        ctx.shared_baseline_key,
-    )
-    return haz_struct, zeros(Float64, npar_total)
+    return _build_parametric_hazard_common(ctx, baseline, generate_weibull_hazard, SemiMarkovHazard)
 end
 
 function _build_gompertz_hazard(ctx::HazardBuildContext)
     baseline = Symbol[Symbol(string(ctx.hazname), "_shape"), Symbol(string(ctx.hazname), "_scale")]
-    covar_pars = _semimarkov_covariate_parnames(ctx)
-    parnames = vcat(baseline, covar_pars)
-    hazard_fn, cumhaz_fn = generate_gompertz_hazard(parnames, ctx.metadata.linpred_effect)
-    npar_baseline = 2
-    ncovar = _ncovar(ctx)
-    npar_total = npar_baseline + ncovar
-    covar_names = Symbol.(_covariate_labels(ctx.rhs_names))
-    haz_struct = SemiMarkovHazard(
-        ctx.hazname,
-        ctx.hazard.statefrom,
-        ctx.hazard.stateto,
-        ctx.family,
-        parnames,
-        npar_baseline,
-        npar_total,
-        hazard_fn,
-        cumhaz_fn,
-        _has_covariates(ctx),
-        covar_names,
-        ctx.metadata,
-        ctx.shared_baseline_key,
-    )
-    return haz_struct, zeros(Float64, npar_total)
+    return _build_parametric_hazard_common(ctx, baseline, generate_gompertz_hazard, SemiMarkovHazard)
 end
 
 function _build_spline_hazard(::HazardBuildContext)
@@ -478,11 +452,11 @@ function build_emat(data::DataFrame, CensoringPatterns::Matrix{Float64}, Emissio
     return emat
 end
 
-@inline function _normalize_subject_weights(SubjectWeights, nsubj)
+@inline function _ensure_subject_weights(SubjectWeights, nsubj)
     return isnothing(SubjectWeights) ? ones(Float64, nsubj) : SubjectWeights
 end
 
-@inline function _normalize_observation_weights(ObservationWeights)
+@inline function _ensure_observation_weights(ObservationWeights)
     return ObservationWeights  # nothing stays nothing, vector stays vector
 end
 
@@ -583,6 +557,9 @@ function multistatemodel(hazards::HazardFunction...;
                         CensoringPatterns::Union{Nothing,Matrix{<:Real}} = nothing, 
                         EmissionMatrix::Union{Nothing,Matrix{Float64}} = nothing,
                         verbose = false) 
+
+    # Validate inputs
+    isempty(hazards) && throw(ArgumentError("At least one hazard must be provided"))
 
     # catch the model call
     modelcall = (hazards = hazards, data = data, SubjectWeights = SubjectWeights, ObservationWeights = ObservationWeights, CensoringPatterns = CensoringPatterns, EmissionMatrix = EmissionMatrix)

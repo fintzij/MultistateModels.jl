@@ -7,6 +7,7 @@
 #   - simulate_data(): convenience function for simulated datasets only
 #   - simulate_paths(): convenience function for continuous paths only
 #   - simulate_path(): simulates a single subject's sample path
+#   - observe_path(): converts continuous path to discrete observations
 #
 # The simulation engine supports two strategies for locating jump times:
 #   - CachedTransformStrategy: uses precomputed time transformations (faster)
@@ -67,6 +68,9 @@ Abstract type for jump time root-finding algorithms.
 """
 abstract type AbstractJumpSolver end
 
+# Default maximum iterations for jump solvers (defined here before struct uses it)
+const _JUMP_SOLVER_MAX_ITERS = 80
+
 """
     BisectionJumpSolver <: AbstractJumpSolver
 
@@ -75,12 +79,12 @@ Robust and guaranteed to converge for well-behaved hazard functions.
 
 # Fields
 - `value_tol::Float64`: Tolerance on the objective function value (default: 1e-10)
-- `max_iters::Int`: Maximum bisection iterations (default: 80)
+- `max_iters::Int`: Maximum bisection iterations (default: _JUMP_SOLVER_MAX_ITERS)
 """
 struct BisectionJumpSolver <: AbstractJumpSolver
     value_tol::Float64
     max_iters::Int
-    BisectionJumpSolver(; value_tol::Float64 = 1e-10, max_iters::Int = 80) = new(value_tol, max_iters)
+    BisectionJumpSolver(; value_tol::Float64 = 1e-10, max_iters::Int = _JUMP_SOLVER_MAX_ITERS) = new(value_tol, max_iters)
 end
 
 """
@@ -210,6 +214,8 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
         return dat, trajectories
     elseif paths == true && data == false
         return trajectories
+    else
+        error("Internal error: unexpected combination of data=$data, paths=$paths")
     end
 end
 
@@ -292,8 +298,6 @@ function simulate_paths(model::MultistateProcess;
     return simulate(model; nsim = nsim, data = false, paths = true,
                     delta_u = delta_u, delta_t = delta_t, strategy = strategy, solver = solver)
 end
-
-const _JUMP_SOLVER_MAX_ITERS = 80
 
 """
     _find_jump_time(solver::AbstractJumpSolver, gap_fn, lo, hi, delta_t)
@@ -462,6 +466,12 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t;
                        strategy::AbstractTransformStrategy = CachedTransformStrategy(),
                        solver::AbstractJumpSolver = BisectionJumpSolver(),
                        rng::AbstractRNG = Random.default_rng())
+
+    # Validate inputs
+    1 <= subj <= length(model.subjectindices) || 
+        throw(ArgumentError("Subject index $subj out of range [1, $(length(model.subjectindices))]"))
+    delta_u > 0 || throw(ArgumentError("delta_u must be positive, got $delta_u"))
+    delta_t > 0 || throw(ArgumentError("delta_t must be positive, got $delta_t"))
 
     # Determine whether to use time transform caching based on strategy
     time_transform = _use_time_transform(strategy)

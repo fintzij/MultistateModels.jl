@@ -32,4 +32,11 @@ using .TestFixtures
     include("test_make_subjdat.jl")
     include("test_simulation.jl")
     include("test_ncv.jl")
+    include("test_exact_data_fitting.jl")
+end
+
+# Long tests - statistical validation (run separately if CI time is a concern)
+# These tests provide MLE recovery, variance consistency checks
+@testset "long tests" begin
+    include("longtest_exact_markov.jl")
 end

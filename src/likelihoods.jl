@@ -146,7 +146,7 @@ When `is_separable` returns `false`, the likelihood must use ODE solvers
 # Usage Sites
 
 This trait is checked in several locations:
-- `loglik_exact_batched`: Use analytic cumhaz when separable
+- `loglik_exact`: Use analytic cumhaz when separable
 - `survprob`: Skip ODE solve when all exit hazards are separable
 - `TimeTransformContext`: Separability is prerequisite for Tang-style caching
 - `simulate`: Cumulative incidence/survival computations
@@ -175,6 +175,10 @@ is_separable(::SplineHazard) = true
 # This section contains infrastructure for efficient batched likelihood computation,
 # particularly useful in MCEM where thousands of paths must be evaluated per iteration.
 #
+# PRIMARY IMPLEMENTATION:
+# - loglik_exact: Fused per-interval computation with full AD support
+# - loglik_semi_markov_batched!: For nested Vector{Vector{SamplePath}} (SMPanelData)
+#
 # Key Concepts:
 #
 # 1. PATH CACHING (CachedPathData)
@@ -186,7 +190,7 @@ is_separable(::SplineHazard) = true
 #    - Reorganizes data from path-centric to hazard-centric layout
 #    - Groups all intervals where a specific hazard contributes
 #    - Enables vectorized evaluation within each hazard
-#    - Use: `stacked = stack_intervals_for_hazard(h, cached_paths, hazards, ...)`
+#    - Used by: loglik_semi_markov_batched!
 #
 # 3. LINEAR PREDICTOR CACHING
 #    - Pre-computes Xβ values when parameters are known
@@ -197,10 +201,6 @@ is_separable(::SplineHazard) = true
 #    - Converts NamedTuple covariates to Matrix format
 #    - Matrix layout: (n_features × n_intervals) for Lux compatibility
 #    - Use: `ode_data = to_batched_ode_data(stacked)`
-#
-# 5. BATCHED FUNCTIONS
-#    - loglik_exact_batched: For flat Vector{SamplePath} (ExactData)
-#    - loglik_semi_markov_batched!: For nested Vector{Vector{SamplePath}} (SMPanelData)
 #
 # Data Flow:
 #
@@ -254,7 +254,7 @@ end
 stacked = stack_intervals_for_hazard(h, cached_paths, model, hazards, totalhazards, tmat)
 ```
 
-See also: [`stack_intervals_for_hazard`](@ref), [`loglik_exact_batched`](@ref)
+See also: [`stack_intervals_for_hazard`](@ref), [`loglik_exact`](@ref)
 """
 struct CachedPathData
     subj::Int
@@ -588,175 +588,69 @@ function cache_path_data(paths::Vector{SamplePath}, model::MultistateProcess)
     return cached
 end
 
-"""
-    loglik_exact_batched(parameters, data::ExactData; neg=true, return_ll_subj=false)
-
-Batched (hazard-centric) log-likelihood computation for exact data.
-Instead of iterating path-by-path and calling survprob (which loops over hazards),
-this version:
-1. Pre-caches all path DataFrames once upfront (eliminating redundant make_subjdat calls)
-2. Pre-processes all paths to extract intervals per hazard
-3. Loops over hazards in the outer loop
-4. Computes all cumulative hazards for a hazard at once
-5. Accumulates contributions to path-level log-likelihoods
-
-This approach is more efficient when:
-- There are many paths (MCEM with many imputed paths)
-- Hazard computations can be vectorized
-- Memory is not the bottleneck (compute > memory)
-
-# Separability
-
-For separable hazards (where `is_separable(hazard) == true`), the cumulative hazard
-is computed analytically using the closed-form `cumulative_hazard` function. This
-applies to all current hazard types (Markov, SemiMarkov, Spline).
-
-Future ODE-based hazards with `is_separable(hazard) == false` will use numerical
-integration via DifferentialEquations.jl.
-
-See also: [`is_separable`](@ref), [`cache_path_data`](@ref), [`StackedHazardData`](@ref)
-"""
-function loglik_exact_batched(parameters, data::ExactData; neg=true, return_ll_subj=false)
-    # Nest parameters
-    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
-    
-    # Get hazards
-    hazards = data.model.hazards
-    n_hazards = length(hazards)
-    n_paths = length(data.paths)
-    
-    # Remake spline parameters and calculate risk periods
-    for i in eachindex(hazards)
-        if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i])
-            set_riskperiod!(hazards[i])
-        end
-    end
-    
-    # Initialize path-level log-likelihoods
-    ll_paths = zeros(n_paths)
-    
-    # Pre-cache all path DataFrames once (eliminates redundant make_subjdat calls)
-    cached_paths = cache_path_data(data.paths, data.model)
-    
-    # Create TimeTransformContext if any hazard uses time_transform
-    # Use first cached path's DataFrame to get time column type
-    sample_df = isempty(cached_paths) ? nothing : first(cached_paths).df
-    tt_context = maybe_time_transform_context(pars, sample_df, hazards)
-    
-    # Pre-process intervals for each hazard using cached paths
-    # Pass pars to pre-compute linear predictors
-    stacked_data = Vector{StackedHazardData}(undef, n_hazards)
-    for h in 1:n_hazards
-        stacked_data[h] = stack_intervals_for_hazard(
-            h, cached_paths, hazards, data.model.totalhazards, data.model.tmat;
-            pars=pars)
-    end
-    
-    # Outer loop over hazards
-    for h in 1:n_hazards
-        sd = stacked_data[h]
-        n_intervals = length(sd.lb)
-        
-        if n_intervals == 0
-            continue
-        end
-        
-        hazard = hazards[h]
-        hazard_pars = pars[h]
-        use_transform = hazard.metadata.time_transform
-        
-        # For separable hazards, use analytic cumulative hazard
-        # Future ODE hazards with is_separable(hazard) == false will branch here
-        
-        # Compute cumulative hazards and hazard values for this hazard
-        for i in 1:n_intervals
-            # Cumulative hazard contribution (survival)
-            log_cumhaz = call_cumulhaz(
-                sd.lb[i], sd.ub[i], hazard_pars, sd.covars[i], hazard;
-                give_log = true,
-                apply_transform = use_transform,
-                cache_context = tt_context,
-                hazard_slot = h)
-            
-            # Subtract from log-likelihood (survival = exp(-cumhaz))
-            ll_paths[sd.path_idx[i]] -= exp(log_cumhaz)
-            
-            # Add transition hazard if applicable
-            if sd.is_transition[i]
-                log_haz = call_haz(
-                    sd.transition_times[i], hazard_pars, sd.covars[i], hazard;
-                    give_log = true,
-                    apply_transform = use_transform,
-                    cache_context = tt_context,
-                    hazard_slot = h)
-                ll_paths[sd.path_idx[i]] += log_haz
-            end
-        end
-    end
-    
-    # Apply subject weights - lookup by path's subject index
-    subj_weights = data.model.SubjectWeights
-    path_weights = [subj_weights[cpd.subj] for cpd in cached_paths]
-    
-    if return_ll_subj
-        return ll_paths .* path_weights
-    else
-        ll = sum(ll_paths .* path_weights)
-        return neg ? -ll : ll
-    end
-end
-
 ########################################################
 ##################### Wrappers #########################
 ########################################################
 
-"""
-    loglik(parameters, data::ExactData; neg = true) 
-
-Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. 
-"""
-function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false)
-
-    # nest parameters
-    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
-
-    # snag the hazards
-    hazards = data.model.hazards
-
-    # remake spline parameters and calculate risk periods
-    for i in eachindex(hazards)
-        if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i])
-            set_riskperiod!(hazards[i])
-        end
-    end
-
-    if return_ll_subj
-        # send each element of samplepaths to loglik
-        # Convert SamplePath to DataFrame using make_subjdat
-        map((path, w) -> begin
-            subj_inds = data.model.subjectindices[path.subj]
-            subj_dat = view(data.model.data, subj_inds, :)
-            subjdat_df = make_subjdat(path, subj_dat)
-            loglik_path(pars, subjdat_df, hazards, data.model.totalhazards, data.model.tmat) * w
-        end, data.paths, data.model.SubjectWeights)
-    else
-        # Convert SamplePath to DataFrame using make_subjdat
-        ll = mapreduce((path, w) -> begin
-            subj_inds = data.model.subjectindices[path.subj]
-            subj_dat = view(data.model.data, subj_inds, :)
-            subjdat_df = make_subjdat(path, subj_dat)
-            loglik_path(pars, subjdat_df, hazards, data.model.totalhazards, data.model.tmat) * w
-        end, +, data.paths, data.model.SubjectWeights)
-        neg ? -ll : ll
-    end
-end
+# =============================================================================
+# Generic dispatch methods for loglik and loglik!
+# =============================================================================
+#
+# These dispatch methods provide a unified interface for likelihood computation
+# across different data types. The MCEM algorithm calls loglik(p, data) and
+# loglik!(p, logliks, data) generically, and these methods dispatch to the
+# appropriate specialized implementations.
+# =============================================================================
 
 """
-    loglik(parameters, data::ExactDataAD; neg = true) 
+    loglik(parameters, data::SMPanelData; neg=true, use_sampling_weight=true)
 
-Return sum of (negative) log likelihoods for all sample paths. Use mapreduce() to call loglik() and sum the results. Each sample path object is `path::SamplePath` and contains the subject index and the jump chain. NOTE: Why is this different from loglik_exact?
+Dispatch method for semi-Markov panel data. Calls `loglik_semi_markov`.
+
+See [`loglik_semi_markov`](@ref) for details.
+"""
+loglik(parameters, data::SMPanelData; neg=true, use_sampling_weight=true) = 
+    loglik_semi_markov(parameters, data; neg=neg, use_sampling_weight=use_sampling_weight)
+
+"""
+    loglik!(parameters, logliks::Vector{}, data::SMPanelData)
+
+In-place dispatch method for semi-Markov panel data. Calls `loglik_semi_markov!`.
+
+See [`loglik_semi_markov!`](@ref) for details.
+"""
+loglik!(parameters, logliks::Vector{}, data::SMPanelData) = 
+    loglik_semi_markov!(parameters, logliks, data)
+
+"""
+    loglik(parameters, data::MPanelData; neg=true, return_ll_subj=false)
+
+Dispatch method for Markov panel data. Calls `loglik_markov`.
+
+See [`loglik_markov`](@ref) for details.
+"""
+loglik(parameters, data::MPanelData; neg=true, return_ll_subj=false) = 
+    loglik_markov(parameters, data; neg=neg, return_ll_subj=return_ll_subj)
+
+"""
+    loglik_AD(parameters, data::ExactDataAD; neg = true) 
+
+Compute (negative) log-likelihood for a single sample path with AD support.
+
+This function is used for per-path Fisher information computation in variance 
+estimation, where we need to differentiate the likelihood of individual paths.
+Unlike `loglik_exact` which operates on `ExactData` (multiple paths), this
+operates on `ExactDataAD` containing a single path.
+
+# Arguments
+- `parameters`: Flat parameter vector
+- `data::ExactDataAD`: Single path data container
+- `neg::Bool=true`: Return negative log-likelihood
+
+# Returns
+Scalar (negative) log-likelihood for the single path, weighted by sampling weight.
+
+See also: [`loglik_exact`](@ref), [`ExactDataAD`](@ref)
 """
 function loglik_AD(parameters, data::ExactDataAD; neg = true)
 
@@ -824,12 +718,15 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
     # number of subjects
     nsubj = length(data.model.subjectindices)
 
+    # Element type for AD compatibility
+    T = eltype(parameters)
+
     # accumulate the log likelihood
-    ll = 0.0
+    ll = zero(T)
 
     # container for subject-level loglikelihood
     if return_ll_subj
-        ll_subj = zeros(Float64, nsubj)
+        ll_subj = zeros(T, nsubj)
     end
 
     # number of states
@@ -997,15 +894,21 @@ end
 """
     loglik(parameters, data::SMPanelData; neg = true)
 
-Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data. 
+Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data.
+
+This implementation uses the fused path-centric approach from `loglik_exact`, calling
+`_compute_path_loglik_fused` directly to avoid DataFrame allocation overhead.
 """
 function loglik_semi_markov(parameters, data::SMPanelData; neg = true, use_sampling_weight = true)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
-    # snag the hazards
+    # snag the hazards and model components
     hazards = data.model.hazards
+    totalhazards = data.model.totalhazards
+    tmat = data.model.tmat
+    n_hazards = length(hazards)
 
     # remake spline parameters and calculate risk periods
     for i in eachindex(hazards)
@@ -1015,18 +918,43 @@ function loglik_semi_markov(parameters, data::SMPanelData; neg = true, use_sampl
         end
     end
 
-    # compute the semi-markov log-likelihoods
-    ll = 0.0
+    # Build subject covariate cache (reusable across all paths)
+    subject_covars = build_subject_covar_cache(data.model)
+    
+    # Element type for AD compatibility
+    T = eltype(parameters)
+    
+    # Get covariate names for each hazard (precomputed)
+    covar_names_per_hazard = [
+        hasfield(typeof(hazards[h]), :covar_names) ? 
+            hazards[h].covar_names : 
+            extract_covar_names(hazards[h].parnames)
+        for h in 1:n_hazards
+    ]
+    
+    # Check if any hazard uses time transform and create context if needed
+    any_time_transform = any(h -> h.metadata.time_transform, hazards)
+    tt_context = if any_time_transform && !isempty(data.paths) && !isempty(data.paths[1])
+        sample_subj = subject_covars[data.paths[1][1].subj]
+        sample_df = isempty(sample_subj.covar_data) ? nothing : sample_subj.covar_data[1:1, :]
+        maybe_time_transform_context(pars, sample_df, hazards)
+    else
+        nothing
+    end
+
+    # compute the semi-markov log-likelihoods using fused approach
+    ll = zero(T)
     for i in eachindex(data.paths)
-        lls = 0.0
+        lls = zero(T)
         for j in eachindex(data.paths[i])
-            # mlm: function Q in the EM
-            # Convert SamplePath to DataFrame using make_subjdat
             path = data.paths[i][j]
-            subj_inds = data.model.subjectindices[path.subj]
-            subj_dat = view(data.model.data, subj_inds, :)
-            subjdat_df = make_subjdat(path, subj_dat)
-            lls += loglik_path(pars, subjdat_df, hazards, data.model.totalhazards, data.model.tmat) * data.ImportanceWeights[i][j]
+            subj_cache = subject_covars[path.subj]
+            
+            path_ll = _compute_path_loglik_fused(
+                path, pars, hazards, totalhazards, tmat,
+                subj_cache, covar_names_per_hazard, tt_context, T
+            )
+            lls += path_ll * data.ImportanceWeights[i][j]
         end
         if use_sampling_weight
             lls *= data.model.SubjectWeights[i]
@@ -1042,14 +970,25 @@ end
     loglik(parameters, data::SMPanelData)
 
 Update log-likelihood for each individual and each path of panel data in a semi-Markov model.
+
+This implementation uses the fused path-centric approach from `loglik_exact`, calling
+`_compute_path_loglik_fused` directly to avoid DataFrame allocation overhead.
+
+# Notes on future neural ODE compatibility:
+When `is_separable(hazard) == false` for ODE-based hazards, the `call_cumulhaz` 
+function in `_compute_path_loglik_fused` is the extension point where numerical 
+ODE solvers would be invoked instead of analytic cumulative hazard formulas.
 """
 function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
 
     # nest the model parameters
     pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
 
-    # snag the hazards
+    # snag the hazards and model components
     hazards = data.model.hazards
+    totalhazards = data.model.totalhazards
+    tmat = data.model.tmat
+    n_hazards = length(hazards)
 
     # remake spline parameters and calculate risk periods
     for i in eachindex(hazards)
@@ -1059,14 +998,40 @@ function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
         end
     end
 
+    # Build subject covariate cache (reusable across all paths)
+    subject_covars = build_subject_covar_cache(data.model)
+    
+    # Element type for computation (Float64 for in-place version)
+    T = Float64
+    
+    # Get covariate names for each hazard (precomputed)
+    covar_names_per_hazard = [
+        hasfield(typeof(hazards[h]), :covar_names) ? 
+            hazards[h].covar_names : 
+            extract_covar_names(hazards[h].parnames)
+        for h in 1:n_hazards
+    ]
+    
+    # Check if any hazard uses time transform and create context if needed
+    any_time_transform = any(h -> h.metadata.time_transform, hazards)
+    tt_context = if any_time_transform && !isempty(data.paths) && !isempty(data.paths[1])
+        sample_subj = subject_covars[data.paths[1][1].subj]
+        sample_df = isempty(sample_subj.covar_data) ? nothing : sample_subj.covar_data[1:1, :]
+        maybe_time_transform_context(pars, sample_df, hazards)
+    else
+        nothing
+    end
+
+    # Compute log-likelihoods using fused path-centric approach
     for i in eachindex(data.paths)
         for j in eachindex(data.paths[i])
-            # Convert SamplePath to DataFrame using make_subjdat
             path = data.paths[i][j]
-            subj_inds = data.model.subjectindices[path.subj]
-            subj_dat = view(data.model.data, subj_inds, :)
-            subjdat_df = make_subjdat(path, subj_dat)
-            logliks[i][j] = loglik_path(pars, subjdat_df, hazards, data.model.totalhazards, data.model.tmat)
+            subj_cache = subject_covars[path.subj]
+            
+            logliks[i][j] = _compute_path_loglik_fused(
+                path, pars, hazards, totalhazards, tmat,
+                subj_cache, covar_names_per_hazard, tt_context, T
+            )
         end
     end
 end
@@ -1146,15 +1111,16 @@ function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}
         use_transform = hazard.metadata.time_transform
         
         for i in 1:n_intervals
-            # Cumulative hazard contribution
-            log_cumhaz = call_cumulhaz(
+            # Cumulative hazard contribution (survival component)
+            # Note: use give_log=false to get cumhaz directly, not log(cumhaz)
+            cumhaz = call_cumulhaz(
                 sd.lb[i], sd.ub[i], hazard_pars, sd.covars[i], hazard;
-                give_log = true,
+                give_log = false,
                 apply_transform = use_transform,
                 cache_context = tt_context,
                 hazard_slot = h)
             
-            ll_flat[sd.path_idx[i]] -= exp(log_cumhaz)
+            ll_flat[sd.path_idx[i]] -= cumhaz
             
             # Transition hazard
             if sd.is_transition[i]
@@ -1174,4 +1140,415 @@ function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}
         i, j = path_mapping[k]
         logliks[i][j] = ll_flat[k]
     end
+end
+
+# =============================================================================
+# Fused Batched Likelihood Computation
+# =============================================================================
+#
+# This section provides an optimized batched likelihood implementation that:
+# 1. Avoids DataFrame allocation by computing intervals directly from SamplePath
+# 2. Caches covariate lookups per subject (not per path)
+# 3. Uses columnar storage for better cache locality
+# 4. Pre-allocates all working memory for reuse across iterations
+#
+# Note: LightweightInterval and SubjectCovarCache structs are defined in common.jl
+#
+# =============================================================================
+
+"""
+    build_subject_covar_cache(model::MultistateProcess)
+
+Build a cache of covariate data per subject.
+This is called once per model and reused across all likelihood evaluations.
+"""
+function build_subject_covar_cache(model::MultistateProcess)
+    n_subjects = length(model.subjectindices)
+    covar_cols = setdiff(names(model.data), [:id, :tstart, :tstop, :statefrom, :stateto, :obstype])
+    has_covars = !isempty(covar_cols)
+    
+    caches = Vector{SubjectCovarCache}(undef, n_subjects)
+    
+    for subj in 1:n_subjects
+        subj_inds = model.subjectindices[subj]
+        subj_data = view(model.data, subj_inds, :)
+        
+        if has_covars
+            covar_data = subj_data[:, covar_cols]
+            tstart = collect(subj_data.tstart)
+        else
+            covar_data = DataFrame()
+            tstart = Float64[]
+        end
+        
+        caches[subj] = SubjectCovarCache(tstart, covar_data)
+    end
+    
+    return caches
+end
+
+"""
+    compute_intervals_from_path(path::SamplePath, subject_covar::SubjectCovarCache)
+
+Compute likelihood intervals directly from a SamplePath without creating a DataFrame.
+Returns a vector of LightweightIntervals.
+
+This implements the same logic as `make_subjdat` but avoids DataFrame allocation.
+"""
+function compute_intervals_from_path(path::SamplePath, subject_covar::SubjectCovarCache)
+    # Determine evaluation times
+    # For paths without covariates, use path times directly
+    # For paths with covariates, merge path times with covariate change times
+    
+    n_transitions = length(path.times) - 1
+    
+    if isempty(subject_covar.covar_data) || nrow(subject_covar.covar_data) <= 1
+        # No time-varying covariates - use path times directly
+        intervals = Vector{LightweightInterval}(undef, n_transitions)
+        
+        sojourn = 0.0
+        for i in 1:n_transitions
+            increment = path.times[i+1] - path.times[i]
+            intervals[i] = LightweightInterval(
+                sojourn,
+                sojourn + increment,
+                path.states[i],
+                path.states[i+1],
+                1  # Single covariate row
+            )
+            
+            # Reset sojourn if state changes (semi-Markov clock reset)
+            if path.states[i] != path.states[i+1]
+                sojourn = 0.0
+            else
+                sojourn += increment
+            end
+        end
+        
+        return intervals
+    else
+        # Time-varying covariates - need to split intervals at covariate change times
+        # Find times where covariates change
+        tstart = subject_covar.tstart
+        covar_data = subject_covar.covar_data
+        
+        # Identify covariate change times (where row differs from previous)
+        change_times = [tstart[1]]  # Always include first time
+        for i in 2:length(tstart)
+            if !isequal(covar_data[i-1, :], covar_data[i, :])
+                push!(change_times, tstart[i])
+            end
+        end
+        
+        # Merge path times with covariate change times
+        utimes = sort(unique(vcat(path.times, change_times)))
+        
+        # Filter to only times within path range
+        filter!(t -> path.times[1] <= t <= path.times[end], utimes)
+        
+        n_intervals = length(utimes) - 1
+        intervals = Vector{LightweightInterval}(undef, n_intervals)
+        
+        # Track sojourn per state visit
+        pathinds = searchsortedlast.(Ref(path.times), utimes)
+        datinds = searchsortedlast.(Ref(tstart), utimes)
+        
+        # Compute sojourns by grouping consecutive intervals in same state visit
+        sojourns = zeros(n_intervals)
+        current_sojourn = 0.0
+        current_pathind = pathinds[1]
+        
+        for i in 1:n_intervals
+            increment = utimes[i+1] - utimes[i]
+            
+            # Reset sojourn if we're in a new state visit
+            if pathinds[i] != current_pathind
+                current_sojourn = 0.0
+                current_pathind = pathinds[i]
+            end
+            
+            sojourns[i] = current_sojourn
+            current_sojourn += increment
+        end
+        
+        # Build intervals
+        for i in 1:n_intervals
+            increment = utimes[i+1] - utimes[i]
+            intervals[i] = LightweightInterval(
+                sojourns[i],
+                sojourns[i] + increment,
+                path.states[pathinds[i]],
+                path.states[pathinds[i+1]],
+                datinds[i]
+            )
+        end
+        
+        return intervals
+    end
+end
+
+"""
+    extract_covariates_lightweight(subject_covar::SubjectCovarCache, row_idx::Int, covar_names::Vector{Symbol})
+
+Extract covariates from the subject cache without DataFrame row access overhead.
+"""
+@inline function extract_covariates_lightweight(subject_covar::SubjectCovarCache, row_idx::Int, covar_names::Vector{Symbol})
+    isempty(covar_names) && return NamedTuple()
+    
+    # Clamp row_idx to valid range
+    idx = clamp(row_idx, 1, max(1, nrow(subject_covar.covar_data)))
+    
+    if isempty(subject_covar.covar_data)
+        return NamedTuple()
+    end
+    
+    # Extract values for requested covariates
+    values = Tuple(subject_covar.covar_data[idx, cname] for cname in covar_names)
+    return NamedTuple{Tuple(covar_names)}(values)
+end
+
+"""
+    loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false)
+
+Compute (negative) log-likelihood for exactly observed sample paths.
+
+This is a fused batched implementation that processes intervals and computes hazards 
+in a single pass, optimized for memory locality by processing all hazards per interval
+rather than all intervals per hazard.
+
+# Features
+- ForwardDiff (forward-mode AD) via parametric element types
+- Zygote/Enzyme (reverse-mode AD) via functional accumulation (no in-place mutation)
+- Time transforms (Tang-style caching) when hazards have `time_transform=true`
+- Time-varying covariates with proper sojourn tracking
+
+# Arguments
+- `parameters`: Flat parameter vector
+- `data::ExactData`: Exact data containing model and sample paths
+- `neg::Bool=true`: Return negative log-likelihood (for minimization)
+- `return_ll_subj::Bool=false`: Return per-path log-likelihoods instead of sum
+
+# Returns
+- If `return_ll_subj=false`: Scalar (negative) log-likelihood
+- If `return_ll_subj=true`: Vector of weighted per-path log-likelihoods
+"""
+function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false)
+    # Nest parameters - preserves dual number types
+    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+    
+    # Get model components
+    hazards = data.model.hazards
+    totalhazards = data.model.totalhazards
+    tmat = data.model.tmat
+    n_hazards = length(hazards)
+    n_paths = length(data.paths)
+    
+    # Remake spline parameters if needed
+    for i in eachindex(hazards)
+        if isa(hazards[i], _SplineHazard)
+            remake_splines!(hazards[i], pars[i])
+            set_riskperiod!(hazards[i])
+        end
+    end
+    
+    # Build subject covariate cache (this is type-stable, no parameters involved)
+    subject_covars = build_subject_covar_cache(data.model)
+    
+    # Element type for AD compatibility (Float64 or Dual)
+    T = eltype(parameters)
+    
+    # Get covariate names for each hazard (precomputed, doesn't depend on parameters)
+    covar_names_per_hazard = [
+        hasfield(typeof(hazards[h]), :covar_names) ? 
+            hazards[h].covar_names : 
+            extract_covar_names(hazards[h].parnames)
+        for h in 1:n_hazards
+    ]
+    
+    # Check if any hazard uses time transform
+    any_time_transform = any(h -> h.metadata.time_transform, hazards)
+    
+    # Create TimeTransformContext if needed
+    # We need a sample DataFrame for type inference - build minimal one
+    tt_context = if any_time_transform && !isempty(data.paths)
+        sample_subj = subject_covars[data.paths[1].subj]
+        sample_df = isempty(sample_subj.covar_data) ? nothing : sample_subj.covar_data[1:1, :]
+        maybe_time_transform_context(pars, sample_df, hazards)
+    else
+        nothing
+    end
+    
+    # Subject weights (precomputed lookup for efficiency)
+    subj_weights = data.model.SubjectWeights
+    
+    # Accumulate log-likelihoods functionally for reverse-mode AD compatibility
+    # Using map instead of in-place mutation
+    ll_paths = map(enumerate(data.paths)) do (path_idx, path)
+        _compute_path_loglik_fused(
+            path, pars, hazards, totalhazards, tmat, 
+            subject_covars[path.subj], covar_names_per_hazard,
+            tt_context, T
+        )
+    end
+    
+    # Convert to proper array type
+    ll_array = collect(T, ll_paths)
+    
+    if return_ll_subj
+        # Element-wise multiplication preserves AD types
+        return ll_array .* [subj_weights[path.subj] for path in data.paths]
+    else
+        # Weighted sum
+        ll = sum(ll_array[i] * subj_weights[data.paths[i].subj] for i in eachindex(data.paths))
+        return neg ? -ll : ll
+    end
+end
+
+"""
+    _compute_path_loglik_fused(path, pars, hazards, totalhazards, tmat, 
+                                subj_cache, covar_names_per_hazard, tt_context, T)
+
+Compute log-likelihood for a single path. Extracted for functional style (reverse-mode AD).
+
+This function is the core likelihood computation shared by `loglik_exact` and `loglik_semi_markov`.
+It uses a path-centric approach that iterates over sojourn intervals in a sample path, 
+accumulating log-survival contributions (via `call_cumulhaz`) and transition hazard 
+contributions (via `call_haz`).
+
+# Neural ODE Extension Point
+The `call_cumulhaz` invocations are the extension points for neural ODE-based hazards.
+When `is_separable(hazard) == false` for an ODE-based hazard, `call_cumulhaz` should be 
+extended to invoke a numerical ODE solver (e.g., DifferentialEquations.jl) to compute 
+the cumulative hazard as an integral: Λ(t₀, t₁) = ∫_{t₀}^{t₁} λ(s) ds.
+
+For reverse-mode AD compatibility with neural ODEs:
+- Use SciMLSensitivity.jl adjoints (BacksolveAdjoint, QuadratureAdjoint)
+- Ensure the hazard's metadata declares supported adjoint methods
+- The functional accumulation style in this function avoids in-place mutation 
+  required for Zygote/Enzyme compatibility
+
+See also: `loglik_exact`, `loglik_semi_markov`, `call_cumulhaz`
+"""
+function _compute_path_loglik_fused(
+    path::SamplePath, 
+    pars::VectorOfVectors, 
+    hazards::Vector{<:_Hazard},
+    totalhazards::Vector{<:_TotalHazard}, 
+    tmat::Matrix{Int64},
+    subj_cache::SubjectCovarCache, 
+    covar_names_per_hazard::Vector{Vector{Symbol}},
+    tt_context,
+    ::Type{T}
+) where T
+    
+    n_hazards = length(hazards)
+    n_transitions = length(path.times) - 1
+    
+    # Initialize log-likelihood for this path
+    ll = zero(T)
+    
+    # Check if we have time-varying covariates
+    has_tvc = !isempty(subj_cache.covar_data) && nrow(subj_cache.covar_data) > 1
+    
+    if !has_tvc
+        # Fast path: no time-varying covariates
+        sojourn = 0.0
+        
+        for i in 1:n_transitions
+            increment = path.times[i+1] - path.times[i]
+            lb = sojourn
+            ub = sojourn + increment
+            statefrom = path.states[i]
+            stateto = path.states[i+1]
+            
+            # Get total hazard for origin state
+            tothaz = totalhazards[statefrom]
+            
+            if tothaz isa _TotalHazardTransient
+                # Determine if time transform is enabled for this state
+                use_transform = _time_transform_enabled(tothaz, hazards)
+                
+                # Accumulate cumulative hazards for all exit hazards
+                for h in tothaz.components
+                    hazard = hazards[h]
+                    hazard_pars = pars[h]
+                    
+                    # Extract covariates
+                    covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[h])
+                    
+                    # Cumulative hazard (use hazard-specific transform flag)
+                    cumhaz = call_cumulhaz(
+                        lb, ub, hazard_pars, covars, hazard;
+                        give_log = false,
+                        apply_transform = hazard.metadata.time_transform,
+                        cache_context = tt_context,
+                        hazard_slot = h)
+                    
+                    ll -= cumhaz
+                end
+                
+                # Add transition hazard if transition occurred
+                if statefrom != stateto
+                    trans_h = tmat[statefrom, stateto]
+                    hazard = hazards[trans_h]
+                    hazard_pars = pars[trans_h]
+                    covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[trans_h])
+                    
+                    log_haz = call_haz(
+                        ub, hazard_pars, covars, hazard;
+                        give_log = true,
+                        apply_transform = hazard.metadata.time_transform,
+                        cache_context = tt_context,
+                        hazard_slot = trans_h)
+                    
+                    ll += log_haz
+                end
+            end
+            
+            # Update sojourn (reset on state change)
+            sojourn = (statefrom != stateto) ? 0.0 : ub
+        end
+    else
+        # Slow path: time-varying covariates (use full interval computation)
+        intervals = compute_intervals_from_path(path, subj_cache)
+        
+        for interval in intervals
+            tothaz = totalhazards[interval.statefrom]
+            
+            if tothaz isa _TotalHazardTransient
+                for h in tothaz.components
+                    hazard = hazards[h]
+                    hazard_pars = pars[h]
+                    covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[h])
+                    
+                    cumhaz = call_cumulhaz(
+                        interval.lb, interval.ub, hazard_pars, covars, hazard;
+                        give_log = false,
+                        apply_transform = hazard.metadata.time_transform,
+                        cache_context = tt_context,
+                        hazard_slot = h)
+                    
+                    ll -= cumhaz
+                end
+                
+                if interval.statefrom != interval.stateto
+                    trans_h = tmat[interval.statefrom, interval.stateto]
+                    hazard = hazards[trans_h]
+                    hazard_pars = pars[trans_h]
+                    covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[trans_h])
+                    
+                    log_haz = call_haz(
+                        interval.ub, hazard_pars, covars, hazard;
+                        give_log = true,
+                        apply_transform = hazard.metadata.time_transform,
+                        cache_context = tt_context,
+                        hazard_slot = trans_h)
+                    
+                    ll += log_haz
+                end
+            end
+        end
+    end
+    
+    return ll
 end

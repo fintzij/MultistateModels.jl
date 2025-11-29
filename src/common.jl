@@ -293,8 +293,14 @@ struct SplineHazard <: _SplineHazard
 end
 
 # =============================================================================
-# OLD HAZARD TYPES (Will be deprecated after Phase 2)
-# ============================================================================= #
+# User-Facing Hazard Specification Types
+# =============================================================================
+#
+# These types are used by users to specify hazards via the Hazard() and 
+# @hazard macros. They are then processed by build_hazards() to create
+# the internal _Hazard types used for computation.
+#
+# =============================================================================
 
 """
 Abstract type for multistate process.
@@ -686,3 +692,33 @@ struct SMPanelData
     paths::Vector{Vector{SamplePath}}
     ImportanceWeights::Vector{Vector{Float64}}
 end
+
+# =============================================================================
+# Fused Likelihood Data Structures
+# =============================================================================
+
+"""
+    LightweightInterval
+
+Minimal representation of a likelihood interval without DataFrame overhead.
+Used in optimized batched likelihood computation to avoid allocation.
+"""
+struct LightweightInterval
+    lb::Float64           # Lower bound (sojourn time)
+    ub::Float64           # Upper bound (sojourn + increment)
+    statefrom::Int        # Origin state
+    stateto::Int          # Destination state
+    covar_row_idx::Int    # Index into subject's covariate data
+end
+
+"""
+    SubjectCovarCache
+
+Cached covariate data for a single subject, keyed by time intervals.
+Used in fused likelihood to avoid repeated DataFrame lookups.
+"""
+struct SubjectCovarCache
+    tstart::Vector{Float64}   # Start times for covariate intervals
+    covar_data::DataFrame     # Covariate columns only (no id, tstart, tstop, etc.)
+end
+

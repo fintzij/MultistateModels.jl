@@ -94,15 +94,17 @@ export
     initialize_parameters,
     initialize_parameters!,
     initialize_surrogate!,
-    # Batched likelihood infrastructure
+    # Batched likelihood infrastructure (for advanced users / semi-Markov batched)
     is_separable,
     cache_path_data,
     CachedPathData,
     BatchedODEData,
     StackedHazardData,
+    LightweightInterval,
+    SubjectCovarCache,
+    # Likelihood functions
     loglik,
     loglik_exact,
-    loglik_exact_batched,
     loglik_markov,
     loglik_semi_markov,
     make_constraints,
