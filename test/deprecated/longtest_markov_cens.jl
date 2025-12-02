@@ -169,7 +169,7 @@ mean(map(x -> any(x.states .== 4), paths))
 # input to the function `likelihood``
 model=model_fit
 books = MultistateModels.build_tpm_mapping(model.data)
-parameters = MultistateModels.flatview(model.parameters)
+parameters = MultistateModels.model.parameters.flat
 data = MultistateModels.MPanelData(model, books)
 
 # the function `likelihood` works

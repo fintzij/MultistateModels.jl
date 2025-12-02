@@ -7,8 +7,16 @@
 # mirrors how modeling code consumes the APIs: single-hazard calls first, then
 # aggregate quantities (`total_cumulhaz`, `survprob`), and finally cache/control
 # paths around time transforms.
+#
+# Note: ParameterHandling.positive() uses ε = sqrt(eps(Float64)) ≈ 1.49e-8 as
+# a safety margin, which introduces small numerical differences when parameters
+# go through the exp/log round-trip. Tests use rtol=1e-6 for robustness.
 
 using .TestFixtures: toy_expwei_model, toy_gompertz_model
+
+# Standard tolerance for tests that compare computed vs expected values
+# after parameter round-trip through ParameterHandling
+const PARAM_RTOL = 1e-6
 
 # --- Survival probability versus reference -------------------------------------
 @testset "survprob" begin
@@ -20,11 +28,13 @@ using .TestFixtures: toy_expwei_model, toy_gompertz_model
 
     # survprob expects DataFrame row, not row index
     subjdat_row = model.data[1, :]
-    interval_incid = 1 - MultistateModels.survprob(0.0, 2.0, model.parameters, subjdat_row, model.totalhazards[1], model.hazards; give_log = false)
+    params = MultistateModels.get_log_scale_params(model.parameters)
+    interval_incid = 1 - MultistateModels.survprob(0.0, 2.0, params, subjdat_row, model.totalhazards[1], model.hazards; give_log = false)
         
     # note that Distributions.jl uses the mean parameterization
-    # i.e., 1/rate. 
-    @test cdf(Exponential(5), 2) ≈ interval_incid
+    # i.e., 1/rate.
+    # Use rtol since parameter goes through ParameterHandling round-trip
+    @test isapprox(cdf(Exponential(5), 2), interval_incid; rtol=PARAM_RTOL)
 end
 
 # --- Exponential hazard evaluations -------------------------------------------
@@ -39,11 +49,11 @@ end
     # exponential hazards, no covariate adjustment
     @test isa(model.hazards[1], MultistateModels.MarkovHazard)
     subjdat_row = model.data[1, :]
-    @test MultistateModels.call_haz(0.0, model.parameters[1], subjdat_row, model.hazards[1]; give_log = true) ≈ 0.8
-    @test MultistateModels.call_haz(0.0, model.parameters[1], subjdat_row, model.hazards[1]; give_log = false) ≈ exp(0.8)
+    @test MultistateModels.call_haz(0.0, get_log_scale_params(model.parameters)[1], subjdat_row, model.hazards[1]; give_log = true) ≈ 0.8
+    @test MultistateModels.call_haz(0.0, get_log_scale_params(model.parameters)[1], subjdat_row, model.hazards[1]; give_log = false) ≈ exp(0.8)
 
     # correct hazard value on log scale, for each row of data
-    pars = model.parameters[2]
+    pars = get_log_scale_params(model.parameters)[2]
     trueval = 
         [pars[1] + data.trt[1] * pars[2] + data.age[1] * pars[3] + 
         data.trt[1] * data.age[1] * pars[4],
@@ -55,9 +65,9 @@ end
     # loop through each row of data embedded in the model
     for h in axes(model.data, 1)
         subjdat_row = model.data[h, :]
-        @test MultistateModels.call_haz(0.0, model.parameters[2], subjdat_row, model.hazards[2]; give_log = true) ≈ trueval[h]
+        @test MultistateModels.call_haz(0.0, get_log_scale_params(model.parameters)[2], subjdat_row, model.hazards[2]; give_log = true) ≈ trueval[h]
 
-        @test MultistateModels.call_haz(0.0, model.parameters[2], subjdat_row, model.hazards[2]; give_log = false) ≈ exp(trueval[h])
+        @test MultistateModels.call_haz(0.0, get_log_scale_params(model.parameters)[2], subjdat_row, model.hazards[2]; give_log = false) ≈ exp(trueval[h])
     end
 end
 
@@ -71,7 +81,7 @@ end
 
     # h(t) = scale * shape * t^{shape - 1}
     subjdat_row = model.data[1, :]
-    pars = model.parameters[3]
+    pars = get_log_scale_params(model.parameters)[3]
     t_eval = 1.7
     log_shape = pars[1]
     log_scale = pars[2]
@@ -83,20 +93,21 @@ end
 
     # set parameters, log(shape_intercept, scale_intercept, scale_trt) weibull PH with covariate adjustment
     # also set time at which to check hazard for correctness
-    pars = [0.2, 0.25, -0.3]
     t = 1.0
-    MultistateModels.set_parameters!(model, (h23 = pars,))
+    MultistateModels.set_parameters!(model, (h23 = [0.2, 0.25, -0.3],))
+    # Get retrieved params (accounts for ParameterHandling round-trip)
+    pars_h23 = get_log_scale_params(model.parameters)[4]
 
     # loop through each row of data embedded in the model, comparing truth to MultistateModels.call_haz output
     for h in axes(model.data, 1)
         subjdat_row = model.data[h, :]
         # Extract covariates from the row manually for truth calculation
         trt_val = subjdat_row.trt
-        trueval = pars[1] + expm1(pars[1]) * log(t) + pars[2] + pars[3] * trt_val
+        trueval = pars_h23[1] + expm1(pars_h23[1]) * log(t) + pars_h23[2] + pars_h23[3] * trt_val
 
-        @test MultistateModels.call_haz(t, model.parameters[4], subjdat_row, model.hazards[4]; give_log=true) ≈ trueval
+        @test MultistateModels.call_haz(t, pars_h23, subjdat_row, model.hazards[4]; give_log=true) ≈ trueval
 
-        @test MultistateModels.call_haz(t, model.parameters[4], subjdat_row, model.hazards[4]; give_log=false) ≈ exp(trueval)
+        @test MultistateModels.call_haz(t, pars_h23, subjdat_row, model.hazards[4]; give_log=false) ≈ exp(trueval)
     end
 end
 
@@ -113,10 +124,10 @@ end
 
     # cumulative hazard for exponential cause specific hazards, no covariate adjustment
     subjdat_row = model.data[1, :]
-    @test MultistateModels.call_cumulhaz(lb, ub, model.parameters[1], subjdat_row, model.hazards[1], give_log = true) == 0.8 + log(ub-lb)
+    @test MultistateModels.call_cumulhaz(lb, ub, get_log_scale_params(model.parameters)[1], subjdat_row, model.hazards[1], give_log = true) ≈ 0.8 + log(ub-lb)
 
     # cumulative hazard for exponential proportional hazards over [lb, ub], with covariate adjustment
-    pars =  model.parameters[2] 
+    pars =  get_log_scale_params(model.parameters)[2] 
     log_haz = 
         [pars[1] + pars[2]*data.trt[1] + pars[3]*data.age[1] + pars[4]*data.trt[1]*data.age[1],
         pars[1] + pars[2]*data.trt[2] + pars[3]*data.age[2] + pars[4]*data.trt[2]*data.age[2],
@@ -126,9 +137,9 @@ end
 
     for h in axes(model.data, 1)
         subjdat_row = model.data[h, :]
-        @test MultistateModels.call_cumulhaz(lb, ub, model.parameters[2], subjdat_row, model.hazards[2], give_log = true) ≈ trueval[h]
+        @test MultistateModels.call_cumulhaz(lb, ub, get_log_scale_params(model.parameters)[2], subjdat_row, model.hazards[2], give_log = true) ≈ trueval[h]
 
-        @test MultistateModels.call_cumulhaz(lb, ub, model.parameters[2], subjdat_row, model.hazards[2], give_log = false) ≈ exp(trueval[h])
+        @test MultistateModels.call_cumulhaz(lb, ub, get_log_scale_params(model.parameters)[2], subjdat_row, model.hazards[2], give_log = false) ≈ exp(trueval[h])
     end
 end
 
@@ -144,12 +155,15 @@ end
 
     # cumulative hazard for weibull cause specific hazards, no covariate adjustment
     subjdat_row = model.data[1, :]
-    @test MultistateModels.call_cumulhaz(lb, ub, model.parameters[3], subjdat_row, model.hazards[3], give_log = true) ≈ log(ub^exp(-0.25)-lb^exp(-0.25)) + 0.2
+    # Use retrieved params for truth calculation (accounts for ParameterHandling round-trip)
+    pars_h21 = get_log_scale_params(model.parameters)[3]
+    trueval_h21 = log(ub^exp(pars_h21[1]) - lb^exp(pars_h21[1])) + pars_h21[2]
+    @test MultistateModels.call_cumulhaz(lb, ub, pars_h21, subjdat_row, model.hazards[3], give_log = true) ≈ trueval_h21
 
-    @test MultistateModels.call_cumulhaz(lb, ub, model.parameters[3], subjdat_row, model.hazards[3], give_log = false) ≈ exp(log(ub^exp(-0.25)-lb^exp(-0.25)) + 0.2)
+    @test MultistateModels.call_cumulhaz(lb, ub, pars_h21, subjdat_row, model.hazards[3], give_log = false) ≈ exp(trueval_h21)
 
     # cumulative hazard for weibull proportional hazards over [lb, ub], with covariate adjustment
-    pars =  model.parameters[4] 
+    pars =  get_log_scale_params(model.parameters)[4] 
     
     # loop through each row of data embedded in the model, comparing truth to MultistateModels.call_cumulhaz output
     for h in axes(model.data, 1)
@@ -158,9 +172,9 @@ end
         trt_val = subjdat_row.trt
         trueval = log(ub^exp(pars[1]) - lb^exp(pars[1])) + pars[2] + pars[3] * trt_val
                     
-        @test MultistateModels.call_cumulhaz(lb, ub, model.parameters[4], subjdat_row, model.hazards[4]; give_log=true) ≈ trueval
+        @test MultistateModels.call_cumulhaz(lb, ub, get_log_scale_params(model.parameters)[4], subjdat_row, model.hazards[4]; give_log=true) ≈ trueval
     
-        @test MultistateModels.call_cumulhaz(lb, ub, model.parameters[4], subjdat_row, model.hazards[4]; give_log=false) ≈ exp(trueval)
+        @test MultistateModels.call_cumulhaz(lb, ub, get_log_scale_params(model.parameters)[4], subjdat_row, model.hazards[4]; give_log=false) ≈ exp(trueval)
     end
 end
 
@@ -179,10 +193,10 @@ end
     ub=5
     window = ub - lb
 
-    pars_h12 = model.parameters[1]
-    pars_h13 = model.parameters[2]
-    pars_h21 = model.parameters[3]
-    pars_h23 = model.parameters[4]
+    pars_h12 = get_log_scale_params(model.parameters)[1]
+    pars_h13 = get_log_scale_params(model.parameters)[2]
+    pars_h21 = get_log_scale_params(model.parameters)[3]
+    pars_h23 = get_log_scale_params(model.parameters)[4]
 
     cum12 = exp(pars_h12[1]) * window
     shape21 = exp(pars_h21[1])
@@ -209,10 +223,11 @@ end
                 0.0
             end
 
-            result = MultistateModels.total_cumulhaz(lb, ub, model.parameters, subjdat_row, model.totalhazards[s], model.hazards; give_log = false)
+            params = get_log_scale_params(model.parameters)
+            result = MultistateModels.total_cumulhaz(lb, ub, params, subjdat_row, model.totalhazards[s], model.hazards; give_log = false)
             @test result ≈ expected_total
 
-            log_result = MultistateModels.total_cumulhaz(lb, ub, model.parameters, subjdat_row, model.totalhazards[s], model.hazards; give_log = true)
+            log_result = MultistateModels.total_cumulhaz(lb, ub, params, subjdat_row, model.totalhazards[s], model.hazards; give_log = true)
             if expected_total == 0.0
                 @test log_result == -Inf
             else
@@ -230,17 +245,27 @@ end
     model = fixture.model
     MultistateModels.set_parameters!(model, (h12 = [log(1.5), log(0.5)], h13 = [log(0.5), log(0.5), 1.5], h23 = [log(1), log(2/3)]))    
 
+    # Get retrieved params (accounts for ParameterHandling round-trip)
+    pars_h12 = get_log_scale_params(model.parameters)[1]
+    pars_h13 = get_log_scale_params(model.parameters)[2]
+    
     # h(t) = scale * exp(shape * t)
     subjdat_row = model.data[1, :]
-    @test MultistateModels.call_haz(1.0, model.parameters[1], subjdat_row, model.hazards[1]; give_log = true) == log(0.5) + log(1.5) + 1.5
+    # log_shape = pars_h12[1], log_scale = pars_h12[2]
+    # log h(t) = log_scale + log_shape + shape * t = pars[2] + pars[1] + exp(pars[1]) * t
+    expected_log_haz = pars_h12[2] + pars_h12[1] + exp(pars_h12[1]) * 1.0
+    @test MultistateModels.call_haz(1.0, pars_h12, subjdat_row, model.hazards[1]; give_log = true) ≈ expected_log_haz
 
-    @test MultistateModels.call_haz(1.0, model.parameters[1], subjdat_row, model.hazards[1]; give_log = false) ≈ 0.5 * 1.5 * exp(1.5)
+    @test MultistateModels.call_haz(1.0, pars_h12, subjdat_row, model.hazards[1]; give_log = false) ≈ exp(expected_log_haz)
 
    # now with covariate adjustment
    subjdat_row2 = model.data[2, :]
-   @test MultistateModels.call_haz(1.0, model.parameters[2], subjdat_row2, model.hazards[2]; give_log = true) == log(0.5) + log(0.5) + exp(log(0.5)) + 1.5
+   # For h13 with trt=1: log h(t) = log_scale + beta_trt + log_shape + shape * t
+   # pars_h13 = [log_shape, log_scale, beta_trt]
+   expected_log_haz_tvc = pars_h13[2] + pars_h13[1] + exp(pars_h13[1]) * 1.0 + pars_h13[3]
+   @test MultistateModels.call_haz(1.0, pars_h13, subjdat_row2, model.hazards[2]; give_log = true) ≈ expected_log_haz_tvc
 
-    @test MultistateModels.call_haz(1.0, model.parameters[2], subjdat_row2, model.hazards[2]; give_log = false) == exp(log(0.5) + log(0.5) + exp(log(0.5)) + 1.5)
+    @test MultistateModels.call_haz(1.0, pars_h13, subjdat_row2, model.hazards[2]; give_log = false) ≈ exp(expected_log_haz_tvc)
 end
 
 # --- Gompertz cumulative hazards ----------------------------------------------
@@ -253,17 +278,27 @@ end
     lb = 0.0
     ub = 5.0
 
-    # test
-    subjdat_row = model.data[1, :]
-    @test MultistateModels.call_cumulhaz(lb, ub, model.parameters[1], subjdat_row, model.hazards[1]; give_log = true) ≈ log(0.5) + log(exp(1.5 * ub) - exp(1.5 * lb))
+    # Get retrieved params
+    pars_h12 = get_log_scale_params(model.parameters)[1]
+    pars_h13 = get_log_scale_params(model.parameters)[2]
     
-    @test MultistateModels.call_cumulhaz(lb, ub, model.parameters[1], subjdat_row, model.hazards[1]; give_log = false) ≈ exp(log(0.5) + log(exp(1.5 * ub) - exp(1.5 * lb)))
+    # Cumulative hazard for Gompertz: H(t) = (scale/shape) * (exp(shape*t) - 1)
+    # log H(lb, ub) = log_scale - log_shape + log(exp(shape*ub) - exp(shape*lb))
+    # Note: for Gompertz, shape = exp(log_shape)
+    subjdat_row = model.data[1, :]
+    shape_h12 = exp(pars_h12[1])
+    expected_log_cumhaz = pars_h12[2] + log(exp(shape_h12 * ub) - exp(shape_h12 * lb))
+    @test MultistateModels.call_cumulhaz(lb, ub, pars_h12, subjdat_row, model.hazards[1]; give_log = true) ≈ expected_log_cumhaz
+    
+    @test MultistateModels.call_cumulhaz(lb, ub, pars_h12, subjdat_row, model.hazards[1]; give_log = false) ≈ exp(expected_log_cumhaz)
 
    # now with covariate adjustment
    subjdat_row2 = model.data[2, :]
-   @test MultistateModels.call_cumulhaz(lb, ub, model.parameters[2], subjdat_row2, model.hazards[2]; give_log = true) ≈ log(0.5) + 1.5 + log(exp(0.5 * ub) - exp(0.5 * lb))
+   shape_h13 = exp(pars_h13[1])
+   expected_log_cumhaz_tvc = pars_h13[2] + pars_h13[3] + log(exp(shape_h13 * ub) - exp(shape_h13 * lb))
+   @test MultistateModels.call_cumulhaz(lb, ub, pars_h13, subjdat_row2, model.hazards[2]; give_log = true) ≈ expected_log_cumhaz_tvc
 
-    @test MultistateModels.call_cumulhaz(lb, ub, model.parameters[2], subjdat_row2, model.hazards[2]; give_log = false) ≈ exp(log(0.5) + 1.5 + log(exp(0.5 * ub) - exp(0.5 * lb)))
+    @test MultistateModels.call_cumulhaz(lb, ub, pars_h13, subjdat_row2, model.hazards[2]; give_log = false) ≈ exp(expected_log_cumhaz_tvc)
 end
 
 # --- Linear predictor effect modes -------------------------------------------
@@ -279,99 +314,118 @@ end
     )
 
     subjdat_row = dat[1, :]
-    λ0 = 0.4
-    β = 0.7
     interval = (0.0, 1.25)
-    linear_pred = β * dat.x[1]
 
     h_exp_ph = Hazard(@formula(0 ~ x), "exp", 1, 2; linpred_effect = :ph)
     h_exp_aft = Hazard(@formula(0 ~ x), "exp", 1, 2; linpred_effect = :aft)
     model_exp_ph = multistatemodel(h_exp_ph; data = dat)
     model_exp_aft = multistatemodel(h_exp_aft; data = dat)
-    MultistateModels.set_parameters!(model_exp_ph, (h12 = [log(λ0), β],))
-    MultistateModels.set_parameters!(model_exp_aft, (h12 = [log(λ0), β],))
+    MultistateModels.set_parameters!(model_exp_ph, (h12 = [log(0.4), 0.7],))
+    MultistateModels.set_parameters!(model_exp_aft, (h12 = [log(0.4), 0.7],))
 
-    rate_ph = λ0 * exp(linear_pred)
-    rate_aft = λ0 * exp(-linear_pred)
+    # Use retrieved params for expected value calculation
+    pars_exp_ph = get_log_scale_params(model_exp_ph.parameters)[1]
+    pars_exp_aft = get_log_scale_params(model_exp_aft.parameters)[1]
+    λ0_ph = exp(pars_exp_ph[1])
+    β_ph = pars_exp_ph[2]
+    λ0_aft = exp(pars_exp_aft[1])
+    β_aft = pars_exp_aft[2]
+    linear_pred_ph = β_ph * dat.x[1]
+    linear_pred_aft = β_aft * dat.x[1]
+
+    rate_ph = λ0_ph * exp(linear_pred_ph)
+    rate_aft = λ0_aft * exp(-linear_pred_aft)
     log_rate_ph = log(rate_ph)
     log_rate_aft = log(rate_aft)
-    @test MultistateModels.call_haz(0.5, model_exp_ph.parameters[1], subjdat_row, model_exp_ph.hazards[1]; give_log = false) ≈ rate_ph
-    @test MultistateModels.call_haz(0.5, model_exp_ph.parameters[1], subjdat_row, model_exp_ph.hazards[1]; give_log = true) ≈ log_rate_ph
-    @test MultistateModels.call_haz(0.5, model_exp_aft.parameters[1], subjdat_row, model_exp_aft.hazards[1]; give_log = false) ≈ rate_aft
-    @test MultistateModels.call_haz(0.5, model_exp_aft.parameters[1], subjdat_row, model_exp_aft.hazards[1]; give_log = true) ≈ log_rate_aft
+    @test MultistateModels.call_haz(0.5, pars_exp_ph, subjdat_row, model_exp_ph.hazards[1]; give_log = false) ≈ rate_ph
+    @test MultistateModels.call_haz(0.5, pars_exp_ph, subjdat_row, model_exp_ph.hazards[1]; give_log = true) ≈ log_rate_ph
+    @test MultistateModels.call_haz(0.5, pars_exp_aft, subjdat_row, model_exp_aft.hazards[1]; give_log = false) ≈ rate_aft
+    @test MultistateModels.call_haz(0.5, pars_exp_aft, subjdat_row, model_exp_aft.hazards[1]; give_log = true) ≈ log_rate_aft
     cum_ph = rate_ph * (interval[2] - interval[1])
     cum_aft = rate_aft * (interval[2] - interval[1])
-    @test MultistateModels.call_cumulhaz(interval[1], interval[2], model_exp_ph.parameters[1], subjdat_row, model_exp_ph.hazards[1]; give_log = false) ≈ cum_ph
-    @test MultistateModels.call_cumulhaz(interval[1], interval[2], model_exp_ph.parameters[1], subjdat_row, model_exp_ph.hazards[1]; give_log = true) ≈ log(cum_ph)
-    @test MultistateModels.call_cumulhaz(interval[1], interval[2], model_exp_aft.parameters[1], subjdat_row, model_exp_aft.hazards[1]; give_log = false) ≈ cum_aft
-    @test MultistateModels.call_cumulhaz(interval[1], interval[2], model_exp_aft.parameters[1], subjdat_row, model_exp_aft.hazards[1]; give_log = true) ≈ log(cum_aft)
+    @test MultistateModels.call_cumulhaz(interval[1], interval[2], pars_exp_ph, subjdat_row, model_exp_ph.hazards[1]; give_log = false) ≈ cum_ph
+    @test MultistateModels.call_cumulhaz(interval[1], interval[2], pars_exp_ph, subjdat_row, model_exp_ph.hazards[1]; give_log = true) ≈ log(cum_ph)
+    @test MultistateModels.call_cumulhaz(interval[1], interval[2], pars_exp_aft, subjdat_row, model_exp_aft.hazards[1]; give_log = false) ≈ cum_aft
+    @test MultistateModels.call_cumulhaz(interval[1], interval[2], pars_exp_aft, subjdat_row, model_exp_aft.hazards[1]; give_log = true) ≈ log(cum_aft)
 
-    log_shape = log(1.4)
-    log_scale = log(0.6)
-    β_w = -0.3
     h_wei_ph = Hazard(@formula(0 ~ x), "wei", 1, 2; linpred_effect = :ph)
     h_wei_aft = Hazard(@formula(0 ~ x), "wei", 1, 2; linpred_effect = :aft)
     model_wei_ph = multistatemodel(h_wei_ph; data = dat)
     model_wei_aft = multistatemodel(h_wei_aft; data = dat)
-    MultistateModels.set_parameters!(model_wei_ph, (h12 = [log_shape, log_scale, β_w],))
-    MultistateModels.set_parameters!(model_wei_aft, (h12 = [log_shape, log_scale, β_w],))
+    MultistateModels.set_parameters!(model_wei_ph, (h12 = [log(1.4), log(0.6), -0.3],))
+    MultistateModels.set_parameters!(model_wei_aft, (h12 = [log(1.4), log(0.6), -0.3],))
 
-    shape = exp(log_shape)
-    scale = exp(log_scale)
-    lp_w = β_w * dat.x[1]
+    # Use retrieved params for expected value calculation
+    pars_wei_ph = get_log_scale_params(model_wei_ph.parameters)[1]
+    pars_wei_aft = get_log_scale_params(model_wei_aft.parameters)[1]
+    shape_ph = exp(pars_wei_ph[1])
+    scale_ph = exp(pars_wei_ph[2])
+    β_w_ph = pars_wei_ph[3]
+    shape_aft = exp(pars_wei_aft[1])
+    scale_aft = exp(pars_wei_aft[2])
+    β_w_aft = pars_wei_aft[3]
+    
+    lp_w_ph = β_w_ph * dat.x[1]
+    lp_w_aft = β_w_aft * dat.x[1]
     t = 1.8
     lb = 0.5
     ub = 1.6
-    haz_ph = shape * scale * t^(shape - 1) * exp(lp_w)
-    haz_aft = shape * scale * t^(shape - 1) * exp(-shape * lp_w)
-    cum_ph = scale * exp(lp_w) * (ub^shape - lb^shape)
-    cum_aft = scale * exp(-shape * lp_w) * (ub^shape - lb^shape)
+    haz_ph = shape_ph * scale_ph * t^(shape_ph - 1) * exp(lp_w_ph)
+    haz_aft = shape_aft * scale_aft * t^(shape_aft - 1) * exp(-shape_aft * lp_w_aft)
+    cum_ph = scale_ph * exp(lp_w_ph) * (ub^shape_ph - lb^shape_ph)
+    cum_aft = scale_aft * exp(-shape_aft * lp_w_aft) * (ub^shape_aft - lb^shape_aft)
 
-    @test MultistateModels.call_haz(t, model_wei_ph.parameters[1], subjdat_row, model_wei_ph.hazards[1]; give_log = false) ≈ haz_ph
-    @test MultistateModels.call_haz(t, model_wei_aft.parameters[1], subjdat_row, model_wei_aft.hazards[1]; give_log = false) ≈ haz_aft
-    @test MultistateModels.call_cumulhaz(lb, ub, model_wei_ph.parameters[1], subjdat_row, model_wei_ph.hazards[1]; give_log = false) ≈ cum_ph
-    @test MultistateModels.call_cumulhaz(lb, ub, model_wei_aft.parameters[1], subjdat_row, model_wei_aft.hazards[1]; give_log = false) ≈ cum_aft
+    @test MultistateModels.call_haz(t, pars_wei_ph, subjdat_row, model_wei_ph.hazards[1]; give_log = false) ≈ haz_ph
+    @test MultistateModels.call_haz(t, pars_wei_aft, subjdat_row, model_wei_aft.hazards[1]; give_log = false) ≈ haz_aft
+    @test MultistateModels.call_cumulhaz(lb, ub, pars_wei_ph, subjdat_row, model_wei_ph.hazards[1]; give_log = false) ≈ cum_ph
+    @test MultistateModels.call_cumulhaz(lb, ub, pars_wei_aft, subjdat_row, model_wei_aft.hazards[1]; give_log = false) ≈ cum_aft
 
-    log_shape_g = log(0.2)
-    log_scale_g = log(0.3)
-    β_g = 0.5
     h_gom_ph = Hazard(@formula(0 ~ x), "gom", 1, 2; linpred_effect = :ph)
     h_gom_aft = Hazard(@formula(0 ~ x), "gom", 1, 2; linpred_effect = :aft)
     model_gom_ph = multistatemodel(h_gom_ph; data = dat)
     model_gom_aft = multistatemodel(h_gom_aft; data = dat)
-    MultistateModels.set_parameters!(model_gom_ph, (h12 = [log_shape_g, log_scale_g, β_g],))
-    MultistateModels.set_parameters!(model_gom_aft, (h12 = [log_shape_g, log_scale_g, β_g],))
+    MultistateModels.set_parameters!(model_gom_ph, (h12 = [log(0.2), log(0.3), 0.5],))
+    MultistateModels.set_parameters!(model_gom_aft, (h12 = [log(0.2), log(0.3), 0.5],))
 
-    shape_g = exp(log_shape_g)
-    scale_g = exp(log_scale_g)
-    lp_g = β_g * dat.x[1]
+    # Use retrieved params for expected value calculation
+    pars_gom_ph = get_log_scale_params(model_gom_ph.parameters)[1]
+    pars_gom_aft = get_log_scale_params(model_gom_aft.parameters)[1]
+    shape_g_ph = exp(pars_gom_ph[1])
+    scale_g_ph = exp(pars_gom_ph[2])
+    β_g_ph = pars_gom_ph[3]
+    shape_g_aft = exp(pars_gom_aft[1])
+    scale_g_aft = exp(pars_gom_aft[2])
+    β_g_aft = pars_gom_aft[3]
+    
+    lp_g_ph = β_g_ph * dat.x[1]
+    lp_g_aft = β_g_aft * dat.x[1]
     t_g = 1.1
     lb_g = 0.2
     ub_g = 1.4
-    haz_g_ph = scale_g * shape_g * exp(shape_g * t_g + lp_g)
-    s = exp(-lp_g)
-    haz_g_aft = scale_g * shape_g * exp(shape_g * t_g * s) * s
+    haz_g_ph = scale_g_ph * shape_g_ph * exp(shape_g_ph * t_g + lp_g_ph)
+    s = exp(-lp_g_aft)
+    haz_g_aft = scale_g_aft * shape_g_aft * exp(shape_g_aft * t_g * s) * s
     cum_g_ph = begin
-        base = if abs(shape_g) < 1e-10
-            scale_g * (ub_g - lb_g)
+        base = if abs(shape_g_ph) < 1e-10
+            scale_g_ph * (ub_g - lb_g)
         else
-            scale_g * (exp(shape_g * ub_g) - exp(shape_g * lb_g))
+            scale_g_ph * (exp(shape_g_ph * ub_g) - exp(shape_g_ph * lb_g))
         end
-        base * exp(lp_g)
+        base * exp(lp_g_ph)
     end
     cum_g_aft = begin
-        scaled_shape = shape_g * s
+        scaled_shape = shape_g_aft * s
         if abs(scaled_shape) < 1e-10
-            scale_g * s * (ub_g - lb_g)
+            scale_g_aft * s * (ub_g - lb_g)
         else
-            scale_g * (exp(scaled_shape * ub_g) - exp(scaled_shape * lb_g))
+            scale_g_aft * (exp(scaled_shape * ub_g) - exp(scaled_shape * lb_g))
         end
     end
 
-    @test MultistateModels.call_haz(t_g, model_gom_ph.parameters[1], subjdat_row, model_gom_ph.hazards[1]; give_log = false) ≈ haz_g_ph
-    @test MultistateModels.call_haz(t_g, model_gom_aft.parameters[1], subjdat_row, model_gom_aft.hazards[1]; give_log = false) ≈ haz_g_aft
-    @test MultistateModels.call_cumulhaz(lb_g, ub_g, model_gom_ph.parameters[1], subjdat_row, model_gom_ph.hazards[1]; give_log = false) ≈ cum_g_ph
-    @test MultistateModels.call_cumulhaz(lb_g, ub_g, model_gom_aft.parameters[1], subjdat_row, model_gom_aft.hazards[1]; give_log = false) ≈ cum_g_aft
+    @test MultistateModels.call_haz(t_g, pars_gom_ph, subjdat_row, model_gom_ph.hazards[1]; give_log = false) ≈ haz_g_ph
+    @test MultistateModels.call_haz(t_g, pars_gom_aft, subjdat_row, model_gom_aft.hazards[1]; give_log = false) ≈ haz_g_aft
+    @test MultistateModels.call_cumulhaz(lb_g, ub_g, pars_gom_ph, subjdat_row, model_gom_ph.hazards[1]; give_log = false) ≈ cum_g_ph
+    @test MultistateModels.call_cumulhaz(lb_g, ub_g, pars_gom_aft, subjdat_row, model_gom_aft.hazards[1]; give_log = false) ≈ cum_g_aft
 end
 
 # --- Time-transform toggles and caches ----------------------------------------
@@ -391,67 +445,72 @@ end
     # Exponential PH hazard with Tang toggle
     h_exp_tt = Hazard(@formula(0 ~ x), "exp", 1, 2; time_transform = true)
     model_exp_tt = multistatemodel(h_exp_tt; data = dat)
-    λ0 = 0.4
-    β = 0.7
-    MultistateModels.set_parameters!(model_exp_tt, (h12 = [log(λ0), β],))
-    rate_exp = λ0 * exp(β * subjdat_row.x)
+    MultistateModels.set_parameters!(model_exp_tt, (h12 = [log(0.4), 0.7],))
+    
+    # Use retrieved params for expected value calculation
+    pars_exp_tt = get_log_scale_params(model_exp_tt.parameters)[1]
+    λ0_tt = exp(pars_exp_tt[1])
+    β_tt = pars_exp_tt[2]
+    rate_exp = λ0_tt * exp(β_tt * subjdat_row.x)
     t_eval = 0.8
     interval = (0.2, 1.1)
-    @test MultistateModels.call_haz(t_eval, model_exp_tt.parameters[1], subjdat_row, model_exp_tt.hazards[1]; give_log = false, apply_transform = false) ≈ rate_exp
-    @test MultistateModels.call_haz(t_eval, model_exp_tt.parameters[1], subjdat_row, model_exp_tt.hazards[1]; give_log = false, apply_transform = true) ≈ rate_exp
-    @test MultistateModels.call_haz(t_eval, model_exp_tt.parameters[1], subjdat_row, model_exp_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(rate_exp)
+    @test MultistateModels.call_haz(t_eval, pars_exp_tt, subjdat_row, model_exp_tt.hazards[1]; give_log = false, apply_transform = false) ≈ rate_exp
+    @test MultistateModels.call_haz(t_eval, pars_exp_tt, subjdat_row, model_exp_tt.hazards[1]; give_log = false, apply_transform = true) ≈ rate_exp
+    @test MultistateModels.call_haz(t_eval, pars_exp_tt, subjdat_row, model_exp_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(rate_exp)
     cum_exp = rate_exp * (interval[2] - interval[1])
-    @test MultistateModels.call_cumulhaz(interval[1], interval[2], model_exp_tt.parameters[1], subjdat_row, model_exp_tt.hazards[1]; give_log = false, apply_transform = true) ≈ cum_exp
-    @test MultistateModels.call_cumulhaz(interval[1], interval[2], model_exp_tt.parameters[1], subjdat_row, model_exp_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(cum_exp)
+    @test MultistateModels.call_cumulhaz(interval[1], interval[2], pars_exp_tt, subjdat_row, model_exp_tt.hazards[1]; give_log = false, apply_transform = true) ≈ cum_exp
+    @test MultistateModels.call_cumulhaz(interval[1], interval[2], pars_exp_tt, subjdat_row, model_exp_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(cum_exp)
     @test MultistateModels.survprob(interval[1], interval[2], model_exp_tt.parameters, subjdat_row, model_exp_tt.totalhazards[1], model_exp_tt.hazards; give_log = false, apply_transform = true) ≈ exp(-cum_exp)
 
     # zero-length interval should return zero cumulative hazard and log zero
-    @test MultistateModels.call_cumulhaz(interval[1], interval[1], model_exp_tt.parameters[1], subjdat_row, model_exp_tt.hazards[1]; give_log = false, apply_transform = true) == 0.0
-    @test MultistateModels.call_cumulhaz(interval[1], interval[1], model_exp_tt.parameters[1], subjdat_row, model_exp_tt.hazards[1]; give_log = true, apply_transform = true) == -Inf
+    @test MultistateModels.call_cumulhaz(interval[1], interval[1], pars_exp_tt, subjdat_row, model_exp_tt.hazards[1]; give_log = false, apply_transform = true) == 0.0
+    @test MultistateModels.call_cumulhaz(interval[1], interval[1], pars_exp_tt, subjdat_row, model_exp_tt.hazards[1]; give_log = true, apply_transform = true) == -Inf
 
     # Weibull PH hazard with Tang toggle
     h_wei_tt = Hazard(@formula(0 ~ x), "wei", 1, 2; time_transform = true)
     model_wei_tt = multistatemodel(h_wei_tt; data = dat)
-    log_shape = log(1.3)
-    log_scale = log(0.6)
-    β_w = -0.4
-    MultistateModels.set_parameters!(model_wei_tt, (h12 = [log_shape, log_scale, β_w],))
-    shape = exp(log_shape)
-    scale = exp(log_scale)
+    MultistateModels.set_parameters!(model_wei_tt, (h12 = [log(1.3), log(0.6), -0.4],))
+    
+    # Use retrieved params for expected value calculation
+    pars_wei_tt = get_log_scale_params(model_wei_tt.parameters)[1]
+    shape = exp(pars_wei_tt[1])
+    scale = exp(pars_wei_tt[2])
+    β_w = pars_wei_tt[3]
     lp_w = β_w * subjdat_row.x
     t_w = 1.25
     lb_w, ub_w = 0.3, 1.6
     haz_w = scale * shape * t_w^(shape - 1) * exp(lp_w)
     cum_w = scale * exp(lp_w) * (ub_w^shape - lb_w^shape)
-    @test MultistateModels.call_haz(t_w, model_wei_tt.parameters[1], subjdat_row, model_wei_tt.hazards[1]; give_log = false, apply_transform = true) ≈ haz_w
-    @test MultistateModels.call_cumulhaz(lb_w, ub_w, model_wei_tt.parameters[1], subjdat_row, model_wei_tt.hazards[1]; give_log = false, apply_transform = true) ≈ cum_w
-    @test MultistateModels.call_haz(t_w, model_wei_tt.parameters[1], subjdat_row, model_wei_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(haz_w)
-    @test MultistateModels.call_cumulhaz(lb_w, ub_w, model_wei_tt.parameters[1], subjdat_row, model_wei_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(cum_w)
+    @test MultistateModels.call_haz(t_w, pars_wei_tt, subjdat_row, model_wei_tt.hazards[1]; give_log = false, apply_transform = true) ≈ haz_w
+    @test MultistateModels.call_cumulhaz(lb_w, ub_w, pars_wei_tt, subjdat_row, model_wei_tt.hazards[1]; give_log = false, apply_transform = true) ≈ cum_w
+    @test MultistateModels.call_haz(t_w, pars_wei_tt, subjdat_row, model_wei_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(haz_w)
+    @test MultistateModels.call_cumulhaz(lb_w, ub_w, pars_wei_tt, subjdat_row, model_wei_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(cum_w)
 
     # Gompertz PH hazard with Tang toggle
     h_gom_tt = Hazard(@formula(0 ~ x), "gom", 1, 2; time_transform = true)
     model_gom_tt = multistatemodel(h_gom_tt; data = dat)
-    log_shape_g = log(0.5)
-    log_scale_g = log(0.8)
-    β_g = 0.25
-    MultistateModels.set_parameters!(model_gom_tt, (h12 = [log_shape_g, log_scale_g, β_g],))
-    shape_g = exp(log_shape_g)
-    scale_g = exp(log_scale_g)
+    MultistateModels.set_parameters!(model_gom_tt, (h12 = [log(0.5), log(0.8), 0.25],))
+    
+    # Use retrieved params for expected value calculation
+    pars_gom_tt = get_log_scale_params(model_gom_tt.parameters)[1]
+    shape_g = exp(pars_gom_tt[1])
+    scale_g = exp(pars_gom_tt[2])
+    β_g = pars_gom_tt[3]
     lp_g = β_g * subjdat_row.x
     t_g = 0.9
     lb_g, ub_g = 0.1, 1.4
     haz_g = scale_g * shape_g * exp(shape_g * t_g + lp_g)
     cum_g = scale_g * exp(lp_g) * (exp(shape_g * ub_g) - exp(shape_g * lb_g))
-    @test MultistateModels.call_haz(t_g, model_gom_tt.parameters[1], subjdat_row, model_gom_tt.hazards[1]; give_log = false, apply_transform = true) ≈ haz_g
-    @test MultistateModels.call_cumulhaz(lb_g, ub_g, model_gom_tt.parameters[1], subjdat_row, model_gom_tt.hazards[1]; give_log = false, apply_transform = true) ≈ cum_g
-    @test MultistateModels.call_haz(t_g, model_gom_tt.parameters[1], subjdat_row, model_gom_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(haz_g)
-    @test MultistateModels.call_cumulhaz(lb_g, ub_g, model_gom_tt.parameters[1], subjdat_row, model_gom_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(cum_g)
+    @test MultistateModels.call_haz(t_g, pars_gom_tt, subjdat_row, model_gom_tt.hazards[1]; give_log = false, apply_transform = true) ≈ haz_g
+    @test MultistateModels.call_cumulhaz(lb_g, ub_g, pars_gom_tt, subjdat_row, model_gom_tt.hazards[1]; give_log = false, apply_transform = true) ≈ cum_g
+    @test MultistateModels.call_haz(t_g, pars_gom_tt, subjdat_row, model_gom_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(haz_g)
+    @test MultistateModels.call_cumulhaz(lb_g, ub_g, pars_gom_tt, subjdat_row, model_gom_tt.hazards[1]; give_log = true, apply_transform = true) ≈ log(cum_g)
 
     # Cache ownership: shared-baseline table per origin state/family
     h_cache = Hazard(@formula(0 ~ x), "exp", 1, 2; time_transform = true)
     model_cache = multistatemodel(h_cache; data = dat)
     MultistateModels.set_parameters!(model_cache, (h12 = [log(0.5), 0.3],))
-    pars_cache = copy(model_cache.parameters[1])
+    pars_cache = copy(get_log_scale_params(model_cache.parameters)[1])
     t_cache = 0.7
     lb_cache, ub_cache = 0.1, 0.9
     lin_type = eltype(pars_cache)
@@ -475,7 +534,7 @@ end
     _ = MultistateModels.call_haz(t_cache, pars_cache, subjdat_row, model_cache.hazards[hazard_slot]; give_log = false, apply_transform = true, cache_context = ctx, hazard_slot = hazard_slot)
     @test length(cache.hazard_values) == 2
 
-    pars_cum = copy(model_cache.parameters[1])
+    pars_cum = copy(get_log_scale_params(model_cache.parameters)[1])
     _ = MultistateModels.call_cumulhaz(lb_cache, ub_cache, pars_cum, subjdat_row, model_cache.hazards[hazard_slot]; give_log = false, apply_transform = true, cache_context = ctx, hazard_slot = hazard_slot)
     @test length(cache.cumulhaz_values) == 1
     _ = MultistateModels.call_cumulhaz(lb_cache, ub_cache, pars_cum, subjdat_row, model_cache.hazards[hazard_slot]; give_log = false, apply_transform = true, cache_context = ctx, hazard_slot = hazard_slot)
@@ -508,8 +567,8 @@ end
     ctx_shared = MultistateModels.TimeTransformContext(Float64, Float64, length(model_shared.hazards))
     row12 = dat_shared[1, :]
     row13 = dat_shared[2, :]
-    pars12 = copy(model_shared.parameters[1])
-    pars13 = copy(model_shared.parameters[2])
+    pars12 = copy(get_log_scale_params(model_shared.parameters)[1])
+    pars13 = copy(get_log_scale_params(model_shared.parameters)[2])
     t_shared = 0.6
 
     @test ctx_shared.caches[1] === nothing
@@ -530,16 +589,19 @@ end
 
     # Helper exposes context construction to callers
     subj_df = DataFrame(sojourn = Float64[0.2])
-    ctx_auto = MultistateModels.maybe_time_transform_context(model_shared.parameters, subj_df, model_shared.hazards)
+    params_shared = get_log_scale_params(model_shared.parameters)
+    ctx_auto = MultistateModels.maybe_time_transform_context(params_shared, subj_df, model_shared.hazards)
     @test ctx_auto isa MultistateModels.TimeTransformContext
     plain_hazard = Hazard(@formula(0 ~ x), "exp", 1, 2)
     plain_model = multistatemodel(plain_hazard; data = dat)
-    ctx_none = MultistateModels.maybe_time_transform_context(plain_model.parameters, subj_df, plain_model.hazards)
+    params_plain = get_log_scale_params(plain_model.parameters)
+    ctx_none = MultistateModels.maybe_time_transform_context(params_plain, subj_df, plain_model.hazards)
     @test ctx_none === nothing
 
-    # Spline hazards should reject Tang transforms until supported
+    # Spline hazards now support time_transform
     spline_spec = Hazard(@formula(0 ~ 1), "sp", 1, 2; time_transform = true, boundaryknots = [0.0, 1.0], degree = 1, natural_spline = false)
-    @test_throws ErrorException multistatemodel(spline_spec; data = dat)
+    spline_model = multistatemodel(spline_spec; data = dat)
+    @test spline_model.hazards[1].metadata.time_transform == true
 end
 
 @testset "time_transform parity" begin
@@ -567,16 +629,16 @@ end
     interval = (0.1, 0.9)
 
     for row in eachrow(dat)
-        plain_haz = MultistateModels.call_haz(eval_times[1], model_plain_exp.parameters[1], row, model_plain_exp.hazards[1]; give_log = false)
-        tt_haz = MultistateModels.call_haz(eval_times[1], model_tt_exp.parameters[1], row, model_tt_exp.hazards[1]; give_log = false, apply_transform = true)
+        plain_haz = MultistateModels.call_haz(eval_times[1], get_log_scale_params(model_plain_exp.parameters)[1], row, model_plain_exp.hazards[1]; give_log = false)
+        tt_haz = MultistateModels.call_haz(eval_times[1], get_log_scale_params(model_tt_exp.parameters)[1], row, model_tt_exp.hazards[1]; give_log = false, apply_transform = true)
         @test tt_haz ≈ plain_haz
 
-        plain_log_haz = MultistateModels.call_haz(eval_times[2], model_plain_exp.parameters[1], row, model_plain_exp.hazards[1]; give_log = true)
-        tt_log_haz = MultistateModels.call_haz(eval_times[2], model_tt_exp.parameters[1], row, model_tt_exp.hazards[1]; give_log = true, apply_transform = true)
+        plain_log_haz = MultistateModels.call_haz(eval_times[2], get_log_scale_params(model_plain_exp.parameters)[1], row, model_plain_exp.hazards[1]; give_log = true)
+        tt_log_haz = MultistateModels.call_haz(eval_times[2], get_log_scale_params(model_tt_exp.parameters)[1], row, model_tt_exp.hazards[1]; give_log = true, apply_transform = true)
         @test tt_log_haz ≈ plain_log_haz
 
-        plain_cum = MultistateModels.call_cumulhaz(interval[1], interval[2], model_plain_exp.parameters[1], row, model_plain_exp.hazards[1]; give_log = false)
-        tt_cum = MultistateModels.call_cumulhaz(interval[1], interval[2], model_tt_exp.parameters[1], row, model_tt_exp.hazards[1]; give_log = false, apply_transform = true)
+        plain_cum = MultistateModels.call_cumulhaz(interval[1], interval[2], get_log_scale_params(model_plain_exp.parameters)[1], row, model_plain_exp.hazards[1]; give_log = false)
+        tt_cum = MultistateModels.call_cumulhaz(interval[1], interval[2], get_log_scale_params(model_tt_exp.parameters)[1], row, model_tt_exp.hazards[1]; give_log = false, apply_transform = true)
         @test tt_cum ≈ plain_cum
 
         plain_surv = MultistateModels.survprob(interval[1], interval[2], model_plain_exp.parameters, row, model_plain_exp.totalhazards[1], model_plain_exp.hazards; give_log = false)
@@ -597,12 +659,12 @@ end
     interval_wei = (0.3, 1.2)
 
     for row in eachrow(dat)
-        plain_haz = MultistateModels.call_haz(t_eval, model_plain_wei.parameters[1], row, model_plain_wei.hazards[1]; give_log = false)
-        tt_haz = MultistateModels.call_haz(t_eval, model_tt_wei.parameters[1], row, model_tt_wei.hazards[1]; give_log = false, apply_transform = true)
+        plain_haz = MultistateModels.call_haz(t_eval, get_log_scale_params(model_plain_wei.parameters)[1], row, model_plain_wei.hazards[1]; give_log = false)
+        tt_haz = MultistateModels.call_haz(t_eval, get_log_scale_params(model_tt_wei.parameters)[1], row, model_tt_wei.hazards[1]; give_log = false, apply_transform = true)
         @test tt_haz ≈ plain_haz
 
-        plain_cum = MultistateModels.call_cumulhaz(interval_wei[1], interval_wei[2], model_plain_wei.parameters[1], row, model_plain_wei.hazards[1]; give_log = false)
-        tt_cum = MultistateModels.call_cumulhaz(interval_wei[1], interval_wei[2], model_tt_wei.parameters[1], row, model_tt_wei.hazards[1]; give_log = false, apply_transform = true)
+        plain_cum = MultistateModels.call_cumulhaz(interval_wei[1], interval_wei[2], get_log_scale_params(model_plain_wei.parameters)[1], row, model_plain_wei.hazards[1]; give_log = false)
+        tt_cum = MultistateModels.call_cumulhaz(interval_wei[1], interval_wei[2], get_log_scale_params(model_tt_wei.parameters)[1], row, model_tt_wei.hazards[1]; give_log = false, apply_transform = true)
         @test tt_cum ≈ plain_cum
 
         plain_surv = MultistateModels.survprob(interval_wei[1], interval_wei[2], model_plain_wei.parameters, row, model_plain_wei.totalhazards[1], model_plain_wei.hazards; give_log = false)
@@ -623,16 +685,16 @@ end
     interval_g = (0.15, 0.95)
 
     for row in eachrow(dat)
-        plain_haz = MultistateModels.call_haz(t_eval_g, model_plain_gom.parameters[1], row, model_plain_gom.hazards[1]; give_log = false)
-        tt_haz = MultistateModels.call_haz(t_eval_g, model_tt_gom.parameters[1], row, model_tt_gom.hazards[1]; give_log = false, apply_transform = true)
+        plain_haz = MultistateModels.call_haz(t_eval_g, get_log_scale_params(model_plain_gom.parameters)[1], row, model_plain_gom.hazards[1]; give_log = false)
+        tt_haz = MultistateModels.call_haz(t_eval_g, get_log_scale_params(model_tt_gom.parameters)[1], row, model_tt_gom.hazards[1]; give_log = false, apply_transform = true)
         @test tt_haz ≈ plain_haz
 
-        plain_log_haz = MultistateModels.call_haz(t_eval_g, model_plain_gom.parameters[1], row, model_plain_gom.hazards[1]; give_log = true)
-        tt_log_haz = MultistateModels.call_haz(t_eval_g, model_tt_gom.parameters[1], row, model_tt_gom.hazards[1]; give_log = true, apply_transform = true)
+        plain_log_haz = MultistateModels.call_haz(t_eval_g, get_log_scale_params(model_plain_gom.parameters)[1], row, model_plain_gom.hazards[1]; give_log = true)
+        tt_log_haz = MultistateModels.call_haz(t_eval_g, get_log_scale_params(model_tt_gom.parameters)[1], row, model_tt_gom.hazards[1]; give_log = true, apply_transform = true)
         @test tt_log_haz ≈ plain_log_haz
 
-        plain_cum = MultistateModels.call_cumulhaz(interval_g[1], interval_g[2], model_plain_gom.parameters[1], row, model_plain_gom.hazards[1]; give_log = false)
-        tt_cum = MultistateModels.call_cumulhaz(interval_g[1], interval_g[2], model_tt_gom.parameters[1], row, model_tt_gom.hazards[1]; give_log = false, apply_transform = true)
+        plain_cum = MultistateModels.call_cumulhaz(interval_g[1], interval_g[2], get_log_scale_params(model_plain_gom.parameters)[1], row, model_plain_gom.hazards[1]; give_log = false)
+        tt_cum = MultistateModels.call_cumulhaz(interval_g[1], interval_g[2], get_log_scale_params(model_tt_gom.parameters)[1], row, model_tt_gom.hazards[1]; give_log = false, apply_transform = true)
         @test tt_cum ≈ plain_cum
 
         plain_surv = MultistateModels.survprob(interval_g[1], interval_g[2], model_plain_gom.parameters, row, model_plain_gom.totalhazards[1], model_plain_gom.hazards; give_log = false)

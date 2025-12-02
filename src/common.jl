@@ -248,10 +248,14 @@ struct SemiMarkovHazard <: _SemiMarkovHazard
 end
 
 """
-    SplineHazard
+    RuntimeSplineHazard
 
-Consolidated hazard type for spline-based hazards.
+Internal hazard type for spline-based hazards (runtime evaluation).
 Uses B-spline basis functions for flexible baseline hazard.
+
+This is the internal/runtime version - users specify hazards using
+`SplineHazard <: HazardFunction` which is converted to this type
+during model construction.
 
 # Fields
 - `hazname::Symbol`: Name identifier (e.g., :h12)
@@ -272,7 +276,7 @@ Uses B-spline basis functions for flexible baseline hazard.
 - `metadata::HazardMetadata`: Tang/linpred metadata
 - `shared_baseline_key::Union{Nothing,SharedBaselineKey}`
 """
-struct SplineHazard <: _SplineHazard
+struct RuntimeSplineHazard <: _SplineHazard
     hazname::Symbol
     statefrom::Int64
     stateto::Int64
@@ -432,11 +436,14 @@ struct _TotalHazardTransient <: _TotalHazard
 end
 
 """
-    MarkovSurrogate(hazards::Vector{_MarkovHazard}, parameters::VectorOfVectors)
+    MarkovSurrogate(hazards::Vector{_MarkovHazard}, parameters::NamedTuple)
+
+Markov surrogate for importance sampling proposals in MCEM.
+Uses ParameterHandling.jl for parameter management.
 """
 struct MarkovSurrogate
     hazards::Vector{_MarkovHazard}
-    parameters::VectorOfVectors
+    parameters::NamedTuple
 end
 
 """
@@ -453,23 +460,23 @@ struct SurrogateControl
 end
 
 """
-    MultistateModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{Union{_Exponential, _ExponentialPH}}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+    MultistateModel
 
 Struct that fully specifies a multistate process for simulation or inference, used in the case when sample paths are fully observed. 
 
-# New ParameterHandling fields (Phase 1):
-- `parameters_ph`: NamedTuple containing:
+# Fields
+- `data::DataFrame`: Long-format dataset with observations
+- `parameters::NamedTuple`: ParameterHandling structure containing:
   - `flat::Vector{Float64}` - flat parameter vector for optimizer
   - `transformed` - ParameterHandling transformed parameters (with positive() etc.)
   - `natural::NamedTuple` - natural scale parameters by hazard name
   - `unflatten::Function` - function to unflatten flat vector
-
-# Phase 3 Change: Now mutable to allow `parameters_ph` updates
+- `hazards::Vector{_Hazard}`: Cause-specific hazard functions
+- Plus other model specification fields...
 """
 mutable struct MultistateModel <: MultistateProcess
     data::DataFrame
-    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
-    parameters_ph::NamedTuple  # NEW: Nested ParameterHandling structure
+    parameters::NamedTuple  # Sole parameter storage via ParameterHandling.jl
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -479,21 +486,19 @@ mutable struct MultistateModel <: MultistateProcess
     SubjectWeights::Vector{Float64}
     ObservationWeights::Union{Nothing, Vector{Float64}}
     CensoringPatterns::Matrix{Float64}
-    markovsurrogate::MarkovSurrogate
+    markovsurrogate::Union{Nothing, MarkovSurrogate}
     modelcall::NamedTuple
 end
 
 """
-    MultistateMarkovModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{Union{_Exponential, _ExponentialPH}}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+    MultistateMarkovModel
 
 Struct that fully specifies a multistate Markov process with no censored state, used with panel data.
-
-# Phase 3 Change: Now mutable to allow `parameters_ph` updates
+Parameters are managed via ParameterHandling.jl through `parameters`.
 """
 mutable struct MultistateMarkovModel <: MultistateMarkovProcess
     data::DataFrame
-    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
-    parameters_ph::NamedTuple  # Nested: (flat, transformed, natural, unflatten)
+    parameters::NamedTuple  # Sole parameter storage: (flat, transformed, natural, unflatten)
     hazards::Vector{_MarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -503,21 +508,19 @@ mutable struct MultistateMarkovModel <: MultistateMarkovProcess
     SubjectWeights::Vector{Float64}
     ObservationWeights::Union{Nothing, Vector{Float64}}
     CensoringPatterns::Matrix{Float64}
-    markovsurrogate::MarkovSurrogate
+    markovsurrogate::Union{Nothing, MarkovSurrogate}
     modelcall::NamedTuple
 end
 
 """
-MultistateMarkovModelCensored(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+    MultistateMarkovModelCensored
 
 Struct that fully specifies a multistate Markov process with some censored states, used with panel data.
-
-# Phase 3 Change: Now mutable to allow `parameters_ph` updates
+Parameters are managed via ParameterHandling.jl through `parameters`.
 """
 mutable struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     data::DataFrame
-    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
-    parameters_ph::NamedTuple  # Nested: (flat, transformed, natural, unflatten)
+    parameters::NamedTuple  # Sole parameter storage: (flat, transformed, natural, unflatten)
     hazards::Vector{_MarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -527,21 +530,19 @@ mutable struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     SubjectWeights::Vector{Float64}
     ObservationWeights::Union{Nothing, Vector{Float64}}
     CensoringPatterns::Matrix{Float64}
-    markovsurrogate::MarkovSurrogate
+    markovsurrogate::Union{Nothing, MarkovSurrogate}
     modelcall::NamedTuple
 end
 
 """
-MultistateSemiMarkovModel(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+    MultistateSemiMarkovModel
 
 Struct that fully specifies a multistate semi-Markov process, used with exact death times.
-
-# Phase 3 Change: Now mutable to allow `parameters_ph` updates
+Parameters are managed via ParameterHandling.jl through `parameters`.
 """
 mutable struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
     data::DataFrame
-    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
-    parameters_ph::NamedTuple  # Nested: (flat, transformed, natural, unflatten)
+    parameters::NamedTuple  # Sole parameter storage: (flat, transformed, natural, unflatten)
     hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -551,21 +552,19 @@ mutable struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
     SubjectWeights::Vector{Float64}
     ObservationWeights::Union{Nothing, Vector{Float64}}
     CensoringPatterns::Matrix{Float64}
-    markovsurrogate::MarkovSurrogate
+    markovsurrogate::Union{Nothing, MarkovSurrogate}
     modelcall::NamedTuple
 end
 
 """
-MultistateSemiMarkovModelCensored(data::DataFrame, parameters::VectorOfVectors,hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+    MultistateSemiMarkovModelCensored
 
 Struct that fully specifies a multistate semi-Markov process with some censored states, used with panel data.
-
-# Phase 3 Change: Now mutable to allow `parameters_ph` updates
+Parameters are managed via ParameterHandling.jl through `parameters`.
 """
 mutable struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     data::DataFrame
-    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
-    parameters_ph::NamedTuple  # Nested: (flat, transformed, natural, unflatten)
+    parameters::NamedTuple  # Sole parameter storage: (flat, transformed, natural, unflatten)
     hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -575,21 +574,19 @@ mutable struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     SubjectWeights::Vector{Float64}
     ObservationWeights::Union{Nothing, Vector{Float64}}
     CensoringPatterns::Matrix{Float64}
-    markovsurrogate::MarkovSurrogate
+    markovsurrogate::Union{Nothing, MarkovSurrogate}
     modelcall::NamedTuple
 end
 
 """
-    MultistateModelFitted(data::DataFrame, parameters::VectorOfVectors, gradient::Vector{Float64}, hazards::Vector{_Hazard}, totalhazards::Vector{_TotalHazard},tmat::Matrix{Int64}, hazkeys::Dict{Symbol, Int64}, subjectindices::Vector{Vector{Int64}})
+    MultistateModelFitted
 
 Struct that fully specifies a fitted multistate model.
-
-# Phase 3 Change: Now mutable (though less critical for fitted models)
+Parameters are managed via ParameterHandling.jl through `parameters`.
 """
 mutable struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
-    parameters::VectorOfVectors  # Legacy - keep for Phase 1 compatibility
-    parameters_ph::NamedTuple  # NEW Phase 3: (flat, transformed, natural, unflatten)
+    parameters::NamedTuple  # Sole parameter storage: (flat, transformed, natural, unflatten)
     loglik::NamedTuple
     vcov::Union{Nothing,Matrix{Float64}}
     ij_vcov::Union{Nothing,Matrix{Float64}}  # Infinitesimal jackknife variance-covariance
@@ -604,7 +601,7 @@ mutable struct MultistateModelFitted <: MultistateProcess
     SubjectWeights::Vector{Float64}
     ObservationWeights::Union{Nothing, Vector{Float64}}
     CensoringPatterns::Matrix{Float64}
-    markovsurrogate::MarkovSurrogate
+    markovsurrogate::Union{Nothing, MarkovSurrogate}
     ConvergenceRecords::Union{Nothing, NamedTuple, Optim.OptimizationResults, Optim.MultivariateOptimizationResults}
     ProposedPaths::Union{Nothing, NamedTuple}
     modelcall::NamedTuple

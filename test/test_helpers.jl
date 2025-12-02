@@ -9,36 +9,45 @@ using .TestFixtures
 
 # --- Parameter setters ----------------------------------------------------------
 @testset "test_set_parameters!" begin
-
+    # Helper to get log-scale params as nested structure
+    get_pars = MultistateModels.get_log_scale_params
+    
+    # Get number of parameters per hazard from natural scale
+    n_pars = [length(v) for v in values(msm_expwei.parameters.natural)]
+    
+    # Note: set_parameters! goes through safe_positive (clamping) and exp/log round-trip,
+    # which introduces small numerical differences (~1e-8). Use rtol=1e-6 for robustness.
+    rtol = 1e-6
+    
     # vector
-    vec_vals = [randn(length(msm_expwei.parameters[1])),
-                randn(length(msm_expwei.parameters[2])),
-                randn(length(msm_expwei.parameters[3])),
-                randn(length(msm_expwei.parameters[4]))]
+    vec_vals = [randn(n_pars[1]),
+                randn(n_pars[2]),
+                randn(n_pars[3]),
+                randn(n_pars[4])]
     set_parameters!(msm_expwei, vec_vals)
 
-    @test msm_expwei.parameters[1] == vec_vals[1]
-    @test all(msm_expwei.parameters[2] .== vec_vals[2])
-    @test all(msm_expwei.parameters[3] .== vec_vals[3])
-    @test all(msm_expwei.parameters[4] .== vec_vals[4])
+    @test isapprox(get_pars(msm_expwei.parameters)[1], vec_vals[1]; rtol=rtol)
+    @test all(isapprox.(get_pars(msm_expwei.parameters)[2], vec_vals[2]; rtol=rtol))
+    @test all(isapprox.(get_pars(msm_expwei.parameters)[3], vec_vals[3]; rtol=rtol))
+    @test all(isapprox.(get_pars(msm_expwei.parameters)[4], vec_vals[4]; rtol=rtol))
     
     # unnamed tuple
     unnamed_tuple = (randn(1), randn(4), randn(2), randn(3))
     set_parameters!(msm_expwei, unnamed_tuple)
 
-    @test msm_expwei.parameters[1] == unnamed_tuple[1]
-    @test all(msm_expwei.parameters[2] .== unnamed_tuple[2])
-    @test all(msm_expwei.parameters[3] .== unnamed_tuple[3])
-    @test all(msm_expwei.parameters[4] .== unnamed_tuple[4])
+    @test isapprox(get_pars(msm_expwei.parameters)[1], unnamed_tuple[1]; rtol=rtol)
+    @test all(isapprox.(get_pars(msm_expwei.parameters)[2], unnamed_tuple[2]; rtol=rtol))
+    @test all(isapprox.(get_pars(msm_expwei.parameters)[3], unnamed_tuple[3]; rtol=rtol))
+    @test all(isapprox.(get_pars(msm_expwei.parameters)[4], unnamed_tuple[4]; rtol=rtol))
 
     # named tuple
     named_tuple = (h12 = randn(1), h13 = randn(4), h21 = randn(2), h23 = randn(3))
     set_parameters!(msm_expwei, named_tuple)
 
-    @test msm_expwei.parameters[1] == named_tuple[1]
-    @test all(msm_expwei.parameters[2] .== named_tuple[2])
-    @test all(msm_expwei.parameters[3] .== named_tuple[3])
-    @test all(msm_expwei.parameters[4] .== named_tuple[4])
+    @test isapprox(get_pars(msm_expwei.parameters)[1], named_tuple[1]; rtol=rtol)
+    @test all(isapprox.(get_pars(msm_expwei.parameters)[2], named_tuple[2]; rtol=rtol))
+    @test all(isapprox.(get_pars(msm_expwei.parameters)[3], named_tuple[3]; rtol=rtol))
+    @test all(isapprox.(get_pars(msm_expwei.parameters)[4], named_tuple[4]; rtol=rtol))
 end
 
 # --- Subject index construction -------------------------------------------------
@@ -77,7 +86,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
         ll_bat = loglik_exact(pars, exact_data; neg=false)
@@ -105,7 +114,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
         ll_bat = loglik_exact(pars, exact_data; neg=false)
@@ -133,7 +142,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
         ll_bat = loglik_exact(pars, exact_data; neg=false)
@@ -159,7 +168,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_neg = loglik_exact(pars, exact_data; neg=true)
         ll_pos = loglik_exact(pars, exact_data; neg=false)
@@ -196,9 +205,26 @@ end
         end
     end
     
-    # Test 2: Spline hazards are separable (skipped - splines not yet implemented)
+    # Test 2: Spline hazards are separable
     @testset "spline hazards are separable" begin
-        @test_skip "Spline hazards not yet implemented - when available, test that is_separable returns true"
+        h_sp = Hazard(@formula(0 ~ 1), "sp", 1, 2; 
+                      degree=3, knots=[0.25, 0.5, 0.75])
+        
+        dat = DataFrame(
+            id = [1, 1],
+            tstart = [0.0, 0.5],
+            tstop = [0.5, 1.0],
+            statefrom = [1, 1],
+            stateto = [1, 2],
+            obstype = [1, 1]
+        )
+        
+        model = multistatemodel(h_sp; data = dat)
+        
+        # Spline hazards should be separable
+        for hazard in model.hazards
+            @test is_separable(hazard) == true
+        end
     end
 end
 
@@ -269,7 +295,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         # Both methods should produce identical results
         ll_bat = loglik_exact(pars, exact_data; neg=false)
@@ -305,7 +331,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         cached = cache_path_data(paths, model)
-        pars = VectorOfVectors(flatview(model.parameters), model.parameters.elem_ptr)
+        pars = VectorOfVectors(model.parameters.flat, get_elem_ptr(model.parameters))
         
         # Stack intervals for hazard 1 (h12)
         stacked = stack_intervals_for_hazard(
@@ -360,7 +386,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         cached = cache_path_data(paths, model)
-        pars = VectorOfVectors(flatview(model.parameters), model.parameters.elem_ptr)
+        pars = VectorOfVectors(model.parameters.flat, get_elem_ptr(model.parameters))
         
         stacked = stack_intervals_for_hazard(
             1, cached, model.hazards, model.totalhazards, model.tmat; pars=pars)
@@ -390,7 +416,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         cached = cache_path_data(paths, model)
-        pars = VectorOfVectors(flatview(model.parameters), model.parameters.elem_ptr)
+        pars = VectorOfVectors(model.parameters.flat, get_elem_ptr(model.parameters))
         
         # h13 has intervals from state 1 (survival contribution)
         stacked = stack_intervals_for_hazard(
@@ -420,7 +446,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         cached = cache_path_data(paths, model)
-        pars = VectorOfVectors(flatview(model.parameters), model.parameters.elem_ptr)
+        pars = VectorOfVectors(model.parameters.flat, get_elem_ptr(model.parameters))
         
         stacked = stack_intervals_for_hazard(
             1, cached, model.hazards, model.totalhazards, model.tmat; pars=pars)
@@ -473,7 +499,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
         ll_bat = loglik_exact(pars, exact_data; neg=false)
@@ -501,7 +527,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
         ll_bat = loglik_exact(pars, exact_data; neg=false)
@@ -536,7 +562,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
         ll_bat = loglik_exact(pars, exact_data; neg=false)
@@ -564,7 +590,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_seq = loglik_exact(pars, exact_data; neg=false)
         ll_bat = loglik_exact(pars, exact_data; neg=false)
@@ -598,7 +624,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_orig = loglik_exact(pars, exact_data; neg=false)
         ll_fused = loglik_exact(pars, exact_data; neg=false)
@@ -628,7 +654,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_orig = loglik_exact(pars, exact_data; neg=false)
         ll_fused = loglik_exact(pars, exact_data; neg=false)
@@ -656,7 +682,7 @@ end
         
         paths_tvc = MultistateModels.extract_paths(model_tvc)
         exact_data_tvc = ExactData(model_tvc, paths_tvc)
-        pars_tvc = flatview(model_tvc.parameters)
+        pars_tvc = model_tvc.parameters.flat
         
         ll_orig_tvc = loglik_exact(pars_tvc, exact_data_tvc; neg=false)
         ll_fused_tvc = loglik_exact(pars_tvc, exact_data_tvc; neg=false)
@@ -684,7 +710,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         grad_orig = ForwardDiff.gradient(p -> loglik_exact(p, exact_data; neg=false), pars)
         grad_fused = ForwardDiff.gradient(p -> loglik_exact(p, exact_data; neg=false), pars)
@@ -712,7 +738,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         hess_orig = ForwardDiff.hessian(p -> loglik_exact(p, exact_data; neg=false), pars)
         hess_fused = ForwardDiff.hessian(p -> loglik_exact(p, exact_data; neg=false), pars)
@@ -745,7 +771,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_orig = loglik_exact(pars, exact_data; neg=false)
         ll_fused = loglik_exact(pars, exact_data; neg=false)
@@ -772,7 +798,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll_subj_orig = loglik_exact(pars, exact_data; neg=false, return_ll_subj=true)
         ll_subj_fused = loglik_exact(pars, exact_data; neg=false, return_ll_subj=true)
@@ -830,7 +856,7 @@ end
         # Create SMPanelData
         smpanel = SMPanelData(model, nested_paths, importance_weights)
         
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         # Initialize log-likelihood matrices
         logliks_seq = [zeros(n_paths_per_subject) for _ in 1:n_subjects]
@@ -876,7 +902,7 @@ end
         importance_weights = [ones(n_paths_per_subject) for _ in 1:n_subjects]
         
         smpanel = SMPanelData(model, nested_paths, importance_weights)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         logliks_seq = [zeros(n_paths_per_subject) for _ in 1:n_subjects]
         logliks_bat = [zeros(n_paths_per_subject) for _ in 1:n_subjects]
@@ -920,7 +946,7 @@ end
         importance_weights = [ones(n_paths_per_subject) for _ in 1:n_subjects]
         
         smpanel = SMPanelData(model, nested_paths, importance_weights)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         logliks_seq = [zeros(n_paths_per_subject) for _ in 1:n_subjects]
         logliks_bat = [zeros(n_paths_per_subject) for _ in 1:n_subjects]

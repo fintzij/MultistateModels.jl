@@ -465,7 +465,7 @@ function summary(model::MultistateModelFitted; compute_se = true, confidence_lev
         # standard error
         varcov = get_vcov(model)
         se = sqrt.(varcov[diagind(varcov)])
-        se_vv = VectorOfVectors(se, model.parameters.elem_ptr)
+        se_vv = VectorOfVectors(se, get_elem_ptr(model.parameters))
         # critical value
         z_critical = quantile(Normal(0.0, 1.0), 1-(1-confidence_level)/2)
 

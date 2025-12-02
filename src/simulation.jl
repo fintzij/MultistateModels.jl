@@ -480,6 +480,9 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t;
     subj_inds = model.subjectindices[subj]
     subj_dat  = view(model.data, subj_inds, :)
 
+    # Get log-scale parameters for hazard functions
+    params = get_log_scale_params(model.parameters)
+
     # current index
     row = 1 # row in subject's data that is incremented
     ind = subj_inds[row] # index in complete dataset
@@ -489,7 +492,7 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t;
     # current state
     scur = subj_dat.statefrom[1]
 
-    tt_context = time_transform ? maybe_time_transform_context(model.parameters, subj_dat, model.hazards; time_column = :tstop) : nothing
+    tt_context = time_transform ? maybe_time_transform_context(params, subj_dat, model.hazards; time_column = :tstop) : nothing
 
     # tcur and tstop
     tcur    = subj_dat.tstart[1]
@@ -526,7 +529,7 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t;
         interval_incid = (1 - cuminc) * (1 - survprob(
             timeinstate,
             timeinstate + tstop - tcur,
-            model.parameters,
+            params,
             covars_cache,
             model.totalhazards[scur],
             model.hazards;
@@ -543,7 +546,7 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t;
                 surv = survprob(
                     current_timeinstate,
                     current_timeinstate + t,
-                    model.parameters,
+                    params,
                     covars_cache,
                     model.totalhazards[scur],
                     model.hazards;
@@ -568,7 +571,7 @@ function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t;
                 timeinstate,
                 scur,
                 covars_cache,
-                model.parameters,
+                params,
                 model.hazards,
                 model.totalhazards;
                 apply_transform = use_transform,

@@ -1,22 +1,31 @@
 """
-    set_parameters!(model::MultistateProcess, newvalues::Vector{Float64})
+    set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVectors,Vector{Vector{Float64}}})
 
-Set model parameters given a vector of values. Copies `newvalues` to `model.parameters`.
+Set model parameters given a nested vector of values (one vector per hazard).
+Values should be on log scale for positive-constrained parameters (baseline rates, shapes, scales).
 
-# Phase 3 Update: Now automatically updates `model.parameters_ph` to keep both representations synchronized.
+# Arguments
+- `model::MultistateProcess`: The model to update
+- `newvalues`: Nested vector or VectorOfVectors with parameters for each hazard
+
+# Note
+Updates model.parameters with the new values and remakes spline hazards as needed.
 """
 function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVectors,Vector{Vector{Float64}}})
     
+    # Get current natural-scale parameters
+    current_natural = model.parameters.natural
+    n_hazards = length(current_natural)
+    
     # check that we have the right number of parameters
-    if(length(model.parameters) != length(newvalues))
-        error("New values and model parameters are not of the same length.")
+    if length(newvalues) != n_hazards
+        error("New values and model parameters are not of the same length. Expected $n_hazards, got $(length(newvalues)).")
     end
 
-    for i in eachindex(model.parameters)
-        if(length(model.parameters[i]) != length(newvalues[i]))
-            @error "New values for hazard $i and model parameters for that hazard are not of the same length."
+    for i in 1:n_hazards
+        if length(current_natural[i]) != length(newvalues[i])
+            error("New values for hazard $i and model parameters for that hazard are not of the same length.")
         end
-        copyto!(model.parameters[i], newvalues[i])
 
         # remake if a spline hazard
         if isa(model.hazards[i], _SplineHazard) 
@@ -25,8 +34,23 @@ function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVect
         end
     end
     
-    # Phase 3: Update parameters_ph automatically (now that structs are mutable)
-    model.parameters_ph = update_parameters_ph!(model)
+    # Rebuild parameters from the new values
+    # newvalues are on log scale, so exp to get natural scale for safe_positive
+    params_transformed_pairs = [
+        hazname => safe_positive(exp.(Vector{Float64}(newvalues[idx])))
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    
+    params_transformed = NamedTuple(params_transformed_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    params_natural = ParameterHandling.value(params_transformed)
+    
+    model.parameters = (
+        flat = params_flat,
+        transformed = params_transformed,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
     
     return nothing
 end
@@ -35,24 +59,25 @@ end
     set_parameters!(model::MultistateProcess, newvalues::Tuple)
 
 Set model parameters given a tuple of vectors parameterizing transition intensities. 
-Assigns new values to `model.parameters[i]`, where `i` indexes the transition intensities 
-in the order they appear in the model object.
+Values should be on log scale for positive-constrained parameters.
 
-# Phase 3 Update: Now automatically updates `model.parameters_ph` to keep both representations synchronized.
+Assigns new values by hazard index in order.
 """
 function set_parameters!(model::MultistateProcess, newvalues::Tuple)
+    # Get current natural-scale parameters
+    current_natural = model.parameters.natural
+    n_hazards = length(current_natural)
+    
     # check that there is a vector of parameters for each cause-specific hazard
-    if(length(model.parameters) != length(newvalues))
-        error("Number of supplied parameter vectors not equal to number of transition intensities.")
+    if length(newvalues) != n_hazards
+        error("Number of supplied parameter vectors not equal to number of transition intensities. Expected $n_hazards, got $(length(newvalues)).")
     end
 
     for i in eachindex(newvalues)
         # check that we have the right number of parameters
-        if(length(model.parameters[i]) != length(newvalues[i]))
-            @error "New values and parameters for cause-specific hazard $i are not of the same length."
+        if length(current_natural[i]) != length(newvalues[i])
+            error("New values and parameters for cause-specific hazard $i are not of the same length.")
         end
-
-        copyto!(model.parameters[i], newvalues[i])    
         
         # remake if a spline hazard
         if isa(model.hazards[i], _SplineHazard)
@@ -61,8 +86,22 @@ function set_parameters!(model::MultistateProcess, newvalues::Tuple)
         end
     end
     
-    # Phase 3: Update parameters_ph automatically
-    model.parameters_ph = update_parameters_ph!(model)
+    # Rebuild parameters from the new values (log scale input -> natural scale via exp)
+    params_transformed_pairs = [
+        hazname => safe_positive(exp.(Vector{Float64}(collect(newvalues[idx]))))
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    
+    params_transformed = NamedTuple(params_transformed_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    params_natural = ParameterHandling.value(params_transformed)
+    
+    model.parameters = (
+        flat = params_flat,
+        transformed = params_transformed,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
     
     return nothing
 end
@@ -70,27 +109,24 @@ end
 """
     set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
 
-Set model parameters given a tuple of vectors parameterizing transition intensities. 
-Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.
+Set model parameters given a NamedTuple with hazard names as keys.
+Values should be on log scale for positive-constrained parameters.
 
-# Phase 3 Update: Now automatically updates `model.parameters_ph` to keep both representations synchronized.
+Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.
 """
 function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
-    
-    # get keys for the new values
+    # Get current natural-scale parameters
+    current_natural = model.parameters.natural
     value_keys = keys(newvalues)
 
     for k in eachindex(value_keys)
-
         vind = value_keys[k]
         mind = model.hazkeys[vind]
 
         # check length of supplied parameters
-        if length(newvalues[vind]) != length(model.parameters[mind])
+        if length(newvalues[vind]) != length(current_natural[mind])
             error("The new parameter values for $vind are not the expected length.")
         end
-
-        copyto!(model.parameters[mind], newvalues[vind])
 
         # remake if a spline hazard
         if isa(model.hazards[mind], _SplineHazard)
@@ -99,8 +135,33 @@ function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
         end
     end
     
-    # Phase 3: Update parameters_ph automatically
-    model.parameters_ph = update_parameters_ph!(model)
+    # Rebuild full parameters, incorporating partial updates
+    # Start with current values and overlay the new ones
+    new_param_vectors = Vector{Vector{Float64}}(undef, length(model.hazards))
+    for (hazname, idx) in model.hazkeys
+        if hazname in value_keys
+            new_param_vectors[idx] = Vector{Float64}(collect(newvalues[hazname]))
+        else
+            # Keep current values (need to convert from natural back to log scale)
+            new_param_vectors[idx] = log.(Vector{Float64}(collect(current_natural[idx])))
+        end
+    end
+    
+    params_transformed_pairs = [
+        hazname => safe_positive(exp.(new_param_vectors[idx]))
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    
+    params_transformed = NamedTuple(params_transformed_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    params_natural = ParameterHandling.value(params_transformed)
+    
+    model.parameters = (
+        flat = params_flat,
+        transformed = params_transformed,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
     
     return nothing
 end
@@ -109,13 +170,12 @@ end
     set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{Float64})
 
 Set parameters for a single hazard by hazard index.
+Values should be on log scale for positive-constrained parameters.
 
 # Arguments
 - `model::MultistateProcess`: The model to update
 - `h::Int64`: Index of the hazard to update
-- `newvalues::Vector{Float64}`: New parameter values (log scale for baseline/shape/scale, natural for covariates)
-
-# Phase 3: Automatically updates both `parameters` and `parameters_ph` to keep them synchronized.
+- `newvalues::Vector{Float64}`: New parameter values (log scale)
 
 # Example
 ```julia
@@ -127,18 +187,18 @@ set_parameters!(model, 2, [log(2.0), log(1.5), 0.3, -0.2])
 ```
 """
 function set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{Float64})
+    current_natural = model.parameters.natural
+    n_hazards = length(current_natural)
+    
     # Check hazard index
-    if h < 1 || h > length(model.parameters)
-        error("Hazard index $h is out of bounds. Model has $(length(model.parameters)) hazards.")
+    if h < 1 || h > n_hazards
+        error("Hazard index $h is out of bounds. Model has $n_hazards hazards.")
     end
     
     # Check parameter length
-    if length(newvalues) != length(model.parameters[h])
-        error("New values length ($(length(newvalues))) does not match expected length ($(length(model.parameters[h]))) for hazard $h.")
+    if length(newvalues) != length(current_natural[h])
+        error("New values length ($(length(newvalues))) does not match expected length ($(length(current_natural[h]))) for hazard $h.")
     end
-    
-    # Update parameters
-    copyto!(model.parameters[h], newvalues)
     
     # Remake splines if needed
     if isa(model.hazards[h], _SplineHazard)
@@ -146,8 +206,32 @@ function set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{F
         set_riskperiod!(model.hazards[h])
     end
     
-    # Phase 3: Update parameters_ph automatically
-    model.parameters_ph = update_parameters_ph!(model)
+    # Build new parameter vectors (keep current for other hazards)
+    new_param_vectors = Vector{Vector{Float64}}(undef, n_hazards)
+    for idx in 1:n_hazards
+        if idx == h
+            new_param_vectors[idx] = Vector{Float64}(newvalues)
+        else
+            # Keep current values (convert from natural back to log scale)
+            new_param_vectors[idx] = log.(Vector{Float64}(collect(current_natural[idx])))
+        end
+    end
+    
+    params_transformed_pairs = [
+        hazname => safe_positive(exp.(new_param_vectors[idx]))
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    
+    params_transformed = NamedTuple(params_transformed_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    params_natural = ParameterHandling.value(params_transformed)
+    
+    model.parameters = (
+        flat = params_flat,
+        transformed = params_transformed,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
     
     return nothing
 end
@@ -179,35 +263,184 @@ end
 PHASE 2: Parameter Update with ParameterHandling.jl
 =============================================================================# 
 
-"""
-    update_parameters_ph!(model::MultistateProcess)
+# Minimum value for parameters to avoid ParameterHandling.positive() epsilon errors
+# ParameterHandling uses ε = sqrt(eps(Float64)) ≈ 1.49e-8, so we use 1e-7 as floor
+const PARAM_FLOOR = 1e-7
 
-Rebuild the parameters_ph structure from current model.parameters.
-Called internally after parameter updates to keep structures synchronized.
-
-Note: Since NamedTuples are immutable, this creates a NEW parameters_ph structure.
-The model struct field cannot be updated in-place. This will be addressed in Phase 3
-by making model structs mutable or using Ref for parameters_ph.
 """
-function update_parameters_ph!(model::MultistateProcess)
-    # Rebuild parameters_ph from current VectorOfVectors parameters
-    # Note: model.parameters are on log scale, but positive() expects natural scale
-    params_transformed_pairs = [
-        hazname => ParameterHandling.positive(exp.(Vector{Float64}(model.parameters[idx])))
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
-    ]
-    
-    params_transformed = NamedTuple(params_transformed_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    safe_positive(x::AbstractVector{<:Real})
+
+Create a ParameterHandling.positive() transformation with a floor to prevent
+"must be greater than ε" errors. Values below `PARAM_FLOOR` are clamped.
+
+This handles edge cases where optimization produces very small parameter values,
+particularly in phase-type models with sparse data for some transitions.
+"""
+function safe_positive(x::AbstractVector{<:Real})
+    return ParameterHandling.positive(max.(x, PARAM_FLOOR))
+end
+
+"""
+    get_log_scale_params(parameters)
+
+Extract log-scale (unconstrained) parameters from a parameters structure.
+This is the correct scale for passing to hazard functions.
+
+Hazard functions expect log-scale parameters (baseline rates, shapes, scales)
+because they apply exp() internally. The ParameterHandling `natural` field
+contains natural-scale values (after exp transform), which should NOT be passed
+to hazard functions directly.
+
+# Arguments
+- `parameters`: A NamedTuple with `transformed` field containing PositiveArray wrappers
+
+# Returns
+- `Tuple`: Log-scale parameters indexed by hazard number
+
+# Example
+```julia
+# Get log-scale params for hazard evaluation
+log_pars = get_log_scale_params(model.parameters)
+# Pass to likelihood
+ll = loglik(log_pars, path, model.hazards, model)
+```
+"""
+function get_log_scale_params(parameters)
+    # Extract unconstrained (log-scale) values from each PositiveArray in transformed
+    return map(x -> x.unconstrained_value, values(parameters.transformed))
+end
+
+"""
+    get_elem_ptr(parameters)
+
+Get element pointer array for converting flat parameter vector to nested structure.
+Returns a vector where elem_ptr[i]:elem_ptr[i+1]-1 gives indices for hazard i.
+
+This replaces the old VectorOfVectors elem_ptr field with a computation from parameters.
+"""
+function get_elem_ptr(parameters)
+    sizes = [length(v) for v in values(parameters.natural)]
+    return cumsum([1; sizes])
+end
+
+"""
+    nest_params(flat_params::AbstractVector, parameters)
+
+Convert a flat parameter vector to a VectorOfVectors using parameters structure.
+This is the **preferred AD-compatible method** for converting flat optimizer 
+parameters to nested form for hazard evaluation.
+
+# Arguments
+- `flat_params::AbstractVector`: Flat parameter vector (from optimizer or model.parameters.flat)
+- `parameters`: The model's parameters NamedTuple containing `natural` field
+
+# Returns  
+- `VectorOfVectors`: Nested view of parameters indexed by hazard number (1-based)
+
+# AD Compatibility
+This function works with ForwardDiff.Dual numbers because VectorOfVectors creates 
+views without type conversion. Use this instead of `unflatten_to_tuple` for any
+code that will be differentiated.
+
+# Example
+```julia
+# In AD-compatible likelihood computation:
+pars = nest_params(parameters, model.parameters)
+haz_params = pars[1]  # Parameters for first hazard (log scale)
+```
+
+See also: [`get_log_scale_params`](@ref), [`unflatten_to_tuple`](@ref)
+"""
+function nest_params(flat_params::AbstractVector, parameters)
+    elem_ptr = get_elem_ptr(parameters)
+    return VectorOfVectors(flat_params, elem_ptr)
+end
+
+"""
+    set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVector)
+
+Set model parameters from a flat parameter vector (as used by optimizers).
+The flat vector is unflattened using the model's parameters.unflatten function.
+
+# Arguments
+- `model::MultistateProcess`: The model to update  
+- `flat_params::AbstractVector`: Flat parameter vector (same format as parameters.flat)
+
+# Note
+This is the primary method for updating parameters during optimization.
+Spline hazards are remade with the new parameters.
+"""
+function set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVector)
+    # Unflatten to get transformed structure
+    params_transformed = model.parameters.unflatten(flat_params)
     params_natural = ParameterHandling.value(params_transformed)
     
-    # Return new structure (caller needs to update model if needed)
-    return (
-        flat = params_flat,
+    # Get new unflatten function (in case structure changed)
+    new_flat, new_unflatten = ParameterHandling.flatten(params_transformed)
+    
+    # Update spline hazards if needed
+    natural_tuple = values(params_natural)
+    for i in eachindex(model.hazards)
+        if isa(model.hazards[i], _SplineHazard)
+            # Convert back to log scale for spline remake
+            log_params = log.(Vector{Float64}(collect(natural_tuple[i])))
+            remake_splines!(model.hazards[i], log_params)
+            set_riskperiod!(model.hazards[i])
+        end
+    end
+    
+    # Update parameters
+    model.parameters = (
+        flat = Vector{Float64}(flat_params),
         transformed = params_transformed,
         natural = params_natural,
-        unflatten = unflatten_fn
+        unflatten = new_unflatten
     )
+    
+    return nothing
+end
+
+"""
+    unflatten_to_tuple(parameters::AbstractVector, unflatten_fn)
+
+!!! warning "Deprecated"
+    This function is NOT compatible with ForwardDiff automatic differentiation
+    because ParameterHandling's unflatten captures Float64 type constraints at
+    construction time. Use `nest_params(parameters, model.parameters)` instead.
+
+Convert flat parameter vector to indexable Tuple for integer indexing.
+Returns a Tuple where `result[hazard_index]` gives parameters for that hazard.
+
+# Arguments
+- `parameters::AbstractVector`: Flat parameter vector (from optimizer or parameters.flat)
+- `unflatten_fn`: The unflatten function from ParameterHandling.flatten()
+
+# Returns
+- `Tuple`: Parameters indexed by hazard number (1-based), compatible with pars[hazard_idx]
+
+# AD Compatibility Warning
+This function does NOT work with ForwardDiff.Dual numbers. ParameterHandling's
+unflatten function captures type constraints (Float64) at construction, causing
+MethodError when passed Dual numbers during differentiation.
+
+For AD-compatible code, use `nest_params` which creates VectorOfVectors views:
+```julia
+# AD-compatible (RECOMMENDED):
+pars = nest_params(parameters, model.parameters)
+
+# NOT AD-compatible (DEPRECATED):
+pars = unflatten_to_tuple(parameters, model.parameters.unflatten)
+```
+
+See also: [`nest_params`](@ref), [`get_log_scale_params`](@ref)
+"""
+function unflatten_to_tuple(parameters::AbstractVector, unflatten_fn)
+    # Unflatten to get NamedTuple of PositiveArray wrappers
+    transformed_nt = unflatten_fn(parameters)
+    # Extract unconstrained (log-scale) values from each PositiveArray
+    # This does NOT preserve ForwardDiff.Dual types - use nest_params instead!
+    unconstrained = map(x -> x.unconstrained_value, values(transformed_nt))
+    return unconstrained
 end
 
 #=============================================================================
@@ -241,7 +474,7 @@ end
 - [`get_unflatten_fn`](@ref) - Get function to unflatten parameters
 """
 function get_parameters_flat(model::MultistateProcess)
-    return model.parameters_ph.flat
+    return model.parameters.flat
 end
 
 """
@@ -268,7 +501,7 @@ h12_trans = params_trans.h12  # e.g., positive([log(2.0)])
 - [`get_parameters_natural`](@ref) - Get parameters on natural scale
 """
 function get_parameters_transformed(model::MultistateProcess)
-    return model.parameters_ph.transformed
+    return model.parameters.transformed
 end
 
 """
@@ -295,7 +528,7 @@ h12_baseline = params_nat.h12[1]  # e.g., 2.0 (not log(2.0))
 - [`get_parameters_transformed`](@ref) - Get parameters with transformations
 """
 function get_parameters_natural(model::MultistateProcess)
-    return model.parameters_ph.natural
+    return model.parameters.natural
 end
 
 """
@@ -322,7 +555,7 @@ params_natural = ParameterHandling.value(params_transformed)
 - [`get_parameters_transformed`](@ref) - Get transformed parameters
 """
 function get_unflatten_fn(model::MultistateProcess)
-    return model.parameters_ph.unflatten
+    return model.parameters.unflatten
 end
 
 """
@@ -361,14 +594,19 @@ params_trans = get_parameters(model, 1, scale=:transformed)
 - [`set_parameters!`](@ref) - Set parameters for a hazard
 """
 function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natural)
-    # Validate hazard index
-    if h < 1 || h > length(model.parameters)
-        throw(BoundsError(model.parameters, h))
+    # Validate hazard index using parameters structure
+    n_hazards = length(model.parameters.natural)
+    if h < 1 || h > n_hazards
+        throw(BoundsError(1:n_hazards, h))
     end
     
     if scale == :log
-        # Legacy representation - direct from VectorOfVectors
-        return model.parameters[h]
+        # Compute log-scale parameters from parameters.flat
+        # Split flat vector into per-hazard vectors based on natural structure
+        natural_vals = values(model.parameters.natural)
+        block_sizes = [length(v) for v in natural_vals]
+        offset = sum(block_sizes[1:h-1])
+        return model.parameters.flat[(offset+1):(offset+block_sizes[h])]
     elseif scale == :natural || scale == :transformed
         # Find hazard name from index
         hazname = nothing
@@ -384,9 +622,9 @@ function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natur
         
         # Return appropriate representation
         if scale == :natural
-            return model.parameters_ph.natural[hazname]
+            return model.parameters.natural[hazname]
         else  # :transformed
-            return model.parameters_ph.transformed[hazname]
+            return model.parameters.transformed[hazname]
         end
     else
         throw(ArgumentError("scale must be :natural, :transformed, or :log (got :$scale)"))
@@ -462,7 +700,7 @@ function check_data!(data::DataFrame, tmat::Matrix, emat::Matrix{<:Real}; verbos
     statespace = sort(vcat(0, collect(1:size(tmat,1)), emat_ids))
     allstates = sort(vcat(unique(data.stateto), unique(data.statefrom)))
     if !all(allstates .∈ Ref(statespace))
-        @error "Data contains states that are not in the state space."
+        error("Data contains states that are not in the state space.")
     end
 
     # warn if state labels are not contiguous (e.g., 1,2,4 instead of 1,2,3)
@@ -564,8 +802,9 @@ function check_weight_exclusivity(SubjectWeights, ObservationWeights, nsubj::Int
         error("SubjectWeights and ObservationWeights are mutually exclusive. Specify only one.")
     end
     
-    # If both are nothing, set default SubjectWeights to ones
-    if isnothing(SubjectWeights) && isnothing(ObservationWeights)
+    # SubjectWeights must always be a Vector{Float64} for the model struct
+    # Set to ones if not provided (whether ObservationWeights is used or not)
+    if isnothing(SubjectWeights)
         SubjectWeights = ones(Float64, nsubj)
     end
     
@@ -779,17 +1018,21 @@ end
     initialize_surrogate!(model::MultistateSemiMarkovProcess; surrogate_parameters = nothing, surrogate_constraints = nothing, crude_inits = true, verbose = true)
 
 Populate the field for the markov surrogate in semi-Markov models.
+If the model does not have a markovsurrogate, builds and fits one.
+If it exists, updates its parameters with fitted values.
 """
 function initialize_surrogate!(model::MultistateProcess; surrogate_parameters = nothing, surrogate_constraints = nothing, crude_inits = true, verbose = true)
 
     # fit surrogate model
     surrogate_fitted = fit_surrogate(model; surrogate_parameters=surrogate_parameters, surrogate_constraints=surrogate_constraints, crude_inits=crude_inits, verbose=verbose)
 
-    # create the surrogate object
-    surrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters)
-
-    for i in eachindex(model.markovsurrogate.parameters)
-        copyto!(model.markovsurrogate.parameters[i], surrogate_fitted.parameters[i])
+    # Update model's markovsurrogate with fitted surrogate
+    if isnothing(model.markovsurrogate)
+        # Create new surrogate
+        model.markovsurrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters)
+    else
+        # Update existing surrogate parameters
+        copyto!(model.markovsurrogate.parameters.flat, surrogate_fitted.parameters.flat)
     end
 end
 

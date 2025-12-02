@@ -2,7 +2,32 @@
 ### Likelihod functions for sample paths, tpms, etc. ###
 ########################################################
 
-### Exactly observed sample paths ----------------------
+# =============================================================================
+# Parameter Preparation (dispatch-based normalization)
+# =============================================================================
+
+"""
+    prepare_parameters(parameters, model::MultistateProcess)
+
+Normalize parameter representations for downstream hazard calls.
+Uses multiple dispatch to handle different parameter container types.
+
+# Supported types
+- `Tuple`: Nested parameters indexed by hazard number (returned as-is)
+- `NamedTuple`: Parameters keyed by hazard name (converted to values tuple)
+- `VectorOfVectors`: Already nested AD-compatible format (returned as-is)
+- `AbstractVector`: Flat parameter vector (nested via `nest_params`)
+"""
+prepare_parameters(p::Tuple, ::MultistateProcess) = p
+prepare_parameters(p::NamedTuple, ::MultistateProcess) = values(p)
+prepare_parameters(p::ArraysOfArrays.VectorOfVectors, ::MultistateProcess) = p
+prepare_parameters(p::AbstractVector{<:AbstractVector}, ::MultistateProcess) = p
+prepare_parameters(p::AbstractVector, model::MultistateProcess) = nest_params(p, model.parameters)
+
+# =============================================================================
+# Exactly observed sample paths
+# =============================================================================
+
 @inline function _time_transform_enabled(totalhazard::_TotalHazard, hazards::Vector{<:_Hazard})
     if totalhazard isa _TotalHazardAbsorbing
         return false
@@ -42,12 +67,15 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
         # accumulate survival probabilty
         origin_state = subjectdata.statefrom[i]
         use_transform = _time_transform_enabled(totalhazards[origin_state], hazards)
+        
+        # Use @view to avoid DataFrameRow allocation
+        row_data = @view subjectdata[i, :]
 
         ll += survprob(
             subjectdata.sojourn[i],
             subjectdata.sojourn[i] + subjectdata.increment[i],
             pars,
-            subjectdata[i, :],
+            row_data,
             totalhazards[origin_state],
             hazards;
             give_log = true,
@@ -65,7 +93,7 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
             ll += call_haz(
                 subjectdata.sojourn[i] + subjectdata.increment[i],
                 pars[transind],
-                subjectdata[i, :],
+                row_data,
                 hazards[transind];
                 give_log = true,
                 apply_transform = hazards[transind].metadata.time_transform,
@@ -82,13 +110,17 @@ end
     loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess)
 
 Convenience wrapper that evaluates the log-likelihood of a single sample path using the
-current model definition. Accepts either a `VectorOfVectors` or flat parameter vector and
-reuses `loglik_path` for the heavy lifting.
+current model definition. Accepts various parameter container types (see `prepare_parameters`)
+and reuses `loglik_path` for the heavy lifting.
+
+# Arguments
+- `parameters`: Tuple, NamedTuple, VectorOfVectors, or flat AbstractVector
+- `path::SamplePath`: The sample path to evaluate
+- `hazards::Vector{<:_Hazard}`: Hazard functions
+- `model::MultistateProcess`: Model containing unflatten function and structure
 """
 function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess)
-
-    # normalize parameter representation for downstream hazard calls
-    pars = parameters isa VectorOfVectors ? parameters : VectorOfVectors(parameters, model.parameters.elem_ptr)
+    pars = prepare_parameters(parameters, model)
 
     # build a subject-level dataframe aligned with the sample path
     subj_inds = model.subjectindices[path.subj]
@@ -132,7 +164,7 @@ using the closed-form `cumulative_hazard` function, avoiding expensive ODE solve
 All existing hazard types return `true`:
 - `MarkovHazard`: Exponential family with constant baseline → separable
 - `SemiMarkovHazard`: Weibull/Gompertz with known cumulative hazards → separable
-- `SplineHazard`: Spline baseline with known integral → separable
+- `RuntimeSplineHazard`: Spline baseline with known integral → separable
 
 # Future Extensions
 
@@ -163,7 +195,7 @@ is_separable(::_Hazard) = true  # Default: all current hazards are separable
 # Explicit dispatches for documentation clarity
 is_separable(::MarkovHazard) = true
 is_separable(::SemiMarkovHazard) = true
-is_separable(::SplineHazard) = true
+is_separable(::_SplineHazard) = true
 
 # =============================================================================
 # Cached path data for efficient batched likelihood
@@ -654,16 +686,19 @@ See also: [`loglik_exact`](@ref), [`ExactDataAD`](@ref)
 """
 function loglik_AD(parameters, data::ExactDataAD; neg = true)
 
-    # nest parameters
-    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+    # nest parameters using VectorOfVectors (AD-compatible)
+    pars = nest_params(parameters, data.model.parameters)
 
     # snag the hazards
     hazards = data.model.hazards
 
     # remake spline parameters and calculate risk periods
+    # Note: parameters are already on log scale (from optimizer flat vector)
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i])
+            # pars[i] is already log-scale, pass directly
+            log_pars = Vector{Float64}(collect(pars[i]))
+            remake_splines!(hazards[i], log_pars)
             set_riskperiod!(hazards[i])
         end
     end
@@ -686,8 +721,8 @@ Return sum of (negative) log likelihood for a Markov model fit to panel and/or e
 """
 function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj = false)
 
-    # nest the model parameters
-    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+    # nest the model parameters using VectorOfVectors (AD-compatible)
+    pars = nest_params(parameters, data.model.parameters)
 
     # build containers for transition intensity and prob mtcs
     hazmat_book = build_hazmat_book(eltype(parameters), data.model.tmat, data.books[1])
@@ -744,44 +779,57 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
         # check if observation weights are provided
         has_obs_weights = !isnothing(data.model.ObservationWeights)
 
+        # Cache hazard covar_names to avoid repeated lookups
+        hazards = data.model.hazards
+
         # no state is censored
         if all(data.model.data.obstype[subj_inds] .∈ Ref([1,2]))
             
             # subject contribution to the loglikelihood
-            subj_ll = 0.0
+            subj_ll = zero(T)
 
             # add the contribution of each observation
-            for i in subj_inds
+            @inbounds for i in subj_inds
                 # get observation weight (default to 1.0)
                 obs_weight = has_obs_weights ? data.model.ObservationWeights[i] : 1.0
                 
-                # get data row for covariate access
-                row_data = data.model.data[i, :]
+                obstype_i = data.model.data.obstype[i]
                 
-                if data.model.data.obstype[i] == 1 # exact data
+                if obstype_i == 1 # exact data
+                    # Use @view to avoid DataFrameRow allocation
+                    row_data = @view data.model.data[i, :]
+                    
+                    statefrom_i = data.model.data.statefrom[i]
+                    stateto_i = data.model.data.stateto[i]
+                    dt = data.model.data.tstop[i] - data.model.data.tstart[i]
                     
                     obs_ll = survprob(
                         0,
-                        data.model.data.tstop[i] - data.model.data.tstart[i],
+                        dt,
                         pars,
                         row_data,
-                        data.model.totalhazards[data.model.data.statefrom[i]],
-                        data.model.hazards;
+                        data.model.totalhazards[statefrom_i],
+                        hazards;
                         give_log = true)
                                         
-                    if data.model.data.statefrom[i] != data.model.data.stateto[i] # if there is a transition, add log hazard
+                    if statefrom_i != stateto_i # if there is a transition, add log hazard
+                        trans_idx = data.model.tmat[statefrom_i, stateto_i]
                         obs_ll += call_haz(
-                            data.model.data.tstop[i] - data.model.data.tstart[i],
-                            pars[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]],
+                            dt,
+                            pars[trans_idx],
                             row_data,
-                            data.model.hazards[data.model.tmat[data.model.data.statefrom[i], data.model.data.stateto[i]]];
+                            hazards[trans_idx];
                             give_log = true)
                     end
                     
                     subj_ll += obs_ll * obs_weight
 
-                else # panel data
-                    subj_ll += log(tpm_book[data.books[2][i, 1]][data.books[2][i, 2]][data.model.data.statefrom[i], data.model.data.stateto[i]]) * obs_weight
+                else # panel data (obstype == 2)
+                    statefrom_i = data.model.data.statefrom[i]
+                    stateto_i = data.model.data.stateto[i]
+                    book_idx1 = data.books[2][i, 1]
+                    book_idx2 = data.books[2][i, 2]
+                    subj_ll += log(tpm_book[book_idx1][book_idx2][statefrom_i, stateto_i]) * obs_weight
                 end
             end
 
@@ -793,54 +841,59 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
                 @warn "ObservationWeights are not supported for censored observations (obstype > 2). Using unweighted likelihood for subject $subj."
             end
             
+            # Pre-compute transient state transitions (avoid findall allocations in loop)
+            tmat_cache = data.model.tmat
+            transient_dests = [findall(tmat_cache[r,:] .!= 0) for r in 1:S]
+            
             # initialize likelihood matrix
             lmat = zeros(eltype(parameters), S, length(subj_inds) + 1)
-            lmat[data.model.data.statefrom[subj_inds[1]], 1] = 1
+            @inbounds lmat[data.model.data.statefrom[subj_inds[1]], 1] = 1
 
             # initialize counter for likelihood matrix
             ind = 1
 
             # update the vector l
-            for i in subj_inds
+            @inbounds for i in subj_inds
 
                 # increment counter for likelihood matrix
                 ind += 1
+                
+                obstype_i = data.model.data.obstype[i]
+                dt = data.model.data.tstop[i] - data.model.data.tstart[i]
 
                 # compute q, the transition probability matrix
-                if data.model.data.obstype[i] != 1
+                if obstype_i != 1
                     # if panel data, simply grab q from tpm_book
-                    copyto!(q, tpm_book[data.books[2][i, 1]][data.books[2][i, 2]])
+                    book_idx1 = data.books[2][i, 1]
+                    book_idx2 = data.books[2][i, 2]
+                    copyto!(q, tpm_book[book_idx1][book_idx2])
                     
                 else
                     # if exact data (obstype = 1), compute q by hand
                     # reset Q
                     fill!(q, -Inf)
                     
+                    # Use @view for data row
+                    row_data = @view data.model.data[i, :]
+                    
                     # compute q(r,s)
                     for r in 1:S
                         if isa(data.model.totalhazards[r], _TotalHazardAbsorbing)
                             q[r,r] = 0.0
                         else
-                            # survival probability
-                            q[r, findall(data.model.tmat[r,:] .!= 0)] .= survprob(
-                                0,
-                                data.model.data.tstop[i] - data.model.data.tstart[i],
-                                pars,
-                                i,
-                                data.model.totalhazards[r],
-                                data.model.hazards;
-                                give_log = true) 
+                            # survival probability - use pre-computed destinations
+                            dest_states = transient_dests[r]
+                            log_surv = survprob(0, dt, pars, row_data,
+                                data.model.totalhazards[r], hazards; give_log = true)
+                            for dest in dest_states
+                                q[r, dest] = log_surv
+                            end
                             
                             # hazard
-                            for s in 1:S
-                                if (s != r) & (data.model.tmat[r,s] != 0)
-                                    q[r, s] += call_haz(
-                                        data.model.data.tstop[i] - data.model.data.tstart[i],
-                                        pars[data.model.tmat[r, s]],
-                                        i,
-                                        data.model.hazards[data.model.tmat[r, s]];
-                                        give_log = true)
-                                end
+                            for s in dest_states
+                                trans_idx = tmat_cache[r, s]
+                                q[r, s] += call_haz(dt, pars[trans_idx], row_data,
+                                    hazards[trans_idx]; give_log = true)
                             end
                         end
 
@@ -853,10 +906,11 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
                 # compute the set of possible "states to" and their emission probabilities
                 # For exact observations (stateto > 0), only that state is possible with probability 1
                 # For censored observations, use the emission matrix
-                if data.model.data.stateto[i] > 0
+                stateto_i = data.model.data.stateto[i]
+                if stateto_i > 0
                     # Exact observation - only one state possible
                     for r in 1:S
-                        lmat[data.model.data.stateto[i], ind] += q[r, data.model.data.stateto[i]] * lmat[r, ind - 1]
+                        lmat[stateto_i, ind] += q[r, stateto_i] * lmat[r, ind - 1]
                     end
                 else
                     # Censored observation - weight by emission probabilities
@@ -901,8 +955,8 @@ This implementation uses the fused path-centric approach from `loglik_exact`, ca
 """
 function loglik_semi_markov(parameters, data::SMPanelData; neg = true, use_sampling_weight = true)
 
-    # nest the model parameters
-    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+    # nest the model parameters using VectorOfVectors (AD-compatible)
+    pars = nest_params(parameters, data.model.parameters)
 
     # snag the hazards and model components
     hazards = data.model.hazards
@@ -910,13 +964,8 @@ function loglik_semi_markov(parameters, data::SMPanelData; neg = true, use_sampl
     tmat = data.model.tmat
     n_hazards = length(hazards)
 
-    # remake spline parameters and calculate risk periods
-    for i in eachindex(hazards)
-        if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i])
-            set_riskperiod!(hazards[i])
-        end
-    end
+    # update spline hazards with current parameters (no-op for functional splines)
+    _update_spline_hazards!(hazards, pars)
 
     # Build subject covariate cache (reusable across all paths)
     subject_covars = build_subject_covar_cache(data.model)
@@ -981,8 +1030,8 @@ ODE solvers would be invoked instead of analytic cumulative hazard formulas.
 """
 function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
 
-    # nest the model parameters
-    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+    # nest the model parameters using VectorOfVectors (AD-compatible)
+    pars = nest_params(parameters, data.model.parameters)
 
     # snag the hazards and model components
     hazards = data.model.hazards
@@ -991,9 +1040,12 @@ function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
     n_hazards = length(hazards)
 
     # remake spline parameters and calculate risk periods
+    # Note: parameters are already on log scale (from optimizer flat vector)
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i])
+            # pars[i] is already log-scale, pass directly
+            log_pars = Vector{Float64}(collect(pars[i]))
+            remake_splines!(hazards[i], log_pars)
             set_riskperiod!(hazards[i])
         end
     end
@@ -1049,17 +1101,20 @@ Arguments:
 - `data`: SMPanelData containing the model and paths
 """
 function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}}, data::SMPanelData)
-    # Nest parameters
-    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+    # Nest parameters using VectorOfVectors (AD-compatible)
+    pars = nest_params(parameters, data.model.parameters)
     
     # Get hazards
     hazards = data.model.hazards
     n_hazards = length(hazards)
     
     # Remake spline parameters and calculate risk periods
+    # Note: parameters are already on log scale (from optimizer flat vector)
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i])
+            # pars[i] is already log-scale, pass directly
+            log_pars = Vector{Float64}(collect(pars[i]))
+            remake_splines!(hazards[i], log_pars)
             set_riskperiod!(hazards[i])
         end
     end
@@ -1333,8 +1388,8 @@ rather than all intervals per hazard.
 - If `return_ll_subj=true`: Vector of weighted per-path log-likelihoods
 """
 function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false)
-    # Nest parameters - preserves dual number types
-    pars = VectorOfVectors(parameters, data.model.parameters.elem_ptr)
+    # Nest parameters using VectorOfVectors - preserves dual number types (AD-compatible)
+    pars = nest_params(parameters, data.model.parameters)
     
     # Get model components
     hazards = data.model.hazards
@@ -1344,9 +1399,12 @@ function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=fals
     n_paths = length(data.paths)
     
     # Remake spline parameters if needed
+    # Note: parameters are already on log scale (from optimizer flat vector)
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i])
+            # pars[i] is already log-scale, pass directly
+            log_pars = Vector{Float64}(collect(pars[i]))
+            remake_splines!(hazards[i], log_pars)
             set_riskperiod!(hazards[i])
         end
     end
@@ -1431,7 +1489,7 @@ See also: `loglik_exact`, `loglik_semi_markov`, `call_cumulhaz`
 """
 function _compute_path_loglik_fused(
     path::SamplePath, 
-    pars::VectorOfVectors, 
+    pars,  # Parameters as nested structure (from nest_params, VectorOfVectors or Tuple)
     hazards::Vector{<:_Hazard},
     totalhazards::Vector{<:_TotalHazard}, 
     tmat::Matrix{Int64},

@@ -1,0 +1,765 @@
+================================================================================
+FUTURE FEATURES TODO - MultistateModels.jl
+================================================================================
+Created: 2025-11-29
+Updated: 2025-06-03
+Branch: infrastructure_changes
+
+================================================================================
+RECENTLY COMPLETED (2025-06-03 Session)
+================================================================================
+
+1. LOO_METHOD DOCUMENTATION
+   - Added `loo_method` parameter to all three `fit()` docstrings
+   - Options: `:direct` (default) and `:cholesky`
+   - Direct: Δᵢ = H⁻¹gᵢ, O(p²n) complexity
+   - Cholesky: Exact H₋ᵢ⁻¹ via rank-k downdates, O(np³) complexity
+
+2. OPTIMIZATION DOCUMENTATION
+   - Created `docs/src/optimization.md` with comprehensive guidance on:
+     - Variance estimation methods (IJ vs jackknife)
+     - LOO method selection criteria
+     - Eigenvalue thresholding for ill-conditioned Hessians
+   - Updated `docs/make.jl` to include new page in navigation
+
+3. TEST DOCUMENTATION UPDATE
+   - Updated `test/reports/testcoverage.md` (763 tests passing)
+   - Renamed `distribution_longtests.md` → `simulation_longtests.md`
+   - Created `test/reports/inference_longtests.md` for MCEM/MLE tests
+
+================================================================================
+FEATURE 1: PHASE-TYPE MARKOV SURROGATES (PRIORITY: HIGH)
+================================================================================
+Status: COMPLETE - Core infrastructure and MCEM integration implemented
+
+Reference: Titman & Sharples (2010) Biometrics 66(3):742-752
+
+DESIGN DECISIONS: [ALL IMPLEMENTED]
+-----------------
+1. AUGMENT, DON'T REPLACE - Keep simple Markov surrogate as default ✓
+   Phase-type is optional via surrogate_type = :phasetype
+
+2. USER-SPECIFIED PHASES - n_phases::Union{Int, Vector{Int}} ✓
+   - Single Int: same phases for all states
+   - Vector{Int}: per-state phase counts  
+   - :auto for BIC-based selection
+   - :heuristic for hazard-family-based selection
+
+3. OPTIONAL CONSTRAINTS - phasetype_constraints::Bool = true ✓
+   - Titman-Sharples constraints ensure valid semi-Markov interpretation
+   - User can disable for flexibility
+
+IMPLEMENTATION STATUS:
+---------------------
+
+Step 1: Core data structures (src/phasetype.jl) [COMPLETE]
+[x] PhaseTypeDistribution struct
+    - n_phases, S (sub-intensity), initial, absorption
+[x] PhaseTypeSurrogate struct 
+    - expanded_Q, n_observed_states, n_expanded_states
+    - state_to_phases, phase_to_state mappings
+    - phasetypes dict for each state
+[x] PhaseTypeConfig struct for user options
+    - n_phases, min_phases, max_phases, constraints, fitting_method
+[x] ProposalConfig struct (unified MCEM proposal config)
+    - type (:markov, :phasetype), n_phases, optimize, parameters
+
+Step 2: PH fitting and moments (src/phasetype.jl) [COMPLETE]
+[x] phasetype_mean, phasetype_variance, phasetype_cv
+[x] phasetype_cdf, phasetype_pdf, phasetype_hazard
+[x] phasetype_sample - random sampling
+[x] build_coxian_subintensity
+[x] apply_titman_sharples_constraints!
+[x] validate_phasetype
+[x] _select_n_phases_bic - BIC-based auto-selection
+[x] _compute_default_n_phases - heuristic based on hazard family
+
+Step 3: Model building (src/phasetype.jl) [COMPLETE]
+[x] build_phasetype_surrogate
+[x] build_expanded_tmat - n×n → (np)×(np)
+[x] build_expanded_Q - expanded intensity matrix
+[x] build_phasetype_hazards - exponential hazards for phases
+[x] build_phasetype_emat - emission matrix for HMM
+[x] build_phasetype_model - full model construction
+[x] expand_data_states! - expand observed data
+[x] collapse_phases - map expanded paths back to observed states
+
+Step 4: Likelihood (src/phasetype.jl) [COMPLETE]
+[x] loglik_phasetype - basic likelihood
+[x] loglik_phasetype_stable - numerically stable version
+[x] loglik_phasetype_panel - panel data likelihood
+
+Step 5: MCEM Integration [COMPLETE]
+The primary use case for phase-type distributions is improving MCEM 
+proposal efficiency for semi-Markov models. Phase-type surrogates 
+better approximate non-exponential sojourn times, yielding higher ESS.
+
+[x] Modify fit() to accept proposal keyword
+    - Default: proposal=:auto (selects based on hazard types)
+    - :auto → phase-type if any non-exponential hazards, else Markov
+    - User can specify: proposal=PhaseTypeProposal(n_phases=3)
+    - User can specify: proposal=MarkovProposal() to force Markov
+    - Implemented via ProposalConfig, MarkovProposal(), PhaseTypeProposal()
+[x] Add needs_phasetype_proposal() - checks if model has non-Markov hazards
+[x] Add resolve_proposal_config() - resolves :auto/:markov/:phasetype symbols
+[x] Integrate phase-type surrogate into DrawSamplePaths!
+    - Build PhaseTypeSurrogate from MarkovSurrogate rates via fit_phasetype_surrogate()
+    - Use expanded state space for FFBS
+    - Collapse sampled paths back to observed states
+[x] Add ForwardFiltering_PH! / BackwardSampling_PH! to sampling.jl
+    - Forward pass on expanded (n*p) state space
+    - Backward sampling respects phase structure  
+    - Emission matrix maps expanded -> observed states
+[x] Add draw_samplepath_phasetype() to sampling.jl
+    - Samples endpoint-conditioned paths in expanded space
+    - Collapses to observed states before returning
+[x] Add loglik_phasetype_path() for importance weight computation
+    - Computes surrogate log-likelihood for weight calculation
+[x] Importance weight correction implemented
+    - log_weight = loglik_target - loglik_surrogate (phase-type)
+    - Phase-type surrogate fit from Markov rates at initialization
+    - Kept fixed throughout MCEM (fit once strategy)
+
+Step 6: Testing (test/test_phasetype.jl) [LARGELY COMPLETE]
+[x] PhaseTypeDistribution construction and validation (155 tests)
+[x] ProposalConfig and PhaseTypeConfig construction
+[x] phasetype_mean, variance, cv tests
+[x] build_phasetype_surrogate tests
+[x] build_expanded_tmat, build_phasetype_emat tests
+[x] expand_data_states! tests
+[x] build_phasetype_model tests (basic, illness-death, fit)
+[ ] MCEM with phase-type vs Markov proposal comparison
+[ ] ESS comparison: expect 2-5x improvement for Weibull hazards
+[ ] Runtime benchmarks: O((np)²) vs O(n²) overhead acceptable?
+
+REMAINING WORK:
+---------------
+- Add tests comparing MCEM convergence with phase-type vs Markov proposals  
+- Benchmark ESS improvement vs runtime overhead
+- Documentation and examples
+
+================================================================================
+FEATURE 1B: SQUAREM ACCELERATION FOR MCEM (IMPLEMENTED)
+================================================================================
+Status: IMPLEMENTED - Basic SQUAREM acceleration available
+Updated: 2025-12-01
+
+Reference: Varadhan, R., & Roland, C. (2008). Simple and globally convergent 
+methods for accelerating the convergence of any EM algorithm. Scandinavian 
+Journal of Statistics, 35(2), 335-353.
+
+IMPLEMENTATION:
+---------------
+SQUAREM (Squared Iterative Methods) treats the MCEM iteration as a fixed-point 
+mapping θ → M(θ) and applies quasi-Newton acceleration every 2 iterations.
+
+Algorithm:
+1. Compute θ₁ = M(θ₀)           (first EM step)
+2. Compute θ₂ = M(θ₁)           (second EM step)  
+3. r = θ₁ - θ₀                  (first increment)
+4. v = (θ₂ - θ₁) - r            (second-order term)
+5. α = -‖r‖/‖v‖                 (step length)
+6. θ_acc = θ₀ - 2αr + α²v       (accelerated update)
+7. Accept if mll(θ_acc) ≥ mll(θ₀); else fall back to θ₂
+
+Usage:
+```julia
+fitted = fit(model; acceleration=:squarem)
+```
+
+Files modified:
+- src/mcem.jl: Added SquaremState struct and helper functions
+  - squarem_step_length(): Compute acceleration step length
+  - squarem_accelerate(): Compute accelerated parameter update
+  - squarem_should_accept(): Decide whether to accept acceleration
+- src/modelfitting.jl: Added acceleration keyword to fit()
+  - SQUAREM state management in main MCEM loop
+  - Fallback to standard EM when acceleration fails
+
+Verbose output includes SQUAREM statistics:
+- Number of successful accelerations
+- Number of fallbacks to standard EM
+
+NOTE: SQUAREM is complementary to phase-type proposals. Phase-type improves
+ESS per sample (reducing Monte Carlo variance), while SQUAREM reduces the
+number of iterations to convergence. Both can be used together:
+```julia
+fitted = fit(model; proposal=:phasetype, acceleration=:squarem)
+```
+
+
+================================================================================
+FEATURE 2: SPLINE HAZARDS (COMPLETED)
+================================================================================
+
+Status: IMPLEMENTED - Core functionality complete
+Priority: HIGH - Target for current infrastructure_changes branch
+Updated: 2025-12-01
+
+IMPLEMENTATION COMPLETE:
+------------------------
+1. RuntimeSplineHazard struct in src/common.jl (line ~280)
+   - Immutable struct storing basis info, knots, and runtime closures
+   - hazard_fn and cumhaz_fn closures capture basis for on-the-fly evaluation
+
+2. _build_spline_hazard() in src/modelgeneration.jl (line ~300)
+   - Builds RuntimeSplineHazard from SplineHazard user specification
+   - Automatic knot placement when knots=nothing (via place_interior_knots())
+   - Supports natural splines, monotone constraints
+
+3. Hazard/cumhaz evaluation in hazards.jl
+   - Dispatch on _SplineHazard abstract type
+   - call_haz, call_cumulhaz, cumulative_hazard all working
+   - Time transform support via _time_transform_hazard/cumhaz
+
+4. Auto knot placement in smooths.jl
+   - place_interior_knots(): quantile-based with tie-breaking
+   - default_nknots(): Tang et al. floor(n^(1/5)) formula
+
+5. Parameter transformations
+   - _spline_ests2coefs(): log-scale params → spline coefficients
+   - _spline_coefs2ests(): inverse transformation
+   - rectify_coefs!(): updated for RuntimeSplineHazard
+
+6. Tests in test/setup_splines.jl
+   - Explicit knots, auto knots, time transform, AD compatibility
+
+DESIGN DECISIONS (from discussion 2025-12-01):
+----------------------------------------------
+1. KEEP BSplineKit.jl - provides analytic integral() for cumulative hazard
+   - DataInterpolations.jl lacks analytic B-spline integrals (throws IntegralNotFoundError)
+   - BSplineKit's RecombinedBSplineBasis handles natural splines
+   - Construct Spline objects functionally (don't store mutable objects)
+
+2. FUNCTIONAL SPLINE EVALUATION - for AD compatibility:
+   ```julia
+   function evaluate_spline_hazard(t, θ, hazard::SplineHazard)
+       coefs = spline_ests2coefs(θ, hazard)  # positivity/monotonicity transform
+       spline = Spline(hazard.basis, coefs)   # construct on-the-fly
+       return spline(t)
+   end
+   
+   function evaluate_spline_cumhaz(lb, ub, θ, hazard::SplineHazard)
+       coefs = spline_ests2coefs(θ, hazard)
+       spline = Spline(hazard.basis, coefs)
+       cumhaz_spline = integral(spline)  # BSplineKit analytic integral
+       return cumhaz_spline(ub) - cumhaz_spline(lb)
+   end
+   ```
+
+3. DEFAULT KNOT PLACEMENT (following survextrap):
+   - Uses floor(n^(1/5)) interior knots (Tang et al. formula)
+   - Placed at quantiles of sojourn times with tie-breaking
+   - Lower boundary: 0 (or minimum sojourn)
+   - Upper boundary: maximum sojourn for transition
+   - Natural spline boundary conditions (zero 2nd derivative)
+   - Flat extrapolation beyond boundaries by default
+
+4. COEFFICIENT PARAMETERIZATION:
+   - M-spline style: exp(θ) for positivity (hazard must be non-negative)
+   - For monotone=1 (increasing): cumsum transformation (I-spline)
+   - For monotone=-1 (decreasing): reverse cumsum
+   - Implemented in _spline_ests2coefs() and _spline_coefs2ests()
+
+IMPLEMENTATION STEPS (Phase 1 - COMPLETED):
+-------------------------------------------
+Step 1: Enable _build_spline_hazard() [DONE]
+[x] Implemented _build_spline_hazard() in modelgeneration.jl
+    - Builds RuntimeSplineHazard with closures
+    - Automatic knot placement via place_interior_knots()
+    - Stores knots directly, not mutable Spline objects
+    
+[x] RuntimeSplineHazard struct for immutability
+    - Stores: knots, degree, natural_spline, monotone
+    - hazard_fn and cumhaz_fn closures capture basis
+
+Step 2: Functional hazard evaluation [DONE]  
+[x] Hazard evaluation via callable RuntimeSplineHazard
+    - hazard_fn closure builds Spline on-the-fly from parameters
+    - Handles extrapolation (flat/linear beyond boundaries)
+    
+[x] Cumulative hazard via cumhaz_fn closure
+    - Uses BSplineKit integral() for analytic cumulative hazard
+    - AD compatible with ForwardDiff
+
+Step 3: Initialization [DONE]
+[x] init_par() for RuntimeSplineHazard in initialization.jl
+    - Crude log-rate initialization for all basis coefficients
+    - Transform to log-scale for optimization
+
+Step 4: Testing [DONE]
+[x] Test spline construction and evaluation (test/setup_splines.jl)
+[x] Test automatic knot placement
+[x] Test time transform support
+[x] Test rectify_coefs! with RuntimeSplineHazard
+
+Step 5: MCEM Long Tests [DONE]
+[x] Test MCEM with spline hazards (test/longtest_mcem_splines.jl)
+    - Exponential matching (degree=1, no interior knots)
+    - Piecewise exponential (degree=1, interior knots)
+    - Gompertz matching (degree=3, monotone=1)
+    - Covariates test (PH effect)
+    - Monotone constraint test
+[x] Bug fixes during testing:
+    - extract_covar_names: filter spline basis params (sp1, sp2, ...)
+    - sampling.jl/likelihoods.jl: removed incorrect log() on log-scale params
+
+REMAINING WORK (Phase 2 - Future):
+----------------------------------
+[ ] Add penalized spline support (P-splines)
+[ ] Automatic smoothing parameter selection (LAML/GCV)
+
+AD COMPATIBILITY FALLBACK:
+--------------------------
+If BSplineKit Spline construction breaks ForwardDiff/Zygote:
+- Pre-compute basis evaluation matrix B at construction time
+- At runtime: hazard(t) = sum(B(t) .* coefs)
+- For cumulative hazard: pre-compute integral basis matrix
+- Pure Julia de Boor's algorithm as last resort
+
+REFERENCES FOR THIS IMPLEMENTATION:
+-----------------------------------
+- survextrap methods: https://chjackson.github.io/survextrap/articles/methods.html
+  - M-spline on hazard, I-spline for cumulative
+  - Multinomial logistic prior on coefficients (Bayesian smoothing)
+  - Default 10 knots, quantile placement
+  
+- BSplineKit.jl: RecombinedBSplineBasis(Natural()) for natural splines
+
+================================================================================
+FEATURE 2B: PENALIZED SPLINES (NEXT BRANCH)
+================================================================================
+
+Status: Planning complete, implementation deferred
+Priority: HIGH (after basic splines work)
+
+MOTIVATION (from discussion 2025-12-01):
+----------------------------------------
+- MSMs are uniquely sensitive to knot placement
+- Need automatic smoothing to reduce sensitivity
+- Want to avoid manual knot selection entirely if possible
+- May need joint penalty on total cumulative hazard (across transitions)
+
+KEY REFERENCES:
+---------------
+1. Murray et al. (2016) PMC4811615 - Low-rank thin plate splines for survival
+   - LRTP linear splines on log-hazard: closed-form likelihood
+   - Avoids knot placement sensitivity
+   - Fast MCMC convergence vs B-splines
+   - Limitation: requires numerical integration for cumulative hazard
+
+2. survPen (Fauvernier et al. 2019) - Multidimensional penalized splines
+   - Natural cubic splines on log-hazard  
+   - LAML for automatic smoothing parameter selection (Wood et al. 2016)
+   - Tensor product smooths for time×covariate interactions
+   - Same smoothing (same.rho=TRUE) vs independent per term
+
+3. Machado et al. (2018) arxiv:1801.06375 - Penalized MSMs for interval-censored
+   - Multiple penalties for multistate models
+   - Automatic selection via modified method
+
+4. Wood (2020) - Neighborhood cross-validation
+   - Infinitesimal jackknife for smooth models
+   - Fast smoothing parameter selection without refitting
+
+PENALTY STRUCTURE OPTIONS:
+--------------------------
+1. P-SPLINE PENALTY (standard)
+   λ * θ' D' D θ where D is differencing matrix
+   - Second-order differences penalize curvature
+   - One λ per transition (independent smoothing)
+
+2. SHARED SMOOTHING (survPen same.rho=TRUE)
+   All transitions share same λ
+   - Appropriate when transitions have similar complexity
+   - Reduces estimation variance
+
+3. HIERARCHICAL SMOOTHING
+   λ_j ~ Gamma(a, b) for each transition j
+   - Borrows strength across transitions
+   - Bayesian or empirical Bayes
+
+4. JOINT TOTAL HAZARD PENALTY (your suggestion)
+   Penalize wigglyness of total cumulative hazard:
+   λ * (Σ_j H_j)'' integrated over time
+   - Makes biological sense: survival should be smooth
+   - Requires special penalty matrix construction
+   - Similar to multivariate P-spline tensor products
+
+SMOOTHING PARAMETER SELECTION:
+------------------------------
+1. LAML (default - survPen, Wood et al. 2016)
+   - Maximize Laplace approximate marginal likelihood
+   - Fast: uses Hessian of penalized likelihood
+   - Accounts for uncertainty in smoothing
+
+2. GCV/LCV (classical)
+   - Leave-one-out cross-validation approximation
+   - Slightly less stable than LAML for survival
+
+3. NCV (Wood 2020 - your infinitesimal jackknife reference)
+   - Neighborhood cross-validation
+   - Fast approximate CV without refitting
+   - Good for model comparison
+
+THIN PLATE SPLINES CONSIDERATION:
+---------------------------------
+Murray et al. (2016) approach could eliminate knot sensitivity:
+- No interior knots needed
+- Penalty on integrated squared second derivative
+- Basis from eigenfunctions of penalty
+
+Trade-offs:
+- Pro: Avoids knot placement entirely
+- Pro: Fast MCMC convergence
+- Con: Models log-hazard (need numerical cumulative hazard)
+- Con: More complex implementation
+
+RECOMMENDATION: Start with standard P-splines (easier), evaluate thin plate
+if knot sensitivity remains problematic.
+
+IMPLEMENTATION PLAN (Future Branch):
+------------------------------------
+Step 1: Penalty infrastructure
+[ ] PenaltyTerm abstract type
+[ ] PSplinePenalty struct: λ, D (differencing), order
+[ ] build_difference_matrix(order, n)
+[ ] Add penalties field to model or hazard
+
+Step 2: Penalized likelihood  
+[ ] penalized_loglik(θ, model, penalties)
+[ ] Gradient including penalty terms
+[ ] Hessian for LAML computation
+
+Step 3: Smoothing parameter selection
+[ ] LAML criterion and its gradient
+[ ] Nested optimization (inner: β, outer: λ)
+[ ] Initial λ from GCV or heuristic
+
+Step 4: Joint penalties
+[ ] Penalty on total cumulative hazard
+[ ] Tensor product smooths (if needed for time×covariate)
+
+Step 5: Testing
+[ ] Compare penalized vs unpenalized on simulated data
+[ ] Sensitivity to initial λ
+[ ] Coverage of confidence intervals
+
+
+================================================================================
+FEATURE 3: CUSTOM HAZARD FUNCTIONS (DEFERRED)
+================================================================================
+
+Status: Not started
+Priority: HIGH (prerequisite for neural hazards in Feature 4)
+
+DESIGN DECISION: Symbolics.jl accepted as dependency
+-----------------------------------------------------
+Rationale: Needed for neural ODEs and neural net hazards anyway.
+Symbolics.jl is well-maintained, pure Julia, enables automatic cumhaz derivation.
+
+MOTIVATION:
+- Users may have domain-specific hazard forms (e.g., log-logistic, generalized F)
+- Enable research on novel hazard formulations
+- Foundation for NeuralHazard (Feature 4)
+
+TWO IMPLEMENTATION PATHS:
+-------------------------
+
+Path 1: CustomHazard (user provides functions)
+```julia
+# User provides hazard and cumulative hazard functions
+h = CustomHazard(
+    hazard_fn = (t, θ, x) -> θ[1] * θ[2] * t^(θ[2]-1),  # Weibull
+    cumhaz_fn = (t, θ, x) -> θ[1] * t^θ[2],
+    n_params = 2,
+    param_names = [:scale, :shape],
+    statefrom = 1, stateto = 2
+)
+```
+Use case: Expert users with specific functional forms
+Requires: User provides both h(t) and H(t) for consistency
+
+Path 2: SymbolicHazard (automatic cumhaz derivation)
+```julia
+@variables t θ[1:2]
+h = SymbolicHazard(
+    hazard = θ[1] * θ[2] * t^(θ[2]-1),
+    statefrom = 1, stateto = 2
+)
+# Cumulative hazard computed via symbolic integration
+# Falls back to numerical integration if symbolic fails
+```
+Use case: Hazards with closed-form expressions
+Bonus: Automatic AD compatibility via Symbolics
+
+TARGET HAZARD FORMS:
+--------------------
+- Log-logistic: h(t) = (α/β)(t/β)^(α-1) / (1 + (t/β)^α)
+- Generalized gamma (includes Weibull, gamma, log-normal as special cases)
+- Bathtub curves (biomedical devices, software reliability)
+- Log-normal (no closed-form cumhaz - needs numerical integration)
+- User-defined for domain-specific applications
+
+IMPLEMENTATION STEPS:
+---------------------
+[ ] Add Symbolics.jl as dependency (or weak dependency)
+[ ] Define CustomHazard <: _SemiMarkovHazard struct
+    - hazard_fn::Function, cumhaz_fn::Function
+    - n_params, param_names, bounds
+[ ] Define SymbolicHazard <: _SemiMarkovHazard struct
+    - hazard_expr::Symbolics.Num
+    - cumhaz_expr::Union{Symbolics.Num, Nothing}  # None if numerical
+    - compiled_hazard::Function, compiled_cumhaz::Function
+[ ] Implement call_haz, call_cumulhaz dispatches
+[ ] Handle is_separable trait (default false, user can override)
+[ ] Add validation:
+    - Hazard positivity at test points
+    - Cumhaz monotonicity (H'(t) = h(t) > 0)
+    - Numerical vs symbolic cumhaz consistency check
+[ ] Test with log-logistic, generalized gamma, log-normal
+
+
+================================================================================
+FEATURE 4: SciML/AD ECOSYSTEM COMPATIBILITY (DEFERRED)
+================================================================================
+
+Status: Extension points documented, not implemented
+Priority: HIGH (foundation for neural hazards)
+
+DESIGN DECISIONS (from discussion 2025-01-27):
+----------------------------------------------
+- AD backend switching: YES (needed for neural ODEs and neural hazards)
+- Neural network hazards: YES (via Lux.jl)
+- Typical model size: 3-6 transitions, 100-2000 subjects
+  → ForwardDiff likely sufficient for parametric hazards
+  → Enzyme/Zygote needed for neural hazards (100s of params)
+- Sensitivity analysis: POSSIBLY (defer to later phase)
+
+MOTIVATION:
+- Enable NeuralHazard with 100s-1000s of parameters
+- Future-proof for ODE-based hazards
+- Allow benchmarking AD backends for user's specific model
+
+CURRENT STATE:
+--------------
+- ForwardDiff.jl used throughout for gradients
+- is_separable trait designed for future ODE hazards
+- BatchedODEData struct ready for SciML solvers
+- Neural ODE comments in _compute_path_loglik_fused
+
+CORE DEPENDENCIES:
+------------------
+1. DifferentiationInterface.jl - Unified AD backend switching
+   - Allows: ForwardDiff (default), Enzyme (speed), Zygote (neural nets)
+   - No code changes needed to switch backends
+   - Good migration path
+
+2. Lux.jl - Pure functional neural networks
+   - Better AD compatibility than Flux.jl
+   - Stateless: model(x, params, state) vs model(x)
+   - Natural fit for hazard functions
+
+3. ChainRulesCore.jl - Custom AD rules
+   - rrules for matrix exponential, emission matrices
+   - Needed for Zygote compatibility
+
+4. SciMLSensitivity.jl (later) - Adjoint methods for ODEs
+   - BacksolveAdjoint, QuadratureAdjoint
+   - For ODE-based hazards (Feature 6)
+
+NEURAL HAZARD DESIGN:
+---------------------
+```julia
+# NeuralHazard wraps a Lux network
+h = NeuralHazard(
+    network = Lux.Chain(
+        Lux.Dense(n_inputs => 32, tanh),
+        Lux.Dense(32 => 32, tanh),
+        Lux.Dense(32 => 1, softplus)  # ensure h(t) > 0
+    ),
+    inputs = [:t, :age, :sex],  # time + covariates
+    statefrom = 1, stateto = 2
+)
+# Cumulative hazard via numerical integration (Gauss-Legendre)
+# Pre-training from Nelson-Aalen estimates
+```
+
+Key considerations:
+- Positivity constraint: softplus/exp output activation
+- Cumulative hazard: no closed form, use quadrature
+- Initialization: pre-train to match Nelson-Aalen estimates
+- Regularization: weight decay, Lipschitz constraints
+- is_separable = false (must integrate numerically)
+
+IMPLEMENTATION ROADMAP:
+-----------------------
+
+Phase 1: DifferentiationInterface.jl wrapper [PRIORITY]
+[ ] Add DifferentiationInterface as dependency
+[ ] Create ADBackend config: :forwarddiff (default), :enzyme, :zygote
+[ ] Wrap likelihood gradient calls in DI interface
+[ ] Benchmark: ForwardDiff vs Enzyme on test models (3-6 transitions)
+[ ] Document type stability requirements for Enzyme
+
+Phase 2: ChainRules for Zygote compatibility
+[ ] Add ChainRulesCore as dependency
+[ ] Add rrule for matrix exponential (ExponentialUtilities)
+[ ] Add rrule for emission matrix operations
+[ ] Test Zygote on simple 2-state Markov model
+[ ] Profile memory usage (Zygote can be memory-hungry)
+
+Phase 3: NeuralHazard integration
+[ ] Add Lux.jl as weak dependency
+[ ] Define NeuralHazard <: _SemiMarkovHazard struct
+    - network::Lux.AbstractExplicitLayer
+    - params::ComponentArray
+    - state::NamedTuple
+    - input_vars::Vector{Symbol}
+[ ] Implement call_haz: network(inputs, params, state)[1]
+[ ] Implement call_cumulhaz: Gauss-Legendre quadrature
+[ ] Pre-training from Nelson-Aalen:
+    - Compute Nelson-Aalen Ĥ(t) from data
+    - Fit network to match Ĥ(t) as initialization
+[ ] Regularization options:
+    - L2 weight decay (standard)
+    - Lipschitz constraint (bound |∂h/∂t|)
+    - Monotonicity penalties if desired
+
+Phase 4: Sensitivity analysis (LATER - if needed)
+[ ] Add SciMLSensitivity as weak dependency
+[ ] Implement ∂loglik/∂observation_times
+[ ] Optimal observation time design?
+
+
+================================================================================
+FEATURE 5: PENALIZED LIKELIHOODS (DEFERRED)
+================================================================================
+
+Status: Not started
+Priority: Medium (needed for spline regularization)
+
+TODO WHEN RESUMING:
+[ ] PenaltyTerm abstract type with implementations:
+    - PSplinePenalty: λ θ'D'Dθ (D = differencing matrix)
+    - RidgePenalty: λ ||θ||²
+    - LassoPenalty: λ ||θ||₁ (needs special optimizer)
+[ ] Add penalties field to model struct
+[ ] Extend likelihood functions with penalized::Bool keyword
+[ ] Implement build_difference_matrix(order, n)
+[ ] Cross-validation for penalty selection: cv_penalty_search()
+[ ] Consider REML for penalty (Wood, 2011)
+
+NOTES:
+- Lambda scaling by sample size?
+- Per-hazard penalties?
+
+
+================================================================================
+FEATURE 6: ODE-BASED HAZARDS (DEFERRED)
+================================================================================
+
+Status: Extension points documented, not implemented
+Priority: Low (foundational for neural ODEs)
+
+CURRENT EXTENSION POINTS:
+- is_separable trait (returns true for all current hazards)
+- BatchedODEData struct ready for SciML
+- Neural ODE comments in _compute_path_loglik_fused
+
+TODO WHEN RESUMING:
+[ ] Add weak dependencies: DifferentialEquations.jl, SciMLSensitivity.jl
+[ ] Create ODEHazard <: _SemiMarkovHazard
+    - rhs_fn::Function
+    - adjoint_method::Symbol
+    - solver::OrdinaryDiffEq.AbstractODEAlgorithm
+[ ] Implement is_separable(::ODEHazard) = false
+[ ] Extend call_cumulhaz with ODE solver branch
+[ ] Support adjoint methods: :BacksolveAdjoint, :QuadratureAdjoint, :ForwardDiff
+
+NEURAL ODE EXTENSION (LATER):
+[ ] NeuralODEHazard wrapping Lux.jl network
+[ ] Pre-training from Nelson-Aalen estimates
+[ ] Regularization (Lipschitz, weight decay)
+
+
+================================================================================
+FEATURE 7: GLOBAL SENSITIVITY ANALYSIS WRAPPERS (DEFERRED)
+================================================================================
+
+Status: Not implemented
+Priority: Medium (useful for model understanding and diagnostics)
+
+MOTIVATION:
+-----------
+GlobalSensitivity.jl provides sensitivity analysis methods (Sobol, Morris, etc.)
+to understand how input parameters affect model outputs. Wrappers would enable:
+- Identifying which hazard parameters most influence state occupation
+- Diagnosing overparameterized models before fitting
+- Post-hoc analysis of fitted models
+- Prior elicitation guidance
+
+INTEGRATION APPROACH:
+--------------------
+GlobalSensitivity.jl expects: gsa(f, method, bounds; samples)
+where f: Vector{Float64} → scalar or vector output
+
+Natural fit with MultistateModels:
+- model.parameters.flat provides flat parameter vector for optimization
+- Parameter bounds already tracked via ParameterHandling constraints
+- Output functions: loglik, state occupancies, transition probabilities
+
+TODO:
+[ ] Add GlobalSensitivity.jl as optional/weak dependency
+[ ] Create sensitivity_analysis(model; output=:loglik, method=Sobol(), ...)
+    - output: :loglik, :state_probs, :transition_counts, custom function
+    - Wrap to handle flat param vector → model output transformation
+[ ] Add get_parameter_bounds(model) utility (extract from ParameterHandling)
+[ ] Support common methods: Sobol(), Morris(), eFAST()
+[ ] Add plotting recipes for sensitivity indices
+[ ] Document in conjunction with StructuralIdentifiability.jl for identifiability workflow
+
+REFERENCE:
+- GlobalSensitivity.jl: https://github.com/SciML/GlobalSensitivity.jl
+- Sobol (1993) sensitivity indices
+- Morris (1991) screening method
+
+
+================================================================================
+REFERENCES
+================================================================================
+
+Phase-Type:
+- Titman & Sharples (2010) Biometrics 66(3):742-752
+- Asmussen et al. (1996) Scand J Stat 23(4):419-441
+
+Splines & Flexible Hazards:
+- Jackson (2023) survextrap: BMC Med Res Meth 23:282
+  https://doi.org/10.1186/s12874-023-02094-1
+  Methods: https://chjackson.github.io/survextrap/articles/methods.html
+- Fauvernier et al. (2019) survPen: JRSS-C 68:1415-1453
+  https://doi.org/10.1111/rssc.12368
+- Murray et al. (2016) Bayesian Anal 11(2):381-402 (LRTP splines)
+  https://pmc.ncbi.nlm.nih.gov/articles/PMC4811615/
+- Machado et al. (2018) Penalized MSMs: arXiv:1801.06375
+  https://arxiv.org/abs/1801.06375
+
+P-Splines & Smoothing:
+- Eilers & Marx (1996) Stat Sci 11(2):89-121
+- Wood (2011) JRSS-B 73(1):3-36 (REML smoothing selection)
+- Wood et al. (2016) JASA 111:1548-1575 (LAML smoothing selection)
+- Wood (2020) Biometrics - Neighborhood cross-validation (NCV)
+
+M-splines & I-splines:
+- Ramsay (1988) Stat Sci 3(4):425-461
+- Royston & Parmar (2002) Stat Med 21:2175-2197
+
+Neural ODEs:
+- Chen et al. (2018) NeurIPS - Neural ODEs
+- Rackauckas et al. (2020) arXiv:2001.04385 - Universal DEs
+
+AD/SciML:
+- Moses & Churavy (2020) - Enzyme.jl
+- Innes (2018) - Zygote.jl
+- Rackauckas & Nie (2017) - DifferentialEquations.jl
+

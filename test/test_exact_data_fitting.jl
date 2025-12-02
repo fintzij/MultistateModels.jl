@@ -304,7 +304,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll = loglik_exact(pars, exact_data; neg=false)
         
@@ -329,7 +329,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         grad = ForwardDiff.gradient(p -> loglik_exact(p, exact_data; neg=false), pars)
         
@@ -354,7 +354,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         hess = ForwardDiff.hessian(p -> loglik_exact(p, exact_data; neg=false), pars)
         
@@ -436,7 +436,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll = loglik_exact(pars, exact_data; neg=false)
         
@@ -463,7 +463,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll = loglik_exact(pars, exact_data; neg=false)
         
@@ -489,7 +489,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll = loglik_exact(pars, exact_data; neg=false)
         
@@ -548,13 +548,10 @@ end
         
         h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
         
-        # ObservationWeights is currently broken - skip this test
-        # TODO: Fix check_weight_exclusivity to set SubjectWeights to ones when ObservationWeights is provided
-        @test_broken begin
-            obs_weights = [2.0, 1.0, 0.5]
-            model_weighted = multistatemodel(h12; data = data, ObservationWeights = obs_weights)
-            model_weighted isa MultistateModels.MultistateProcess
-        end
+        # ObservationWeights should work when SubjectWeights is not provided
+        obs_weights = [2.0, 1.0, 0.5]
+        model_weighted = multistatemodel(h12; data = data, ObservationWeights = obs_weights)
+        @test model_weighted isa MultistateModels.MultistateProcess
         
         # Verify unweighted model works
         model_unweighted = multistatemodel(h12; data = data)
@@ -584,7 +581,7 @@ end
     
     paths = MultistateModels.extract_paths(model)
     exact_data = ExactData(model, paths)
-    pars = flatview(model.parameters)
+    pars = model.parameters.flat
     
     ll_total = loglik_exact(pars, exact_data; neg=false)
     ll_subj = loglik_exact(pars, exact_data; neg=false, return_ll_subj=true)
@@ -729,7 +726,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         # Should compute valid likelihood
         ll = loglik_exact(pars, exact_data; neg=false)
@@ -761,7 +758,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         # Should handle the piecewise intervals correctly
         ll = loglik_exact(pars, exact_data; neg=false)
@@ -799,7 +796,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll = loglik_exact(pars, exact_data; neg=false)
         @test isfinite(ll)
@@ -840,7 +837,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         # Likelihood should be computable
         ll = loglik_exact(pars, exact_data; neg=false)
@@ -867,7 +864,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll = loglik_exact(pars, exact_data; neg=false)
         @test isfinite(ll)
@@ -918,7 +915,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll = loglik_exact(pars, exact_data; neg=false)
         @test isfinite(ll)
@@ -941,7 +938,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll = loglik_exact(pars, exact_data; neg=false)
         @test isfinite(ll)
@@ -987,7 +984,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         # Likelihood is just survival probability
         ll = loglik_exact(pars, exact_data; neg=false)
@@ -1046,7 +1043,7 @@ end
         
         paths = MultistateModels.extract_paths(model)
         exact_data = ExactData(model, paths)
-        pars = flatview(model.parameters)
+        pars = model.parameters.flat
         
         ll = loglik_exact(pars, exact_data; neg=false)
         @test isfinite(ll)

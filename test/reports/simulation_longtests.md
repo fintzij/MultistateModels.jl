@@ -1,5 +1,5 @@
 ---
-title: "Model Generation Testing Guide"
+title: "Simulation Long Tests"
 format:
     html:
         theme:
@@ -9,13 +9,19 @@ format:
         highlight-style: atom-one-dark
 ---
 
-# Model Generation Testing Guide
+# Simulation Long Tests
 
-This document explains the model generation process in MultistateModels.jl and how each step is unit tested.
+_Last updated: 2025-06-03 UTC_
+
+This document describes the long-running statistical validation tests for the simulation infrastructure in MultistateModels.jl. These tests verify that `simulate_path` correctly samples from the target sojourn time distributions across all supported hazard families and covariate configurations.
 
 ## Overview
 
-Model generation in MultistateModels.jl follows a multi-step validation and construction process. Each step has corresponding unit tests in `test/test_modelgeneration.jl` (run via `Pkg.test(test_args=["test_modelgeneration"])`). All of the model-generation-focused tests currently pass ✅. Status last verified on **2025-11-25** by running `julia --project -e 'using Pkg; Pkg.test(test_args=["test_modelgeneration"])'` on branch `infrastructure_changes`.
+Simulation validation tests live in:
+- `test/longtest_simulation_distribution.jl` - Distribution fidelity tests (1M samples per scenario)
+- `test/longtest_simulation_tvc.jl` - Time-varying covariate tests (10K samples per scenario)
+
+Run with: `MSM_TEST_LEVEL=full julia --project -e 'using Pkg; Pkg.test()'`
 
 ## Expanded Diagnostics Matrix
 

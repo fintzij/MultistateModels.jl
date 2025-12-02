@@ -10,12 +10,8 @@ and Ipopt for constrained problems by default.
 - `model::MultistateModel`: multistate model object with exact observation times
 - `constraints`: parameter constraints (see Constraints documentation)
 - `verbose::Bool=true`: print optimization messages
-- `solver`: optimization solver to use. Default is `nothing`, which uses:
-  - `Optim.LBFGS()` for unconstrained problems (fast, gradient-based)
-  - `Ipopt.Optimizer()` for constrained problems (interior-point method)
-  Users can specify any solver compatible with Optimization.jl, e.g.:
-  - `Optim.BFGS()`, `Optim.NelderMead()` for unconstrained
-  - `Ipopt.Optimizer()` for constrained
+- `solver`: optimization solver (default: L-BFGS for unconstrained, Ipopt for constrained).
+  See [Optimization Solvers](@ref) for available options.
 - `compute_vcov::Bool=true`: compute model-based variance-covariance matrix (H⁻¹).
   Useful for diagnostics by comparing to robust variance.
 - `vcov_threshold::Bool=true`: if true, uses adaptive threshold `1/√(log(n)·p)` for pseudo-inverse 
@@ -23,9 +19,12 @@ and Ipopt for constrained problems by default.
 - `compute_ij_vcov::Bool=true`: compute infinitesimal jackknife (sandwich/robust) variance H⁻¹KH⁻¹.
   **This is the recommended variance for inference** as it remains valid under model misspecification.
 - `compute_jk_vcov::Bool=false`: compute jackknife variance ((n-1)/n)·Σᵢ ΔᵢΔᵢᵀ
-- `loo_method::Symbol=:direct`: method for leave-one-out perturbations:
-  - `:direct`: compute H⁻¹ once, multiply by each gᵢ (faster for n >> p)
-  - `:cholesky`: use Cholesky rank-k downdates (more stable, slower)
+- `loo_method::Symbol=:direct`: method for computing leave-one-out (LOO) perturbations Δᵢ.
+  **Only affects jackknife variance** (not IJ), since IJ uses Var_IJ = H⁻¹KH⁻¹ directly
+  without computing individual LOO estimates. Options:
+  - `:direct`: approximate H₋ᵢ⁻¹ ≈ H⁻¹, so Δᵢ = H⁻¹gᵢ. O(p²n), faster when n >> p.
+  - `:cholesky`: compute H₋ᵢ⁻¹ exactly via Cholesky rank-k downdates of H = LLᵀ.
+    O(np³), more numerically stable for ill-conditioned problems.
 
 # Returns
 - `MultistateModelFitted`: fitted model object with estimates, standard errors, and diagnostics
@@ -114,7 +113,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
         initcons = consfun_multistate(zeros(length(constraints.cons)), parameters, nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
         if length(badcons) > 0
-            @error "Constraints $badcons are violated at the initial parameter values."
+            error("Constraints $badcons are violated at the initial parameter values.")
         end
 
         optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_multistate)
@@ -158,26 +157,32 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
         subject_grads = robust_result.subject_gradients
     end
 
-    # create parameters VectorOfVectors from solution
-    parameters_fitted = VectorOfVectors(sol.u, model.parameters.elem_ptr)
-    
-    # build ParameterHandling structure for fitted parameters
+    # Build ParameterHandling structure for fitted parameters
     # Use the unflatten function from the model to convert flat params back to transformed
-    params_transformed = model.parameters_ph.unflatten(sol.u)
+    params_transformed = model.parameters.unflatten(sol.u)
     params_natural = ParameterHandling.value(params_transformed)
-    parameters_ph_fitted = (
-        flat = sol.u,
+    parameters_fitted = (
+        flat = Vector{Float64}(sol.u),
         transformed = params_transformed,
         natural = params_natural,
-        unflatten = model.parameters_ph.unflatten
+        unflatten = model.parameters.unflatten
     )
+
+    # Split sol.u into per-hazard log-scale vectors for spline remaking
+    natural_vals = values(model.parameters.natural)
+    block_sizes = [length(v) for v in natural_vals]
+    log_scale_params = Vector{Vector{Float64}}(undef, length(block_sizes))
+    offset = 0
+    for i in eachindex(block_sizes)
+        log_scale_params[i] = sol.u[(offset+1):(offset+block_sizes[i])]
+        offset += block_sizes[i]
+    end
 
     # wrap results
     model_fitted = MultistateModelFitted(
         model.data,
         parameters_fitted,
-        parameters_ph_fitted,
-        (loglik = -sol.minimum, subj_lml = ll_subj),
+        (loglik = -sol.objective, subj_lml = ll_subj),
         vcov,
         isnothing(ij_variance) ? nothing : Matrix(ij_variance),
         isnothing(jk_variance) ? nothing : Matrix(jk_variance),
@@ -196,10 +201,10 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall)
 
-    # remake splines and calculate risk periods
+    # remake splines and calculate risk periods using log-scale parameters
     for i in eachindex(model_fitted.hazards)
         if isa(model_fitted.hazards[i], _SplineHazard)
-            remake_splines!(model_fitted.hazards[i], model_fitted.parameters[i])
+            remake_splines!(model_fitted.hazards[i], log_scale_params[i])
             set_riskperiod!(model_fitted.hazards[i])
         end
     end
@@ -221,16 +226,16 @@ and Ipopt for constrained problems by default.
 - `model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}`: Markov model with panel observations
 - `constraints`: parameter constraints (see Constraints documentation)
 - `verbose::Bool=true`: print optimization messages
-- `solver`: optimization solver to use. Default is `nothing`, which uses:
-  - `Optim.LBFGS()` for unconstrained problems
-  - `Ipopt.Optimizer()` for constrained problems
-  Users can specify any solver compatible with Optimization.jl.
+- `solver`: optimization solver (default: L-BFGS for unconstrained, Ipopt for constrained).
+  See [Optimization Solvers](@ref) for available options.
 - `compute_vcov::Bool=true`: compute model-based variance-covariance matrix (for diagnostics)
 - `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse of Fisher information
 - `compute_ij_vcov::Bool=true`: compute infinitesimal jackknife (sandwich/robust) variance.
   **This is the recommended variance for inference.**
 - `compute_jk_vcov::Bool=false`: compute jackknife variance
-- `loo_method::Symbol=:direct`: method for LOO perturbations (`:direct` or `:cholesky`)
+- `loo_method::Symbol=:direct`: method for LOO perturbations Δᵢ = θ̂₋ᵢ - θ̂ (jackknife only, not IJ):
+  - `:direct`: Δᵢ = H⁻¹gᵢ (faster, O(p²n))
+  - `:cholesky`: exact H₋ᵢ⁻¹ via Cholesky downdates (stable, O(np³))
 
 # Returns
 - `MultistateModelFitted`: fitted model with estimates and variance matrices
@@ -314,7 +319,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         initcons = consfun_markov(zeros(length(constraints.cons)), parameters, nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
         if length(badcons) > 0
-            @error "Constraints $badcons are violated at the initial parameter values."
+            error("Constraints $badcons are violated at the initial parameter values.")
         end
 
         optf = OptimizationFunction(loglik_markov, Optimization.AutoForwardDiff(), cons = consfun_markov)
@@ -332,7 +337,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     end
 
     # compute loglikelihood at the estimate
-    logliks = (loglik = -sol.minimum, subj_lml = loglik_markov(sol.u, MPanelData(model, books); return_ll_subj = true))
+    logliks = (loglik = -sol.objective, subj_lml = loglik_markov(sol.u, MPanelData(model, books); return_ll_subj = true))
 
     # compute robust variance estimates if requested
     ij_variance = nothing
@@ -353,29 +358,21 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         subject_grads = robust_result.subject_gradients
     end
 
-    # create parameters VectorOfVectors from solution
-    parameters_fitted = VectorOfVectors(sol.u, model.parameters.elem_ptr)
-    
-    # build ParameterHandling structure for fitted parameters
-    params_transformed_pairs = [
-        hazname => ParameterHandling.positive(Vector{Float64}(parameters_fitted[idx]))
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
-    ]
-    params_transformed = NamedTuple(params_transformed_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    # Build ParameterHandling structure for fitted parameters
+    # Use the unflatten function from the model to convert flat params back to transformed
+    params_transformed = model.parameters.unflatten(sol.u)
     params_natural = ParameterHandling.value(params_transformed)
-    parameters_ph_fitted = (
-        flat = params_flat,
+    parameters_fitted = (
+        flat = Vector{Float64}(sol.u),
         transformed = params_transformed,
         natural = params_natural,
-        unflatten = unflatten_fn
+        unflatten = model.parameters.unflatten
     )
 
     # wrap results
     return MultistateModelFitted(
         model.data,
         parameters_fitted,
-        parameters_ph_fitted,
         logliks,
         vcov,
         isnothing(ij_variance) ? nothing : Matrix(ij_variance),
@@ -405,6 +402,11 @@ Fit a semi-Markov model to panel data via Monte Carlo EM (MCEM).
 Uses L-BFGS optimization for unconstrained M-steps (5-6× faster than interior-point methods)
 and Ipopt for constrained M-steps by default.
 
+!!! note "Surrogate Required"
+    MCEM requires a Markov surrogate for importance sampling proposals. 
+    You must call `set_surrogate!(model)` or use `surrogate=:markov` in 
+    `multistatemodel()` before fitting.
+
 # Algorithm
 
 The MCEM algorithm iterates between:
@@ -426,21 +428,18 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
   expectation-maximization. JRSS-B, 67(2), 235-251.
 - Vehtari, A., Simpson, D., Gelman, A., Yao, Y., & Gabry, J. (2024). 
   Pareto Smoothed Importance Sampling. JMLR, 25(72), 1-58.
+- Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods 
+  for accelerating the convergence of any EM algorithm. Scand. J. Stat., 35(2), 335-353.
 
 # Arguments
 
 **Model and constraints:**
 - `model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}`: semi-Markov model
-- `optimize_surrogate::Bool=true`: optimize Markov surrogate parameters for path proposal
 - `constraints`: parameter constraints tuple
-- `surrogate_constraints`: constraints for Markov surrogate optimization
-- `surrogate_parameters`: initial surrogate parameters (if not optimizing)
 
 **Optimization:**
-- `solver`: optimization solver for M-step. Default is `nothing`, which uses:
-  - `Optim.LBFGS()` for unconstrained problems
-  - `Ipopt.Optimizer()` for constrained problems
-  Users can specify any solver compatible with Optimization.jl.
+- `solver`: optimization solver for M-step (default: L-BFGS for unconstrained, Ipopt for constrained).
+  See [Optimization Solvers](@ref) for available options.
 
 **MCEM algorithm control:**
 - `maxiter::Int=100`: maximum MCEM iterations
@@ -454,6 +453,10 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
 - `npaths_additional::Int=10`: increment for additional paths when augmenting
 - `viterbi_init::Bool=true`: initialize MCEM with Viterbi MAP path per subject for warm start
 - `block_hessian_speedup::Float64=2.0`: minimum speedup factor to use block-diagonal Hessian
+- `acceleration::Symbol=:none`: acceleration method for MCEM. Options:
+  - `:none` (default): standard MCEM without acceleration
+  - `:squarem`: SQUAREM acceleration (Varadhan & Roland, 2008), applies quasi-Newton 
+    extrapolation every 2 iterations to speed up convergence
 
 **Output control:**
 - `verbose::Bool=true`: print progress messages
@@ -465,7 +468,9 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
 - `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse
 - `compute_ij_vcov::Bool=true`: compute IJ/sandwich variance (robust, **recommended for inference**)
 - `compute_jk_vcov::Bool=false`: compute jackknife variance
-- `loo_method::Symbol=:direct`: method for LOO perturbations
+- `loo_method::Symbol=:direct`: method for LOO perturbations Δᵢ (jackknife only, not IJ):
+  - `:direct`: Δᵢ = H⁻¹gᵢ (faster)
+  - `:cholesky`: exact H₋ᵢ⁻¹ via Cholesky downdates (stable)
 
 # Returns
 - `MultistateModelFitted`: fitted model with MCEM solution and variance estimates
@@ -499,11 +504,32 @@ records = get_convergence_records(fitted)
 # Use a custom solver for the M-step
 using Optim
 fitted = fit(semimarkov_model; solver=Optim.BFGS())
+
+# Use SQUAREM acceleration for faster convergence
+fitted = fit(semimarkov_model; acceleration=:squarem)
 ```
 
 See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; optimize_surrogate = true, constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, viterbi_init = true, block_hessian_speedup = 2.0, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, viterbi_init = true, block_hessian_speedup = 2.0, acceleration::Symbol = :none, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+
+    # Validate acceleration parameter
+    if acceleration ∉ (:none, :squarem)
+        error("acceleration must be :none or :squarem, got :$acceleration")
+    end
+    use_squarem = acceleration === :squarem
+    
+    if verbose && use_squarem
+        println("Using SQUAREM acceleration for MCEM.\n")
+    end
+
+    # Resolve proposal configuration
+    proposal_config = resolve_proposal_config(proposal, model)
+    use_phasetype = proposal_config.type === :phasetype
+    
+    if verbose && use_phasetype
+        println("Using phase-type proposal for MCEM importance sampling.\n")
+    end
 
     # copy of data
     data_original = deepcopy(model.data)
@@ -518,7 +544,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         initcons = consfun_semimarkov(zeros(length(constraints.cons)), get_parameters_flat(model), nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
         if length(badcons) > 0
-            @error "Constraints $badcons are violated at the initial parameter values."
+            error("Constraints $badcons are violated at the initial parameter values.")
         end
     end
 
@@ -534,13 +560,13 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
     # throw a warning if trying to fit a spline model where the degree is 0 for all splines
     if all(map(x -> (isa(x, _MarkovHazard) | (isa(x, _SplineHazard) && (x.degree == 0) && (length(x.knots) == 2))), model.hazards))
-        @error "Attempting to fit a Markov model via MCEM. Recode degree 0 splines as exponential hazards and refit."
+        error("Attempting to fit a time-homogeneous Markov model via MCEM. Recode as exponential hazards and refit.")
     end
 
     # MCEM initialization
     keep_going = true
     iter = 0
-    convergence = false
+    is_converged = false
 
     # number of subjects
     nsubj = length(model.subjectindices)
@@ -595,23 +621,31 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # Phase 3: Use ParameterHandling.jl flat parameter length
     parameters_trace = ElasticArray{Float64, 2}(undef, length(get_parameters_flat(model)), 0) # parameter estimates
 
-    # build surrogate
-    if optimize_surrogate
-
-        surrogate_fitted = fit_surrogate(model; surrogate_parameters=surrogate_parameters, surrogate_constraints=surrogate_constraints, verbose=verbose)
-
-        # create the surrogate object
-        surrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters)
-        
-    else
-        # set to supplied initial values
-        if isnothing(surrogate_parameters)
-            @error "Parameters for the Markov surrogate must be supplied if optimize_surrogate=false."
-        end 
-
-        # if parameters for the surrogate are provided, simply use these values
-        surrogate = MarkovSurrogate(model.markovsurrogate.hazards, surrogate_parameters)
+    # Require a pre-built Markov surrogate for MCEM
+    # Users should call set_surrogate!(model) or use surrogate=:markov in multistatemodel() beforehand
+    if isnothing(model.markovsurrogate)
+        error("MCEM requires a Markov surrogate. Call `set_surrogate!(model)` or use `surrogate=:markov` in `multistatemodel()` before fitting.")
     end
+    
+    markov_surrogate = model.markovsurrogate
+    if verbose
+        println("Using model's Markov surrogate for MCEM.\n")
+    end
+
+    # Build phase-type surrogate if requested
+    phasetype_surrogate = nothing
+    tpm_book_ph = nothing
+    hazmat_book_ph = nothing
+    fbmats_ph = nothing
+    emat_ph = nothing
+    
+    if use_phasetype
+        phasetype_surrogate = fit_phasetype_surrogate(model, markov_surrogate; 
+                                                       config=proposal_config, verbose=verbose)
+    end
+    
+    # Use Markov surrogate for compatibility (phase-type uses it for sampling infrastructure)
+    surrogate = markov_surrogate
 
      # containers for bookkeeping TPMs
      books = build_tpm_mapping(model.data)    
@@ -624,28 +658,48 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
      cache = ExponentialUtilities.alloc_mem(similar(hazmat_book_surrogate[1]), ExpMethodGeneric())
 
     # Solve Kolmogorov equations for TPMs
+    # Get log-scale surrogate parameters for hazard evaluation
+    surrogate_pars = get_log_scale_params(surrogate.parameters)
     for t in eachindex(books[1])
         # compute the transition intensity matrix
-        compute_hazmat!(hazmat_book_surrogate[t], surrogate.parameters, surrogate.hazards, books[1][t], model.data)
+        compute_hazmat!(hazmat_book_surrogate[t], surrogate_pars, surrogate.hazards, books[1][t], model.data)
         # compute transition probability matrices
         compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
     end
 
-    # compute normalizing constant of Markov proposal
-    NormConstantProposal = surrogate_fitted.loglik.loglik
+    # Build phase-type TPM book if using phase-type proposals
+    if use_phasetype
+        tpm_book_ph, hazmat_book_ph = build_phasetype_tpm_book(phasetype_surrogate, books, model.data)
+        fbmats_ph = build_fbmats_phasetype(model, phasetype_surrogate)
+        emat_ph = build_phasetype_emat_expanded(model, phasetype_surrogate)
+    end
+
+    # compute normalizing constant of proposal distribution
+    # For Markov proposal: this is the log-likelihood under the Markov surrogate
+    # For phase-type proposal: compute marginal likelihood via forward algorithm
+    #   This is r(Y|θ') in the importance sampling formula:
+    #   log f̂(Y|θ) = log r(Y|θ') + Σᵢ log(mean(νᵢ))
+    if use_phasetype
+        NormConstantProposal = compute_phasetype_marginal_loglik(model, phasetype_surrogate, emat_ph)
+    else
+        NormConstantProposal = surrogate_fitted.loglik.loglik
+    end
 
     # Viterbi MAP warm start initialization
     #
     # By initializing with the marginal posterior mode (Viterbi MAP) path for each
     # subject, the first M-step can take a large step toward the mode of the
     # likelihood surface, accelerating MCEM convergence.
-    if viterbi_init
+    #
+    # Note: Skip Viterbi initialization when using phase-type proposals because
+    # Viterbi paths are in observed space, but phase-type importance weights
+    # require expanded space paths. Paths will be drawn in expanded space directly.
+    if viterbi_init && !use_phasetype
         if verbose println("Initializing with Viterbi MAP paths...\n") end
         
         for i in 1:nsubj
             # Get subject data indices
             subj_inds = model.subjectindices[i]
-            
             # Skip subjects with only exact observations (obstype == 1)
             # For these subjects, the path is fully determined by the data
             if all(model.data.obstype[subj_inds] .== 1)
@@ -658,9 +712,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             # initialize containers with single MAP path
             push!(samplepaths[i], map_path)
             
-            # compute log-likelihoods
-            ll_surrog = loglik(surrogate.parameters, map_path, surrogate.hazards, model)
-            ll_target = loglik(VectorOfVectors(params_cur, model.parameters.elem_ptr), map_path, model.hazards, model)
+            # compute log-likelihoods using log-scale parameters
+            surrogate_pars = get_log_scale_params(surrogate.parameters)
+            ll_surrog = loglik(surrogate_pars, map_path, surrogate.hazards, model)
+            target_pars = nest_params(params_cur, model.parameters)
+            ll_target = loglik(target_pars, map_path, model.hazards, model)
             
             push!(loglik_surrog[i], ll_surrog)
             push!(loglik_target_cur[i], ll_target)
@@ -695,7 +751,13 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         surrogate = surrogate, 
         psis_pareto_k = psis_pareto_k,
         fbmats = fbmats,
-        absorbingstates = absorbingstates)
+        absorbingstates = absorbingstates,
+        # Phase-type infrastructure (nothing if not using)
+        phasetype_surrogate = phasetype_surrogate,
+        tpm_book_ph = tpm_book_ph,
+        hazmat_book_ph = hazmat_book_ph,
+        fbmats_ph = fbmats_ph,
+        emat_ph = emat_ph)
     
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SubjectWeights)
@@ -725,11 +787,22 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     ascent_lb = 0.0
     ascent_ub = 0.0
 
+    # Initialize SQUAREM state if using acceleration
+    squarem_state = use_squarem ? SquaremState(length(params_cur)) : nothing
+
     # start algorithm
     while keep_going
 
         # increment the iteration
         iter += 1
+        
+        # =====================================================================
+        # SQUAREM: Save θ₀ at start of cycle (every 2 iterations)
+        # =====================================================================
+        if use_squarem && squarem_state.step == 0
+            squarem_state.θ0 .= params_cur
+            squarem_state.step = 1
+        end
         
         # solve M-step: use user-specified solver or default (L-BFGS for unconstrained, Ipopt for constrained)
         if isnothing(constraints)
@@ -767,13 +840,89 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             ase = 0
             ascent_lb = 0
             ascent_ub = 0
-            convergence = true
+            is_converged = true
         end
 
-        # increment the current values of the parameter, marginal log likelihood, target loglik
-        params_cur        = deepcopy(params_prop)
-        mll_cur           = deepcopy(mll_prop)
-        loglik_target_cur = deepcopy(loglik_target_prop)
+        # =====================================================================
+        # SQUAREM: Apply acceleration every 2 iterations
+        # =====================================================================
+        if use_squarem && !is_converged
+            if squarem_state.step == 1
+                # After first EM step: save θ₁, continue to second step
+                squarem_state.θ1 .= params_prop
+                squarem_state.step = 2
+                
+                # Standard update for this iteration
+                params_cur        = deepcopy(params_prop)
+                mll_cur           = deepcopy(mll_prop)
+                loglik_target_cur = deepcopy(loglik_target_prop)
+                
+            elseif squarem_state.step == 2
+                # After second EM step: θ₂ = params_prop, now compute acceleration
+                squarem_state.θ2 .= params_prop
+                
+                # Compute step length and acceleration vectors
+                α, r, v = squarem_step_length(squarem_state.θ0, squarem_state.θ1, squarem_state.θ2)
+                squarem_state.α = α
+                
+                if α == -1.0
+                    # No acceleration possible (v too small), use standard EM update
+                    params_cur        = deepcopy(params_prop)
+                    mll_cur           = deepcopy(mll_prop)
+                    loglik_target_cur = deepcopy(loglik_target_prop)
+                    squarem_state.n_fallbacks += 1
+                    if verbose
+                        println("  [SQUAREM: no acceleration (Δ too small), using standard EM]\n")
+                    end
+                else
+                    # Compute accelerated parameters
+                    params_acc = squarem_accelerate(squarem_state.θ0, r, v, α)
+                    
+                    # Evaluate likelihood at accelerated point
+                    loglik!(params_acc, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights))
+                    mll_acc = mcem_mll(loglik_target_prop, ImportanceWeights, model.SubjectWeights)
+                    
+                    # Decide whether to accept acceleration
+                    # Use mll at θ₀ as reference (start of SQUAREM cycle)
+                    mll_θ0 = mcem_mll(loglik_target_cur, ImportanceWeights, model.SubjectWeights)
+                    
+                    if squarem_should_accept(mll_acc, mll_prop, mll_θ0)
+                        # Accept accelerated step
+                        params_cur = params_acc
+                        mll_cur = mll_acc
+                        # loglik_target_cur already holds logliks at params_acc from loglik! call above
+                        loglik_target_cur = deepcopy(loglik_target_prop)
+                        squarem_state.n_accelerations += 1
+                        
+                        # Update mll_change for reporting
+                        mll_change = mll_acc - mll_θ0
+                        
+                        if verbose
+                            println("  [SQUAREM: acceleration accepted, α=$(round(α;sigdigits=3))]\n")
+                        end
+                    else
+                        # Fallback to standard EM update (θ₂)
+                        loglik!(squarem_state.θ2, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights))
+                        params_cur        = deepcopy(squarem_state.θ2)
+                        mll_cur           = deepcopy(mll_prop)
+                        loglik_target_cur = deepcopy(loglik_target_prop)
+                        squarem_state.n_fallbacks += 1
+                        if verbose
+                            println("  [SQUAREM: acceleration rejected (mll decreased), using θ₂]\n")
+                        end
+                    end
+                end
+                
+                # Reset SQUAREM cycle
+                squarem_state.step = 0
+            end
+        else
+            # Standard MCEM (no SQUAREM) or converged
+            # increment the current values of the parameter, marginal log likelihood, target loglik
+            params_cur        = deepcopy(params_prop)
+            mll_cur           = deepcopy(mll_prop)
+            loglik_target_cur = deepcopy(loglik_target_prop)
+        end
 
         # increment log importance weights, importance weights, effective sample size and pareto shape parameter
         ComputeImportanceWeightsESS!(loglik_target_cur, loglik_surrog, _logImportanceWeights, ImportanceWeights, ess_cur, ess_target, psis_pareto_k)
@@ -790,7 +939,12 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             println("Gain in marginal log-likelihood, ΔQ: $(round(mll_change;sigdigits=3))")
             println("MCEM asymptotic standard error: $(round(ase;sigdigits=3))")
             println("Ascent lower and upper bound: [$(round(ascent_lb; sigdigits=3)), $(round(ascent_ub; sigdigits=3))]")
-            println("Estimate of the log marginal likelihood, l(θ): $(round(compute_loglik(model, loglik_surrog, loglik_target_cur, NormConstantProposal).loglik;digits=3))\n")
+            println("Estimate of the log marginal likelihood, l(θ): $(round(compute_loglik(model, loglik_surrog, loglik_target_cur, NormConstantProposal).loglik;digits=3))")
+            if use_squarem
+                println("SQUAREM: $(squarem_state.n_accelerations) accelerations, $(squarem_state.n_fallbacks) fallbacks\n")
+            else
+                println()
+            end
         end
 
         # save marginal log likelihood, parameters and effective sample size
@@ -800,7 +954,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
         # check for convergence
         if ascent_ub < tol
-            convergence = true
+            is_converged = true
             if verbose  println("The MCEM algorithm has converged.\n") end
             break
         end
@@ -843,10 +997,16 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             surrogate = surrogate,
             psis_pareto_k = psis_pareto_k,
             fbmats = fbmats,
-            absorbingstates = absorbingstates)
+            absorbingstates = absorbingstates,
+            # Phase-type infrastructure (nothing if not using)
+            phasetype_surrogate = phasetype_surrogate,
+            tpm_book_ph = tpm_book_ph,
+            hazmat_book_ph = hazmat_book_ph,
+            fbmats_ph = fbmats_ph,
+            emat_ph = emat_ph)
     end # end-while
 
-    if !convergence
+    if !is_converged
         @warn "MCEM did not converge."
     end
 
@@ -864,7 +1024,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         end
         vcov = nothing
     
-    elseif convergence && compute_vcov
+    elseif is_converged && compute_vcov
         if verbose
             println("Computing variance-covariance matrix at final estimates.")
         end
@@ -873,10 +1033,14 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         path = Array{SamplePath}(undef, 1)
         samplingweight = Vector{Float64}(undef, 1)
         
-        # Get hazard parameter blocks from elem_ptr
-        # elem_ptr[i] gives the start index for hazard i (1-indexed into flat parameter vector)
-        elem_ptr = model.parameters.elem_ptr
-        nhaz = length(elem_ptr) - 1
+        # Get hazard parameter blocks from parameters.natural
+        # Each hazard has a vector of parameters; compute block indices
+        natural_pars = model.parameters.natural
+        nhaz = length(natural_pars)
+        block_sizes = [length(natural_pars[k]) for k in 1:nhaz]
+        
+        # Build index ranges for each hazard block
+        elem_ptr = cumsum([1; block_sizes])
         blocks = [elem_ptr[k]:(elem_ptr[k+1]-1) for k in 1:nhaz]
         
         # initialize Fisher information matrix containers
@@ -900,7 +1064,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # Decide whether to use block-diagonal or dense Hessian computation
         # Due to function call overhead, we only use block-diagonal when theoretical speedup
         # exceeds the threshold (default 2.0× speedup required)
-        block_sizes = [length(b) for b in blocks]
         sum_block_sq = sum(bs^2 for bs in block_sizes)
         theoretical_speedup = nparams^2 / sum_block_sq
         use_block_diagonal = theoretical_speedup > block_hessian_speedup && nhaz > 1
@@ -1044,7 +1207,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     jk_variance = nothing
     subject_grads = nothing
     
-    if (compute_ij_vcov || compute_jk_vcov) && !isnothing(vcov) && isnothing(constraints) && convergence
+    if (compute_ij_vcov || compute_jk_vcov) && !isnothing(vcov) && isnothing(constraints) && is_converged
         if verbose
             println("Computing robust variance estimates...")
         end
@@ -1064,18 +1227,30 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # return sampled paths and importance weights
     ProposedPaths = return_proposed_paths ? (paths=samplepaths, weights=ImportanceWeights) : nothing
 
-    # create parameters VectorOfVectors from current parameters
-    parameters_fitted = VectorOfVectors(params_cur, model.parameters.elem_ptr)
+    # Build ParameterHandling structure for fitted parameters
+    # params_cur contains log-scale parameters; we need to split into per-hazard vectors
+    # Compute block sizes from model.parameters.natural structure
+    natural_vals = values(model.parameters.natural)
+    block_sizes = [length(v) for v in natural_vals]
     
-    # build ParameterHandling structure for fitted parameters
+    # Split params_cur into per-hazard log-scale vectors
+    log_scale_params = Vector{Vector{Float64}}(undef, length(block_sizes))
+    offset = 0
+    for i in eachindex(block_sizes)
+        log_scale_params[i] = params_cur[(offset+1):(offset+block_sizes[i])]
+        offset += block_sizes[i]
+    end
+    
+    # Build transformed NamedTuple: exp to get natural scale, wrap with positive()
+    haznames = sort(collect(model.hazkeys), by = x -> x[2])
     params_transformed_pairs = [
-        hazname => ParameterHandling.positive(Vector{Float64}(parameters_fitted[idx]))
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+        haznames[i].first => safe_positive(exp.(log_scale_params[i]))
+        for i in eachindex(haznames)
     ]
     params_transformed = NamedTuple(params_transformed_pairs)
     params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
     params_natural = ParameterHandling.value(params_transformed)
-    parameters_ph_fitted = (
+    parameters_fitted = (
         flat = params_flat,
         transformed = params_transformed,
         natural = params_natural,
@@ -1086,7 +1261,6 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     model_fitted = MultistateModelFitted(
         data_original,
         parameters_fitted,
-        parameters_ph_fitted,
         logliks,
         vcov,
         isnothing(ij_variance) ? nothing : Matrix(ij_variance),
@@ -1106,10 +1280,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         ProposedPaths,
         model.modelcall)
 
-    # remake splines and calculate risk periods
+    # remake splines and calculate risk periods using log-scale parameters
     for i in eachindex(model_fitted.hazards)
         if isa(model_fitted.hazards[i], _SplineHazard)
-            remake_splines!(model_fitted.hazards[i], model_fitted.parameters[i])
+            remake_splines!(model_fitted.hazards[i], log_scale_params[i])
             set_riskperiod!(model_fitted.hazards[i])
         end
     end

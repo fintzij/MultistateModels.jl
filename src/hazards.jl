@@ -16,7 +16,8 @@ Example:
 """
     extract_covar_names(parnames::Vector{Symbol})
 
-Extract covariate names from parameter names by removing hazard prefix and excluding Intercept/shape/scale.
+Extract covariate names from parameter names by removing hazard prefix and 
+excluding baseline parameters (Intercept, shape, scale, and spline basis sp1, sp2, ...).
 
 # Example
 ```julia
@@ -25,6 +26,9 @@ extract_covar_names(parnames)  # Returns [:age, :trt]
 
 parnames_wei = [:h12_shape, :h12_scale, :h12_age]
 extract_covar_names(parnames_wei)  # Returns [:age]
+
+parnames_spline = [:h12_sp1, :h12_sp2, :h12_sp3, :h12_age]
+extract_covar_names(parnames_spline)  # Returns [:age]
 ```
 """
 function extract_covar_names(parnames::Vector{Symbol})
@@ -33,11 +37,16 @@ function extract_covar_names(parnames::Vector{Symbol})
         pname_str = String(pname)
         # Skip baseline parameters (not covariates)
         # Exponential: "Intercept", Weibull/Gompertz: "shape" and "scale"
+        # Spline: "sp1", "sp2", etc. (spline basis coefficients)
         if occursin("Intercept", pname_str) || occursin("shape", pname_str) || occursin("scale", pname_str)
             continue
         end
         # Remove hazard prefix (e.g., "h12_age" -> "age")
         covar_name = replace(pname_str, r"^h\d+_" => "")
+        # Skip spline basis parameters (sp1, sp2, ...)
+        if occursin(r"^sp\d+$", covar_name)
+            continue
+        end
         push!(covar_names, Symbol(covar_name))
     end
     return covar_names
@@ -172,9 +181,7 @@ end
 
 @inline function _ensure_transform_supported(hazard::_Hazard)
     hazard.metadata.time_transform || return
-    if hazard isa SplineHazard
-        throw(ArgumentError("time_transform=true is not yet supported for spline hazards"))
-    end
+    # Splines now support time transform
 end
 
 @inline function _time_transform_cache(context::TimeTransformContext{LinType,TimeType}, hazard_slot::Int) where {LinType,TimeType}
@@ -301,6 +308,39 @@ end
         return _time_transform_cumhaz_gompertz(pars, linpred, hazard.metadata.linpred_effect, lb, ub)
     else
         throw(ArgumentError("time_transform=true is not implemented for family $(family)"))
+    end
+end
+
+# Spline hazard time transform methods
+# For splines, the baseline hazard α(t) is modeled by the spline, so we evaluate
+# the stored hazard_fn and cumhaz_fn closures directly.
+
+@inline function _time_transform_hazard(hazard::RuntimeSplineHazard, pars::AbstractVector, t::Real, linpred::Real)
+    # The hazard_fn closure handles baseline spline evaluation
+    # Linear predictor effect applied based on linpred_effect mode
+    base_haz = hazard.hazard_fn(t, pars, NamedTuple())
+    
+    effect = hazard.metadata.linpred_effect
+    if effect == :aft
+        # AFT: h(t) * exp(-linpred) - time is scaled, hazard adjusted
+        return base_haz * exp(-linpred)
+    else
+        # PH: h(t) * exp(linpred)
+        return base_haz * exp(linpred)
+    end
+end
+
+@inline function _time_transform_cumhaz(hazard::RuntimeSplineHazard, pars::AbstractVector, lb::Real, ub::Real, linpred::Real)
+    # The cumhaz_fn closure handles baseline spline cumulative hazard
+    base_cumhaz = hazard.cumhaz_fn(lb, ub, pars, NamedTuple())
+    
+    effect = hazard.metadata.linpred_effect
+    if effect == :aft
+        # AFT: H(t) * exp(-linpred)
+        return base_cumhaz * exp(-linpred)
+    else
+        # PH: H(t) * exp(linpred)
+        return base_cumhaz * exp(linpred)
     end
 end
 
@@ -512,21 +552,21 @@ function (hazard::SemiMarkovHazard)(t::Real, pars::AbstractVector, covars::Union
 end
 
 """
-    (hazard::SplineHazard)(t, pars, covars=Float64[])
+    (hazard::_SplineHazard)(t, pars, covars=Float64[])
 
-Make SplineHazard directly callable for hazard evaluation.
+Make spline hazards (RuntimeSplineHazard) directly callable for hazard evaluation.
 Returns hazard rate at time t.
 """
-function (hazard::SplineHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,NamedTuple}=Float64[])
+function (hazard::_SplineHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,NamedTuple}=Float64[])
     return hazard.hazard_fn(t, pars, covars)
 end
 
 """
-    cumulative_hazard(hazard::Union{MarkovHazard,SemiMarkovHazard,SplineHazard}, lb, ub, pars, covars=Float64[])
+    cumulative_hazard(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, lb, ub, pars, covars=Float64[])
 
 Compute cumulative hazard over interval [lb, ub].
 """
-function cumulative_hazard(hazard::Union{MarkovHazard,SemiMarkovHazard,SplineHazard}, 
+function cumulative_hazard(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, 
                           lb::Real, ub::Real, 
                           pars::AbstractVector, 
                           covars::Union{AbstractVector,NamedTuple}=Float64[])
@@ -540,7 +580,7 @@ PHASE 2: Backward Compatibility Layer
 """
 Backward compatibility: Make new hazard types work with old call_haz() dispatch.
 
-For new hazard types (MarkovHazard, SemiMarkovHazard, SplineHazard), we extract covariates
+For new hazard types (MarkovHazard, SemiMarkovHazard, RuntimeSplineHazard), we extract covariates
 by name using the parnames field and the provided subjdat row.
 
 # Note on Interface:
@@ -729,8 +769,8 @@ function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame
         hazard_slot = hazard_slot)
 end
 
-# SplineHazard backward compatibility (with subjdat)
-function call_haz(t, parameters, covars::NamedTuple, hazard::SplineHazard;
+# _SplineHazard (RuntimeSplineHazard) backward compatibility (with subjdat)
+function call_haz(t, parameters, covars::NamedTuple, hazard::_SplineHazard;
                   give_log = true,
                   apply_transform::Bool = false,
                   cache_context::Union{Nothing,TimeTransformContext}=nothing,
@@ -740,7 +780,7 @@ function call_haz(t, parameters, covars::NamedTuple, hazard::SplineHazard;
     give_log ? log(value) : value
 end
 
-function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SplineHazard;
+function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::_SplineHazard;
                   give_log = true,
                   apply_transform::Bool = false,
                   cache_context::Union{Nothing,TimeTransformContext}=nothing,
@@ -757,7 +797,7 @@ function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard:
         hazard_slot = hazard_slot)
 end
 
-function call_cumulhaz(lb, ub, parameters, covars::NamedTuple, hazard::SplineHazard;
+function call_cumulhaz(lb, ub, parameters, covars::NamedTuple, hazard::_SplineHazard;
                        give_log = true,
                        apply_transform::Bool = false,
                        cache_context::Union{Nothing,TimeTransformContext}=nothing,
@@ -767,7 +807,7 @@ function call_cumulhaz(lb, ub, parameters, covars::NamedTuple, hazard::SplineHaz
     give_log ? log(value) : value
 end
 
-function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SplineHazard;
+function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::_SplineHazard;
                        give_log = true,
                        apply_transform::Bool = false,
                        cache_context::Union{Nothing,TimeTransformContext}=nothing,
@@ -1013,17 +1053,21 @@ Fill in a matrix of transition intensities for a multistate Markov model.
 """
 function compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame, model_data::DataFrame) where T <: _Hazard
 
-    # Get the DataFrameRow for covariate extraction
-    subjdat_row = model_data[tpm_index.datind[1], :]
+    # Get the DataFrameRow for covariate extraction - ONLY ONCE
+    @inbounds subjdat_row = model_data[tpm_index.datind[1], :]
     
-    # compute transition intensities
-    for h in eachindex(hazards) 
-        Q[hazards[h].statefrom, hazards[h].stateto] = 
+    # Pre-extract covariates for each hazard using cached covar_names
+    # This avoids regex parsing in extract_covariates on every call
+    @inbounds for h in eachindex(hazards) 
+        hazard = hazards[h]
+        # Use extract_covariates_fast with pre-cached covar_names
+        covars = extract_covariates_fast(subjdat_row, hazard.covar_names)
+        Q[hazard.statefrom, hazard.stateto] = 
             call_haz(
                 tpm_index.tstart[1], 
                 parameters[h],
-                subjdat_row,
-                hazards[h]; 
+                covars,
+                hazard; 
                 give_log = false)
     end
 
@@ -1038,7 +1082,7 @@ Calculate transition probability matrices for a multistate Markov process.
 """
 function compute_tmat!(P, Q, tpm_index::DataFrame, cache)
 
-    for t in eachindex(P)
+    @inbounds for t in eachindex(P)
         copyto!(P[t], exponential!(Q * tpm_index.tstop[t], ExpMethodGeneric(), cache))
     end  
 end
@@ -1191,6 +1235,9 @@ function compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int64
 
     # get hazard index
     hazind = model.hazkeys[hazard]
+    
+    # get log-scale parameters for this hazard
+    hazard_params = get_parameters(model, hazind, scale=:log)
 
     # compute hazards
     hazards = zeros(Float64, length(t))
@@ -1199,7 +1246,7 @@ function compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int64
         rowind = findlast((model.data.id .== subj) .& (model.data.tstart .<= t[s]))
 
         # compute hazard
-        hazards[s] = call_haz(t[s], model.parameters[hazind], rowind, model.hazards[hazind]; give_log = false)
+        hazards[s] = call_haz(t[s], hazard_params, rowind, model.hazards[hazind]; give_log = false)
     end
 
     # return hazards
@@ -1233,6 +1280,9 @@ function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, haza
 
     # get hazard index
     hazind = model.hazkeys[hazard]
+    
+    # get log-scale parameters for this hazard
+    hazard_params = get_parameters(model, hazind, scale=:log)
 
     # compute hazards
     cumulative_hazards = zeros(Float64, length(tstart))
@@ -1250,7 +1300,7 @@ function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, haza
             rowind = findlast((model.data.id .== subj) .& (model.data.tstart .<= times[i]))
 
             # compute hazard
-            chaz += call_cumulhaz(times[i], times[i+1], model.parameters[hazind], rowind, model.hazards[hazind]; give_log = false)
+            chaz += call_cumulhaz(times[i], times[i+1], hazard_params, rowind, model.hazards[hazind]; give_log = false)
         end
 
         # save

@@ -6,7 +6,7 @@ Modify the parameter values in a MultistateProcess object
 function set_crude_init!(model::MultistateProcess; constraints = nothing)
 
     if !isnothing(constraints)
-        @error "Cannot initialize parameters to crude estimates when there are parameter constraints."    
+        error("Cannot initialize parameters to crude estimates when there are parameter constraints.")
     
     elseif isnothing(constraints)
         
@@ -19,7 +19,8 @@ function set_crude_init!(model::MultistateProcess; constraints = nothing)
 
         for i in eachindex(model.hazards)
             if isa(model.hazards[i], _SplineHazard)
-                remake_splines!(model.hazards[i], model.parameters[i])
+                log_params = get_log_scale_params(model.parameters)
+                remake_splines!(model.hazards[i], log_params[i])
                 set_riskperiod!(model.hazards[i])
             end
         end
@@ -57,7 +58,8 @@ function initialize_parameters(model::MultistateProcess; constraints = nothing, 
             set_parameters!(model, NamedTuple{(model.hazards[i].hazname,)}((set_par_to,)))
 
             if isa(model.hazards[i], _SplineHazard)
-                remake_splines!(model.hazards[i], model.parameters[i])
+                log_params = get_log_scale_params(model.parameters)
+                remake_splines!(model.hazards[i], log_params[i])
                 set_riskperiod!(model.hazards[i])
             end
         end
@@ -95,7 +97,8 @@ function initialize_parameters!(model::MultistateProcess; constraints = nothing,
             set_parameters!(model, NamedTuple{(model.hazards[i].hazname,)}((set_par_to,)))
 
             if isa(model.hazards[i], _SplineHazard)
-                remake_splines!(model.hazards[i], model.parameters[i])
+                log_params = get_log_scale_params(model.parameters)
+                remake_splines!(model.hazards[i], log_params[i])
                 set_riskperiod!(model.hazards[i])
             end
         end
@@ -196,11 +199,11 @@ function calculate_crude(model::MultistateProcess)
 end
 
 """
-Initialize parameters for new hazard types (MarkovHazard, SemiMarkovHazard, SplineHazard).
+Initialize parameters for new hazard types (MarkovHazard, SemiMarkovHazard, RuntimeSplineHazard).
 
 Dispatches based on family and has_covariates to determine parameter initialization.
 """
-function init_par(hazard::Union{MarkovHazard,SemiMarkovHazard,SplineHazard}, crude_log_rate=0)
+function init_par(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, crude_log_rate=0.0)
     family = hazard.family
     has_covs = hazard.has_covariates
     ncovar = hazard.npar_total - hazard.npar_baseline
@@ -222,8 +225,12 @@ function init_par(hazard::Union{MarkovHazard,SemiMarkovHazard,SplineHazard}, cru
         return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
         
     elseif family == "sp"
-        # Spline: Will be implemented when splines are fully migrated
-        error("Spline initialization not yet implemented for new SplineHazard type")
+        # Spline: Initialize all spline coefficients to give constant hazard
+        # log(coef) = 0 → coef = 1 → constant hazard at value 1
+        # The crude_log_rate can be used to shift the overall level
+        nbasis = hazard.npar_baseline
+        baseline = fill(crude_log_rate, nbasis)
+        return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
         
     else
         error("Unknown hazard family: $family")

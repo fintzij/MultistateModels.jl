@@ -64,7 +64,7 @@ using ForwardDiff
     @testset "Viterbi MAP path" begin
         # Test the viterbi_map_path function
         
-        # Create a simple model
+        # Create a simple model with surrogate for testing
         h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
         h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1)
         
@@ -78,7 +78,8 @@ using ForwardDiff
             obstype = repeat([2, 1], outer=nsubj)  # first is panel, second is exact
         )
         
-        model = multistatemodel(h12, h21; data=dat)
+        # Create model with surrogate for testing MCEM infrastructure
+        model = multistatemodel(h12, h21; data=dat, surrogate=:markov)
         
         # Build TPM books (needed for viterbi_map_path)
         books = MultistateModels.build_tpm_mapping(model.data)

@@ -23,6 +23,7 @@ using ParetoSmooth
 using Preferences
 using QuadGK
 using RuntimeGeneratedFunctions
+using SpecialFunctions: gamma  # for phase-type fitting
 using StatsBase
 using StatsFuns
 using StatsModels
@@ -52,12 +53,15 @@ export
     maybe_time_transform_context,
     fit,
     fit_surrogate,
+    set_surrogate!,
     get_convergence_records,
     get_loglik,
     get_parameters,
     get_parameters_flat,
     get_parameters_transformed,
     get_parameters_natural,
+    get_log_scale_params,
+    get_elem_ptr,
     get_unflatten_fn,
     get_parnames,
     get_vcov,
@@ -121,6 +125,26 @@ export
     # Legacy aliases (deprecated, use CachedTransformStrategy/DirectTransformStrategy)
     TangTransformStrategy,
     LegacyTransformStrategy,
+    # Phase-type surrogates (Titman & Sharples 2010)
+    PhaseTypeDistribution,
+    PhaseTypeConfig,
+    PhaseTypeSurrogate,
+    # MCEM proposal configuration
+    ProposalConfig,
+    MarkovProposal,
+    PhaseTypeProposal,
+    needs_phasetype_proposal,
+    resolve_proposal_config,
+    phasetype_mean,
+    phasetype_variance,
+    phasetype_cv,
+    phasetype_cdf,
+    phasetype_pdf,
+    phasetype_hazard,
+    phasetype_sample,
+    validate_phasetype,
+    collapse_phases,
+    expand_initial_state,
     # statetable,
     summary,
     __init__
@@ -149,6 +173,12 @@ include("mcem.jl")
 # miscellaneous functions
 include("miscellaneous.jl")
 
+# phase-type distributions for improved surrogates
+include("phasetype.jl")
+
+# surrogate
+include("surrogates.jl")
+
 # model fitting
 include("modelfitting.jl")
 
@@ -172,9 +202,6 @@ include("simulation.jl")
 
 # smooths
 include("smooths.jl")
-
-# surrogate
-include("surrogates.jl")
 
 # cross-validation and robust covariance estimation
 include("crossvalidation.jl")

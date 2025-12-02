@@ -127,14 +127,16 @@ end
     dat = baseline_exact_data()
     
     # State 0 should never appear in hazard definitions
-    # The tmat will have issues if we try to use state 0
-    h_bad_from = Hazard(@formula(0 ~ 1), "exp", 0, 1)
-    h_bad_to = Hazard(@formula(0 ~ 1), "exp", 1, 0)
-    h_good = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+    # The Hazard constructor now validates this immediately
+    @test_throws AssertionError Hazard(@formula(0 ~ 1), "exp", 0, 1)
+    @test_throws AssertionError Hazard(@formula(0 ~ 1), "exp", 1, 0)
     
-    # These should fail during model construction
-    @test_throws Exception multistatemodel(h_bad_from, h_good; data = dat)
-    @test_throws Exception multistatemodel(h_good, h_bad_to; data = dat)
+    # Also test that statefrom != stateto is enforced
+    @test_throws AssertionError Hazard(@formula(0 ~ 1), "exp", 1, 1)
+    
+    # Valid hazard should work
+    h_good = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+    @test isa(h_good, MultistateModels.ParametricHazard)
 end
 
 # --- Parameter naming -----------------------------------------------------------
