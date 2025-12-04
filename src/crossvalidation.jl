@@ -93,7 +93,7 @@ function compute_subject_gradients(params::AbstractVector, model::MultistateMode
         
         # closure for subject i's log-likelihood
         function ll_subj_i(pars)
-            pars_nested = VectorOfVectors(pars, get_elem_ptr(model.parameters))
+            pars_nested = nest_params(pars, model.parameters)
             subj_inds = model.subjectindices[path.subj]
             subj_dat = view(model.data, subj_inds, :)
             subjdat_df = make_subjdat(path, subj_dat)
@@ -266,7 +266,7 @@ function compute_subject_hessians(params::AbstractVector, model::MultistateModel
         
         # closure for subject i's log-likelihood
         function ll_subj_i(pars)
-            pars_nested = VectorOfVectors(pars, get_elem_ptr(model.parameters))
+            pars_nested = nest_params(pars, model.parameters)
             subj_inds = model.subjectindices[path.subj]
             subj_dat = view(model.data, subj_inds, :)
             subjdat_df = make_subjdat(path, subj_dat)
@@ -340,7 +340,7 @@ function loglik_weighted_with_params(θw::AbstractVector{T}, npaths::Int, nparam
     w = @view θw[nparams+1:end]
     
     # nest parameters
-    pars_nested = VectorOfVectors(θ, get_elem_ptr(model.parameters))
+    pars_nested = nest_params(θ, model.parameters)
     hazards = model.hazards
     
     # remake spline parameters if needed
@@ -389,7 +389,7 @@ function loglik_paths_subject(pars::AbstractVector{T}, subject_paths::Vector{Sam
     lls = Vector{T}(undef, npaths)
     
     # nest parameters
-    pars_nested = VectorOfVectors(pars, get_elem_ptr(model.parameters))
+    pars_nested = nest_params(pars, model.parameters)
     hazards = model.hazards
     
     # remake spline parameters if needed
@@ -441,7 +441,7 @@ function loglik_weighted_subject(pars::AbstractVector{T}, subject_paths::Vector{
     ll_weighted = zero(T)
     
     # nest parameters
-    pars_nested = VectorOfVectors(pars, get_elem_ptr(model.parameters))
+    pars_nested = nest_params(pars, model.parameters)
     hazards = model.hazards
     
     # remake spline parameters if needed

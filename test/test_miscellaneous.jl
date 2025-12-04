@@ -57,7 +57,9 @@ function loglik_path_OLD(parameters, path, hazards, model)
 
                 # if event happened, accrue hazard
                 if snext != scur
-                    ll += MultistateModels.call_haz(timeinstate, parameters[model.tmat[scur, snext]], comp_dat_ind, hazards[model.tmat[scur, snext]]; give_log = true)
+                    hazard = hazards[model.tmat[scur, snext]]
+                    covars = MultistateModels.extract_covariates_fast(comp_dat_ind, hazard.covar_names)
+                    ll += log(MultistateModels.eval_hazard(hazard, timeinstate, parameters[model.tmat[scur, snext]], covars))
                 end
 
                 # increment row index in subj_dat

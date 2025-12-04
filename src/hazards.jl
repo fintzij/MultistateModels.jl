@@ -114,15 +114,22 @@ end
 """
     extract_covariates_fast(subjdat::DataFrameRow, covar_names::Vector{Symbol})
 
-Fast covariate extraction using pre-computed covariate names from hazard struct.
-Avoids regex parsing of parameter names on every call.
+Extract covariate values into a NamedTuple for caching in hot loops.
+
+For single evaluations, prefer passing the DataFrameRow directly to `eval_hazard`/`eval_cumhaz`
+which avoids allocation. Use this function only when you need to cache covariate values
+for repeated evaluation (e.g., in likelihood computation across many intervals).
 
 # Arguments
 - `subjdat::DataFrameRow`: current observation row
 - `covar_names::Vector{Symbol}`: pre-extracted covariate names from hazard.covar_names
 
 # Returns
-- `NamedTuple`: covariate values keyed by name
+- `NamedTuple`: covariate values keyed by name (allocates)
+
+# Performance Note
+- Single call: Pass DataFrameRow directly to `eval_hazard(haz, t, pars, row)` (zero-copy)
+- Repeated calls: Cache with `covars = extract_covariates_fast(row, haz.covar_names)` then reuse
 """
 @inline function extract_covariates_fast(subjdat::DataFrameRow, covar_names::Vector{Symbol})
     isempty(covar_names) && return NamedTuple()
@@ -130,43 +137,14 @@ Avoids regex parsing of parameter names on every call.
     return NamedTuple{Tuple(covar_names)}(values)
 end
 
+# Covariate data types: NamedTuple for cached values, DataFrameRow for direct access
+const CovariateData = Union{NamedTuple, DataFrameRow}
+
 @inline _covariate_entry(covars_cache::AbstractVector{<:NamedTuple}, hazard_slot::Int) = covars_cache[hazard_slot]
+@inline _covariate_entry(covars_cache::DataFrameRow, ::Int) = covars_cache
 @inline _covariate_entry(covars_cache, ::Int) = covars_cache
 
-@inline function _call_haz_with_covars(t, parameters, covars_cache, hazard::_Hazard, hazard_slot;
-                                       give_log = true,
-                                       apply_transform::Bool = false,
-                                       cache_context::Union{Nothing,TimeTransformContext}=nothing)
-    covars = _covariate_entry(covars_cache, hazard_slot)
-    return call_haz(
-        t,
-        parameters,
-        covars,
-        hazard;
-        give_log = give_log,
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
-end
-
-@inline function _call_cumulhaz_with_covars(lb, ub, parameters, covars_cache, hazard::_Hazard, hazard_slot;
-                                            give_log = true,
-                                            apply_transform::Bool = false,
-                                            cache_context::Union{Nothing,TimeTransformContext}=nothing)
-    covars = _covariate_entry(covars_cache, hazard_slot)
-    return call_cumulhaz(
-        lb,
-        ub,
-        parameters,
-        covars,
-        hazard;
-        give_log = give_log,
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
-end
-
-@inline function _linear_predictor(pars::AbstractVector, covars::NamedTuple, hazard::_Hazard)
+@inline function _linear_predictor(pars::AbstractVector, covars::CovariateData, hazard::_Hazard)
     hazard.has_covariates || return zero(eltype(pars))
     covar_names = hazard.covar_names  # Use pre-cached covar_names
     offset = hazard.npar_baseline
@@ -205,11 +183,11 @@ end
 end
 
 @inline function _hazard_cache_key(cache::TimeTransformCache{LinType,TimeType}, linpred, t) where {LinType,TimeType}
-    return TangHazardKey{LinType,TimeType}(convert(LinType, linpred), convert(TimeType, t))
+    return TimeTransformHazardKey{LinType,TimeType}(convert(LinType, linpred), convert(TimeType, t))
 end
 
 @inline function _cumul_cache_key(cache::TimeTransformCache{LinType,TimeType}, linpred, lb, ub) where {LinType,TimeType}
-    return TangCumulKey{LinType,TimeType}(convert(LinType, linpred), convert(TimeType, lb), convert(TimeType, ub))
+    return TimeTransformCumulKey{LinType,TimeType}(convert(LinType, linpred), convert(TimeType, lb), convert(TimeType, ub))
 end
 
 @inline function _time_transform_hazard(hazard::MarkovHazard, pars::AbstractVector, t::Real, linpred::Real)
@@ -536,8 +514,10 @@ PHASE 2: Callable Hazard Interface
 
 Make MarkovHazard directly callable for hazard evaluation.
 Returns hazard rate at time t (time parameter ignored for Markov processes).
+
+Covariates can be passed as NamedTuple (cached) or DataFrameRow (direct view).
 """
-function (hazard::MarkovHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,NamedTuple}=Float64[])
+function (hazard::MarkovHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,CovariateData}=Float64[])
     return hazard.hazard_fn(t, pars, covars)
 end
 
@@ -546,8 +526,10 @@ end
 
 Make SemiMarkovHazard directly callable for hazard evaluation.
 Returns hazard rate at time t.
+
+Covariates can be passed as NamedTuple (cached) or DataFrameRow (direct view).
 """
-function (hazard::SemiMarkovHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,NamedTuple}=Float64[])
+function (hazard::SemiMarkovHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,CovariateData}=Float64[])
     return hazard.hazard_fn(t, pars, covars)
 end
 
@@ -556,8 +538,10 @@ end
 
 Make spline hazards (RuntimeSplineHazard) directly callable for hazard evaluation.
 Returns hazard rate at time t.
+
+Covariates can be passed as NamedTuple (cached) or DataFrameRow (direct view).
 """
-function (hazard::_SplineHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,NamedTuple}=Float64[])
+function (hazard::_SplineHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,CovariateData}=Float64[])
     return hazard.hazard_fn(t, pars, covars)
 end
 
@@ -565,264 +549,125 @@ end
     cumulative_hazard(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, lb, ub, pars, covars=Float64[])
 
 Compute cumulative hazard over interval [lb, ub].
+
+Covariates can be passed as NamedTuple (cached) or DataFrameRow (direct view).
 """
 function cumulative_hazard(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, 
                           lb::Real, ub::Real, 
                           pars::AbstractVector, 
-                          covars::Union{AbstractVector,NamedTuple}=Float64[])
+                          covars::Union{AbstractVector,CovariateData}=Float64[])
     return hazard.cumhaz_fn(lb, ub, pars, covars)
 end
 
 #=============================================================================
-PHASE 2: Backward Compatibility Layer
+Hazard Evaluation API
 =============================================================================# 
 
 """
-Backward compatibility: Make new hazard types work with old call_haz() dispatch.
+    eval_hazard(hazard, t, pars, covars; apply_transform=false, cache_context=nothing, hazard_slot=nothing)
 
-For new hazard types (MarkovHazard, SemiMarkovHazard, RuntimeSplineHazard), we extract covariates
-by name using the parnames field and the provided subjdat row.
+Evaluate the hazard rate at time `t`. Returns the hazard on NATURAL scale (not log).
 
-# Note on Interface:
-- Old hazard types: Expect `rowind` and have `.data` field
-- New hazard types: Expect `subjdat::DataFrameRow` and use `parnames` to extract covariates
-- Both interfaces supported for backward compatibility
+This is the primary interface for hazard evaluation. It handles:
+- Direct evaluation via hazard_fn
+- Time transform optimization (when apply_transform=true and hazard supports it)
+- Caching for repeated evaluations with same linear predictor
+
+# Arguments
+- `hazard::_Hazard`: The hazard function struct
+- `t::Real`: Time at which to evaluate hazard
+- `pars::AbstractVector`: Parameters (log-scale for baseline, natural for covariates)
+- `covars`: Covariate values - can be NamedTuple (cached) or DataFrameRow (direct view, zero-copy)
+- `apply_transform::Bool=false`: Use time transform optimization if hazard supports it
+- `cache_context::Union{Nothing,TimeTransformContext}=nothing`: Cache for repeated evaluations
+- `hazard_slot::Union{Nothing,Int}=nothing`: Index of this hazard in the model
+
+# Returns
+- `Float64`: Hazard rate on natural scale
 """
-
-function _maybe_transform_hazard(hazard::_Hazard, parameters, covars::NamedTuple, t::Real;
-                                 apply_transform::Bool,
-                                 cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                                 hazard_slot::Union{Nothing,Int}=nothing)
+@inline function eval_hazard(hazard::_Hazard, t::Real, pars::AbstractVector, covars::CovariateData;
+                             apply_transform::Bool = false,
+                             cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                             hazard_slot::Union{Nothing,Int}=nothing)
     use_transform = apply_transform && hazard.metadata.time_transform
-    use_transform || return hazard(t, parameters, covars)
+    use_transform || return hazard(t, pars, covars)
 
     _ensure_transform_supported(hazard)
-    linpred = _linear_predictor(parameters, covars, hazard)
+    linpred = _linear_predictor(pars, covars, hazard)
 
     if cache_context === nothing || hazard_slot === nothing
-        return _time_transform_hazard(hazard, parameters, t, linpred)
+        return _time_transform_hazard(hazard, pars, t, linpred)
     end
 
     cache = _shared_or_local_cache(cache_context, hazard_slot, hazard)
     key = _hazard_cache_key(cache, linpred, t)
     return get!(cache.hazard_values, key) do
-        _time_transform_hazard(hazard, parameters, t, linpred)
+        _time_transform_hazard(hazard, pars, t, linpred)
     end
 end
 
-function _maybe_transform_cumulhaz(hazard::_Hazard, parameters, covars::NamedTuple, lb::Real, ub::Real;
-                                   apply_transform::Bool,
-                                   cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                                   hazard_slot::Union{Nothing,Int}=nothing)
+"""
+    eval_cumhaz(hazard, lb, ub, pars, covars; apply_transform=false, cache_context=nothing, hazard_slot=nothing)
+
+Evaluate the cumulative hazard over interval [lb, ub]. Returns on NATURAL scale (not log).
+
+This is the primary interface for cumulative hazard evaluation.
+
+# Arguments
+- `hazard::_Hazard`: The hazard function struct
+- `lb::Real`: Lower bound of interval
+- `ub::Real`: Upper bound of interval  
+- `pars::AbstractVector`: Parameters (log-scale for baseline, natural for covariates)
+- `covars`: Covariate values - can be NamedTuple (cached) or DataFrameRow (direct view, zero-copy)
+- `apply_transform::Bool=false`: Use time transform optimization if hazard supports it
+- `cache_context::Union{Nothing,TimeTransformContext}=nothing`: Cache for repeated evaluations
+- `hazard_slot::Union{Nothing,Int}=nothing`: Index of this hazard in the model
+
+# Returns
+- `Float64`: Cumulative hazard on natural scale
+"""
+@inline function eval_cumhaz(hazard::_Hazard, lb::Real, ub::Real, pars::AbstractVector, covars::CovariateData;
+                             apply_transform::Bool = false,
+                             cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                             hazard_slot::Union{Nothing,Int}=nothing)
     use_transform = apply_transform && hazard.metadata.time_transform
-    use_transform || return cumulative_hazard(hazard, lb, ub, parameters, covars)
+    use_transform || return cumulative_hazard(hazard, lb, ub, pars, covars)
 
     _ensure_transform_supported(hazard)
-    linpred = _linear_predictor(parameters, covars, hazard)
+    linpred = _linear_predictor(pars, covars, hazard)
 
     if cache_context === nothing || hazard_slot === nothing
-        return _time_transform_cumhaz(hazard, parameters, lb, ub, linpred)
+        return _time_transform_cumhaz(hazard, pars, lb, ub, linpred)
     end
 
     cache = _shared_or_local_cache(cache_context, hazard_slot, hazard)
     key = _cumul_cache_key(cache, linpred, lb, ub)
     return get!(cache.cumulhaz_values, key) do
-        _time_transform_cumhaz(hazard, parameters, lb, ub, linpred)
+        _time_transform_cumhaz(hazard, pars, lb, ub, linpred)
     end
 end
 
-# MarkovHazard backward compatibility (with subjdat)
-function call_haz(t, parameters, covars::NamedTuple, hazard::MarkovHazard;
-                  give_log = true,
-                  apply_transform::Bool = false,
-                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                  hazard_slot::Union{Nothing,Int}=nothing)
-    value = _maybe_transform_hazard(
-        hazard,
-        parameters,
-        covars,
-        t;
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
-    give_log ? log(value) : value
+# Convenience methods that extract covariates from DataFrameRow
+@inline function eval_hazard(hazard::_Hazard, t::Real, pars::AbstractVector, subjdat::DataFrameRow;
+                             apply_transform::Bool = false,
+                             cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                             hazard_slot::Union{Nothing,Int}=nothing)
+    covars = extract_covariates_fast(subjdat, hazard.covar_names)
+    return eval_hazard(hazard, t, pars, covars; 
+                       apply_transform=apply_transform,
+                       cache_context=cache_context, 
+                       hazard_slot=hazard_slot)
 end
 
-function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::MarkovHazard;
-                  give_log = true,
-                  apply_transform::Bool = false,
-                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                  hazard_slot::Union{Nothing,Int}=nothing)
-    covars = extract_covariates(subjdat, hazard.parnames)
-    return call_haz(
-        t,
-        parameters,
-        covars,
-        hazard;
-        give_log = give_log,
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
-end
-
-function call_cumulhaz(lb, ub, parameters, covars::NamedTuple, hazard::MarkovHazard;
-                       give_log = true,
-                       apply_transform::Bool = false,
-                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                       hazard_slot::Union{Nothing,Int}=nothing)
-    value = _maybe_transform_cumulhaz(
-        hazard,
-        parameters,
-        covars,
-        lb,
-        ub;
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
-    give_log ? log(value) : value
-end
-
-function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::MarkovHazard;
-                       give_log = true,
-                       apply_transform::Bool = false,
-                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                       hazard_slot::Union{Nothing,Int}=nothing)
-    covars = extract_covariates(subjdat, hazard.parnames)
-    return call_cumulhaz(
-        lb,
-        ub,
-        parameters,
-        covars,
-        hazard;
-        give_log = give_log,
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
-end
-
-# SemiMarkovHazard backward compatibility (with subjdat)
-function call_haz(t, parameters, covars::NamedTuple, hazard::SemiMarkovHazard;
-                  give_log = true,
-                  apply_transform::Bool = false,
-                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                  hazard_slot::Union{Nothing,Int}=nothing)
-    value = _maybe_transform_hazard(
-        hazard,
-        parameters,
-        covars,
-        t;
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
-    give_log ? log(value) : value
-end
-
-function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SemiMarkovHazard;
-                  give_log = true,
-                  apply_transform::Bool = false,
-                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                  hazard_slot::Union{Nothing,Int}=nothing)
-    covars = extract_covariates(subjdat, hazard.parnames)
-    return call_haz(
-        t,
-        parameters,
-        covars,
-        hazard;
-        give_log = give_log,
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
-end
-
-function call_cumulhaz(lb, ub, parameters, covars::NamedTuple, hazard::SemiMarkovHazard;
-                       give_log = true,
-                       apply_transform::Bool = false,
-                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                       hazard_slot::Union{Nothing,Int}=nothing)
-    value = _maybe_transform_cumulhaz(
-        hazard,
-        parameters,
-        covars,
-        lb,
-        ub;
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
-    give_log ? log(value) : value
-end
-
-function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::SemiMarkovHazard;
-                       give_log = true,
-                       apply_transform::Bool = false,
-                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                       hazard_slot::Union{Nothing,Int}=nothing)
-    covars = extract_covariates(subjdat, hazard.parnames)
-    return call_cumulhaz(
-        lb,
-        ub,
-        parameters,
-        covars,
-        hazard;
-        give_log = give_log,
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
-end
-
-# _SplineHazard (RuntimeSplineHazard) backward compatibility (with subjdat)
-function call_haz(t, parameters, covars::NamedTuple, hazard::_SplineHazard;
-                  give_log = true,
-                  apply_transform::Bool = false,
-                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                  hazard_slot::Union{Nothing,Int}=nothing)
-    apply_transform && _ensure_transform_supported(hazard)
-    value = hazard(t, parameters, covars)
-    give_log ? log(value) : value
-end
-
-function call_haz(t, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::_SplineHazard;
-                  give_log = true,
-                  apply_transform::Bool = false,
-                  cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                  hazard_slot::Union{Nothing,Int}=nothing)
-    covars = extract_covariates(subjdat, hazard.parnames)
-    return call_haz(
-        t,
-        parameters,
-        covars,
-        hazard;
-        give_log = give_log,
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
-end
-
-function call_cumulhaz(lb, ub, parameters, covars::NamedTuple, hazard::_SplineHazard;
-                       give_log = true,
-                       apply_transform::Bool = false,
-                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                       hazard_slot::Union{Nothing,Int}=nothing)
-    apply_transform && _ensure_transform_supported(hazard)
-    value = cumulative_hazard(hazard, lb, ub, parameters, covars)
-    give_log ? log(value) : value
-end
-
-function call_cumulhaz(lb, ub, parameters, subjdat::Union{DataFrameRow,DataFrame}, hazard::_SplineHazard;
-                       give_log = true,
-                       apply_transform::Bool = false,
-                       cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                       hazard_slot::Union{Nothing,Int}=nothing)
-    covars = extract_covariates(subjdat, hazard.parnames)
-    return call_cumulhaz(
-        lb,
-        ub,
-        parameters,
-        covars,
-        hazard;
-        give_log = give_log,
-        apply_transform = apply_transform,
-        cache_context = cache_context,
-        hazard_slot = hazard_slot)
+@inline function eval_cumhaz(hazard::_Hazard, lb::Real, ub::Real, pars::AbstractVector, subjdat::DataFrameRow;
+                             apply_transform::Bool = false,
+                             cache_context::Union{Nothing,TimeTransformContext}=nothing,
+                             hazard_slot::Union{Nothing,Int}=nothing)
+    covars = extract_covariates_fast(subjdat, hazard.covar_names)
+    return eval_cumhaz(hazard, lb, ub, pars, covars;
+                       apply_transform=apply_transform,
+                       cache_context=cache_context,
+                       hazard_slot=hazard_slot)
 end
 
 # =============================================================================
@@ -831,6 +676,7 @@ end
 #
 # These functions compute survival probabilities and total cumulative hazards
 # by dispatching on the _TotalHazard type. They are used by:
+
 # - loglik_path: For sample path likelihood computation
 # - loglik_markov: For Markov model panel data likelihood
 # - simulation.jl: For cumulative incidence calculations
@@ -878,13 +724,12 @@ function total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHaz
     tot_haz = 0.0
 
     for x in _totalhazard.components
-        tot_haz += call_cumulhaz(
+        tot_haz += eval_cumhaz(
+            _hazards[x],
             lb,
             ub,
             parameters[x],
-            subjdat_row,
-            _hazards[x];
-            give_log = false,
+            subjdat_row;
             apply_transform = apply_transform,
             cache_context = cache_context,
             hazard_slot = x)
@@ -901,16 +746,16 @@ function total_cumulhaz(lb, ub, parameters, covars_cache::AbstractVector{<:Named
     tot_haz = 0.0
 
     for x in _totalhazard.components
-        tot_haz += _call_cumulhaz_with_covars(
+        covars = _covariate_entry(covars_cache, x)
+        tot_haz += eval_cumhaz(
+            _hazards[x],
             lb,
             ub,
             parameters[x],
-            covars_cache,
-            _hazards[x],
-            x;
-            give_log = false,
+            covars;
             apply_transform = apply_transform,
-            cache_context = cache_context)
+            cache_context = cache_context,
+            hazard_slot = x)
     end
 
     give_log ? log(tot_haz) : tot_haz
@@ -997,15 +842,15 @@ function _next_state_probs!(ns_probs::AbstractVector{Float64}, trans_inds::Abstr
         return ns_probs
     end
 
-    vals = map(x -> _call_haz_with_covars(
-            t,
-            parameters[x],
-            covars_cache,
-            hazards[x],
-            x;
-            apply_transform = apply_transform && hazards[x].metadata.time_transform,
-            cache_context = cache_context),
-        totalhazards[scur].components)
+    # Compute log-hazards for softmax
+    vals = map(totalhazards[scur].components) do x
+        covars = _covariate_entry(covars_cache, x)
+        haz = eval_hazard(hazards[x], t, parameters[x], covars;
+                          apply_transform = apply_transform && hazards[x].metadata.time_transform,
+                          cache_context = cache_context,
+                          hazard_slot = x)
+        log(haz)  # softmax expects log scale
+    end
     ns_probs[trans_inds] = softmax(vals)
 
     local_probs = view(ns_probs, trans_inds)
@@ -1063,12 +908,7 @@ function compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame
         # Use extract_covariates_fast with pre-cached covar_names
         covars = extract_covariates_fast(subjdat_row, hazard.covar_names)
         Q[hazard.statefrom, hazard.stateto] = 
-            call_haz(
-                tpm_index.tstart[1], 
-                parameters[h],
-                covars,
-                hazard; 
-                give_log = false)
+            eval_hazard(hazard, tpm_index.tstart[1], parameters[h], covars)
     end
 
     # set diagonal elements equal to the sum of off-diags
@@ -1144,10 +984,11 @@ function cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
         # compute incidences
         for r in 1:n_intervals
             subjdat_row = subj_dat[interval_inds[r], :]
+            covars = extract_covariates_fast(subjdat_row, hazards[h].covar_names)
             incidences[r,h] = 
                 survprobs[r,trans_inds[h]] * 
                 quadgk(t -> (
-                        call_haz(t, parameters[h], subjdat_row, hazards[h]; give_log = false) * 
+                        eval_hazard(hazards[h], t, parameters[h], covars) * 
                         survprob(subj_times[r], t, parameters, subjdat_row, totalhazards[statefrom], hazards; give_log = false)), 
                         subj_times[r], subj_times[r + 1])[1]
         end        
@@ -1207,11 +1048,14 @@ function cumulative_incidence(t, model::MultistateProcess, parameters, statefrom
     # compute the cumulative incidence for each transition type
     for h in eachindex(hazinds)
         for r in 1:n_intervals
+            subjdat_row = subj_dat[interval_inds[r], :]
+            hazard = hazards[hazinds[h]]
+            covars = extract_covariates_fast(subjdat_row, hazard.covar_names)
             incidences[r,h] = 
                 survprobs[r] * 
                 quadgk(t -> (
-                        call_haz(t, parameters[hazinds[h]], subj_inds[interval_inds[r]], hazards[hazinds[h]]; give_log = false) * 
-                        survprob(subj_times[r], t, parameters, subj_inds[interval_inds[r]], totalhazards[statefrom], hazards; give_log = false)), 
+                        eval_hazard(hazard, t, parameters[hazinds[h]], covars) * 
+                        survprob(subj_times[r], t, parameters, subjdat_row, totalhazards[statefrom], hazards; give_log = false)), 
                         subj_times[r], subj_times[r + 1])[1]
         end        
     end
@@ -1238,15 +1082,18 @@ function compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int64
     
     # get log-scale parameters for this hazard
     hazard_params = get_parameters(model, hazind, scale=:log)
+    haz = model.hazards[hazind]
 
     # compute hazards
     hazards = zeros(Float64, length(t))
     for s in eachindex(t)
-        # get row index
+        # get row
         rowind = findlast((model.data.id .== subj) .& (model.data.tstart .<= t[s]))
+        subjdat_row = model.data[rowind, :]
+        covars = extract_covariates_fast(subjdat_row, haz.covar_names)
 
         # compute hazard
-        hazards[s] = call_haz(t[s], hazard_params, rowind, model.hazards[hazind]; give_log = false)
+        hazards[s] = eval_hazard(haz, t[s], hazard_params, covars)
     end
 
     # return hazards
@@ -1283,6 +1130,7 @@ function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, haza
     
     # get log-scale parameters for this hazard
     hazard_params = get_parameters(model, hazind, scale=:log)
+    haz = model.hazards[hazind]
 
     # compute hazards
     cumulative_hazards = zeros(Float64, length(tstart))
@@ -1296,11 +1144,13 @@ function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, haza
 
         # accumulate
         for i in 1:(length(times) - 1)
-            # get row index
+            # get row
             rowind = findlast((model.data.id .== subj) .& (model.data.tstart .<= times[i]))
+            subjdat_row = model.data[rowind, :]
+            covars = extract_covariates_fast(subjdat_row, haz.covar_names)
 
-            # compute hazard
-            chaz += call_cumulhaz(times[i], times[i+1], hazard_params, rowind, model.hazards[hazind]; give_log = false)
+            # compute cumulative hazard
+            chaz += eval_cumhaz(haz, times[i], times[i+1], hazard_params, covars)
         end
 
         # save

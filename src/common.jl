@@ -48,41 +48,41 @@ end
 HazardMetadata(; time_transform::Bool = false, linpred_effect::Symbol = :ph) =
     HazardMetadata(time_transform, linpred_effect)
 
-struct TangHazardKey{LinType,TimeType}
+struct TimeTransformHazardKey{LinType,TimeType}
     linpred::LinType
     t::TimeType
 end
 
-struct TangCumulKey{LinType,TimeType}
+struct TimeTransformCumulKey{LinType,TimeType}
     linpred::LinType
     lb::TimeType
     ub::TimeType
 end
 
-function Base.:(==)(a::TangHazardKey, b::TangHazardKey)
+function Base.:(==)(a::TimeTransformHazardKey, b::TimeTransformHazardKey)
     return a.linpred == b.linpred && a.t == b.t
 end
 
-function Base.hash(a::TangHazardKey, h::UInt)
+function Base.hash(a::TimeTransformHazardKey, h::UInt)
     return hash(a.t, hash(a.linpred, h))
 end
 
-function Base.:(==)(a::TangCumulKey, b::TangCumulKey)
+function Base.:(==)(a::TimeTransformCumulKey, b::TimeTransformCumulKey)
     return a.linpred == b.linpred && a.lb == b.lb && a.ub == b.ub
 end
 
-function Base.hash(a::TangCumulKey, h::UInt)
+function Base.hash(a::TimeTransformCumulKey, h::UInt)
     return hash(a.ub, hash(a.lb, hash(a.linpred, h)))
 end
 
 mutable struct TimeTransformCache{LinType,TimeType}
-    hazard_values::Dict{TangHazardKey{LinType,TimeType}, LinType}
-    cumulhaz_values::Dict{TangCumulKey{LinType,TimeType}, LinType}
+    hazard_values::Dict{TimeTransformHazardKey{LinType,TimeType}, LinType}
+    cumulhaz_values::Dict{TimeTransformCumulKey{LinType,TimeType}, LinType}
 end
 
 function TimeTransformCache(::Type{LinType}, ::Type{TimeType}) where {LinType,TimeType}
-    hazard_values = Dict{TangHazardKey{LinType,TimeType}, LinType}()
-    cumulhaz_values = Dict{TangCumulKey{LinType,TimeType}, LinType}()
+    hazard_values = Dict{TimeTransformHazardKey{LinType,TimeType}, LinType}()
+    cumulhaz_values = Dict{TimeTransformCumulKey{LinType,TimeType}, LinType}()
     return TimeTransformCache{LinType,TimeType}(hazard_values, cumulhaz_values)
 end
 
@@ -466,17 +466,17 @@ Struct that fully specifies a multistate process for simulation or inference, us
 
 # Fields
 - `data::DataFrame`: Long-format dataset with observations
-- `parameters::NamedTuple`: ParameterHandling structure containing:
-  - `flat::Vector{Float64}` - flat parameter vector for optimizer
-  - `transformed` - ParameterHandling transformed parameters (with positive() etc.)
+- `parameters::NamedTuple`: Parameter structure containing:
+  - `flat::Vector{Float64}` - flat parameter vector for optimizer (log scale for baseline)
+  - `nested::NamedTuple` - nested parameters by hazard name with baseline/covariates fields
   - `natural::NamedTuple` - natural scale parameters by hazard name
-  - `unflatten::Function` - function to unflatten flat vector
+  - `unflatten::Function` - function to unflatten flat vector to nested structure
 - `hazards::Vector{_Hazard}`: Cause-specific hazard functions
 - Plus other model specification fields...
 """
 mutable struct MultistateModel <: MultistateProcess
     data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage via ParameterHandling.jl
+    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
     hazards::Vector{_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -494,11 +494,11 @@ end
     MultistateMarkovModel
 
 Struct that fully specifies a multistate Markov process with no censored state, used with panel data.
-Parameters are managed via ParameterHandling.jl through `parameters`.
+Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
 """
 mutable struct MultistateMarkovModel <: MultistateMarkovProcess
     data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, transformed, natural, unflatten)
+    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
     hazards::Vector{_MarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -516,11 +516,11 @@ end
     MultistateMarkovModelCensored
 
 Struct that fully specifies a multistate Markov process with some censored states, used with panel data.
-Parameters are managed via ParameterHandling.jl through `parameters`.
+Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
 """
 mutable struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, transformed, natural, unflatten)
+    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
     hazards::Vector{_MarkovHazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -538,11 +538,11 @@ end
     MultistateSemiMarkovModel
 
 Struct that fully specifies a multistate semi-Markov process, used with exact death times.
-Parameters are managed via ParameterHandling.jl through `parameters`.
+Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
 """
 mutable struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
     data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, transformed, natural, unflatten)
+    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
     hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -560,11 +560,11 @@ end
     MultistateSemiMarkovModelCensored
 
 Struct that fully specifies a multistate semi-Markov process with some censored states, used with panel data.
-Parameters are managed via ParameterHandling.jl through `parameters`.
+Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
 """
 mutable struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, transformed, natural, unflatten)
+    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
     hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -582,11 +582,11 @@ end
     MultistateModelFitted
 
 Struct that fully specifies a fitted multistate model.
-Parameters are managed via ParameterHandling.jl through `parameters`.
+Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
 """
 mutable struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, transformed, natural, unflatten)
+    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
     loglik::NamedTuple
     vcov::Union{Nothing,Matrix{Float64}}
     ij_vcov::Union{Nothing,Matrix{Float64}}  # Infinitesimal jackknife variance-covariance

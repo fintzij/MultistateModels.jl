@@ -13,7 +13,7 @@
 #   - CachedTransformStrategy: uses precomputed time transformations (faster)
 #   - DirectTransformStrategy: computes cumulative hazards directly (baseline)
 #
-# Jump time root-finding can use either bisection (default) or Optim.jl.
+# Jump time root-finding uses Optim.jl's Brent method (OptimJumpSolver).
 # ============================================================================
 
 using Random
@@ -68,30 +68,11 @@ Abstract type for jump time root-finding algorithms.
 """
 abstract type AbstractJumpSolver end
 
-# Default maximum iterations for jump solvers (defined here before struct uses it)
-const _JUMP_SOLVER_MAX_ITERS = 80
-
-"""
-    BisectionJumpSolver <: AbstractJumpSolver
-
-Uses bisection to locate jump times. This is the default solver.
-Robust and guaranteed to converge for well-behaved hazard functions.
-
-# Fields
-- `value_tol::Float64`: Tolerance on the objective function value (default: 1e-10)
-- `max_iters::Int`: Maximum bisection iterations (default: _JUMP_SOLVER_MAX_ITERS)
-"""
-struct BisectionJumpSolver <: AbstractJumpSolver
-    value_tol::Float64
-    max_iters::Int
-    BisectionJumpSolver(; value_tol::Float64 = 1e-10, max_iters::Int = _JUMP_SOLVER_MAX_ITERS) = new(value_tol, max_iters)
-end
-
 """
     OptimJumpSolver <: AbstractJumpSolver
 
-Uses Optim.jl's Brent method to locate jump times.
-May be faster for smooth hazards but less robust than bisection.
+Uses Optim.jl's Brent method to locate jump times. This is the default solver.
+Brent's method is robust and efficient for bounded univariate optimization.
 
 # Fields
 - `rel_tol::Float64`: Relative tolerance (default: sqrt(sqrt(eps())))
@@ -106,7 +87,7 @@ end
 """
     simulate(model::MultistateProcess; nsim = 1, data = true, paths = false,
              delta_u = sqrt(eps()), delta_t = sqrt(eps()),
-             strategy = CachedTransformStrategy(), solver = BisectionJumpSolver())
+             strategy = CachedTransformStrategy(), solver = OptimJumpSolver())
 
 Simulate datasets and/or continuous-time sample paths from a multistate model.
 
@@ -125,8 +106,7 @@ to also receive the underlying continuous-time sample paths.
   - `CachedTransformStrategy()` (default): uses cached time transformations when available
   - `DirectTransformStrategy()`: always computes cumulative hazards directly
 - `solver::AbstractJumpSolver`: controls jump time root-finding algorithm
-  - `BisectionJumpSolver(; value_tol, max_iters)` (default): robust bisection method
-  - `OptimJumpSolver(; rel_tol, abs_tol)`: Optim.jl's Brent method
+  - `OptimJumpSolver(; rel_tol, abs_tol)` (default): Optim.jl's Brent method
 
 # Returns
 Depends on `data` and `paths` arguments:
@@ -159,7 +139,7 @@ See also: [`simulate_data`](@ref), [`simulate_paths`](@ref), [`simulate_path`](@
 function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false, 
                   delta_u = sqrt(eps()), delta_t = sqrt(eps()), 
                   strategy::AbstractTransformStrategy = CachedTransformStrategy(),
-                  solver::AbstractJumpSolver = BisectionJumpSolver())
+                  solver::AbstractJumpSolver = OptimJumpSolver())
 
     # throw an error if neither paths nor data are asked for
     if paths == false && data == false
@@ -197,14 +177,14 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
         end
     end
 
-    # vertically concatenate datasets
+    # vertically concatenate datasets into Vector{DataFrame}
     if data == true
-        dat = mapslices(x -> reduce(vcat, x), datasets, dims = [1,])
+        dat = [reduce(vcat, @view(datasets[:, i])) for i in 1:nsim]
     end
 
-    # concatenate subject paths
+    # collect subject paths into Vector{Vector{SamplePath}}
     if paths == true
-        trajectories = mapslices(x -> reduce(vcat, x), samplepaths, dims = [1,])
+        trajectories = [collect(@view(samplepaths[:, i])) for i in 1:nsim]
     end
 
     # return paths and data
@@ -222,7 +202,7 @@ end
 """
     simulate_data(model::MultistateProcess; nsim = 1, delta_u = sqrt(eps()),
                   delta_t = sqrt(eps()), strategy = CachedTransformStrategy(),
-                  solver = BisectionJumpSolver())
+                  solver = OptimJumpSolver())
 
 Simulate discretely observed datasets from a multistate model.
 
@@ -236,7 +216,7 @@ observed data (no continuous-time paths). Equivalent to calling
 - `delta_u::Float64`: minimum cumulative incidence increment per jump (default: sqrt(eps()))
 - `delta_t::Float64`: minimum time increment per jump (default: sqrt(eps()))
 - `strategy::AbstractTransformStrategy`: controls cumulative hazard computation (default: `CachedTransformStrategy()`)
-- `solver::AbstractJumpSolver`: controls jump time root-finding (default: `BisectionJumpSolver()`)
+- `solver::AbstractJumpSolver`: controls jump time root-finding (default: `OptimJumpSolver()`)
 
 # Returns
 - `Vector{DataFrame}`: array of simulated datasets with dimensions (1, nsim)
@@ -254,7 +234,7 @@ function simulate_data(model::MultistateProcess;
                        delta_u::Float64 = sqrt(eps()),
                        delta_t::Float64 = sqrt(eps()),
                        strategy::AbstractTransformStrategy = CachedTransformStrategy(),
-                       solver::AbstractJumpSolver = BisectionJumpSolver())
+                       solver::AbstractJumpSolver = OptimJumpSolver())
     return simulate(model; nsim = nsim, data = true, paths = false,
                     delta_u = delta_u, delta_t = delta_t, strategy = strategy, solver = solver)
 end
@@ -262,7 +242,7 @@ end
 """
     simulate_paths(model::MultistateProcess; nsim = 1, delta_u = sqrt(eps()),
                    delta_t = sqrt(eps()), strategy = CachedTransformStrategy(),
-                   solver = BisectionJumpSolver())
+                   solver = OptimJumpSolver())
 
 Simulate continuous-time sample paths from a multistate model.
 
@@ -276,7 +256,7 @@ calling `simulate(model; nsim=nsim, data=false, paths=true, ...)`.
 - `delta_u::Float64`: minimum cumulative incidence increment per jump (default: sqrt(eps()))
 - `delta_t::Float64`: minimum time increment per jump (default: sqrt(eps()))
 - `strategy::AbstractTransformStrategy`: controls cumulative hazard computation (default: `CachedTransformStrategy()`)
-- `solver::AbstractJumpSolver`: controls jump time root-finding (default: `BisectionJumpSolver()`)
+- `solver::AbstractJumpSolver`: controls jump time root-finding (default: `OptimJumpSolver()`)
 
 # Returns
 - `Matrix{SamplePath}`: array of sample paths with dimensions (nsubj, nsim)
@@ -294,7 +274,7 @@ function simulate_paths(model::MultistateProcess;
                         delta_u::Float64 = sqrt(eps()),
                         delta_t::Float64 = sqrt(eps()),
                         strategy::AbstractTransformStrategy = CachedTransformStrategy(),
-                        solver::AbstractJumpSolver = BisectionJumpSolver())
+                        solver::AbstractJumpSolver = OptimJumpSolver())
     return simulate(model; nsim = nsim, data = false, paths = true,
                     delta_u = delta_u, delta_t = delta_t, strategy = strategy, solver = solver)
 end
@@ -305,17 +285,6 @@ end
 Dispatch to the appropriate jump time solver based on solver type.
 """
 function _find_jump_time end
-
-"""
-    _find_jump_time(solver::BisectionJumpSolver, gap_fn, lo, hi, delta_t)
-
-Find jump time using bisection method with parameters from solver.
-"""
-function _find_jump_time(solver::BisectionJumpSolver, gap_fn, lo, hi, delta_t)
-    return _find_jump_time_bisection(gap_fn, lo, hi, delta_t;
-                                     value_tol = solver.value_tol,
-                                     max_iters = solver.max_iters)
-end
 
 """
     _find_jump_time(solver::OptimJumpSolver, gap_fn, lo, hi, delta_t)
@@ -362,46 +331,6 @@ values needed for that hazard's computation.
 end
 
 """
-    _find_jump_time_bisection(gap_fn, lo, hi, delta_t;
-                              value_tol = 1e-10,
-                              max_iters = _JUMP_SOLVER_MAX_ITERS)
-
-Solve `gap_fn(t) = 0` on `[lo, hi]` via bisection. The caller guarantees
-`gap_fn(lo) ≤ 0` and `gap_fn(hi) ≥ 0`. Returns the midpoint once either the
-function value drops below `value_tol` or the bracket width shrinks beneath
-`max(delta_t, value_tol)`.
-"""
-function _find_jump_time_bisection(gap_fn, lo, hi, delta_t;
-                                   value_tol = 1e-10,
-                                   max_iters = _JUMP_SOLVER_MAX_ITERS)
-    lo >= hi && return hi
-    initial_lo, initial_hi = lo, hi
-    lo_val = gap_fn(lo)
-    lo_val > 0 && return lo
-    hi_val = gap_fn(hi)
-    hi_val < 0 && error("simulate_path failed to bracket jump time on interval [$initial_lo, $initial_hi]")
-
-    for iter in 1:max_iters
-        mid = 0.5 * (lo + hi)
-        mid_val = gap_fn(mid)
-
-        if !isfinite(mid_val)
-            error("simulate_path encountered non-finite objective while locating jump time on interval [$initial_lo, $initial_hi]")
-        end
-
-        if abs(mid_val) <= value_tol || (hi - lo) <= max(delta_t, value_tol)
-            return mid
-        elseif mid_val > 0
-            hi = mid
-        else
-            lo = mid
-        end
-    end
-
-    error("simulate_path failed to locate jump time after $(max_iters) bisection iterations on interval [$initial_lo, $initial_hi]")
-end
-
-"""
     _sample_next_state(rng::AbstractRNG, probs::AbstractVector{Float64},
                        trans_inds::AbstractVector{Int})
 
@@ -432,7 +361,7 @@ end
 
 """
     simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t;
-                  strategy = CachedTransformStrategy(), solver = BisectionJumpSolver(),
+                  strategy = CachedTransformStrategy(), solver = OptimJumpSolver(),
                   rng = Random.default_rng())
 
 Simulate a single sample path for one subject.
@@ -453,8 +382,7 @@ by repeatedly:
   - `CachedTransformStrategy()` (default): uses cached time transformations
   - `DirectTransformStrategy()`: computes cumulative hazards directly
 - `solver::AbstractJumpSolver`: controls jump time root-finding
-  - `BisectionJumpSolver(; value_tol, max_iters)` (default): robust bisection
-  - `OptimJumpSolver(; rel_tol, abs_tol)`: Optim.jl's Brent method
+  - `OptimJumpSolver(; rel_tol, abs_tol)` (default): Optim.jl's Brent method
 - `rng::AbstractRNG`: random number generator (default: task-local RNG)
 
 # Returns
@@ -464,7 +392,7 @@ See also: [`simulate`](@ref), [`simulate_paths`](@ref)
 """
 function simulate_path(model::MultistateProcess, subj::Int64, delta_u, delta_t;
                        strategy::AbstractTransformStrategy = CachedTransformStrategy(),
-                       solver::AbstractJumpSolver = BisectionJumpSolver(),
+                       solver::AbstractJumpSolver = OptimJumpSolver(),
                        rng::AbstractRNG = Random.default_rng())
 
     # Validate inputs

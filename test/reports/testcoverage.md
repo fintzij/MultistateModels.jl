@@ -126,6 +126,31 @@ Long tests provide statistical validation through simulation studies. See:
 - `test/reports/simulation_longtests.md` - simulation distribution validation
 - `test/reports/inference_longtests.md` - MCEM and MLE fitting validation
 
+#### MCEM ESS and Pareto-k Behavior
+
+When running MCEM long tests, certain ESS and Pareto-k patterns are expected and do not indicate bugs:
+
+| Subject Pattern | Pareto-k | ESS | Explanation |
+|-----------------|----------|-----|-------------|
+| Early transition (first interval) | 1.0 | 1.0 | Path structure is deterministic; only transition time varies |
+| No transition | 0.0 | target | All sampled paths identical; uniform weights |
+| Late transition | ~1.0 | ~target | PSIS fitting may fail with few samples, but ESS is adequate |
+
+**Pareto-k diagnostic interpretation** (from PSIS literature):
+- `k = 0.0`: Uniform weights (no variability)
+- `k < 0.5`: Good importance sampling quality
+- `0.5 < k < 0.7`: Acceptable quality
+- `k > 0.7`: Poor quality - weights have heavy tails
+- `k = 1.0`: PSIS fitting failed (fallback to standard IS)
+
+**Note:** High Pareto-k values indicate the Markov surrogate may not be an ideal proposal for the semi-Markov target, but the MCEM algorithm still converges correctly. Subjects with ESS = 1.0 contribute less information but do not prevent convergence.
+
+**Test assertions:** The `longtest_mcem_tvc.jl` suite verifies:
+1. MCEM is correctly invoked (ConvergenceRecords has `ess_trace`)
+2. All ESS values are ≥ 1.0
+3. Average ESS is reasonable (> 5.0)
+4. Fitted parameters are finite and in reasonable ranges
+
 ### Setup / Fixture Files
 - `test/setup_*.jl` scripts assemble toy models used across suites; each script is scoped to the corresponding suite (e.g., `setup_3state_expwei.jl`).
 - `test/fixtures/TestFixtures.jl` exports reusable builders like `toy_expwei_model()`; updates here should be reflected wherever fixtures power assertions.

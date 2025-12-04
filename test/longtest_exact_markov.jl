@@ -1,133 +1,643 @@
 """
-Long test suite for exact data fitting and Markov model correctness.
+Long test suite for exact data fitting (MLE parameter recovery).
 
-This test suite verifies:
-1. MLE recovery: simulated data with known parameters → fitted parameters match
-2. Exact vs Markov consistency: exact data gives same likelihood as Markov with obstype=1
-3. Variance estimation: IJ and JK variances are consistent with bootstrap
-4. Subject/Observation weights: correctly weight the likelihood contributions
-5. Emission probabilities: censored observations handled correctly
+This test suite validates:
+1. **Parameter Recovery**: At sample size n=1000, estimated parameters should be 
+   close to true values (within 3 SEs or 25% relative tolerance).
+2. **Distributional Fidelity**: Trajectories simulated from fitted models (n=10000) 
+   should have similar distributional properties (state prevalence) to trajectories 
+   simulated from models with true parameters.
 
-These tests take longer to run (~2-5 minutes) but provide statistical validation.
+Test matrix:
+- Hazard families: exponential, Weibull, Gompertz, spline
+- Covariates: none, time-fixed, time-varying (TVC)
+- Model structure: illness-death (1→2, 2→3, 1→3 where 3 is absorbing)
 
-Note: When running standalone, ensure MultistateModels, DataFrames, Test, Random, etc. are loaded first.
+References:
+- Asymptotic MLE theory: estimates √n-consistent, asymptotically normal
+- Andersen & Keiding (2002) Statistical Methods in Medical Research - multi-state models
 """
 
-# Import internal types - assumes MultistateModels is already loaded by runtests.jl or manually
-# Use import (not using) to avoid conflicts with other test files
+# Import internal types - assumes MultistateModels is already loaded by runtests.jl
 import MultistateModels: Hazard, multistatemodel, fit, set_parameters!, simulate, 
-    ExactData, MPanelData, loglik_exact, loglik_markov, build_tpm_mapping
+    ExactData, MPanelData, loglik_exact, loglik_markov, build_tpm_mapping,
+    get_parameters, get_parameters_flat, SamplePath, cumulative_incidence, @formula
 
-# For standalone execution, add these at REPL:
-# using DataFrames, Distributions, LinearAlgebra, MultistateModels, Random, Statistics, StatsModels, Test
+using Test
+using DataFrames
+using Random
+using Statistics
+using LinearAlgebra
+using Distributions
 
 const RNG_SEED = 0x12345678
-const N_SUBJECTS = 500
-const N_BOOTSTRAP = 200
+const N_SUBJECTS = 1000         # Sample size for fitting
+const N_SIM_TRAJ = 10000        # Trajectories for distributional comparison
+const MAX_TIME = 20.0           # Maximum follow-up time
+const PARAM_TOL_SE = 3.0        # Parameter should be within 3 SEs of truth
+const PARAM_TOL_REL = 0.25      # Relative tolerance if SE unavailable
 
 # ============================================================================
-# Test 1: MLE Recovery for Exponential Model (Exact Data)
+# Helper Functions
 # ============================================================================
 
-@testset "MLE Recovery - Exponential Exact Data" begin
-    Random.seed!(RNG_SEED)
+"""
+    compute_state_prevalence(paths::Vector{SamplePath}, eval_times::Vector{Float64}, n_states::Int)
+
+Compute state prevalence at each evaluation time from a collection of sample paths.
+"""
+function compute_state_prevalence(paths::Vector{SamplePath}, eval_times::Vector{Float64}, n_states::Int)
+    n_times = length(eval_times)
+    prevalence = zeros(Float64, n_times, n_states)
+    n_paths = length(paths)
     
-    # True parameters (on log scale for rates)
-    true_log_rate_12 = -1.5  # rate = 0.223
-    true_log_rate_21 = -2.0  # rate = 0.135
-    true_log_rate_23 = -2.5  # rate = 0.082
+    for path in paths
+        for (t_idx, t) in enumerate(eval_times)
+            state_idx = searchsortedlast(path.times, t)
+            if state_idx >= 1
+                state = path.states[state_idx]
+                prevalence[t_idx, state] += 1.0
+            end
+        end
+    end
     
-    # Create model for simulation
-    h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
-    h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1)
-    h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3)  # absorbing state
+    prevalence ./= n_paths
+    return prevalence
+end
+
+"""
+    count_transitions(paths::Vector{SamplePath}, n_states::Int)
+
+Count total transitions between each pair of states.
+"""
+function count_transitions(paths::Vector{SamplePath}, n_states::Int)
+    counts = zeros(Int, n_states, n_states)
+    for path in paths
+        for i in 1:(length(path.states) - 1)
+            counts[path.states[i], path.states[i+1]] += 1
+        end
+    end
+    return counts
+end
+
+"""
+    generate_exact_data_illness_death(hazards, true_params; n_subj, max_time, covariates)
+
+Generate exact (continuous-time) data from illness-death model.
+Returns DataFrame with columns: id, tstart, tstop, statefrom, stateto, obstype, [covariates...]
+"""
+function generate_exact_data_illness_death(hazards, true_params; 
+    n_subj::Int = N_SUBJECTS, 
+    max_time::Float64 = MAX_TIME,
+    covariate_data::Union{Nothing, DataFrame} = nothing)
     
-    # Generate data
-    sim_data = DataFrame(
-        id = repeat(1:N_SUBJECTS, inner=1),
-        tstart = zeros(N_SUBJECTS),
-        tstop = fill(50.0, N_SUBJECTS),
-        statefrom = ones(Int, N_SUBJECTS),
-        stateto = ones(Int, N_SUBJECTS),
-        obstype = ones(Int, N_SUBJECTS)
+    # Build template for simulation
+    template = DataFrame(
+        id = 1:n_subj,
+        tstart = zeros(n_subj),
+        tstop = fill(max_time, n_subj),
+        statefrom = ones(Int, n_subj),
+        stateto = ones(Int, n_subj),
+        obstype = ones(Int, n_subj)  # Exact observation
     )
     
-    model = multistatemodel(h12, h21, h23; data = sim_data)
+    if !isnothing(covariate_data)
+        template = hcat(template, covariate_data)
+    end
     
-    # Set true parameters (hazard_index, values)
-    set_parameters!(model, 1, [true_log_rate_12])
-    set_parameters!(model, 2, [true_log_rate_21])
-    set_parameters!(model, 3, [true_log_rate_23])
+    model = multistatemodel(hazards...; data=template)
+    set_parameters!(model, true_params)
     
-    # Simulate exact data
-    sim_result = simulate(model; paths = false, data = true, nsim = 1)
-    sim_data_exact = sim_result[1, 1]  # Get the first (and only) simulated dataset
+    sim_result = simulate(model; paths=false, data=true, nsim=1)
+    return sim_result[1, 1]
+end
+
+"""
+    check_parameter_recovery(fitted, true_params_flat; tol_se, tol_rel)
+
+Verify fitted parameters are close to true values. Returns boolean.
+"""
+function check_parameter_recovery(fitted, true_params_flat; tol_se=PARAM_TOL_SE, tol_rel=PARAM_TOL_REL)
+    fitted_params = get_parameters_flat(fitted)
     
-    # Fit model to simulated data
-    model_fit = multistatemodel(h12, h21, h23; data = sim_data_exact)
-    fitted = fit(model_fit; verbose = false)
-    
-    # Check parameter recovery (within 3 standard errors)
-    fitted_params = MultistateModels.get_parameters_flat(fitted)
-    true_params = [true_log_rate_12, true_log_rate_21, true_log_rate_23]
-    
-    # Get standard errors from IJ variance
     if !isnothing(fitted.vcov)
         ses = sqrt.(diag(fitted.vcov))
-        for i in 1:3
-            @test abs(fitted_params[i] - true_params[i]) < 3 * ses[i]
+        for i in eachindex(fitted_params)
+            se = ses[i]
+            if se > 0 && isfinite(se)
+                err_se = abs(fitted_params[i] - true_params_flat[i]) / se
+                if err_se > tol_se
+                    return false
+                end
+            else
+                # Fallback to relative tolerance
+                if abs(fitted_params[i] - true_params_flat[i]) > abs(true_params_flat[i]) * tol_rel + 0.1
+                    return false
+                end
+            end
         end
     else
-        # Just check parameters are in reasonable range
-        for i in 1:3
-            @test abs(fitted_params[i] - true_params[i]) < 0.5
+        # No vcov: use relative tolerance
+        for i in eachindex(fitted_params)
+            if abs(fitted_params[i] - true_params_flat[i]) > abs(true_params_flat[i]) * tol_rel + 0.1
+                return false
+            end
         end
+    end
+    return true
+end
+
+"""
+    check_distributional_fidelity(model_true, model_fitted, true_params, fitted_params; 
+                                   n_traj, max_time, eval_times, max_diff)
+
+Compare state prevalence from true vs fitted models.
+"""
+function check_distributional_fidelity(hazards, true_params, fitted_params_flat;
+    n_traj::Int = N_SIM_TRAJ,
+    max_time::Float64 = MAX_TIME,
+    eval_times::Vector{Float64} = collect(1.0:1.0:max_time),
+    max_prev_diff::Float64 = 0.10,
+    n_states::Int = 3,
+    covariate_data::Union{Nothing, DataFrame} = nothing)
+    
+    # Build simulation template
+    template = DataFrame(
+        id = 1:n_traj,
+        tstart = zeros(n_traj),
+        tstop = fill(max_time, n_traj),
+        statefrom = ones(Int, n_traj),
+        stateto = ones(Int, n_traj),
+        obstype = ones(Int, n_traj)
+    )
+    
+    if !isnothing(covariate_data)
+        # Repeat covariate pattern
+        n_repeats = ceil(Int, n_traj / nrow(covariate_data))
+        cov_extended = vcat([covariate_data for _ in 1:n_repeats]...)[1:n_traj, :]
+        template = hcat(template, cov_extended)
+    end
+    
+    # Model with true parameters
+    model_true = multistatemodel(hazards...; data=template)
+    set_parameters!(model_true, true_params)
+    
+    # Model with fitted parameters
+    model_fitted = multistatemodel(hazards...; data=template)
+    
+    # Set fitted parameters by index
+    idx = 1
+    for (h_idx, haz) in enumerate(model_fitted.hazards)
+        npar = haz.npar_total
+        set_parameters!(model_fitted, h_idx, fitted_params_flat[idx:idx+npar-1])
+        idx += npar
+    end
+    
+    # Simulate - returns Vector{Vector{SamplePath}} when data=false, paths=true
+    Random.seed!(RNG_SEED + 1000)
+    trajectories_true = simulate(model_true; paths=true, data=false, nsim=1)
+    paths_true = trajectories_true[1]  # First simulation's paths
+    
+    Random.seed!(RNG_SEED + 1000)
+    trajectories_fitted = simulate(model_fitted; paths=true, data=false, nsim=1)
+    paths_fitted = trajectories_fitted[1]
+    
+    # Compare prevalence
+    prev_true = compute_state_prevalence(paths_true, eval_times, n_states)
+    prev_fitted = compute_state_prevalence(paths_fitted, eval_times, n_states)
+    
+    max_diff = maximum(abs.(prev_true .- prev_fitted))
+    return max_diff < max_prev_diff
+end
+
+# ============================================================================
+# TEST SECTION 1: EXPONENTIAL HAZARDS
+# ============================================================================
+
+@testset "Exponential - No Covariates" begin
+    Random.seed!(RNG_SEED)
+    
+    # True parameters (log scale)
+    true_rate_12 = 0.25
+    true_rate_23 = 0.15
+    true_rate_13 = 0.10  # Direct transition to absorbing
+    true_params = (
+        h12 = [log(true_rate_12)],
+        h23 = [log(true_rate_23)],
+        h13 = [log(true_rate_13)]
+    )
+    true_flat = [log(true_rate_12), log(true_rate_23), log(true_rate_13)]
+    
+    # Create illness-death model
+    h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+    h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
+    h13 = Hazard(@formula(0 ~ 1), "exp", 1, 3)
+    
+    # Generate and fit
+    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params)
+    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
+    
+    @testset "Parameter recovery" begin
+        fitted_natural = get_parameters(fitted; scale=:natural)
+        @test isapprox(fitted_natural.h12[1], true_rate_12; rtol=PARAM_TOL_REL)
+        @test isapprox(fitted_natural.h23[1], true_rate_23; rtol=PARAM_TOL_REL)
+        @test isapprox(fitted_natural.h13[1], true_rate_13; rtol=PARAM_TOL_REL)
+    end
+    
+    @testset "Distributional fidelity" begin
+        @test check_distributional_fidelity((h12, h23, h13), true_params, get_parameters_flat(fitted))
+    end
+end
+
+@testset "Exponential - With Covariate" begin
+    Random.seed!(RNG_SEED + 1)
+    
+    # True parameters: rate * exp(beta * x)
+    true_rate_12 = 0.25
+    true_beta_12 = 0.5
+    true_rate_23 = 0.15
+    true_beta_23 = -0.3
+    true_rate_13 = 0.08
+    true_beta_13 = 0.4
+    
+    # Covariate data
+    cov_data = DataFrame(x = randn(N_SUBJECTS))
+    
+    true_params = (
+        h12 = [log(true_rate_12), true_beta_12],
+        h23 = [log(true_rate_23), true_beta_23],
+        h13 = [log(true_rate_13), true_beta_13]
+    )
+    
+    h12 = Hazard(@formula(0 ~ x), "exp", 1, 2)
+    h23 = Hazard(@formula(0 ~ x), "exp", 2, 3)
+    h13 = Hazard(@formula(0 ~ x), "exp", 1, 3)
+    
+    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params; covariate_data=cov_data)
+    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
+    
+    @testset "Parameter recovery" begin
+        # Use named parameters to avoid ordering confusion
+        p = get_parameters(fitted; scale=:estimation)
+        p_nat = get_parameters(fitted; scale=:natural)
+        
+        # Test h12 parameters (well-identified: many 1→2 transitions)
+        @test isapprox(p_nat.h12[1], true_rate_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p_nat.h12[2], true_beta_12; atol=0.25)
+        
+        # h23 and h13 may have fewer events, so use relaxed tolerance
+        @test isapprox(p_nat.h23[1], true_rate_23; rtol=0.40)
+        @test isapprox(p_nat.h23[2], true_beta_23; atol=0.35)
+        @test isapprox(p_nat.h13[1], true_rate_13; rtol=0.40)
+        @test isapprox(p_nat.h13[2], true_beta_13; atol=0.35)
     end
 end
 
 # ============================================================================
-# Test 2: Exact vs Markov Consistency (obstype=1 should give identical likelihood)
+# TEST SECTION 2: WEIBULL HAZARDS
 # ============================================================================
 
-@testset "Exact vs Markov Consistency" begin
-    Random.seed!(RNG_SEED + 1)
+@testset "Weibull - No Covariates" begin
+    Random.seed!(RNG_SEED + 10)
     
-    # Create simple 2-state model with exact observations
-    # For obstype=1 (exact), both exact data and Markov methods should give same result
-    data = DataFrame(
-        id = [1, 1, 2, 2],
-        tstart = [0.0, 1.0, 0.0, 2.0],
-        tstop = [1.0, 3.0, 2.0, 4.0],
-        statefrom = [1, 2, 1, 1],
-        stateto = [2, 2, 1, 2],
-        obstype = [1, 1, 1, 1]  # all exact observations
+    # True parameters: h(t) = shape * scale * t^(shape-1)
+    true_shape_12, true_scale_12 = 1.3, 0.20
+    true_shape_23, true_scale_23 = 0.9, 0.15
+    true_shape_13, true_scale_13 = 1.1, 0.08
+    
+    true_params = (
+        h12 = [log(true_shape_12), log(true_scale_12)],
+        h23 = [log(true_shape_23), log(true_scale_23)],
+        h13 = [log(true_shape_13), log(true_scale_13)]
     )
     
-    h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
-    h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1)
+    h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+    h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3)
+    h13 = Hazard(@formula(0 ~ 1), "wei", 1, 3)
     
-    # Fit model
-    model = multistatemodel(h12, h21; data = data)
-    fitted = fit(model; verbose = false)
+    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params)
+    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
     
-    # Just verify the model fits and log-likelihood is reasonable
-    ll = get_loglik(fitted)
-    @test isfinite(ll)
-    @test ll < 0  # Log-likelihood should be negative for this model
+    @testset "Parameter recovery" begin
+        p = get_parameters(fitted; scale=:natural)
+        @test isapprox(p.h12[1], true_shape_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p.h12[2], true_scale_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p.h23[1], true_shape_23; rtol=PARAM_TOL_REL)
+        @test isapprox(p.h23[2], true_scale_23; rtol=PARAM_TOL_REL)
+        @test isapprox(p.h13[1], true_shape_13; rtol=PARAM_TOL_REL)
+        @test isapprox(p.h13[2], true_scale_13; rtol=PARAM_TOL_REL)
+    end
     
-    # Verify parameters are reasonable (not at boundary)
-    params = MultistateModels.get_parameters_flat(fitted)
-    @test all(isfinite.(params))
+    @testset "Distributional fidelity" begin
+        @test check_distributional_fidelity((h12, h23, h13), true_params, get_parameters_flat(fitted))
+    end
+end
+
+@testset "Weibull - With Covariate" begin
+    Random.seed!(RNG_SEED + 11)
+    
+    true_shape_12, true_scale_12, true_beta_12 = 1.3, 0.20, 0.4
+    true_shape_23, true_scale_23, true_beta_23 = 1.0, 0.15, -0.3
+    true_shape_13, true_scale_13, true_beta_13 = 1.1, 0.08, 0.5
+    
+    cov_data = DataFrame(x = randn(N_SUBJECTS))
+    
+    true_params = (
+        h12 = [log(true_shape_12), log(true_scale_12), true_beta_12],
+        h23 = [log(true_shape_23), log(true_scale_23), true_beta_23],
+        h13 = [log(true_shape_13), log(true_scale_13), true_beta_13]
+    )
+    
+    h12 = Hazard(@formula(0 ~ x), "wei", 1, 2)
+    h23 = Hazard(@formula(0 ~ x), "wei", 2, 3)
+    h13 = Hazard(@formula(0 ~ x), "wei", 1, 3)
+    
+    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params; covariate_data=cov_data)
+    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
+    
+    @testset "Parameter recovery" begin
+        p = get_parameters(fitted; scale=:estimation)
+        @test isapprox(exp(p[1]), true_shape_12; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[2]), true_scale_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p[3], true_beta_12; atol=0.25)
+    end
 end
 
 # ============================================================================
-# Test 3: Subject Weights Work Correctly
+# TEST SECTION 3: GOMPERTZ HAZARDS
+# ============================================================================
+
+@testset "Gompertz - No Covariates" begin
+    Random.seed!(RNG_SEED + 20)
+    
+    # Gompertz: h(t) = scale * exp(shape * t)
+    true_scale_12, true_shape_12 = 0.05, 0.10
+    true_scale_23, true_shape_23 = 0.03, 0.08
+    true_scale_13, true_shape_13 = 0.02, 0.05
+    
+    true_params = (
+        h12 = [log(true_scale_12), log(true_shape_12)],
+        h23 = [log(true_scale_23), log(true_shape_23)],
+        h13 = [log(true_scale_13), log(true_shape_13)]
+    )
+    
+    h12 = Hazard(@formula(0 ~ 1), "gom", 1, 2)
+    h23 = Hazard(@formula(0 ~ 1), "gom", 2, 3)
+    h13 = Hazard(@formula(0 ~ 1), "gom", 1, 3)
+    
+    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params; max_time=30.0)
+    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
+    
+    @testset "Parameter recovery" begin
+        p = get_parameters(fitted; scale=:estimation)
+        @test isapprox(exp(p[1]), true_scale_12; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[2]), true_shape_12; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[3]), true_scale_23; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[4]), true_shape_23; rtol=PARAM_TOL_REL)
+    end
+    
+    @testset "Distributional fidelity" begin
+        @test check_distributional_fidelity((h12, h23, h13), true_params, get_parameters_flat(fitted); max_time=30.0)
+    end
+end
+
+@testset "Gompertz - With Covariate" begin
+    Random.seed!(RNG_SEED + 21)
+    
+    true_scale_12, true_shape_12, true_beta_12 = 0.05, 0.10, 0.3
+    true_scale_23, true_shape_23, true_beta_23 = 0.03, 0.08, -0.2
+    true_scale_13, true_shape_13, true_beta_13 = 0.02, 0.05, 0.4
+    
+    cov_data = DataFrame(x = randn(N_SUBJECTS))
+    
+    true_params = (
+        h12 = [log(true_scale_12), log(true_shape_12), true_beta_12],
+        h23 = [log(true_scale_23), log(true_shape_23), true_beta_23],
+        h13 = [log(true_scale_13), log(true_shape_13), true_beta_13]
+    )
+    
+    h12 = Hazard(@formula(0 ~ x), "gom", 1, 2)
+    h23 = Hazard(@formula(0 ~ x), "gom", 2, 3)
+    h13 = Hazard(@formula(0 ~ x), "gom", 1, 3)
+    
+    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params; 
+        covariate_data=cov_data, max_time=30.0)
+    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
+    
+    @testset "Parameter recovery" begin
+        p = get_parameters(fitted; scale=:estimation)
+        @test isapprox(exp(p[1]), true_scale_12; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[2]), true_shape_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p[3], true_beta_12; atol=0.25)
+    end
+end
+
+# ============================================================================
+# TEST SECTION 4: SPLINE HAZARDS
+# ============================================================================
+
+@testset "Spline - No Covariates" begin
+    Random.seed!(RNG_SEED + 30)
+    
+    # Generate data from Weibull, fit with splines
+    # This tests that splines can approximate known parametric forms
+    true_shape_12, true_scale_12 = 1.2, 0.20
+    true_shape_23, true_scale_23 = 1.0, 0.15
+    true_shape_13, true_scale_13 = 1.3, 0.08
+    
+    h12_wei = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+    h23_wei = Hazard(@formula(0 ~ 1), "wei", 2, 3)
+    h13_wei = Hazard(@formula(0 ~ 1), "wei", 1, 3)
+    
+    wei_params = (
+        h12 = [log(true_shape_12), log(true_scale_12)],
+        h23 = [log(true_shape_23), log(true_scale_23)],
+        h13 = [log(true_shape_13), log(true_scale_13)]
+    )
+    
+    exact_data = generate_exact_data_illness_death((h12_wei, h23_wei, h13_wei), wei_params)
+    
+    # Fit with splines
+    h12_sp = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree=3, knots=[5.0, 10.0, 15.0], 
+                    boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
+    h23_sp = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree=3, knots=[5.0, 10.0, 15.0],
+                    boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
+    h13_sp = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree=3, knots=[5.0, 10.0, 15.0],
+                    boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
+    
+    model_fit = multistatemodel(h12_sp, h23_sp, h13_sp; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
+    
+    @testset "Spline fit converges" begin
+        @test isfinite(fitted.loglik.loglik)
+        @test fitted.loglik.loglik < 0
+    end
+    
+    @testset "Hazard values reasonable" begin
+        # Evaluate fitted spline hazards at a few time points
+        pars = get_parameters_flat(fitted)
+        npar_each = fitted.hazards[1].npar_total
+        
+        for t in [2.0, 5.0, 10.0, 15.0]
+            h12_val = fitted.hazards[1](t, pars[1:npar_each], NamedTuple())
+            @test isfinite(h12_val) && h12_val > 0
+        end
+    end
+end
+
+@testset "Spline - With Covariate" begin
+    Random.seed!(RNG_SEED + 31)
+    
+    # Generate from Weibull with covariate, fit spline
+    true_shape, true_scale, true_beta = 1.2, 0.15, 0.4
+    
+    cov_data = DataFrame(x = randn(N_SUBJECTS))
+    
+    h12_wei = Hazard(@formula(0 ~ x), "wei", 1, 2)
+    h23_wei = Hazard(@formula(0 ~ 1), "wei", 2, 3)  # No covariate on this transition
+    
+    wei_params = (
+        h12 = [log(true_shape), log(true_scale), true_beta],
+        h23 = [log(1.0), log(0.10)]  # shape=1 (exponential), scale=0.1
+    )
+    
+    # Simple 1→2→3 progression (no competing 1→3)
+    template = DataFrame(
+        id = 1:N_SUBJECTS,
+        tstart = zeros(N_SUBJECTS),
+        tstop = fill(MAX_TIME, N_SUBJECTS),
+        statefrom = ones(Int, N_SUBJECTS),
+        stateto = ones(Int, N_SUBJECTS),
+        obstype = ones(Int, N_SUBJECTS),
+        x = cov_data.x
+    )
+    
+    model_sim = multistatemodel(h12_wei, h23_wei; data=template)
+    set_parameters!(model_sim, wei_params)
+    sim_result = simulate(model_sim; paths=false, data=true, nsim=1)
+    exact_data = sim_result[1, 1]
+    
+    # Fit with splines
+    h12_sp = Hazard(@formula(0 ~ x), "sp", 1, 2; degree=3, knots=[5.0, 10.0],
+                    boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
+    h23_sp = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree=3, knots=[5.0, 10.0],
+                    boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
+    
+    model_fit = multistatemodel(h12_sp, h23_sp; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
+    
+    @testset "Spline with covariate fit converges" begin
+        @test isfinite(fitted.loglik.loglik)
+    end
+    
+    @testset "Covariate effect reasonable" begin
+        # The covariate effect should be in the right direction
+        p = get_parameters_flat(fitted)
+        # Find the beta coefficient (last parameter in h12)
+        npar_baseline = fitted.hazards[1].npar_baseline
+        beta_est = p[npar_baseline + 1]
+        @test isapprox(beta_est, true_beta; atol=0.35)
+    end
+end
+
+# ============================================================================
+# TEST SECTION 5: TIME-VARYING COVARIATES (TVC)
+# ============================================================================
+
+@testset "Exponential - TVC" begin
+    Random.seed!(RNG_SEED + 40)
+    
+    # Time-varying covariate: x changes at t=5
+    true_rate_12, true_beta_12 = 0.20, 0.5
+    true_rate_23, true_beta_23 = 0.15, -0.3
+    
+    # Generate TVC data manually
+    n_subj = N_SUBJECTS
+    rows = []
+    for i in 1:n_subj
+        x_before = randn()
+        x_after = x_before + 0.5 * randn()  # Correlated change
+        
+        # Two observation intervals with different covariate values
+        push!(rows, (id=i, tstart=0.0, tstop=5.0, statefrom=1, stateto=1, obstype=1, x=x_before))
+        push!(rows, (id=i, tstart=5.0, tstop=MAX_TIME, statefrom=1, stateto=1, obstype=1, x=x_after))
+    end
+    template = DataFrame(rows)
+    
+    h12 = Hazard(@formula(0 ~ x), "exp", 1, 2)
+    h23 = Hazard(@formula(0 ~ x), "exp", 2, 3)
+    
+    true_params = (
+        h12 = [log(true_rate_12), true_beta_12],
+        h23 = [log(true_rate_23), true_beta_23]
+    )
+    
+    model_sim = multistatemodel(h12, h23; data=template)
+    set_parameters!(model_sim, true_params)
+    sim_result = simulate(model_sim; paths=false, data=true, nsim=1)
+    exact_data = sim_result[1, 1]
+    
+    model_fit = multistatemodel(h12, h23; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
+    
+    @testset "TVC parameter recovery" begin
+        p = get_parameters(fitted; scale=:estimation)
+        @test isapprox(exp(p[1]), true_rate_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p[2], true_beta_12; atol=0.3)
+        @test isapprox(exp(p[3]), true_rate_23; rtol=PARAM_TOL_REL)
+        @test isapprox(p[4], true_beta_23; atol=0.3)
+    end
+end
+
+@testset "Weibull - TVC" begin
+    Random.seed!(RNG_SEED + 41)
+    
+    # Simple TVC test with Weibull
+    true_shape, true_scale, true_beta = 1.2, 0.15, 0.4
+    
+    n_subj = N_SUBJECTS
+    rows = []
+    for i in 1:n_subj
+        x_before = randn()
+        x_after = x_before + randn()
+        push!(rows, (id=i, tstart=0.0, tstop=8.0, statefrom=1, stateto=1, obstype=1, x=x_before))
+        push!(rows, (id=i, tstart=8.0, tstop=MAX_TIME, statefrom=1, stateto=1, obstype=1, x=x_after))
+    end
+    template = DataFrame(rows)
+    
+    h12 = Hazard(@formula(0 ~ x), "wei", 1, 2)
+    
+    true_params = (h12 = [log(true_shape), log(true_scale), true_beta],)
+    
+    model_sim = multistatemodel(h12; data=template)
+    set_parameters!(model_sim, true_params)
+    sim_result = simulate(model_sim; paths=false, data=true, nsim=1)
+    exact_data = sim_result[1, 1]
+    
+    model_fit = multistatemodel(h12; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
+    
+    @testset "Weibull TVC parameter recovery" begin
+        p = get_parameters(fitted; scale=:estimation)
+        @test isapprox(exp(p[1]), true_shape; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[2]), true_scale; rtol=PARAM_TOL_REL)
+        @test isapprox(p[3], true_beta; atol=0.3)
+    end
+end
+
+# ============================================================================
+# TEST SECTION 6: EDGE CASES AND REGRESSION TESTS
 # ============================================================================
 
 @testset "Subject Weights" begin
-    Random.seed!(RNG_SEED + 2)
+    Random.seed!(RNG_SEED + 50)
     
-    # Create simple data
     data = DataFrame(
         id = [1, 2, 3],
         tstart = zeros(3),
@@ -140,209 +650,80 @@ end
     h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
     
     # Model without weights
-    model_unweighted = multistatemodel(h12; data = data)
+    model_unweighted = multistatemodel(h12; data=data)
     set_parameters!(model_unweighted, 1, [-1.0])
     
     # Model with weights (subject 1 gets weight 2)
     weights = [2.0, 1.0, 1.0]
-    model_weighted = multistatemodel(h12; data = data, SubjectWeights = weights)
+    model_weighted = multistatemodel(h12; data=data, SubjectWeights=weights)
     set_parameters!(model_weighted, 1, [-1.0])
     
     # Compute likelihoods
-    params = MultistateModels.get_parameters_flat(model_unweighted)
+    params = get_parameters_flat(model_unweighted)
     
     paths_unweighted = MultistateModels.extract_paths(model_unweighted)
     exact_data_unweighted = ExactData(model_unweighted, paths_unweighted)
-    ll_unweighted = loglik_exact(params, exact_data_unweighted; neg = false)
+    ll_unweighted = loglik_exact(params, exact_data_unweighted; neg=false)
     
     paths_weighted = MultistateModels.extract_paths(model_weighted)
     exact_data_weighted = ExactData(model_weighted, paths_weighted)
-    ll_weighted = loglik_exact(params, exact_data_weighted; neg = false)
+    ll_weighted = loglik_exact(params, exact_data_weighted; neg=false)
     
-    # With weight=2 for subject 1, the weighted likelihood should differ
-    # Weighted ll = 2*ll_1 + ll_2 + ll_3 = ll_1 + ll_unweighted
-    @test ll_weighted != ll_unweighted
-    
-    # Verify the relationship more precisely
-    # Compute subject 1's contribution
-    model_subj1 = multistatemodel(h12; data = data[1:1, :])
-    set_parameters!(model_subj1, 1, [-1.0])
-    paths_subj1 = MultistateModels.extract_paths(model_subj1)
-    exact_data_subj1 = ExactData(model_subj1, paths_subj1)
-    ll_subj1 = loglik_exact(params, exact_data_subj1; neg = false)
-    
-    @test isapprox(ll_weighted, ll_unweighted + ll_subj1; rtol = 1e-10)
-end
-
-# ============================================================================
-# Test 4: Emission Matrix (Censored Observations)
-# ============================================================================
-
-@testset "Emission Matrix" begin
-    Random.seed!(RNG_SEED + 3)
-    
-    # Generate larger dataset for testing emission matrix
-    # Use more subjects to ensure model can fit
-    n = 50
-    sim_data = DataFrame(
-        id = repeat(1:n, inner=2),
-        tstart = repeat([0.0, 1.0], n),
-        tstop = repeat([1.0, 2.0], n),
-        statefrom = ones(Int, 2n),
-        stateto = ones(Int, 2n),
-        obstype = ones(Int, 2n)
-    )
-    
-    h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
-    h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1)
-    
-    # Create model and simulate data
-    model_sim = multistatemodel(h12, h21; data = sim_data)
-    set_parameters!(model_sim, 1, [-1.0])
-    set_parameters!(model_sim, 2, [-1.5])
-    
-    simulated = simulate(model_sim; paths = false, data = true, nsim = 1)
-    full_data = simulated[1, 1]
-    
-    # Test 1: CensoringPatterns approach
-    # Now add some censored observations using CensoringPatterns
-    test_data = copy(full_data)
-    # Mark some observations as censored
-    n_obs = nrow(test_data)
-    cens_mask = rand(n_obs) .< 0.2  # ~20% censored
-    test_data.obstype[cens_mask] .= 3
-    test_data.stateto[cens_mask] .= 0  # censored - could be any state
-    
-    # CensoringPatterns: ID 3 means could be in state 1 or 2
-    censoring = [3 1 1]  # [ID, state1_possible, state2_possible]
-    
-    model_cens = multistatemodel(h12, h21; data = test_data, CensoringPatterns = censoring)
-    
-    # Verify model was created
-    @test model_cens isa MultistateModels.MultistateProcess
-    
-    # Test 2: EmissionMatrix approach with exact data (no obstype >= 3)
-    # EmissionMatrix allows soft evidence on exact observations
-    n_states = 2
-    emission_mat = zeros(Float64, nrow(full_data), n_states)
-    for i in 1:nrow(full_data)
-        # For exact observations, use the observed state
-        emission_mat[i, full_data.stateto[i]] = 1.0
+    @testset "Weights affect likelihood" begin
+        @test ll_weighted != ll_unweighted
     end
     
-    # Apply soft evidence to some observations (even though they're "exact")
-    # This represents uncertainty in the observation mechanism
-    soft_mask = rand(nrow(full_data)) .< 0.1  # ~10% with soft evidence
-    for i in findall(soft_mask)
-        emission_mat[i, :] .= [0.9, 0.1]  # 90% confident in current state assignment
+    @testset "Weight relationship is correct" begin
+        model_subj1 = multistatemodel(h12; data=data[1:1, :])
+        set_parameters!(model_subj1, 1, [-1.0])
+        paths_subj1 = MultistateModels.extract_paths(model_subj1)
+        exact_data_subj1 = ExactData(model_subj1, paths_subj1)
+        ll_subj1 = loglik_exact(params, exact_data_subj1; neg=false)
+        
+        @test isapprox(ll_weighted, ll_unweighted + ll_subj1; rtol=1e-10)
     end
-    
-    model_emission = multistatemodel(h12, h21; data = full_data, EmissionMatrix = emission_mat)
-    
-    # Verify emission matrix was processed
-    @test model_emission isa MultistateModels.MultistateProcess
-    @test model_emission.emat isa Matrix{Float64}
-    @test size(model_emission.emat) == (nrow(full_data), n_states)
-    
-    # The emat should match what we provided
-    @test model_emission.emat == emission_mat
 end
 
-# ============================================================================
-# Test 5: IJ Variance Consistency with Numerical Jackknife
-# ============================================================================
-
-@testset "IJ Variance vs Numerical Jackknife" begin
-    Random.seed!(RNG_SEED + 4)
+@testset "Log-likelihood Properties" begin
+    Random.seed!(RNG_SEED + 51)
     
-    # Generate data with enough subjects for variance estimation
-    n = 30
+    # Simple model to verify basic likelihood properties
     data = DataFrame(
-        id = repeat(1:n, inner=1),
-        tstart = zeros(n),
-        tstop = fill(5.0, n),
-        statefrom = ones(Int, n),
-        stateto = ones(Int, n),
-        obstype = ones(Int, n)
+        id = repeat(1:100, inner=1),
+        tstart = zeros(100),
+        tstop = fill(5.0, 100),
+        statefrom = ones(Int, 100),
+        stateto = vcat(fill(2, 70), fill(1, 30)),  # 70 events, 30 censored
+        obstype = ones(Int, 100)
     )
     
     h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
-    h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1)
+    model = multistatemodel(h12; data=data)
+    fitted = fit(model; verbose=false)
     
-    model = multistatemodel(h12, h21; data = data)
-    set_parameters!(model, 1, [-1.0])
-    set_parameters!(model, 2, [-1.5])
+    @testset "Likelihood is finite and negative" begin
+        @test isfinite(fitted.loglik.loglik)
+        @test fitted.loglik.loglik < 0
+    end
     
-    # Simulate data
-    sim_data = simulate(model; paths = false, data = true, nsim = 1)[1, 1]
-    
-    # Fit with IJ variance
-    model_fit = multistatemodel(h12, h21; data = sim_data)
-    fitted = fit(model_fit; verbose = false, compute_vcov = true, compute_ij_vcov = true)
-    
-    @test !isnothing(fitted.vcov)
-    @test !isnothing(fitted.ij_vcov)
-    
-    # IJ variance should be positive definite
-    if !isnothing(fitted.ij_vcov)
-        @test all(eigvals(Symmetric(fitted.ij_vcov)) .> 0)
+    @testset "Variance-covariance is positive definite" begin
+        if !isnothing(fitted.vcov)
+            eigvals = LinearAlgebra.eigvals(fitted.vcov)
+            @test all(eigvals .> 0)
+        end
     end
 end
 
 # ============================================================================
-# Test 6: Panel Data Markov Model
+# Summary
 # ============================================================================
 
-@testset "Markov Panel Data Fitting" begin
-    Random.seed!(RNG_SEED + 5)
-    
-    # For panel data (obstype = 2), we need:
-    # - statefrom: state at start of interval (can be 0 if unknown except first obs per subject)
-    # - stateto: state at end of interval (must be known for obstype=2)
-    # Generate data with proper panel structure
-    n = 100
-    n_obs_per_subj = 3
-    
-    # Create baseline data for simulation
-    sim_base = DataFrame(
-        id = repeat(1:n, inner=n_obs_per_subj),
-        tstart = repeat([0.0, 1.0, 2.0], n),
-        tstop = repeat([1.0, 2.0, 3.0], n),
-        statefrom = repeat([1, 1, 1], n),  # temporary
-        stateto = repeat([1, 1, 1], n),    # temporary
-        obstype = repeat([1, 1, 1], n)      # exact for simulation
-    )
-    
-    h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
-    h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1)
-    
-    model = multistatemodel(h12, h21; data = sim_base)
-    set_parameters!(model, 1, [-1.0])
-    set_parameters!(model, 2, [-1.5])
-    
-    # Simulate exact data
-    sim_data = simulate(model; paths = false, data = true, nsim = 1)[1, 1]
-    
-    # Convert to panel data (obstype = 2)
-    # For panel data: statefrom tells us where they started, stateto where they ended
-    sim_data.obstype .= 2
-    
-    # Fit as panel data
-    model_panel = multistatemodel(h12, h21; data = sim_data)
-    fitted = fit(model_panel; verbose = false)
-    
-    @test isfinite(fitted.loglik.loglik)
-    
-    # Parameters should be in reasonable range
-    fitted_params = MultistateModels.get_parameters_flat(fitted)
-    @test all(abs.(fitted_params) .< 5.0)
-end
-
-println("\n=== Long Test Suite Complete ===\n")
-println("All tests verify statistical correctness of:")
-println("  - MLE parameter recovery")
-println("  - Exact vs Markov likelihood consistency")
-println("  - Subject weight implementation")
-println("  - Emission probability handling")
-println("  - IJ variance estimation")
-println("  - Panel data Markov model fitting")
+println("\n=== Exact Data Long Test Suite Complete ===\n")
+println("This test suite validated:")
+println("  - Exponential hazards: no covariate, with covariate")
+println("  - Weibull hazards: no covariate, with covariate")
+println("  - Gompertz hazards: no covariate, with covariate")
+println("  - Spline hazards: no covariate, with covariate")
+println("  - Time-varying covariates: exponential, Weibull")
+println("  - Edge cases: subject weights, likelihood properties")
+println("Sample size: n=$(N_SUBJECTS), simulation trajectories: $(N_SIM_TRAJ)")

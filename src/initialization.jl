@@ -50,17 +50,19 @@ function initialize_parameters(model::MultistateProcess; constraints = nothing, 
         for i in eachindex(model.hazards)
             set_par_to = init_par(model.hazards[i], surrog.parameters[i][1])
 
-            # copy covariate effects if there are any
-            if typeof(model.hazards[i]) ∈ [_ExponentialPH, _WeibullPH, _GompertzPH, _SplinePH]
-                set_par_to[reverse(range(length(set_par_to); step = -1, length = model.hazards[i].ncovar))] .= surrog.parameters[i][Not(1)]
+            # Copy covariate effects if there are any
+            hazard = model.hazards[i]
+            if hazard.has_covariates
+                ncovar = hazard.npar_total - hazard.npar_baseline
+                set_par_to[reverse(range(length(set_par_to); step = -1, length = ncovar))] .= surrog.parameters[i][Not(1)]
             end
             
-            set_parameters!(model, NamedTuple{(model.hazards[i].hazname,)}((set_par_to,)))
+            set_parameters!(model, NamedTuple{(hazard.hazname,)}((set_par_to,)))
 
-            if isa(model.hazards[i], _SplineHazard)
+            if isa(hazard, _SplineHazard)
                 log_params = get_log_scale_params(model.parameters)
-                remake_splines!(model.hazards[i], log_params[i])
-                set_riskperiod!(model.hazards[i])
+                remake_splines!(hazard, log_params[i])
+                set_riskperiod!(hazard)
             end
         end
     end
@@ -89,17 +91,19 @@ function initialize_parameters!(model::MultistateProcess; constraints = nothing,
         for i in eachindex(model.hazards)
             set_par_to = init_par(model.hazards[i], surrog.parameters[i][1])
 
-            # copy covariate effects if there are any
-            if typeof(model.hazards[i]) ∈ [_ExponentialPH, _WeibullPH, _GompertzPH, _SplinePH]
-                set_par_to[reverse(range(length(set_par_to); step = -1, length = model.hazards[i].ncovar))] .= surrog.parameters[i][Not(1)]
+            # Copy covariate effects if there are any
+            hazard = model.hazards[i]
+            if hazard.has_covariates
+                ncovar = hazard.npar_total - hazard.npar_baseline
+                set_par_to[reverse(range(length(set_par_to); step = -1, length = ncovar))] .= surrog.parameters[i][Not(1)]
             end
             
-            set_parameters!(model, NamedTuple{(model.hazards[i].hazname,)}((set_par_to,)))
+            set_parameters!(model, NamedTuple{(hazard.hazname,)}((set_par_to,)))
 
-            if isa(model.hazards[i], _SplineHazard)
+            if isa(hazard, _SplineHazard)
                 log_params = get_log_scale_params(model.parameters)
-                remake_splines!(model.hazards[i], log_params[i])
-                set_riskperiod!(model.hazards[i])
+                remake_splines!(hazard, log_params[i])
+                set_riskperiod!(hazard)
             end
         end
     end

@@ -44,9 +44,10 @@ include("setup_splines.jl")  # Spline hazards now implemented
     include("test_make_subjdat.jl")
     include("test_simulation.jl")
     include("test_ncv.jl")
-    include("test_exact_data_fitting.jl")
     include("test_phasetype_is.jl")
     include("test_splines.jl")
+    include("test_surrogates.jl")
+    include("test_mcem.jl")
 end
 
 # =============================================================================

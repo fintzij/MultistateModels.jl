@@ -1,6 +1,5 @@
 module MultistateModels
 
-using ArraysOfArrays
 using BSplineKit
 using Chain
 using ComponentArrays
@@ -23,7 +22,6 @@ using ParetoSmooth
 using Preferences
 using QuadGK
 using RuntimeGeneratedFunctions
-using SpecialFunctions: gamma  # for phase-type fitting
 using StatsBase
 using StatsFuns
 using StatsModels
@@ -58,10 +56,10 @@ export
     get_loglik,
     get_parameters,
     get_parameters_flat,
-    get_parameters_transformed,
+    get_parameters_nested,
+    get_parameters_transformed,  # Backward compat alias for get_parameters_nested
     get_parameters_natural,
     get_log_scale_params,
-    get_elem_ptr,
     get_unflatten_fn,
     get_parnames,
     get_vcov,
@@ -118,33 +116,32 @@ export
     simulate,
     simulate_data,
     simulate_paths,
+    path_to_dataframe,
+    paths_to_dataset,
     OptimJumpSolver,
-    BisectionJumpSolver,
     CachedTransformStrategy,
     DirectTransformStrategy,
     # Legacy aliases (deprecated, use CachedTransformStrategy/DirectTransformStrategy)
     TangTransformStrategy,
     LegacyTransformStrategy,
-    # Phase-type surrogates (Titman & Sharples 2010)
+    # Phase-type surrogates
     PhaseTypeDistribution,
     PhaseTypeConfig,
     PhaseTypeSurrogate,
+    absorption_rates,
+    subintensity,
     # MCEM proposal configuration
     ProposalConfig,
     MarkovProposal,
     PhaseTypeProposal,
     needs_phasetype_proposal,
     resolve_proposal_config,
-    phasetype_mean,
-    phasetype_variance,
-    phasetype_cv,
-    phasetype_cdf,
-    phasetype_pdf,
-    phasetype_hazard,
-    phasetype_sample,
-    validate_phasetype,
     collapse_phases,
     expand_initial_state,
+    # Spline utilities
+    place_knots_from_paths!,
+    default_nknots,
+    place_interior_knots,
     # statetable,
     summary,
     __init__

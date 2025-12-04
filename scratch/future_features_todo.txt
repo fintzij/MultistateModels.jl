@@ -52,9 +52,12 @@ DESIGN DECISIONS: [ALL IMPLEMENTED]
 IMPLEMENTATION STATUS:
 ---------------------
 
-Step 1: Core data structures (src/phasetype.jl) [COMPLETE]
+Step 1: Core data structures (src/phasetype.jl) [COMPLETE - REFACTORED 2025-12-03]
 [x] PhaseTypeDistribution struct
-    - n_phases, S (sub-intensity), initial, absorption
+    - n_phases, Q (full intensity matrix including absorbing state), initial
+    - Q is (n+1)×(n+1) where n = n_phases, last row/col is absorbing state
+    - subintensity(ph) extracts S from Q when needed
+    - REFACTORED: Changed from subintensity S to full intensity Q (2025-12-03)
 [x] PhaseTypeSurrogate struct 
     - expanded_Q, n_observed_states, n_expanded_states
     - state_to_phases, phase_to_state mappings
@@ -68,7 +71,8 @@ Step 2: PH fitting and moments (src/phasetype.jl) [COMPLETE]
 [x] phasetype_mean, phasetype_variance, phasetype_cv
 [x] phasetype_cdf, phasetype_pdf, phasetype_hazard
 [x] phasetype_sample - random sampling
-[x] build_coxian_subintensity
+[x] _build_coxian_from_rate - builds Coxian Q matrix from crude rate
+    - coxian_structure options: :unstructured, :prop_to_prog, :allequal
 [x] apply_titman_sharples_constraints!
 [x] validate_phasetype
 [x] _select_n_phases_bic - BIC-based auto-selection
@@ -194,7 +198,7 @@ FEATURE 2: SPLINE HAZARDS (COMPLETED)
 
 Status: IMPLEMENTED - Core functionality complete
 Priority: HIGH - Target for current infrastructure_changes branch
-Updated: 2025-12-01
+Updated: 2025-12-03
 
 IMPLEMENTATION COMPLETE:
 ------------------------
@@ -215,14 +219,20 @@ IMPLEMENTATION COMPLETE:
 4. Auto knot placement in smooths.jl
    - place_interior_knots(): quantile-based with tie-breaking
    - default_nknots(): Tang et al. floor(n^(1/5)) formula
+   - place_knots_from_paths!(): data-driven knot placement from sampled paths (2025-12-03)
+     * Uses fitted surrogate to draw conditional sample paths
+     * Computes sojourn time quantiles per transition
+     * Updates target model's spline hazards in place
+   - _rebuild_model_with_knots!(): internal helper for rebuilding hazards with new knots
 
 5. Parameter transformations
    - _spline_ests2coefs(): log-scale params → spline coefficients
    - _spline_coefs2ests(): inverse transformation
    - rectify_coefs!(): updated for RuntimeSplineHazard
 
-6. Tests in test/setup_splines.jl
+6. Tests in test/test_splines.jl (108 tests)
    - Explicit knots, auto knots, time transform, AD compatibility
+   - place_knots_from_paths! tests: structure, ordering, bounds, evaluability
 
 DESIGN DECISIONS (from discussion 2025-12-01):
 ----------------------------------------------

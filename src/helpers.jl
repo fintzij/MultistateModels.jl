@@ -1,17 +1,54 @@
 """
-    set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVectors,Vector{Vector{Float64}}})
+    rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::MultistateProcess)
+
+Rebuild the parameters structure from new parameter vectors.
+Parameters are stored on log scale for baseline, as-is for covariates.
+
+# Arguments
+- `new_param_vectors`: Vector of parameter vectors (one per hazard), on log scale for baseline
+- `model`: The model containing hazard info for npar_baseline
+
+# Returns
+- NamedTuple with flat, nested, natural, and unflatten fields
+"""
+function rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::MultistateProcess)
+    params_nested_pairs = [
+        hazname => build_hazard_params(new_param_vectors[idx], model.hazards[idx].npar_baseline)
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    
+    params_nested = NamedTuple(params_nested_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
+    
+    # Get natural scale parameters as flattened vectors per hazard
+    params_natural_pairs = [
+        hazname => extract_natural_vector(params_nested[hazname])
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    params_natural = NamedTuple(params_natural_pairs)
+    
+    return (
+        flat = params_flat,
+        nested = params_nested,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
+end
+
+"""
+    set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Float64}})
 
 Set model parameters given a nested vector of values (one vector per hazard).
-Values should be on log scale for positive-constrained parameters (baseline rates, shapes, scales).
+Values should be on log scale for baseline parameters, as-is for covariate coefficients.
 
 # Arguments
 - `model::MultistateProcess`: The model to update
-- `newvalues`: Nested vector or VectorOfVectors with parameters for each hazard
+- `newvalues`: Nested vector with parameters for each hazard
 
 # Note
 Updates model.parameters with the new values and remakes spline hazards as needed.
 """
-function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVectors,Vector{Vector{Float64}}})
+function set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Float64}})
     
     # Get current natural-scale parameters
     current_natural = model.parameters.natural
@@ -34,23 +71,8 @@ function set_parameters!(model::MultistateProcess, newvalues::Union{VectorOfVect
         end
     end
     
-    # Rebuild parameters from the new values
-    # newvalues are on log scale, so exp to get natural scale for safe_positive
-    params_transformed_pairs = [
-        hazname => safe_positive(exp.(Vector{Float64}(newvalues[idx])))
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
-    ]
-    
-    params_transformed = NamedTuple(params_transformed_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
-    params_natural = ParameterHandling.value(params_transformed)
-    
-    model.parameters = (
-        flat = params_flat,
-        transformed = params_transformed,
-        natural = params_natural,
-        unflatten = unflatten_fn
-    )
+    # Rebuild parameters with proper constraints
+    model.parameters = rebuild_parameters(newvalues, model)
     
     return nothing
 end
@@ -59,7 +81,7 @@ end
     set_parameters!(model::MultistateProcess, newvalues::Tuple)
 
 Set model parameters given a tuple of vectors parameterizing transition intensities. 
-Values should be on log scale for positive-constrained parameters.
+Values should be on log scale for baseline parameters, as-is for covariate coefficients.
 
 Assigns new values by hazard index in order.
 """
@@ -86,22 +108,9 @@ function set_parameters!(model::MultistateProcess, newvalues::Tuple)
         end
     end
     
-    # Rebuild parameters from the new values (log scale input -> natural scale via exp)
-    params_transformed_pairs = [
-        hazname => safe_positive(exp.(Vector{Float64}(collect(newvalues[idx]))))
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
-    ]
-    
-    params_transformed = NamedTuple(params_transformed_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
-    params_natural = ParameterHandling.value(params_transformed)
-    
-    model.parameters = (
-        flat = params_flat,
-        transformed = params_transformed,
-        natural = params_natural,
-        unflatten = unflatten_fn
-    )
+    # Convert tuple to vector and rebuild
+    new_param_vectors = [Vector{Float64}(collect(newvalues[i])) for i in 1:n_hazards]
+    model.parameters = rebuild_parameters(new_param_vectors, model)
     
     return nothing
 end
@@ -110,7 +119,7 @@ end
     set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
 
 Set model parameters given a NamedTuple with hazard names as keys.
-Values should be on log scale for positive-constrained parameters.
+Values should be on log scale for baseline parameters, as-is for covariate coefficients.
 
 Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.
 """
@@ -142,26 +151,12 @@ function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
         if hazname in value_keys
             new_param_vectors[idx] = Vector{Float64}(collect(newvalues[hazname]))
         else
-            # Keep current values (need to convert from natural back to log scale)
-            new_param_vectors[idx] = log.(Vector{Float64}(collect(current_natural[idx])))
+            # Keep current values - extract from nested structure
+            new_param_vectors[idx] = extract_params_vector(model.parameters.nested[idx])
         end
     end
     
-    params_transformed_pairs = [
-        hazname => safe_positive(exp.(new_param_vectors[idx]))
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
-    ]
-    
-    params_transformed = NamedTuple(params_transformed_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
-    params_natural = ParameterHandling.value(params_transformed)
-    
-    model.parameters = (
-        flat = params_flat,
-        transformed = params_transformed,
-        natural = params_natural,
-        unflatten = unflatten_fn
-    )
+    model.parameters = rebuild_parameters(new_param_vectors, model)
     
     return nothing
 end
@@ -170,12 +165,12 @@ end
     set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{Float64})
 
 Set parameters for a single hazard by hazard index.
-Values should be on log scale for positive-constrained parameters.
+Values should be on log scale for baseline parameters, as-is for covariate coefficients.
 
 # Arguments
 - `model::MultistateProcess`: The model to update
 - `h::Int64`: Index of the hazard to update
-- `newvalues::Vector{Float64}`: New parameter values (log scale)
+- `newvalues::Vector{Float64}`: New parameter values (log scale for baseline, as-is for covariates)
 
 # Example
 ```julia
@@ -212,26 +207,12 @@ function set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{F
         if idx == h
             new_param_vectors[idx] = Vector{Float64}(newvalues)
         else
-            # Keep current values (convert from natural back to log scale)
-            new_param_vectors[idx] = log.(Vector{Float64}(collect(current_natural[idx])))
+            # Keep current values - extract from nested structure
+            new_param_vectors[idx] = extract_params_vector(model.parameters.nested[idx])
         end
     end
     
-    params_transformed_pairs = [
-        hazname => safe_positive(exp.(new_param_vectors[idx]))
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
-    ]
-    
-    params_transformed = NamedTuple(params_transformed_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
-    params_natural = ParameterHandling.value(params_transformed)
-    
-    model.parameters = (
-        flat = params_flat,
-        transformed = params_transformed,
-        natural = params_natural,
-        unflatten = unflatten_fn
-    )
+    model.parameters = rebuild_parameters(new_param_vectors, model)
     
     return nothing
 end
@@ -263,39 +244,86 @@ end
 PHASE 2: Parameter Update with ParameterHandling.jl
 =============================================================================# 
 
-# Minimum value for parameters to avoid ParameterHandling.positive() epsilon errors
-# ParameterHandling uses ε = sqrt(eps(Float64)) ≈ 1.49e-8, so we use 1e-7 as floor
-const PARAM_FLOOR = 1e-7
+"""
+    build_hazard_params(log_scale_params::Vector{Float64}, npar_baseline::Int)
+
+Create a NamedTuple with baseline and covariate parameters.
+
+Parameters are stored on log scale for baseline, as-is for covariates.
+No transformations are applied - hazard functions expect log scale.
+
+# Arguments
+- `log_scale_params`: Full parameter vector - log scale for baseline, as-is for covariates
+- `npar_baseline`: Number of baseline parameters
+
+# Returns
+- `NamedTuple`: `(baseline = [...], covariates = [...])` or just `(baseline = [...],)` if no covariates
+
+# Note
+All parameters are stored on log scale for baseline (as expected by hazard functions).
+Covariate coefficients are stored as-is (unconstrained).
+"""
+function build_hazard_params(log_scale_params::Vector{Float64}, npar_baseline::Int)
+    # Store baseline on log scale (hazard functions expect this)
+    baseline = log_scale_params[1:npar_baseline]
+    
+    npar_total = length(log_scale_params)
+    if npar_total > npar_baseline
+        # Has covariates - leave them as-is
+        covariates = log_scale_params[(npar_baseline+1):end]
+        return (baseline = baseline, covariates = covariates)
+    else
+        # No covariates
+        return (baseline = baseline,)
+    end
+end
 
 """
-    safe_positive(x::AbstractVector{<:Real})
+    extract_params_vector(hazard_params)
 
-Create a ParameterHandling.positive() transformation with a floor to prevent
-"must be greater than ε" errors. Values below `PARAM_FLOOR` are clamped.
-
-This handles edge cases where optimization produces very small parameter values,
-particularly in phase-type models with sparse data for some transitions.
+Extract the full parameter vector from a hazard's NamedTuple params structure.
+Returns log-scale for baseline + as-is for covariates (the scale expected by hazard functions).
 """
-function safe_positive(x::AbstractVector{<:Real})
-    return ParameterHandling.positive(max.(x, PARAM_FLOOR))
+function extract_params_vector(hazard_params::NamedTuple)
+    if haskey(hazard_params, :covariates)
+        return vcat(hazard_params.baseline, hazard_params.covariates)
+    else
+        return hazard_params.baseline
+    end
+end
+
+"""
+    extract_natural_vector(hazard_params, npar_baseline::Int)
+
+Extract the natural-scale parameter vector from a hazard's NamedTuple params structure.
+Applies exp() to baseline parameters, leaves covariates as-is.
+"""
+function extract_natural_vector(hazard_params::NamedTuple)
+    baseline_natural = exp.(hazard_params.baseline)
+    
+    if haskey(hazard_params, :covariates)
+        return vcat(baseline_natural, hazard_params.covariates)
+    else
+        return baseline_natural
+    end
 end
 
 """
     get_log_scale_params(parameters)
 
-Extract log-scale (unconstrained) parameters from a parameters structure.
+Extract log-scale parameters from a parameters structure.
 This is the correct scale for passing to hazard functions.
 
 Hazard functions expect log-scale parameters (baseline rates, shapes, scales)
-because they apply exp() internally. The ParameterHandling `natural` field
-contains natural-scale values (after exp transform), which should NOT be passed
-to hazard functions directly.
+because they apply exp() internally. Covariate coefficients are passed as-is.
+The `natural` field contains natural-scale values (after exp transform for baseline),
+which should NOT be passed to hazard functions directly.
 
 # Arguments
-- `parameters`: A NamedTuple with `transformed` field containing PositiveArray wrappers
+- `parameters`: A NamedTuple with `nested` field containing per-hazard NamedTuples
 
 # Returns
-- `Tuple`: Log-scale parameters indexed by hazard number
+- `Tuple`: Log-scale baseline + unconstrained covariate parameters indexed by hazard number
 
 # Example
 ```julia
@@ -306,27 +334,14 @@ ll = loglik(log_pars, path, model.hazards, model)
 ```
 """
 function get_log_scale_params(parameters)
-    # Extract unconstrained (log-scale) values from each PositiveArray in transformed
-    return map(x -> x.unconstrained_value, values(parameters.transformed))
-end
-
-"""
-    get_elem_ptr(parameters)
-
-Get element pointer array for converting flat parameter vector to nested structure.
-Returns a vector where elem_ptr[i]:elem_ptr[i+1]-1 gives indices for hazard i.
-
-This replaces the old VectorOfVectors elem_ptr field with a computation from parameters.
-"""
-function get_elem_ptr(parameters)
-    sizes = [length(v) for v in values(parameters.natural)]
-    return cumsum([1; sizes])
+    # Extract log-scale values: baseline and covariates as stored
+    return map(extract_params_vector, values(parameters.nested))
 end
 
 """
     nest_params(flat_params::AbstractVector, parameters)
 
-Convert a flat parameter vector to a VectorOfVectors using parameters structure.
+Convert a flat parameter vector to a tuple of views using parameters structure.
 This is the **preferred AD-compatible method** for converting flat optimizer 
 parameters to nested form for hazard evaluation.
 
@@ -335,32 +350,48 @@ parameters to nested form for hazard evaluation.
 - `parameters`: The model's parameters NamedTuple containing `natural` field
 
 # Returns  
-- `VectorOfVectors`: Nested view of parameters indexed by hazard number (1-based)
+- `Tuple`: Tuple of views into flat_params, indexed by hazard number (1-based)
 
 # AD Compatibility
-This function works with ForwardDiff.Dual numbers because VectorOfVectors creates 
-views without type conversion. Use this instead of `unflatten_to_tuple` for any
-code that will be differentiated.
+This function works with ForwardDiff.Dual numbers because it creates views 
+without type conversion. The flat vector contains log-scale baseline params,
+so these views can be passed directly to hazard functions.
+
+# Why not just use unflatten?
+While ParameterHandling.jl's unflatten is useful, it returns a structured 
+NamedTuple. For AD-compatible hazard evaluation, we need simple views into 
+the flat vector. This function provides that without allocations and preserves 
+Dual number types.
 
 # Example
 ```julia
 # In AD-compatible likelihood computation:
-pars = nest_params(parameters, model.parameters)
-haz_params = pars[1]  # Parameters for first hazard (log scale)
+pars = nest_params(flat_params, model.parameters)
+haz_params = pars[1]  # Parameters for first hazard (log scale for baseline)
 ```
 
-See also: [`get_log_scale_params`](@ref), [`unflatten_to_tuple`](@ref)
+See also: [`get_log_scale_params`](@ref)
 """
 function nest_params(flat_params::AbstractVector, parameters)
-    elem_ptr = get_elem_ptr(parameters)
-    return VectorOfVectors(flat_params, elem_ptr)
+    # Compute sizes and offsets from parameters structure
+    sizes = [length(v) for v in values(parameters.natural)]
+    n_hazards = length(sizes)
+    
+    # Build views without intermediate allocations
+    offset = 0
+    return ntuple(n_hazards) do i
+        start_idx = offset + 1
+        end_idx = offset + sizes[i]
+        offset = end_idx
+        view(flat_params, start_idx:end_idx)
+    end
 end
 
 """
     set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVector)
 
 Set model parameters from a flat parameter vector (as used by optimizers).
-The flat vector is unflattened using the model's parameters.unflatten function.
+The flat vector is unflattened using ParameterHandling's unflatten function.
 
 # Arguments
 - `model::MultistateProcess`: The model to update  
@@ -371,76 +402,38 @@ This is the primary method for updating parameters during optimization.
 Spline hazards are remade with the new parameters.
 """
 function set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVector)
-    # Unflatten to get transformed structure
-    params_transformed = model.parameters.unflatten(flat_params)
-    params_natural = ParameterHandling.value(params_transformed)
+    # Unflatten to get nested structure
+    params_nested = model.parameters.unflatten(flat_params)
     
-    # Get new unflatten function (in case structure changed)
-    new_flat, new_unflatten = ParameterHandling.flatten(params_transformed)
+    # Get new unflatten function
+    new_flat, new_unflatten = ParameterHandling.flatten(params_nested)
     
-    # Update spline hazards if needed
-    natural_tuple = values(params_natural)
+    # Update spline hazards if needed - extract log-scale params properly
     for i in eachindex(model.hazards)
         if isa(model.hazards[i], _SplineHazard)
-            # Convert back to log scale for spline remake
-            log_params = log.(Vector{Float64}(collect(natural_tuple[i])))
+            hazard_params = values(params_nested)[i]
+            log_params = extract_params_vector(hazard_params)
             remake_splines!(model.hazards[i], log_params)
             set_riskperiod!(model.hazards[i])
         end
     end
     
+    # Compute natural scale parameters
+    params_natural_pairs = [
+        hazname => extract_natural_vector(params_nested[hazname])
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    params_natural = NamedTuple(params_natural_pairs)
+    
     # Update parameters
     model.parameters = (
         flat = Vector{Float64}(flat_params),
-        transformed = params_transformed,
+        nested = params_nested,
         natural = params_natural,
         unflatten = new_unflatten
     )
     
     return nothing
-end
-
-"""
-    unflatten_to_tuple(parameters::AbstractVector, unflatten_fn)
-
-!!! warning "Deprecated"
-    This function is NOT compatible with ForwardDiff automatic differentiation
-    because ParameterHandling's unflatten captures Float64 type constraints at
-    construction time. Use `nest_params(parameters, model.parameters)` instead.
-
-Convert flat parameter vector to indexable Tuple for integer indexing.
-Returns a Tuple where `result[hazard_index]` gives parameters for that hazard.
-
-# Arguments
-- `parameters::AbstractVector`: Flat parameter vector (from optimizer or parameters.flat)
-- `unflatten_fn`: The unflatten function from ParameterHandling.flatten()
-
-# Returns
-- `Tuple`: Parameters indexed by hazard number (1-based), compatible with pars[hazard_idx]
-
-# AD Compatibility Warning
-This function does NOT work with ForwardDiff.Dual numbers. ParameterHandling's
-unflatten function captures type constraints (Float64) at construction, causing
-MethodError when passed Dual numbers during differentiation.
-
-For AD-compatible code, use `nest_params` which creates VectorOfVectors views:
-```julia
-# AD-compatible (RECOMMENDED):
-pars = nest_params(parameters, model.parameters)
-
-# NOT AD-compatible (DEPRECATED):
-pars = unflatten_to_tuple(parameters, model.parameters.unflatten)
-```
-
-See also: [`nest_params`](@ref), [`get_log_scale_params`](@ref)
-"""
-function unflatten_to_tuple(parameters::AbstractVector, unflatten_fn)
-    # Unflatten to get NamedTuple of PositiveArray wrappers
-    transformed_nt = unflatten_fn(parameters)
-    # Extract unconstrained (log-scale) values from each PositiveArray
-    # This does NOT preserve ForwardDiff.Dual types - use nest_params instead!
-    unconstrained = map(x -> x.unconstrained_value, values(transformed_nt))
-    return unconstrained
 end
 
 #=============================================================================
@@ -456,7 +449,7 @@ This is the representation that optimization algorithms expect - a single
 flat Vector{Float64} with all parameters concatenated.
 
 # Returns
-- `Vector{Float64}`: Flat parameter vector (transformed/log scale)
+- `Vector{Float64}`: Flat parameter vector (log scale for baseline, as-is for covariates)
 
 # Example
 ```julia
@@ -469,7 +462,7 @@ end
 ```
 
 # See also
-- [`get_parameters_transformed`](@ref) - Get parameters with transformations as NamedTuple
+- [`get_parameters_nested`](@ref) - Get parameters as nested NamedTuple
 - [`get_parameters_natural`](@ref) - Get parameters on natural scale as NamedTuple
 - [`get_unflatten_fn`](@ref) - Get function to unflatten parameters
 """
@@ -478,31 +471,33 @@ function get_parameters_flat(model::MultistateProcess)
 end
 
 """
-    get_parameters_transformed(model::MultistateProcess)
+    get_parameters_nested(model::MultistateProcess)
 
-Get model parameters in transformed (log) scale as a NamedTuple.
+Get model parameters as a nested NamedTuple.
 
-Parameters are organized by hazard name with log transformations applied
-for positive constraints (baseline, shape, scale). Covariate coefficients
-remain on natural scale.
+Parameters are organized by hazard name. Baseline parameters are on log scale
+(as used by hazard functions), covariate coefficients are on natural scale.
 
 # Returns
-- `NamedTuple`: Parameters by hazard name with transformations
+- `NamedTuple`: Parameters by hazard name with structure `(baseline = [...], covariates = [...])`
 
 # Example
 ```julia
-params_trans = get_parameters_transformed(model)
+params_nested = get_parameters_nested(model)
 # Access specific hazard
-h12_trans = params_trans.h12  # e.g., positive([log(2.0)])
+h12_params = params_nested.h12  # (baseline = [log(2.0)], covariates = [0.5])
 ```
 
 # See also
 - [`get_parameters_flat`](@ref) - Get parameters as flat vector for optimization
 - [`get_parameters_natural`](@ref) - Get parameters on natural scale
 """
-function get_parameters_transformed(model::MultistateProcess)
-    return model.parameters.transformed
+function get_parameters_nested(model::MultistateProcess)
+    return model.parameters.nested
 end
+
+# Alias for backward compatibility
+const get_parameters_transformed = get_parameters_nested
 
 """
     get_parameters_natural(model::MultistateProcess)
@@ -525,7 +520,7 @@ h12_baseline = params_nat.h12[1]  # e.g., 2.0 (not log(2.0))
 
 # See also
 - [`get_parameters_flat`](@ref) - Get parameters as flat vector
-- [`get_parameters_transformed`](@ref) - Get parameters with transformations
+- [`get_parameters_nested`](@ref) - Get nested parameters
 """
 function get_parameters_natural(model::MultistateProcess)
     return model.parameters.natural
@@ -546,13 +541,12 @@ vector back to the structured NamedTuple representation.
 ```julia
 unflatten = get_unflatten_fn(model)
 flat_params = get_parameters_flat(model)
-params_transformed = unflatten(flat_params)
-params_natural = ParameterHandling.value(params_transformed)
+params_nested = unflatten(flat_params)
 ```
 
 # See also
 - [`get_parameters_flat`](@ref) - Get flat parameter vector
-- [`get_parameters_transformed`](@ref) - Get transformed parameters
+- [`get_parameters_nested`](@ref) - Get nested parameters
 """
 function get_unflatten_fn(model::MultistateProcess)
     return model.parameters.unflatten
@@ -566,26 +560,26 @@ Get parameters for a specific hazard by index.
 # Arguments
 - `model::MultistateProcess`: The model
 - `h::Int64`: Hazard index (1-based)
-- `scale::Symbol`: One of `:natural`, `:transformed`, or `:log` (default: `:natural`)
+- `scale::Symbol`: One of `:natural`, `:nested`, or `:log` (default: `:natural`)
 
 # Returns
-- `Vector{Float64}`: Parameters for the specified hazard
+- `Vector{Float64}` or `NamedTuple`: Parameters for the specified hazard
 
 # Scales
 - `:natural` - Natural scale (baseline/shape/scale are positive values)
-- `:transformed` - Transformed scale (from ParameterHandling, includes wrapper)
-- `:log` - Log scale (from model.parameters VectorOfVectors, backward compat)
+- `:nested` - Nested NamedTuple with (baseline = [...], covariates = [...])
+- `:log` - Log scale (baseline on log scale, covariates on natural scale)
 
 # Examples
 ```julia
 # Get natural scale parameters for hazard 1
 params_nat = get_parameters(model, 1)  # Returns [2.0, 1.5, ...]
 
-# Get log scale parameters (legacy representation)
+# Get log scale parameters
 params_log = get_parameters(model, 1, scale=:log)  # Returns [log(2.0), log(1.5), ...]
 
-# Get transformed parameters (with ParameterHandling wrapper)
-params_trans = get_parameters(model, 1, scale=:transformed)
+# Get nested parameters
+params_nested = get_parameters(model, 1, scale=:nested)
 ```
 
 # See also
@@ -607,7 +601,7 @@ function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natur
         block_sizes = [length(v) for v in natural_vals]
         offset = sum(block_sizes[1:h-1])
         return model.parameters.flat[(offset+1):(offset+block_sizes[h])]
-    elseif scale == :natural || scale == :transformed
+    elseif scale == :natural || scale == :nested || scale == :transformed
         # Find hazard name from index
         hazname = nothing
         for (name, idx) in model.hazkeys
@@ -623,11 +617,11 @@ function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natur
         # Return appropriate representation
         if scale == :natural
             return model.parameters.natural[hazname]
-        else  # :transformed
-            return model.parameters.transformed[hazname]
+        else  # :nested or :transformed (backward compat)
+            return model.parameters.nested[hazname]
         end
     else
-        throw(ArgumentError("scale must be :natural, :transformed, or :log (got :$scale)"))
+        throw(ArgumentError("scale must be :natural, :nested, or :log (got :$scale)"))
     end
 end
 

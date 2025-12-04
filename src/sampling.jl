@@ -14,7 +14,7 @@ function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, max_sam
     use_phasetype = !isnothing(phasetype_surrogate)
 
     # make sure spline parameters are assigned correctly
-    # nest the model parameters using VectorOfVectors (AD-compatible)
+    # nest the model parameters using nest_params (AD-compatible)
     pars = nest_params(params_cur, model.parameters)
 
     # update spline hazards with current parameters (no-op for functional splines)
@@ -155,6 +155,15 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
                     copyto!(ImportanceWeights[i], psiw.weights)
                     ess_cur[i] = psiw.ess[1]
                     psis_pareto_k[i] = psiw.pareto_k[1]
+                    
+                    # Handle NaN ESS from PSIS (can happen with high Pareto-k)
+                    # Fall back to simple ESS calculation
+                    if isnan(ess_cur[i]) || isinf(ess_cur[i])
+                        # exponentiate and normalize the unnormalized log weights
+                        copyto!(ImportanceWeights[i], normalize(exp.(_logImportanceWeights[i] .- maximum(_logImportanceWeights[i])), 1))
+                        ess_cur[i] = 1 / sum(ImportanceWeights[i] .^ 2)
+                        # Keep the high pareto_k to indicate unreliable weights
+                    end
     
                 catch err
                     # exponentiate and normalize the unnormalized log weights
@@ -832,282 +841,6 @@ function BackwardSampling(m, p)
 
     return h
 
-end
-
-
-# =============================================================================
-# Viterbi MAP functions for MCEM warm start initialization
-# =============================================================================
-#
-# These functions compute the marginal posterior mode (Viterbi MAP) at each
-# observation time, selecting the most probable state given all observed data.
-# This is used to initialize MCEM with a single high-quality path per subject
-# that is close to the mode of the posterior distribution.
-#
-# Key distinction from Viterbi sequence:
-# - Viterbi sequence: joint mode argmax P(h_1:T | y_1:T)
-# - Viterbi MAP: marginal mode [argmax P(h_1 | y_1:T), ..., argmax P(h_T | y_1:T)]
-#
-# The marginal mode is computed using the forward-backward algorithm:
-# P(h_t | y_1:T) ∝ α_t(h_t) * β_t(h_t)
-# where α_t are forward probabilities and β_t are backward probabilities.
-#
-# The marginal mode provides a good initialization point for MCEM.
-# =============================================================================
-
-"""
-    BackwardMAP!(subj_dat, subj_fbmats)
-
-Compute the Viterbi MAP (marginal posterior mode) path for a subject.
-
-Instead of sampling from the posterior distribution of hidden states, this function
-takes the argmax of the marginal posterior at each observation time. This provides
-a deterministic path that lies near the mode of the posterior distribution.
-
-The marginal posterior is computed from the forward-backward matrices:
-```math
-P(h_t = s | y_{1:T}) \\propto \\sum_{s'} \\text{fbmats}[t, s, s']
-```
-
-where fbmats contains the filtered probabilities from forward-backward recursion.
-
-# Arguments
-- `subj_dat`: Subject data (modified in-place)
-- `subj_fbmats`: Forward-backward matrices from `ForwardFiltering!`
-
-# Notes
-This function modifies `subj_dat.statefrom` and `subj_dat.stateto` in-place,
-setting them to the argmax of the marginal posterior at each time point.
-
-See also: [`BackwardSampling!`](@ref), [`viterbi_map_path`](@ref)
-"""
-function BackwardMAP!(subj_dat, subj_fbmats)
-
-    # initialize
-    n_times  = size(subj_fbmats, 1)
-    n_states = size(subj_fbmats, 2)
-
-    # marginal probability at final time: sum over the "from" state
-    p_final = vec(sum(subj_fbmats[n_times,:,:], dims=1))
-    
-    # take argmax instead of sampling
-    subj_dat.stateto[end] = argmax(p_final)
-
-    # recurse backward, taking argmax at each step
-    if n_times > 1
-        for t in (n_times - 1):-1:1
-            # marginal posterior for state at time t given state at t+1
-            p_t = subj_fbmats[t+1, :, subj_dat.stateto[t + 1]]
-            subj_dat.stateto[t] = argmax(p_t)
-        end
-        subj_dat.statefrom[Not(1)] .= subj_dat.stateto[Not(end)]
-    end
-end
-
-"""
-    viterbi_map_path(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map, fbmats, absorbingstates)
-
-Compute the Viterbi MAP (marginal posterior mode) path for a subject.
-
-This function is analogous to `draw_samplepath` but instead of sampling from the
-posterior distribution, it returns the deterministic path obtained by taking
-the argmax of the marginal posterior at each observation time.
-
-# Arguments
-- `subj::Int64`: Subject index
-- `model::MultistateProcess`: Multistate model
-- `tpm_book`: Pre-computed transition probability matrices
-- `hazmat_book`: Pre-computed hazard matrices
-- `tpm_map`: Mapping to TPM book indices
-- `fbmats`: Forward-backward matrices container
-- `absorbingstates`: Indices of absorbing states
-
-# Returns
-- `SamplePath`: The MAP path for this subject
-
-# Usage in MCEM
-
-This function is used for MCEM warm start initialization. By starting with
-a single high-quality path per subject (the marginal MAP), the first M-step
-can take a large step toward the mode, accelerating convergence.
-
-See also: [`draw_samplepath`](@ref), [`BackwardMAP!`](@ref)
-"""
-function viterbi_map_path(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map, fbmats, absorbingstates)
-
-    # subject data
-    subj_inds = model.subjectindices[subj]
-    subj_dat = view(model.data, subj_inds, :)
-    subj_tpm_map = view(tpm_map, subj_inds, :)
-
-    # for observations with censoring, compute forward probabilities and backward MAP
-    if any(subj_dat.obstype .∉ Ref([1,2]))
-        # compute forward matrices
-        subj_emat = view(model.emat, subj_inds, :)
-        ForwardFiltering!(fbmats[subj], subj_dat, tpm_book, subj_tpm_map, subj_emat)
-        
-        # take MAP instead of sampling
-        BackwardMAP!(subj_dat, fbmats[subj])
-    end
-
-    # initialize sample path
-    times  = [subj_dat.tstart[1]]; sizehint!(times, size(model.tmat, 2) * 2)
-    states = [subj_dat.statefrom[1]]; sizehint!(states, size(model.tmat, 2) * 2)
-
-    # loop through data and construct path
-    # For exact observations, use the observed states
-    # For panel/censored observations, use the MAP states from backward pass
-    for i in eachindex(subj_inds)
-        if subj_dat.obstype[i] == 1 
-            # exact observation - use observed states
-            push!(times, subj_dat.tstop[i])
-            push!(states, subj_dat.stateto[i])
-        else
-            # panel observation - for MAP path, we don't sample intermediate states
-            # just use the MAP endpoints. Use draw_map_ecctmc for deterministic interior.
-            map_path = draw_map_ecctmc(
-                tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]], 
-                hazmat_book[subj_tpm_map[i,1]], 
-                subj_dat.statefrom[i], 
-                subj_dat.stateto[i], 
-                subj_dat.tstart[i], 
-                subj_dat.tstop[i]
-            )
-            # append intermediate times and states (excluding start which is already in path)
-            if length(map_path.times) > 1
-                append!(times, map_path.times[2:end])
-                append!(states, map_path.states[2:end])
-            end
-        end
-    end
-
-    # append last state and time if not exact observation
-    if subj_dat.obstype[end] != 1
-        push!(times, subj_dat.tstop[end])
-        push!(states, subj_dat.stateto[end])
-    end
-
-    # truncate at entry to absorbing states
-    truncind = findfirst(states .∈ Ref(absorbingstates))
-    if !isnothing(truncind)
-        times = first(times, truncind)
-        states = first(states, truncind)
-    end
-
-    # return path
-    return reduce_jumpchain(SamplePath(subj, times, states))
-end
-
-"""
-    draw_map_ecctmc(P, Q, a, b, t0, t1)
-
-Compute the MAP (most probable) path for an endpoint-conditioned CTMC.
-
-This is a deterministic analog of `sample_ecctmc` that returns the most probable
-interior path rather than sampling from the distribution of paths.
-
-For a single direct transition from state `a` to state `b`, the conditional density 
-of the transition time `t` given the endpoints is:
-
-```math
-f(t | X(t_0)=a, X(t_1)=b) \\propto q_{ab} \\cdot S_a(t-t_0) \\cdot P_{bb}(t_1-t)
-```
-
-where `S_a(τ) = exp(-q_a τ)` is survival in state `a`, `q_a = -Q[a,a]` is the total 
-exit rate from state `a`, and `P_{bb}(τ)` is the probability of being in state `b` 
-after time `τ` starting from `b`.
-
-The MAP transition time is found by maximizing this density using Brent's method.
-
-# Arguments
-- `P`: Transition probability matrix over the interval [t0, t1]
-- `Q`: Transition intensity matrix
-- `a`: Initial state
-- `b`: Final state
-- `t0`: Start time
-- `t1`: End time
-
-# Returns
-- `NamedTuple{(:times, :states)}`: Times and states of the MAP path
-
-# References
-- Morsomme et al. (2025) Biostatistics, kxaf038
-
-See also: [`sample_ecctmc`](@ref), [`viterbi_map_path`](@ref)
-"""
-function draw_map_ecctmc(P, Q, a, b, t0, t1)
-    if a == b
-        # No transition needed - stay in state a for entire interval
-        return (times = [t0], states = [a])
-    end
-    
-    # For a single direct transition a → b, find the MAP transition time
-    # The conditional density is: f(t) ∝ q_ab * exp(-q_a * (t-t0)) * P_bb(t1-t)
-    # where q_a = -Q[a,a], q_ab = Q[a,b]
-    
-    T = t1 - t0
-    q_a = -Q[a, a]      # Total exit rate from state a
-    q_ab = Q[a, b]      # Rate of transition a → b
-    
-    # Handle edge cases
-    if T ≤ 0 || q_ab ≤ 0
-        # Degenerate case: return midpoint
-        return (times = [t0, (t0 + t1) / 2], states = [a, b])
-    end
-    
-    # Compute P_bb(τ) = exp(Q * τ)[b,b] for remaining time τ after transition
-    # For efficiency, we use the matrix exponential cache structure
-    # The objective to maximize is: log(q_ab) - q_a*(t-t0) + log(P_bb(t1-t))
-    # We minimize the negative of this
-    
-    # For small state spaces, compute matrix exponential at each evaluation
-    nstates = size(Q, 1)
-    
-    # Objective function (negative log density, for minimization)
-    function neg_log_density(t_rel)
-        # t_rel is time since t0
-        if t_rel ≤ 0 || t_rel ≥ T
-            return Inf
-        end
-        
-        τ_remaining = T - t_rel
-        
-        # Survival in state a: exp(-q_a * t_rel)
-        log_surv_a = -q_a * t_rel
-        
-        # P_bb(τ_remaining) via matrix exponential
-        if τ_remaining > 0
-            P_remaining = exp(Q * τ_remaining)
-            p_bb = P_remaining[b, b]
-            if p_bb ≤ 0
-                return Inf
-            end
-            log_p_bb = log(p_bb)
-        else
-            log_p_bb = 0.0  # P_bb(0) = 1
-        end
-        
-        # Negative log density (for minimization)
-        return -(log(q_ab) + log_surv_a + log_p_bb)
-    end
-    
-    # Find MAP time using Brent's method on the interior of [0, T]
-    # Use small epsilon to stay in interior
-    ε = min(T * 1e-6, 1e-10)
-    
-    try
-        result = Optim.optimize(neg_log_density, ε, T - ε, Optim.Brent())
-        t_map_rel = Optim.minimizer(result)
-        t_map = t0 + t_map_rel
-        
-        # Ensure t_map is strictly between t0 and t1
-        t_map = clamp(t_map, t0 + ε, t1 - ε)
-        
-        return (times = [t0, t_map], states = [a, b])
-    catch
-        # Fallback to midpoint if optimization fails
-        return (times = [t0, (t0 + t1) / 2], states = [a, b])
-    end
 end
 
 

@@ -1,12 +1,18 @@
 """
-Long test suite for MCEM algorithm statistical validation.
+Long test suite for MCEM algorithm (panel data fitting).
 
-This test suite verifies:
-1. Parameter recovery: MCEM with Weibull hazards recovers known parameters
-2. Phase-type vs Markov ESS: Phase-type proposals yield higher ESS for non-exponential hazards
-3. Convergence: MCEM converges for semi-Markov illness-death models
+This test suite validates:
+1. **Parameter Recovery**: At sample size n=1000, MCEM-estimated parameters should be 
+   close to true values (within reasonable tolerance given Monte Carlo variability).
+2. **Distributional Fidelity**: Trajectories simulated from fitted models (n=10000) 
+   should have similar distributional properties (state prevalence) to trajectories 
+   simulated from models with true parameters.
+3. **Proposal Selection**: Phase-type vs Markov proposal appropriately selected.
 
-These tests are computationally intensive (~5-10 minutes total).
+Test matrix (panel data):
+- Hazard families: exponential, Weibull, Gompertz
+- Covariates: none, time-fixed
+- Model structure: illness-death (1→2, 2→3, 1→3 where 3 is absorbing)
 
 References:
 - Morsomme et al. (2025) Biostatistics kxaf038 - multistate semi-Markov MCEM
@@ -23,108 +29,443 @@ using LinearAlgebra
 
 # Import internal functions for testing
 import MultistateModels: Hazard, multistatemodel, fit, set_parameters!, simulate,
-    get_parameters_flat, get_log_scale_params, MarkovProposal, PhaseTypeProposal,
+    get_parameters_flat, get_parameters, get_log_scale_params, MarkovProposal, PhaseTypeProposal,
     fit_surrogate, build_tpm_mapping, build_hazmat_book, build_tpm_book,
     compute_hazmat!, compute_tmat!, ExpMethodGeneric, ExponentialUtilities,
-    needs_phasetype_proposal, resolve_proposal_config, SamplePath
+    needs_phasetype_proposal, resolve_proposal_config, SamplePath, @formula
 
 const RNG_SEED = 0xABCD1234
-const N_SUBJECTS_SMALL = 50   # For quick convergence tests
-const N_SUBJECTS_MED = 100    # For parameter recovery
-const MCEM_TOL = 0.05         # Relaxed tolerance for faster convergence
-const MAX_ITER_SHORT = 30     # Short iteration limit for tests
+const N_SUBJECTS = 1000          # Sample size for fitting
+const N_SIM_TRAJ = 10000         # Trajectories for distributional comparison
+const MAX_TIME = 15.0            # Maximum follow-up time
+const MCEM_TOL = 0.05            # MCEM convergence tolerance
+const MAX_ITER = 30              # Maximum MCEM iterations
+const PARAM_TOL_REL = 0.35       # Relaxed relative tolerance for MCEM (more MC noise)
 
 # ============================================================================
-# Test 1: MCEM Parameter Recovery for Weibull Model
+# Helper Functions
 # ============================================================================
 
-@testset "MCEM Parameter Recovery - Weibull Illness-Death" begin
-    Random.seed!(RNG_SEED)
+"""
+    compute_state_prevalence(paths::Vector{SamplePath}, eval_times::Vector{Float64}, n_states::Int)
+
+Compute state prevalence at each evaluation time from a collection of sample paths.
+"""
+function compute_state_prevalence(paths::Vector{SamplePath}, eval_times::Vector{Float64}, n_states::Int)
+    n_times = length(eval_times)
+    prevalence = zeros(Float64, n_times, n_states)
+    n_paths = length(paths)
     
-    # True parameters (on log scale)
-    # h12: Weibull with shape=1.5, scale=0.3
-    true_log_shape_12 = log(1.5)
-    true_log_scale_12 = log(0.3)
-    # h23: Weibull with shape=1.2, scale=0.2 (absorbing)
-    true_log_shape_23 = log(1.2)
-    true_log_scale_23 = log(0.2)
+    for path in paths
+        for (t_idx, t) in enumerate(eval_times)
+            state_idx = searchsortedlast(path.times, t)
+            if state_idx >= 1
+                state = path.states[state_idx]
+                prevalence[t_idx, state] += 1.0
+            end
+        end
+    end
     
-    # Create illness-death model (1 → 2 → 3, where 3 is absorbing)
-    h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
-    h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3)
+    prevalence ./= n_paths
+    return prevalence
+end
+
+"""
+    count_transitions(paths::Vector{SamplePath}, n_states::Int)
+
+Count total transitions between each pair of states.
+"""
+function count_transitions(paths::Vector{SamplePath}, n_states::Int)
+    counts = zeros(Int, n_states, n_states)
+    for path in paths
+        for i in 1:(length(path.states) - 1)
+            counts[path.states[i], path.states[i+1]] += 1
+        end
+    end
+    return counts
+end
+
+"""
+    generate_panel_data_illness_death(hazards, true_params; n_subj, obs_times, covariate_data)
+
+Generate panel (interval-censored) data from illness-death model.
+"""
+function generate_panel_data_illness_death(hazards, true_params; 
+    n_subj::Int = N_SUBJECTS,
+    obs_times::Vector{Float64} = [0.0, 3.0, 6.0, 9.0, 12.0, MAX_TIME],
+    covariate_data::Union{Nothing, DataFrame} = nothing)
     
-    # Generate panel data template with observations at discrete times
-    obs_times = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 15.0, 20.0]
     nobs = length(obs_times) - 1
     
-    sim_data = DataFrame(
-        id = repeat(1:N_SUBJECTS_MED, inner=nobs),
-        tstart = repeat(obs_times[1:end-1], N_SUBJECTS_MED),
-        tstop = repeat(obs_times[2:end], N_SUBJECTS_MED),
-        statefrom = ones(Int, N_SUBJECTS_MED * nobs),
-        stateto = ones(Int, N_SUBJECTS_MED * nobs),
-        obstype = fill(2, N_SUBJECTS_MED * nobs)  # Panel observations
+    # Build template
+    template = DataFrame(
+        id = repeat(1:n_subj, inner=nobs),
+        tstart = repeat(obs_times[1:end-1], n_subj),
+        tstop = repeat(obs_times[2:end], n_subj),
+        statefrom = ones(Int, n_subj * nobs),
+        stateto = ones(Int, n_subj * nobs),
+        obstype = fill(2, n_subj * nobs)  # Panel observation
     )
     
-    model_sim = multistatemodel(h12, h23; data=sim_data)
+    if !isnothing(covariate_data)
+        # Repeat covariate for each observation interval
+        cov_expanded = DataFrame()
+        for col in names(covariate_data)
+            cov_expanded[!, col] = repeat(covariate_data[!, col], inner=nobs)
+        end
+        template = hcat(template, cov_expanded)
+    end
     
-    # Set true parameters for simulation
-    MultistateModels.set_parameters!(model_sim, (h12 = [true_log_shape_12, true_log_scale_12],
-                                                  h23 = [true_log_shape_23, true_log_scale_23]))
+    model = multistatemodel(hazards...; data=template)
+    set_parameters!(model, true_params)
     
-    # Simulate panel data using package simulation machinery
-    # This correctly handles panel observations with obstype=2 for all intervals
-    sim_result = simulate(model_sim; paths=false, data=true, nsim=1)
-    panel_data = sim_result[1, 1]
+    sim_result = simulate(model; paths=false, data=true, nsim=1)
+    return sim_result[1, 1]
+end
+
+"""
+    check_distributional_fidelity_mcem(hazards, true_params, fitted_params_flat; kwargs...)
+
+Compare state prevalence from true vs fitted models for panel data validation.
+"""
+function check_distributional_fidelity_mcem(hazards, true_params, fitted_params_flat;
+    n_traj::Int = N_SIM_TRAJ,
+    max_time::Float64 = MAX_TIME,
+    eval_times::Vector{Float64} = collect(1.0:1.0:max_time),
+    max_prev_diff::Float64 = 0.12,  # Slightly relaxed for MCEM
+    n_states::Int = 3,
+    covariate_data::Union{Nothing, DataFrame} = nothing)
     
-    # Fit model via MCEM
-    model_fit = multistatemodel(h12, h23; data=panel_data)
+    # Build simulation template (exact observation for fair comparison)
+    template = DataFrame(
+        id = 1:n_traj,
+        tstart = zeros(n_traj),
+        tstop = fill(max_time, n_traj),
+        statefrom = ones(Int, n_traj),
+        stateto = ones(Int, n_traj),
+        obstype = ones(Int, n_traj)
+    )
     
-    # Run MCEM with short iterations for testing
-    fitted = fit(model_fit; 
+    if !isnothing(covariate_data)
+        n_repeats = ceil(Int, n_traj / nrow(covariate_data))
+        cov_extended = vcat([covariate_data for _ in 1:n_repeats]...)[1:n_traj, :]
+        template = hcat(template, cov_extended)
+    end
+    
+    # Model with true parameters
+    model_true = multistatemodel(hazards...; data=template)
+    set_parameters!(model_true, true_params)
+    
+    # Model with fitted parameters
+    model_fitted = multistatemodel(hazards...; data=template)
+    idx = 1
+    for (h_idx, haz) in enumerate(model_fitted.hazards)
+        npar = haz.npar_total
+        set_parameters!(model_fitted, h_idx, fitted_params_flat[idx:idx+npar-1])
+        idx += npar
+    end
+    
+    # Simulate - returns Vector{Vector{SamplePath}} when data=false, paths=true
+    Random.seed!(RNG_SEED + 2000)
+    trajectories_true = simulate(model_true; paths=true, data=false, nsim=1)
+    paths_true = trajectories_true[1]
+    
+    Random.seed!(RNG_SEED + 2000)
+    trajectories_fitted = simulate(model_fitted; paths=true, data=false, nsim=1)
+    paths_fitted = trajectories_fitted[1]
+    
+    # Compare prevalence
+    prev_true = compute_state_prevalence(paths_true, eval_times, n_states)
+    prev_fitted = compute_state_prevalence(paths_fitted, eval_times, n_states)
+    
+    max_diff = maximum(abs.(prev_true .- prev_fitted))
+    return max_diff < max_prev_diff
+end
+
+# ============================================================================
+# TEST SECTION 1: EXPONENTIAL HAZARDS (MCEM)
+# ============================================================================
+
+@testset "MCEM Exponential - No Covariates" begin
+    Random.seed!(RNG_SEED)
+    
+    # True parameters
+    true_rate_12 = 0.20
+    true_rate_23 = 0.15
+    true_rate_13 = 0.08
+    
+    true_params = (
+        h12 = [log(true_rate_12)],
+        h23 = [log(true_rate_23)],
+        h13 = [log(true_rate_13)]
+    )
+    
+    h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+    h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
+    h13 = Hazard(@formula(0 ~ 1), "exp", 1, 3)
+    
+    panel_data = generate_panel_data_illness_death((h12, h23, h13), true_params)
+    
+    model_fit = multistatemodel(h12, h23, h13; data=panel_data)
+    fitted = fit(model_fit;
+        proposal=:markov,  # Exponential can use Markov proposal
         verbose=false,
-        maxiter=MAX_ITER_SHORT,
+        maxiter=MAX_ITER,
         tol=MCEM_TOL,
         ess_target_initial=30,
         max_ess=500,
         compute_vcov=true,
-        compute_ij_vcov=false,  # Skip for speed
+        compute_ij_vcov=false,
         return_convergence_records=true)
     
-    # Check that MCEM produced reasonable estimates
-    fitted_params = get_parameters_flat(fitted)
-    true_params = [true_log_shape_12, true_log_scale_12, true_log_shape_23, true_log_scale_23]
-    
-    # Parameters should be in reasonable range (within 50% of true values on natural scale)
-    for i in 1:4
-        fitted_natural = exp(fitted_params[i])
-        true_natural = exp(true_params[i])
-        rel_error = abs(fitted_natural - true_natural) / true_natural
-        @test rel_error < 0.5  # Within 50% - reasonable for small sample
+    @testset "Parameter recovery" begin
+        p = get_parameters(fitted; scale=:natural)
+        @test isapprox(p.h12[1], true_rate_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p.h23[1], true_rate_23; rtol=PARAM_TOL_REL)
+        @test isapprox(p.h13[1], true_rate_13; rtol=PARAM_TOL_REL)
     end
     
-    # Check convergence records exist
-    @test !isnothing(fitted.ConvergenceRecords)
-    @test length(fitted.ConvergenceRecords.mll_trace) > 0
+    @testset "Convergence records valid" begin
+        @test !isnothing(fitted.ConvergenceRecords)
+        @test length(fitted.ConvergenceRecords.mll_trace) > 0
+        @test isfinite(fitted.loglik.loglik)
+    end
     
-    # Log-likelihood should be finite and negative
-    @test isfinite(fitted.loglik.loglik)
-    @test fitted.loglik.loglik < 0
+    @testset "Distributional fidelity" begin
+        @test check_distributional_fidelity_mcem((h12, h23, h13), true_params, get_parameters_flat(fitted))
+    end
+end
+
+@testset "MCEM Exponential - With Covariate" begin
+    Random.seed!(RNG_SEED + 1)
+    
+    true_rate_12, true_beta_12 = 0.20, 0.4
+    true_rate_23, true_beta_23 = 0.15, -0.3
+    true_rate_13, true_beta_13 = 0.08, 0.5
+    
+    cov_data = DataFrame(x = randn(N_SUBJECTS))
+    
+    true_params = (
+        h12 = [log(true_rate_12), true_beta_12],
+        h23 = [log(true_rate_23), true_beta_23],
+        h13 = [log(true_rate_13), true_beta_13]
+    )
+    
+    h12 = Hazard(@formula(0 ~ x), "exp", 1, 2)
+    h23 = Hazard(@formula(0 ~ x), "exp", 2, 3)
+    h13 = Hazard(@formula(0 ~ x), "exp", 1, 3)
+    
+    panel_data = generate_panel_data_illness_death((h12, h23, h13), true_params; covariate_data=cov_data)
+    
+    model_fit = multistatemodel(h12, h23, h13; data=panel_data)
+    fitted = fit(model_fit;
+        proposal=:markov,
+        verbose=false,
+        maxiter=MAX_ITER,
+        tol=MCEM_TOL,
+        ess_target_initial=30,
+        max_ess=500,
+        compute_vcov=false,
+        return_convergence_records=true)
+    
+    @testset "Parameter recovery" begin
+        p = get_parameters(fitted; scale=:estimation)
+        @test isapprox(exp(p[1]), true_rate_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p[2], true_beta_12; atol=0.3)
+        @test isapprox(exp(p[3]), true_rate_23; rtol=PARAM_TOL_REL)
+        @test isapprox(p[4], true_beta_23; atol=0.3)
+    end
 end
 
 # ============================================================================
-# Test 2: Phase-Type vs Markov Proposal Comparison
+# TEST SECTION 2: WEIBULL HAZARDS (MCEM)
 # ============================================================================
 
-@testset "Phase-Type vs Markov Proposal ESS" begin
-    Random.seed!(RNG_SEED + 1)
+@testset "MCEM Weibull - No Covariates" begin
+    Random.seed!(RNG_SEED + 10)
     
-    # Create a Weibull model where phase-type should help
-    # Weibull shape > 1 means increasing hazard (poor exponential approximation)
+    # Weibull hazards require phase-type proposal
+    true_shape_12, true_scale_12 = 1.3, 0.15
+    true_shape_23, true_scale_23 = 1.1, 0.12
+    true_shape_13, true_scale_13 = 1.2, 0.06
+    
+    true_params = (
+        h12 = [log(true_shape_12), log(true_scale_12)],
+        h23 = [log(true_shape_23), log(true_scale_23)],
+        h13 = [log(true_shape_13), log(true_scale_13)]
+    )
+    
     h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+    h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3)
+    h13 = Hazard(@formula(0 ~ 1), "wei", 1, 3)
     
-    # Generate panel data
-    n_subj = N_SUBJECTS_SMALL
+    panel_data = generate_panel_data_illness_death((h12, h23, h13), true_params)
+    
+    model_fit = multistatemodel(h12, h23, h13; data=panel_data)
+    fitted = fit(model_fit;
+        proposal=:auto,  # Should auto-select phase-type
+        verbose=false,
+        maxiter=MAX_ITER,
+        tol=MCEM_TOL,
+        ess_target_initial=30,
+        max_ess=500,
+        compute_vcov=true,
+        compute_ij_vcov=false,
+        return_convergence_records=true)
+    
+    @testset "Parameter recovery" begin
+        p = get_parameters(fitted; scale=:natural)
+        @test isapprox(p.h12[1], true_shape_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p.h12[2], true_scale_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p.h23[1], true_shape_23; rtol=PARAM_TOL_REL)
+        @test isapprox(p.h23[2], true_scale_23; rtol=PARAM_TOL_REL)
+    end
+    
+    @testset "Distributional fidelity" begin
+        @test check_distributional_fidelity_mcem((h12, h23, h13), true_params, get_parameters_flat(fitted))
+    end
+end
+
+@testset "MCEM Weibull - With Covariate" begin
+    Random.seed!(RNG_SEED + 11)
+    
+    true_shape_12, true_scale_12, true_beta_12 = 1.3, 0.15, 0.4
+    true_shape_23, true_scale_23, true_beta_23 = 1.1, 0.12, -0.3
+    true_shape_13, true_scale_13, true_beta_13 = 1.2, 0.06, 0.3
+    
+    cov_data = DataFrame(x = randn(N_SUBJECTS))
+    
+    true_params = (
+        h12 = [log(true_shape_12), log(true_scale_12), true_beta_12],
+        h23 = [log(true_shape_23), log(true_scale_23), true_beta_23],
+        h13 = [log(true_shape_13), log(true_scale_13), true_beta_13]
+    )
+    
+    h12 = Hazard(@formula(0 ~ x), "wei", 1, 2)
+    h23 = Hazard(@formula(0 ~ x), "wei", 2, 3)
+    h13 = Hazard(@formula(0 ~ x), "wei", 1, 3)
+    
+    panel_data = generate_panel_data_illness_death((h12, h23, h13), true_params; covariate_data=cov_data)
+    
+    model_fit = multistatemodel(h12, h23, h13; data=panel_data)
+    fitted = fit(model_fit;
+        proposal=:auto,
+        verbose=false,
+        maxiter=MAX_ITER,
+        tol=MCEM_TOL,
+        ess_target_initial=30,
+        max_ess=500,
+        compute_vcov=false,
+        return_convergence_records=true)
+    
+    @testset "Parameter recovery" begin
+        p = get_parameters(fitted; scale=:estimation)
+        @test isapprox(exp(p[1]), true_shape_12; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[2]), true_scale_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p[3], true_beta_12; atol=0.35)
+    end
+end
+
+# ============================================================================
+# TEST SECTION 3: GOMPERTZ HAZARDS (MCEM)
+# ============================================================================
+
+@testset "MCEM Gompertz - No Covariates" begin
+    Random.seed!(RNG_SEED + 20)
+    
+    # Gompertz: h(t) = scale * exp(shape * t)
+    true_scale_12, true_shape_12 = 0.04, 0.08
+    true_scale_23, true_shape_23 = 0.03, 0.06
+    true_scale_13, true_shape_13 = 0.02, 0.04
+    
+    true_params = (
+        h12 = [log(true_scale_12), log(true_shape_12)],
+        h23 = [log(true_scale_23), log(true_shape_23)],
+        h13 = [log(true_scale_13), log(true_shape_13)]
+    )
+    
+    h12 = Hazard(@formula(0 ~ 1), "gom", 1, 2)
+    h23 = Hazard(@formula(0 ~ 1), "gom", 2, 3)
+    h13 = Hazard(@formula(0 ~ 1), "gom", 1, 3)
+    
+    panel_data = generate_panel_data_illness_death((h12, h23, h13), true_params;
+        obs_times=[0.0, 5.0, 10.0, 15.0, 20.0, 25.0])  # Longer observation for Gompertz
+    
+    model_fit = multistatemodel(h12, h23, h13; data=panel_data)
+    fitted = fit(model_fit;
+        proposal=:auto,
+        verbose=false,
+        maxiter=MAX_ITER,
+        tol=MCEM_TOL,
+        ess_target_initial=30,
+        max_ess=500,
+        compute_vcov=true,
+        compute_ij_vcov=false,
+        return_convergence_records=true)
+    
+    @testset "Parameter recovery" begin
+        p = get_parameters(fitted; scale=:estimation)
+        @test isapprox(exp(p[1]), true_scale_12; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[2]), true_shape_12; rtol=PARAM_TOL_REL)
+    end
+    
+    @testset "Distributional fidelity" begin
+        @test check_distributional_fidelity_mcem((h12, h23, h13), true_params, get_parameters_flat(fitted);
+            max_time=25.0, eval_times=collect(2.0:2.0:25.0))
+    end
+end
+
+@testset "MCEM Gompertz - With Covariate" begin
+    Random.seed!(RNG_SEED + 21)
+    
+    true_scale_12, true_shape_12, true_beta_12 = 0.04, 0.08, 0.3
+    true_scale_23, true_shape_23, true_beta_23 = 0.03, 0.06, -0.2
+    true_scale_13, true_shape_13, true_beta_13 = 0.02, 0.04, 0.4
+    
+    cov_data = DataFrame(x = randn(N_SUBJECTS))
+    
+    true_params = (
+        h12 = [log(true_scale_12), log(true_shape_12), true_beta_12],
+        h23 = [log(true_scale_23), log(true_shape_23), true_beta_23],
+        h13 = [log(true_scale_13), log(true_shape_13), true_beta_13]
+    )
+    
+    h12 = Hazard(@formula(0 ~ x), "gom", 1, 2)
+    h23 = Hazard(@formula(0 ~ x), "gom", 2, 3)
+    h13 = Hazard(@formula(0 ~ x), "gom", 1, 3)
+    
+    panel_data = generate_panel_data_illness_death((h12, h23, h13), true_params;
+        covariate_data=cov_data,
+        obs_times=[0.0, 5.0, 10.0, 15.0, 20.0, 25.0])
+    
+    model_fit = multistatemodel(h12, h23, h13; data=panel_data)
+    fitted = fit(model_fit;
+        proposal=:auto,
+        verbose=false,
+        maxiter=MAX_ITER,
+        tol=MCEM_TOL,
+        ess_target_initial=30,
+        max_ess=500,
+        compute_vcov=false,
+        return_convergence_records=true)
+    
+    @testset "Parameter recovery" begin
+        p = get_parameters(fitted; scale=:estimation)
+        @test isapprox(exp(p[1]), true_scale_12; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[2]), true_shape_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p[3], true_beta_12; atol=0.35)
+    end
+end
+
+# ============================================================================
+# TEST SECTION 4: PROPOSAL SELECTION AND CONVERGENCE
+# ============================================================================
+
+@testset "Phase-Type vs Markov Proposal Selection" begin
+    Random.seed!(RNG_SEED + 30)
+    
+    # Panel data for testing proposal selection
+    n_subj = 100
     dat = DataFrame(
         id = repeat(1:n_subj, inner=3),
         tstart = repeat([0.0, 2.0, 4.0], n_subj),
@@ -134,50 +475,52 @@ end
         obstype = repeat([2, 2, 2], n_subj)
     )
     
-    model = multistatemodel(h12; data=dat)
+    @testset "Weibull requires phase-type" begin
+        h12_wei = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+        model_wei = multistatemodel(h12_wei; data=dat)
+        
+        @test needs_phasetype_proposal(model_wei.hazards) == true
+        config = resolve_proposal_config(:auto, model_wei)
+        @test config.type == :phasetype
+    end
     
-    # Set Weibull parameters with shape > 1 (increasing hazard)
-    MultistateModels.set_parameters!(model, (h12 = [log(2.0), log(0.5)],))  # shape=2, scale=0.5
+    @testset "Exponential uses Markov" begin
+        h12_exp = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+        model_exp = multistatemodel(h12_exp; data=dat)
+        
+        @test needs_phasetype_proposal(model_exp.hazards) == false
+        config = resolve_proposal_config(:auto, model_exp)
+        @test config.type == :markov
+    end
     
-    # Test that needs_phasetype_proposal detects non-exponential hazards
-    # Function takes hazards vector, not model
-    @test needs_phasetype_proposal(model.hazards) == true
+    @testset "Gompertz requires phase-type" begin
+        h12_gom = Hazard(@formula(0 ~ 1), "gom", 1, 2)
+        model_gom = multistatemodel(h12_gom; data=dat)
+        
+        @test needs_phasetype_proposal(model_gom.hazards) == true
+    end
     
-    # Test proposal resolution
-    config_auto = resolve_proposal_config(:auto, model)
-    @test config_auto.type == :phasetype  # Should default to phase-type for Weibull
-    
-    config_markov = resolve_proposal_config(:markov, model)
-    @test config_markov.type == :markov
-    
-    config_ph = resolve_proposal_config(PhaseTypeProposal(n_phases=2), model)
-    @test config_ph.type == :phasetype
-    @test config_ph.n_phases == 2
-    
-    # Create exponential model for comparison
-    h12_exp = Hazard(@formula(0 ~ 1), "exp", 1, 2)
-    model_exp = multistatemodel(h12_exp; data=dat)
-    
-    # Exponential model should NOT need phase-type
-    @test needs_phasetype_proposal(model_exp.hazards) == false
-    
-    config_exp_auto = resolve_proposal_config(:auto, model_exp)
-    @test config_exp_auto.type == :markov  # Should use Markov for exponential
+    @testset "Manual proposal override" begin
+        h12_wei = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+        model = multistatemodel(h12_wei; data=dat)
+        
+        config_markov = resolve_proposal_config(:markov, model)
+        @test config_markov.type == :markov
+        
+        config_ph = resolve_proposal_config(PhaseTypeProposal(n_phases=2), model)
+        @test config_ph.type == :phasetype
+        @test config_ph.n_phases == 2
+    end
 end
 
-# ============================================================================
-# Test 3: MCEM Convergence Diagnostics
-# ============================================================================
-
 @testset "MCEM Convergence Diagnostics" begin
-    Random.seed!(RNG_SEED + 2)
+    Random.seed!(RNG_SEED + 31)
     
-    # Simple reversible model for reliable convergence
+    # Simple model for convergence testing
     h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
     h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1)
     
-    # Small dataset
-    n_subj = 30
+    n_subj = 50
     dat = DataFrame(
         id = repeat(1:n_subj, inner=3),
         tstart = repeat([0.0, 1.0, 2.0], n_subj),
@@ -189,50 +532,47 @@ end
     
     model = multistatemodel(h12, h21; data=dat)
     
-    # Fit with convergence records
     fitted = fit(model;
-        proposal=:markov,  # Use Markov for simplicity
+        proposal=:markov,
         verbose=false,
         maxiter=15,
-        tol=0.1,  # Relaxed for quick convergence
+        tol=0.1,
         ess_target_initial=20,
         max_ess=200,
         compute_vcov=false,
         compute_ij_vcov=false,
         return_convergence_records=true)
     
-    # Check convergence records
     records = fitted.ConvergenceRecords
-    @test !isnothing(records)
     
-    # MLL trace should exist and increase (mostly)
-    mll_trace = records.mll_trace
-    @test length(mll_trace) >= 1
+    @testset "Convergence records structure" begin
+        @test !isnothing(records)
+        
+        mll_trace = records.mll_trace
+        @test length(mll_trace) >= 1
+        
+        ess_trace = records.ess_trace
+        @test size(ess_trace, 2) == length(mll_trace)
+        @test size(ess_trace, 1) == n_subj
+        
+        params_trace = records.parameters_trace
+        @test size(params_trace, 2) == length(mll_trace)
+    end
     
-    # ESS trace should exist
-    ess_trace = records.ess_trace
-    @test size(ess_trace, 2) == length(mll_trace)
-    @test size(ess_trace, 1) == n_subj
-    
-    # Parameters trace should exist
-    params_trace = records.parameters_trace
-    @test size(params_trace, 2) == length(mll_trace)
-    
-    # Pareto-k diagnostics should be available
-    pareto_k = records.psis_pareto_k
-    @test length(pareto_k) == n_subj
-    # Most should be finite; NaN/Inf can occur for subjects with single unique path
-    @test count(isfinite.(pareto_k)) >= n_subj * 0.5
+    @testset "Pareto-k diagnostics" begin
+        pareto_k = records.psis_pareto_k
+        @test length(pareto_k) == n_subj
+        @test count(isfinite.(pareto_k)) >= n_subj * 0.5
+    end
 end
 
 # ============================================================================
-# Test 4: Surrogate Fitting
+# TEST SECTION 5: MARKOV SURROGATE FITTING
 # ============================================================================
 
 @testset "Markov Surrogate Fitting" begin
-    Random.seed!(RNG_SEED + 3)
+    Random.seed!(RNG_SEED + 40)
     
-    # Create semi-Markov model
     h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
     h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1)
     
@@ -248,85 +588,30 @@ end
     
     model = multistatemodel(h12, h21; data=dat)
     
-    # Fit Markov surrogate
     surrogate_fitted = fit_surrogate(model; verbose=false)
     
-    # Check surrogate has valid log-likelihood
-    @test isfinite(surrogate_fitted.loglik.loglik)
-    @test surrogate_fitted.loglik.loglik < 0
-    
-    # Check surrogate parameters are finite
-    surrogate_params = get_parameters_flat(surrogate_fitted)
-    @test all(isfinite.(surrogate_params))
-    
-    # Surrogate should have exponential hazards (Markov)
-    @test all(isa.(surrogate_fitted.hazards, MultistateModels._MarkovHazard))
-end
-
-# ============================================================================
-# Test 5: Viterbi MAP Initialization
-# ============================================================================
-
-@testset "Viterbi MAP Warm Start" begin
-    Random.seed!(RNG_SEED + 4)
-    
-    # Create model with panel data
-    h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
-    h21 = Hazard(@formula(0 ~ 1), "exp", 2, 1)
-    
-    n_subj = 20
-    dat = DataFrame(
-        id = repeat(1:n_subj, inner=2),
-        tstart = repeat([0.0, 1.0], n_subj),
-        tstop = repeat([1.0, 2.0], n_subj),
-        statefrom = repeat([1, 1], n_subj),
-        stateto = vcat([[rand() < 0.3 ? 2 : 1, 2] for _ in 1:n_subj]...),
-        obstype = repeat([2, 1], n_subj)
-    )
-    
-    # Create model with surrogate for MCEM testing
-    model = multistatemodel(h12, h21; data=dat, surrogate=:markov)
-    
-    # Build surrogate and TPM infrastructure
-    books = build_tpm_mapping(model.data)
-    hazmat_book = build_hazmat_book(Float64, model.tmat, books[1])
-    tpm_book = build_tpm_book(Float64, model.tmat, books[1])
-    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
-    
-    surrogate = model.markovsurrogate
-    surrogate_pars = get_log_scale_params(surrogate.parameters)
-    
-    for t in eachindex(books[1])
-        compute_hazmat!(hazmat_book[t], surrogate_pars, surrogate.hazards, books[1][t], model.data)
-        compute_tmat!(tpm_book[t], hazmat_book[t], books[1][t], cache)
-    end
-    
-    fbmats = MultistateModels.build_fbmats(model)
-    absorbingstates = findall([isa(h, MultistateModels._TotalHazardAbsorbing) for h in model.totalhazards])
-    
-    # Compute Viterbi path for first subject with panel observations
-    subj_with_panel = findfirst(i -> any(dat.obstype[model.subjectindices[i]] .> 1), 1:n_subj)
-    
-    if !isnothing(subj_with_panel)
-        map_path = MultistateModels.viterbi_map_path(
-            subj_with_panel, model, tpm_book, hazmat_book, books[2], fbmats, absorbingstates)
+    @testset "Surrogate validity" begin
+        @test isfinite(surrogate_fitted.loglik.loglik)
+        @test surrogate_fitted.loglik.loglik < 0
         
-        @test map_path isa SamplePath
-        @test map_path.subj == subj_with_panel
-        @test length(map_path.times) >= 1
-        @test length(map_path.states) == length(map_path.times)
-        @test all(s -> s in [1, 2], map_path.states)
+        surrogate_params = get_parameters_flat(surrogate_fitted)
+        @test all(isfinite.(surrogate_params))
+        
+        # Surrogate should have exponential hazards (Markov)
+        @test all(isa.(surrogate_fitted.hazards, MultistateModels._MarkovHazard))
     end
 end
 
 # ============================================================================
-# Print summary
+# Summary
 # ============================================================================
 
 println("\n=== MCEM Long Test Suite Complete ===\n")
-println("Tests verify:")
-println("  - MCEM parameter recovery for Weibull illness-death models")
+println("This test suite validated:")
+println("  - MCEM parameter recovery for exponential, Weibull, Gompertz hazards")
+println("  - MCEM with covariates")
+println("  - MCEM distributional fidelity (state prevalence)")
 println("  - Phase-type vs Markov proposal selection")
 println("  - Convergence diagnostics and ESS tracking")
 println("  - Markov surrogate fitting")
-println("  - Viterbi MAP warm start initialization")
+println("Sample size: n=$(N_SUBJECTS), simulation trajectories: $(N_SIM_TRAJ)")

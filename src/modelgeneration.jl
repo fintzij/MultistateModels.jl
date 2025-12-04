@@ -372,10 +372,19 @@ function _build_spline_hazard(ctx::HazardBuildContext)
         intknots = copy(hazard.knots)
     end
     
+    # Track whether user provided explicit boundary knots
+    user_provided_boundaries = hazard.boundaryknots !== nothing
+    
     # Validate interior knots are within boundaries
+    # If user provided both boundaries and interior knots that exceed them, warn
+    # If boundaries were inferred, silently extend to encompass interior knots
     if !isempty(intknots)
-        if any(intknots .< bknots[1]) || any(intknots .> bknots[2])
-            @warn "Interior knots outside boundary knots detected. Adjusting boundaries."
+        needs_adjustment = any(intknots .< bknots[1]) || any(intknots .> bknots[2])
+        if needs_adjustment
+            if user_provided_boundaries
+                @warn "Interior knots outside user-specified boundary knots. Adjusting boundaries."
+            end
+            # Silently extend boundaries if they were inferred
             bknots[1] = min(bknots[1], minimum(intknots))
             bknots[2] = max(bknots[2], maximum(intknots))
         end
@@ -705,43 +714,47 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
         push!(parameters_list, hazpars)
     end
 
-    parameters = build_parameters(parameters_list, hazkeys)
+    parameters = build_parameters(parameters_list, hazkeys, _hazards)
     return _hazards, parameters, hazkeys
 end
 
 """
-    build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Symbol, Int64})
+    build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Symbol, Int64}, hazards::Vector{<:_Hazard})
 
-Create a ParameterHandling.jl structure from nested parameter vectors.
+Create a parameters structure from nested parameter vectors.
 
 Returns a NamedTuple with fields:
-- `flat`: Vector{Float64} of all parameters in flattened form (transformed scale)
-- `transformed`: NamedTuple of positive() transformations for each hazard
-- `natural`: NamedTuple of Vectors for each hazard (natural scale)
-- `unflatten`: Function to reconstruct from flat vector
+- `flat`: Vector{Float64} of all parameters (log scale for baseline, as-is for covariates)
+- `nested`: NamedTuple of NamedTuples per hazard with `baseline` and optional `covariates` fields
+- `natural`: NamedTuple of Vectors for each hazard (natural scale for baseline, as-is for covariates)
+- `unflatten`: Function to reconstruct nested structure from flat vector
 
-Parameters are stored on the log scale using ParameterHandling.positive().
+Parameters are stored on log scale for baseline (rates, shapes, scales) because hazard 
+functions expect log-scale and apply exp() internally. Covariate coefficients are unconstrained.
 """
-function build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Symbol, Int64})
-    # Use safe_positive to prevent ParameterHandling epsilon errors
-    # Input parameters are on log scale, exp to get natural scale
-    params_transformed_pairs = [
-        hazname => safe_positive(exp.(parameters[idx]))
+function build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Symbol, Int64}, hazards::Vector{<:_Hazard})
+    # Build nested parameters structure per hazard
+    # Parameters are stored on log scale for baseline, as-is for covariates
+    params_nested_pairs = [
+        hazname => build_hazard_params(parameters[idx], hazards[idx].npar_baseline)
         for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
     ]
-
-    params_transformed = NamedTuple(params_transformed_pairs)
+    params_nested = NamedTuple(params_nested_pairs)
     
-    # Flatten to get the flat vector and unflatten function
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
+    # Use ParameterHandling to flatten/unflatten the nested structure
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
     
-    # Get natural scale parameters
-    params_natural = ParameterHandling.value(params_transformed)
+    # Get natural scale parameters (exp for baseline, as-is for covariates)
+    params_natural_pairs = [
+        hazname => extract_natural_vector(params_nested[hazname])
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    params_natural = NamedTuple(params_natural_pairs)
     
-    # Return nested structure
+    # Return structure
     return (
         flat = params_flat,
-        transformed = params_transformed,
+        nested = params_nested,
         natural = params_natural,
         unflatten = unflatten_fn
     )
@@ -916,6 +929,8 @@ will insert the intercept-only design automatically as described in `Hazard`'s d
 
 # Keywords
 - `data`: long-format `DataFrame` with at least `:subject`, `:statefrom`, `:stateto`, `:time`, `:obstype`.
+- `constraints`: optional parameter constraints (see `make_constraints`). When provided at model creation,
+  constraints are validated at parameter setting time and used as defaults in `fit()`.
 - `surrogate::Symbol = :none`: surrogate model for importance sampling in MCEM.
   - `:none` (default): no surrogate created (for Markov models or exact data)
   - `:markov`: create a Markov surrogate (required for semi-Markov MCEM fitting)
@@ -933,6 +948,14 @@ will insert the intercept-only design automatically as described in `Hazard`'s d
 # Markov model (no surrogate needed)
 model = multistatemodel(h12, h21; data = df)
 
+# Model with parameter constraints
+cons = make_constraints(
+    cons = [:(log_λ_12 == log_λ_21)],  # Equal rates
+    lcons = [0.0],
+    ucons = [0.0]
+)
+model = multistatemodel(h12, h21; data = df, constraints = cons)
+
 # Semi-Markov model - surrogate will be created and fitted when fit() is called
 model = multistatemodel(h12_wei, h21_wei; data = df, surrogate = :markov)
 
@@ -942,6 +965,7 @@ model = multistatemodel(h12_wei, h21_wei; data = df, surrogate = :markov, optimi
 """
 function multistatemodel(hazards::HazardFunction...; 
                         data::DataFrame, 
+                        constraints = nothing,
                         surrogate::Symbol = :none,
                         optimize_surrogate::Bool = false,
                         surrogate_constraints = nothing,
@@ -959,8 +983,8 @@ function multistatemodel(hazards::HazardFunction...;
     # Validate inputs
     isempty(hazards) && throw(ArgumentError("At least one hazard must be provided"))
 
-    # catch the model call
-    modelcall = (hazards = hazards, data = data, SubjectWeights = SubjectWeights, ObservationWeights = ObservationWeights, CensoringPatterns = CensoringPatterns, EmissionMatrix = EmissionMatrix)
+    # catch the model call (includes constraints for use by fit())
+    modelcall = (hazards = hazards, data = data, constraints = constraints, SubjectWeights = SubjectWeights, ObservationWeights = ObservationWeights, CensoringPatterns = CensoringPatterns, EmissionMatrix = EmissionMatrix)
 
     # get indices for each subject in the dataset
     subjinds, nsubj = get_subjinds(data)

@@ -15,12 +15,11 @@ Uses multiple dispatch to handle different parameter container types.
 # Supported types
 - `Tuple`: Nested parameters indexed by hazard number (returned as-is)
 - `NamedTuple`: Parameters keyed by hazard name (converted to values tuple)
-- `VectorOfVectors`: Already nested AD-compatible format (returned as-is)
+- `AbstractVector{<:AbstractVector}`: Already nested format (returned as-is)
 - `AbstractVector`: Flat parameter vector (nested via `nest_params`)
 """
 prepare_parameters(p::Tuple, ::MultistateProcess) = p
 prepare_parameters(p::NamedTuple, ::MultistateProcess) = values(p)
-prepare_parameters(p::ArraysOfArrays.VectorOfVectors, ::MultistateProcess) = p
 prepare_parameters(p::AbstractVector{<:AbstractVector}, ::MultistateProcess) = p
 prepare_parameters(p::AbstractVector, model::MultistateProcess) = nest_params(p, model.parameters)
 
@@ -89,16 +88,15 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
             transind = tmat[subjectdata.statefrom[i], subjectdata.stateto[i]]
 
             # log hazard at time of transition
-            # Pass the DataFrame row for new hazard types (with name-based covariate matching)
-            ll += call_haz(
+            haz_value = eval_hazard(
+                hazards[transind],
                 subjectdata.sojourn[i] + subjectdata.increment[i],
                 pars[transind],
-                row_data,
-                hazards[transind];
-                give_log = true,
+                row_data;
                 apply_transform = hazards[transind].metadata.time_transform,
                 cache_context = tt_context,
                 hazard_slot = transind)
+            ll += log(haz_value)
         end
      end
  
@@ -114,7 +112,7 @@ current model definition. Accepts various parameter container types (see `prepar
 and reuses `loglik_path` for the heavy lifting.
 
 # Arguments
-- `parameters`: Tuple, NamedTuple, VectorOfVectors, or flat AbstractVector
+- `parameters`: Tuple, NamedTuple, nest_params, or flat AbstractVector
 - `path::SamplePath`: The sample path to evaluate
 - `hazards::Vector{<:_Hazard}`: Hazard functions
 - `model::MultistateProcess`: Model containing unflatten function and structure
@@ -686,7 +684,7 @@ See also: [`loglik_exact`](@ref), [`ExactDataAD`](@ref)
 """
 function loglik_AD(parameters, data::ExactDataAD; neg = true)
 
-    # nest parameters using VectorOfVectors (AD-compatible)
+    # nest parameters using nest_params (AD-compatible)
     pars = nest_params(parameters, data.model.parameters)
 
     # snag the hazards
@@ -721,7 +719,7 @@ Return sum of (negative) log likelihood for a Markov model fit to panel and/or e
 """
 function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj = false)
 
-    # nest the model parameters using VectorOfVectors (AD-compatible)
+    # nest the model parameters using nest_params (AD-compatible)
     pars = nest_params(parameters, data.model.parameters)
 
     # build containers for transition intensity and prob mtcs
@@ -814,12 +812,8 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
                                         
                     if statefrom_i != stateto_i # if there is a transition, add log hazard
                         trans_idx = data.model.tmat[statefrom_i, stateto_i]
-                        obs_ll += call_haz(
-                            dt,
-                            pars[trans_idx],
-                            row_data,
-                            hazards[trans_idx];
-                            give_log = true)
+                        haz_value = eval_hazard(hazards[trans_idx], dt, pars[trans_idx], row_data)
+                        obs_ll += log(haz_value)
                     end
                     
                     subj_ll += obs_ll * obs_weight
@@ -892,8 +886,8 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
                             # hazard
                             for s in dest_states
                                 trans_idx = tmat_cache[r, s]
-                                q[r, s] += call_haz(dt, pars[trans_idx], row_data,
-                                    hazards[trans_idx]; give_log = true)
+                                haz_value = eval_hazard(hazards[trans_idx], dt, pars[trans_idx], row_data)
+                                q[r, s] += log(haz_value)
                             end
                         end
 
@@ -955,7 +949,7 @@ This implementation uses the fused path-centric approach from `loglik_exact`, ca
 """
 function loglik_semi_markov(parameters, data::SMPanelData; neg = true, use_sampling_weight = true)
 
-    # nest the model parameters using VectorOfVectors (AD-compatible)
+    # nest the model parameters using nest_params (AD-compatible)
     pars = nest_params(parameters, data.model.parameters)
 
     # snag the hazards and model components
@@ -1024,13 +1018,13 @@ This implementation uses the fused path-centric approach from `loglik_exact`, ca
 `_compute_path_loglik_fused` directly to avoid DataFrame allocation overhead.
 
 # Notes on future neural ODE compatibility:
-When `is_separable(hazard) == false` for ODE-based hazards, the `call_cumulhaz` 
+When `is_separable(hazard) == false` for ODE-based hazards, the `eval_cumhaz` 
 function in `_compute_path_loglik_fused` is the extension point where numerical 
 ODE solvers would be invoked instead of analytic cumulative hazard formulas.
 """
 function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
 
-    # nest the model parameters using VectorOfVectors (AD-compatible)
+    # nest the model parameters using nest_params (AD-compatible)
     pars = nest_params(parameters, data.model.parameters)
 
     # snag the hazards and model components
@@ -1101,7 +1095,7 @@ Arguments:
 - `data`: SMPanelData containing the model and paths
 """
 function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}}, data::SMPanelData)
-    # Nest parameters using VectorOfVectors (AD-compatible)
+    # Nest parameters using nest_params (AD-compatible)
     pars = nest_params(parameters, data.model.parameters)
     
     # Get hazards
@@ -1167,10 +1161,8 @@ function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}
         
         for i in 1:n_intervals
             # Cumulative hazard contribution (survival component)
-            # Note: use give_log=false to get cumhaz directly, not log(cumhaz)
-            cumhaz = call_cumulhaz(
-                sd.lb[i], sd.ub[i], hazard_pars, sd.covars[i], hazard;
-                give_log = false,
+            cumhaz = eval_cumhaz(
+                hazard, sd.lb[i], sd.ub[i], hazard_pars, sd.covars[i];
                 apply_transform = use_transform,
                 cache_context = tt_context,
                 hazard_slot = h)
@@ -1179,13 +1171,12 @@ function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}
             
             # Transition hazard
             if sd.is_transition[i]
-                log_haz = call_haz(
-                    sd.transition_times[i], hazard_pars, sd.covars[i], hazard;
-                    give_log = true,
+                haz_value = eval_hazard(
+                    hazard, sd.transition_times[i], hazard_pars, sd.covars[i];
                     apply_transform = use_transform,
                     cache_context = tt_context,
                     hazard_slot = h)
-                ll_flat[sd.path_idx[i]] += log_haz
+                ll_flat[sd.path_idx[i]] += log(haz_value)
             end
         end
     end
@@ -1388,7 +1379,7 @@ rather than all intervals per hazard.
 - If `return_ll_subj=true`: Vector of weighted per-path log-likelihoods
 """
 function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false)
-    # Nest parameters using VectorOfVectors - preserves dual number types (AD-compatible)
+    # Nest parameters using nest_params - preserves dual number types (AD-compatible)
     pars = nest_params(parameters, data.model.parameters)
     
     # Get model components
@@ -1470,12 +1461,12 @@ Compute log-likelihood for a single path. Extracted for functional style (revers
 
 This function is the core likelihood computation shared by `loglik_exact` and `loglik_semi_markov`.
 It uses a path-centric approach that iterates over sojourn intervals in a sample path, 
-accumulating log-survival contributions (via `call_cumulhaz`) and transition hazard 
-contributions (via `call_haz`).
+accumulating log-survival contributions (via `eval_cumhaz`) and transition hazard 
+contributions (via `eval_hazard`).
 
 # Neural ODE Extension Point
-The `call_cumulhaz` invocations are the extension points for neural ODE-based hazards.
-When `is_separable(hazard) == false` for an ODE-based hazard, `call_cumulhaz` should be 
+The `eval_cumhaz` invocations are the extension points for neural ODE-based hazards.
+When `is_separable(hazard) == false` for an ODE-based hazard, `eval_cumhaz` should be 
 extended to invoke a numerical ODE solver (e.g., DifferentialEquations.jl) to compute 
 the cumulative hazard as an integral: Λ(t₀, t₁) = ∫_{t₀}^{t₁} λ(s) ds.
 
@@ -1485,11 +1476,11 @@ For reverse-mode AD compatibility with neural ODEs:
 - The functional accumulation style in this function avoids in-place mutation 
   required for Zygote/Enzyme compatibility
 
-See also: `loglik_exact`, `loglik_semi_markov`, `call_cumulhaz`
+See also: `loglik_exact`, `loglik_semi_markov`, `eval_cumhaz`
 """
 function _compute_path_loglik_fused(
     path::SamplePath, 
-    pars,  # Parameters as nested structure (from nest_params, VectorOfVectors or Tuple)
+    pars,  # Parameters as nested structure (from nest_params, nest_params or Tuple)
     hazards::Vector{<:_Hazard},
     totalhazards::Vector{<:_TotalHazard}, 
     tmat::Matrix{Int64},
@@ -1535,9 +1526,8 @@ function _compute_path_loglik_fused(
                     covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[h])
                     
                     # Cumulative hazard (use hazard-specific transform flag)
-                    cumhaz = call_cumulhaz(
-                        lb, ub, hazard_pars, covars, hazard;
-                        give_log = false,
+                    cumhaz = eval_cumhaz(
+                        hazard, lb, ub, hazard_pars, covars;
                         apply_transform = hazard.metadata.time_transform,
                         cache_context = tt_context,
                         hazard_slot = h)
@@ -1552,14 +1542,13 @@ function _compute_path_loglik_fused(
                     hazard_pars = pars[trans_h]
                     covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[trans_h])
                     
-                    log_haz = call_haz(
-                        ub, hazard_pars, covars, hazard;
-                        give_log = true,
+                    haz_value = eval_hazard(
+                        hazard, ub, hazard_pars, covars;
                         apply_transform = hazard.metadata.time_transform,
                         cache_context = tt_context,
                         hazard_slot = trans_h)
                     
-                    ll += log_haz
+                    ll += log(haz_value)
                 end
             end
             
@@ -1579,9 +1568,8 @@ function _compute_path_loglik_fused(
                     hazard_pars = pars[h]
                     covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[h])
                     
-                    cumhaz = call_cumulhaz(
-                        interval.lb, interval.ub, hazard_pars, covars, hazard;
-                        give_log = false,
+                    cumhaz = eval_cumhaz(
+                        hazard, interval.lb, interval.ub, hazard_pars, covars;
                         apply_transform = hazard.metadata.time_transform,
                         cache_context = tt_context,
                         hazard_slot = h)
@@ -1595,14 +1583,13 @@ function _compute_path_loglik_fused(
                     hazard_pars = pars[trans_h]
                     covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[trans_h])
                     
-                    log_haz = call_haz(
-                        interval.ub, hazard_pars, covars, hazard;
-                        give_log = true,
+                    haz_value = eval_hazard(
+                        hazard, interval.ub, hazard_pars, covars;
                         apply_transform = hazard.metadata.time_transform,
                         cache_context = tt_context,
                         hazard_slot = trans_h)
                     
-                    ll += log_haz
+                    ll += log(haz_value)
                 end
             end
         end

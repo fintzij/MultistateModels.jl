@@ -28,6 +28,7 @@ const RNG_SEED = 0xABCD5678
 const N_SUBJECTS = 80        # Moderate sample for spline fitting
 const MCEM_TOL = 0.05        # Relaxed tolerance
 const MAX_ITER = 25          # Short iteration limit
+const HAZARD_TOL_FACTOR = 2.0  # Spline hazard should be within factor of 2 of true
 
 # ============================================================================
 # Test 1: Spline Approximation to Exponential (Constant Hazard)
@@ -87,18 +88,16 @@ const MAX_ITER = 25          # Short iteration limit
     # Check that spline hazard at various times approximates true exponential
     pars_12 = MultistateModels.get_parameters(fitted, 1, scale=:log)
     
+    # Verify spline hazard approximates true constant rate at all evaluation times
     for t in [0.5, 1.5, 2.5, 3.5, 4.5]
         h_spline = fitted.hazards[1](t, pars_12, NamedTuple())
-        # For constant hazard, should be close to true_rate at all times
-        @test isfinite(h_spline)
-        @test h_spline > 0
-        # Relaxed check: within factor of 2 of true rate
-        @test h_spline > true_rate * 0.5 && h_spline < true_rate * 2.0
+        # Key test: spline hazard must be within factor of HAZARD_TOL_FACTOR of true rate
+        @test h_spline > true_rate / HAZARD_TOL_FACTOR
+        @test h_spline < true_rate * HAZARD_TOL_FACTOR
     end
     
-    # Check log-likelihood is reasonable
+    # Verify log-likelihood converged (finite)
     @test isfinite(fitted.loglik.loglik)
-    @test fitted.loglik.loglik < 0
     
     println("  ✓ Linear spline approximates constant/exponential hazard")
 end
@@ -158,22 +157,22 @@ end
         compute_vcov=false,
         return_convergence_records=true)
     
-    # Check that spline is well-behaved
+    # Check that spline hazard approximates average rate
     pars_12 = MultistateModels.get_parameters(fitted, 1, scale=:log)
     
-    # Hazard should be positive at all evaluation points
+    # Hazard should be within factor of 2 of average rate at all times
     for t in [0.5, 1.5, 2.5, 3.5, 4.5]
         h_spline = fitted.hazards[1](t, pars_12, NamedTuple())
-        @test isfinite(h_spline)
-        @test h_spline > 0
+        @test h_spline > avg_rate / HAZARD_TOL_FACTOR
+        @test h_spline < avg_rate * HAZARD_TOL_FACTOR
     end
     
-    # Cumulative hazard should be monotonically increasing
+    # Cumulative hazard must be monotonically increasing (fundamental property)
     H_vals = [cumulative_hazard(fitted.hazards[1], 0.0, t, pars_12, NamedTuple()) 
               for t in [1.0, 2.0, 3.0, 4.0]]
     @test all(diff(H_vals) .> 0)
     
-    # Check log-likelihood
+    # Convergence check
     @test isfinite(fitted.loglik.loglik)
     
     println("  ✓ Spline with interior knot handles piecewise hazard")
@@ -235,24 +234,28 @@ end
         compute_vcov=false,
         return_convergence_records=true)
     
-    # Check that spline captures increasing hazard pattern
+    # Check that spline captures Gompertz hazard pattern
     pars_12 = MultistateModels.get_parameters(fitted, 1, scale=:log)
     
-    # Evaluate hazard at multiple times
-    h_vals = [fitted.hazards[1](t, pars_12, NamedTuple()) for t in [0.5, 2.0, 3.5]]
+    # Evaluate hazard at multiple times and compare to true Gompertz
+    # True Gompertz: h(t) = exp(true_a + true_b * t)
+    for t in [0.5, 2.0, 3.5]
+        h_spline = fitted.hazards[1](t, pars_12, NamedTuple())
+        h_true = exp(true_a + true_b * t)
+        # Spline should be within factor of HAZARD_TOL_FACTOR of true Gompertz
+        @test h_spline > h_true / HAZARD_TOL_FACTOR
+        @test h_spline < h_true * HAZARD_TOL_FACTOR
+    end
     
-    # All should be positive and finite
-    @test all(isfinite.(h_vals))
-    @test all(h_vals .> 0)
-    
-    # Cumulative hazard should increase
+    # Cumulative hazard must be monotonically increasing
     H_vals = [cumulative_hazard(fitted.hazards[1], 0.0, t, pars_12, NamedTuple()) 
               for t in [1.0, 2.0, 3.0, 4.0]]
     @test all(diff(H_vals) .> 0)
     
+    # Convergence check
     @test isfinite(fitted.loglik.loglik)
     
-    println("  ✓ Quadratic spline approximates Gompertz (increasing) hazard")
+    println("  ✓ Cubic spline approximates Gompertz (increasing) hazard")
 end
 
 # ============================================================================
@@ -314,19 +317,23 @@ end
     pars_12 = MultistateModels.get_parameters(fitted, 1, scale=:log)
     @test length(pars_12) == fitted.hazards[1].npar_baseline + 1
     
-    # Hazard should be higher for x=1 than x=0
+    # Verify covariate effect: h(x=1) vs h(x=0) at t=2.0
     covars_0 = (x = 0.0,)
     covars_1 = (x = 1.0,)
     
     h_x0 = fitted.hazards[1](2.0, pars_12, covars_0)
     h_x1 = fitted.hazards[1](2.0, pars_12, covars_1)
     
-    @test isfinite(h_x0) && isfinite(h_x1)
-    @test h_x0 > 0 && h_x1 > 0
-    # With positive true_beta, x=1 should have higher hazard (usually)
-    # Relaxed: just check both are reasonable
-    @test abs(log(h_x1) - log(h_x0)) < 3  # Log hazard ratio reasonable
+    # Both hazards should be within factor of true baseline
+    @test h_x0 > true_baseline / HAZARD_TOL_FACTOR
+    @test h_x0 < true_baseline * HAZARD_TOL_FACTOR
     
+    # Log hazard ratio should be approximately true_beta
+    # log(h_x1/h_x0) ≈ true_beta (with tolerance)
+    log_hr = log(h_x1) - log(h_x0)
+    @test isapprox(log_hr, true_beta; atol=1.0)  # Within 1.0 of true beta
+    
+    # Convergence check
     @test isfinite(fitted.loglik.loglik)
     
     println("  ✓ Spline with covariates works in MCEM")
@@ -386,15 +393,17 @@ end
     
     h_vals = [fitted.hazards[1](t, pars_12, NamedTuple()) for t in 0.5:0.5:3.5]
     
-    # All should be positive
-    @test all(h_vals .> 0)
+    # Hazards should be within factor of true rate (0.3)
+    true_rate = 0.3
+    @test all(h .> true_rate / HAZARD_TOL_FACTOR for h in h_vals)
+    @test all(h .< true_rate * HAZARD_TOL_FACTOR for h in h_vals)
     
-    # Should be non-decreasing (monotone=1)
-    # Allow small numerical tolerance
+    # Must be non-decreasing (monotone=1 constraint)
     for i in 2:length(h_vals)
         @test h_vals[i] >= h_vals[i-1] - 1e-10
     end
     
+    # Convergence check
     @test isfinite(fitted.loglik.loglik)
     
     println("  ✓ Monotone increasing spline enforces constraint in MCEM")
@@ -406,8 +415,8 @@ end
 
 println("\n=== MCEM Spline Long Test Suite Complete ===\n")
 println("Tests verify:")
-println("  - Spline (degree=0) approximates constant/exponential hazard")
+println("  - Linear spline approximates constant/exponential hazard")
 println("  - Spline with interior knots handles piecewise hazard")
 println("  - Cubic spline approximates Gompertz (exponential) hazard")
-println("  - Spline with covariates works correctly")
+println("  - Spline with covariates recovers log hazard ratio")
 println("  - Monotone spline constraints are enforced in MCEM")

@@ -17,15 +17,47 @@ function get_loglik(model::MultistateModelFitted; ll = "loglik")
 end
 
 """
-get_parameters(model::MultistateProcess) 
+    get_parameters(model::MultistateProcess; scale::Symbol=:natural)
 
-Return the maximum likelihood estimates. 
+Return model parameters on the specified scale.
 
 # Arguments 
-- model: fitted model
+- `model`: A MultistateProcess (fitted or unfitted)
+- `scale::Symbol=:natural`: Parameter scale
+  - `:natural` - Human-readable scale (exp applied to baseline params)
+  - `:estimation` or `:log` - Flat vector on log scale (for optimization)
+  - `:nested` - Nested NamedTuple with ParameterHandling structure
+
+# Returns
+- For `:natural`: `NamedTuple` with parameters per hazard on natural scale
+- For `:estimation`/`:log`: `Vector{Float64}` flat parameter vector
+- For `:nested`: `NamedTuple` with full ParameterHandling structure
+
+# Example
+```julia
+# Get human-readable parameters
+params = get_parameters(fitted_model)  # Same as scale=:natural
+# (h12 = [1.0, 0.3, 0.5], h21 = [1.2, 0.25, 0.3])
+
+# Get flat vector for optimization
+params_flat = get_parameters(fitted_model; scale=:estimation)
+# [0.0, -1.2, 0.5, 0.18, -1.39, 0.3]
+```
+
+# See also
+- [`set_parameters!`](@ref) - Set model parameters
+- [`get_parnames`](@ref) - Get parameter names
 """
-function get_parameters(model::MultistateProcess)
-    model.parameters
+function get_parameters(model::MultistateProcess; scale::Symbol=:natural)
+    if scale == :natural
+        return model.parameters.natural
+    elseif scale == :estimation || scale == :log || scale == :flat
+        return model.parameters.flat
+    elseif scale == :nested
+        return model.parameters.nested
+    else
+        throw(ArgumentError("scale must be :natural, :estimation, :log, :flat, or :nested (got :$scale)"))
+    end
 end
 
 """
@@ -34,10 +66,25 @@ end
 Return the parameter names.
 
 # Arguments
-- `model`
+- `model`: A MultistateProcess or MarkovSurrogate
 """
 function get_parnames(model::MultistateProcess)
     [x.parnames for x in model.hazards]
+end
+
+"""
+    get_parnames(surrogate::MarkovSurrogate)
+
+Return the parameter names for a Markov surrogate.
+
+# Arguments
+- `surrogate::MarkovSurrogate`: A Markov surrogate
+
+# Returns
+- Vector of parameter name vectors, one per hazard
+"""
+function get_parnames(surrogate::MarkovSurrogate)
+    [x.parnames for x in surrogate.hazards]
 end
 
 """
@@ -465,7 +512,7 @@ function summary(model::MultistateModelFitted; compute_se = true, confidence_lev
         # standard error
         varcov = get_vcov(model)
         se = sqrt.(varcov[diagind(varcov)])
-        se_vv = VectorOfVectors(se, get_elem_ptr(model.parameters))
+        se_nested = nest_params(se, model.parameters)
         # critical value
         z_critical = quantile(Normal(0.0, 1.0), 1-(1-confidence_level)/2)
 
@@ -474,7 +521,7 @@ function summary(model::MultistateModelFitted; compute_se = true, confidence_lev
             # summary for hazard s
             summary_table[s] = DataFrame(
                 estimate = reduce(vcat, mle[s]),
-                se = reduce(vcat, se_vv[s]))
+                se = reduce(vcat, se_nested[s]))
                 summary_table[s].lower = summary_table[s].estimate .- z_critical .* summary_table[s].se
                 summary_table[s].upper = summary_table[s].estimate .+ z_critical .* summary_table[s].se
         end
@@ -631,4 +678,77 @@ function bic(model::MultistateModelFitted; loglik = nothing, estimate_likelihood
     BIC = - 2 * ll + log(n) * p
 
     return BIC
+end
+
+# =============================================================================
+# Pretty printing for fitted models
+# =============================================================================
+
+"""
+    Base.show(io::IO, model::MultistateModelFitted)
+
+Pretty print a fitted multistate model with parameter estimates.
+"""
+function Base.show(io::IO, model::MultistateModelFitted)
+    # Header
+    println(io, "MultistateModelFitted")
+    println(io, "─" ^ 50)
+    
+    # Basic info
+    n_subj = length(model.subjectindices)
+    n_states = size(model.tmat, 1)
+    n_hazards = length(model.hazards)
+    println(io, "  Subjects: $n_subj")
+    println(io, "  States: $n_states")
+    println(io, "  Hazards: $n_hazards")
+    
+    # Log-likelihood
+    ll = model.loglik.loglik
+    println(io, "  Log-likelihood: $(round(ll, digits=4))")
+    
+    # Parameters
+    println(io)
+    println(io, "Parameter estimates (natural scale):")
+    println(io, "─" ^ 50)
+    
+    # Get sorted hazard names
+    sorted_hazkeys = sort(collect(model.hazkeys), by = x -> x[2])
+    
+    for (hazname, idx) in sorted_hazkeys
+        haz = model.hazards[idx]
+        parnames = haz.parnames
+        natural_pars = model.parameters.natural[hazname]
+        
+        # Format transition
+        trans_str = "$(haz.statefrom)→$(haz.stateto)"
+        family_str = string(haz.family)
+        println(io, "  $hazname ($trans_str, $family_str):")
+        
+        for (i, (pname, pval)) in enumerate(zip(parnames, natural_pars))
+            # Clean up parameter name for display
+            pname_str = string(pname)
+            # Remove hazard prefix if present
+            if startswith(pname_str, string(hazname) * "_")
+                pname_str = pname_str[length(string(hazname))+2:end]
+            end
+            println(io, "    $pname_str = $(round(pval, digits=4))")
+        end
+    end
+    
+    # Variance-covariance status
+    println(io)
+    if !isnothing(model.vcov)
+        println(io, "  Variance-covariance: computed")
+    else
+        println(io, "  Variance-covariance: not computed")
+    end
+end
+
+"""
+    Base.show(io::IO, ::MIME"text/plain", model::MultistateModelFitted)
+
+Extended pretty print for REPL display.
+"""
+function Base.show(io::IO, ::MIME"text/plain", model::MultistateModelFitted)
+    show(io, model)
 end

@@ -66,9 +66,21 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
     # initialize array of sample paths
     samplepaths = extract_paths(model)
 
+    # Initialize parameters to crude estimates for better optimizer starting point
+    # This is especially important for Gompertz/Weibull hazards where poor initialization
+    # can lead to degenerate local optima
+    if isnothing(constraints)
+        set_crude_init!(model)
+    end
+
     # extract and initialize model parameters
     # Phase 3: Use ParameterHandling.jl flat parameters (log scale)
     parameters = get_parameters_flat(model)
+
+    # Use model constraints if none provided and model has them
+    if isnothing(constraints) && haskey(model.modelcall, :constraints) && !isnothing(model.modelcall.constraints)
+        constraints = model.modelcall.constraints
+    end
 
     # parse constraints, or not, and solve
     if isnothing(constraints) 
@@ -157,13 +169,20 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
         subject_grads = robust_result.subject_gradients
     end
 
-    # Build ParameterHandling structure for fitted parameters
-    # Use the unflatten function from the model to convert flat params back to transformed
-    params_transformed = model.parameters.unflatten(sol.u)
-    params_natural = ParameterHandling.value(params_transformed)
+    # Build parameters structure for fitted parameters
+    # Use the unflatten function from the model to convert flat params back to nested
+    params_nested = model.parameters.unflatten(sol.u)
+    
+    # Compute natural scale parameters
+    params_natural_pairs = [
+        hazname => extract_natural_vector(params_nested[hazname])
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    params_natural = NamedTuple(params_natural_pairs)
+    
     parameters_fitted = (
         flat = Vector{Float64}(sol.u),
-        transformed = params_transformed,
+        nested = params_nested,
         natural = params_natural,
         unflatten = model.parameters.unflatten
     )
@@ -274,12 +293,24 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
 
+    # Initialize parameters to crude estimates for better optimizer starting point
+    # This is especially important for Gompertz/Weibull hazards where poor initialization
+    # can lead to degenerate local optima
+    if isnothing(constraints)
+        set_crude_init!(model)
+    end
+
     # extract and initialize model parameters
     # Phase 3: Use ParameterHandling.jl flat parameters (log scale)
     parameters = get_parameters_flat(model)
 
     # number of subjects
     nsubj = length(model.subjectindices)
+
+    # Use model constraints if none provided and model has them
+    if isnothing(constraints) && haskey(model.modelcall, :constraints) && !isnothing(model.modelcall.constraints)
+        constraints = model.modelcall.constraints
+    end
 
     # parse constraints, or not, and solve
     if isnothing(constraints)
@@ -358,13 +389,20 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         subject_grads = robust_result.subject_gradients
     end
 
-    # Build ParameterHandling structure for fitted parameters
-    # Use the unflatten function from the model to convert flat params back to transformed
-    params_transformed = model.parameters.unflatten(sol.u)
-    params_natural = ParameterHandling.value(params_transformed)
+    # Build parameters structure for fitted parameters
+    # Use the unflatten function from the model to convert flat params back to nested
+    params_nested = model.parameters.unflatten(sol.u)
+    
+    # Compute natural scale parameters
+    params_natural_pairs = [
+        hazname => extract_natural_vector(params_nested[hazname])
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    params_natural = NamedTuple(params_natural_pairs)
+    
     parameters_fitted = (
         flat = Vector{Float64}(sol.u),
-        transformed = params_transformed,
+        nested = params_nested,
         natural = params_natural,
         unflatten = model.parameters.unflatten
     )
@@ -451,7 +489,6 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
 - `max_ess::Int=10000`: maximum ESS before stopping for non-convergence
 - `max_sampling_effort::Int=20`: maximum factor of ESS for additional path sampling
 - `npaths_additional::Int=10`: increment for additional paths when augmenting
-- `viterbi_init::Bool=true`: initialize MCEM with Viterbi MAP path per subject for warm start
 - `block_hessian_speedup::Float64=2.0`: minimum speedup factor to use block-diagonal Hessian
 - `acceleration::Symbol=:none`: acceleration method for MCEM. Options:
   - `:none` (default): standard MCEM without acceleration
@@ -511,7 +548,7 @@ fitted = fit(semimarkov_model; acceleration=:squarem)
 
 See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, viterbi_init = true, block_hessian_speedup = 2.0, acceleration::Symbol = :none, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :none, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # Validate acceleration parameter
     if acceleration ∉ (:none, :squarem)
@@ -533,6 +570,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
     # copy of data
     data_original = deepcopy(model.data)
+
+    # Use model constraints if none provided and model has them
+    if isnothing(constraints) && haskey(model.modelcall, :constraints) && !isnothing(model.modelcall.constraints)
+        constraints = model.modelcall.constraints
+    end
 
     # check that constraints for the initial values are satisfied
     if !isnothing(constraints)
@@ -627,6 +669,17 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         error("MCEM requires a Markov surrogate. Call `set_surrogate!(model)` or use `surrogate=:markov` in `multistatemodel()` before fitting.")
     end
     
+    # Check if surrogate needs to be fitted (has default zero params)
+    # This happens when surrogate=:markov is used without optimize_surrogate=true
+    surrog_pars = model.markovsurrogate.parameters.flat
+    if all(isapprox.(surrog_pars, 0.0; atol=1e-6))
+        if verbose
+            println("Markov surrogate has default parameters. Fitting via MLE...")
+        end
+        # Fit the surrogate via set_surrogate! with MLE method
+        set_surrogate!(model; type=:markov, method=:mle, verbose=verbose)
+    end
+    
     markov_surrogate = model.markovsurrogate
     if verbose
         println("Using model's Markov surrogate for MCEM.\n")
@@ -682,53 +735,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     if use_phasetype
         NormConstantProposal = compute_phasetype_marginal_loglik(model, phasetype_surrogate, emat_ph)
     else
-        NormConstantProposal = surrogate_fitted.loglik.loglik
-    end
-
-    # Viterbi MAP warm start initialization
-    #
-    # By initializing with the marginal posterior mode (Viterbi MAP) path for each
-    # subject, the first M-step can take a large step toward the mode of the
-    # likelihood surface, accelerating MCEM convergence.
-    #
-    # Note: Skip Viterbi initialization when using phase-type proposals because
-    # Viterbi paths are in observed space, but phase-type importance weights
-    # require expanded space paths. Paths will be drawn in expanded space directly.
-    if viterbi_init && !use_phasetype
-        if verbose println("Initializing with Viterbi MAP paths...\n") end
-        
-        for i in 1:nsubj
-            # Get subject data indices
-            subj_inds = model.subjectindices[i]
-            # Skip subjects with only exact observations (obstype == 1)
-            # For these subjects, the path is fully determined by the data
-            if all(model.data.obstype[subj_inds] .== 1)
-                continue
-            end
-            
-            # compute Viterbi MAP path for subject i
-            map_path = viterbi_map_path(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2], fbmats, absorbingstates)
-            
-            # initialize containers with single MAP path
-            push!(samplepaths[i], map_path)
-            
-            # compute log-likelihoods using log-scale parameters
-            surrogate_pars = get_log_scale_params(surrogate.parameters)
-            ll_surrog = loglik(surrogate_pars, map_path, surrogate.hazards, model)
-            target_pars = nest_params(params_cur, model.parameters)
-            ll_target = loglik(target_pars, map_path, model.hazards, model)
-            
-            push!(loglik_surrog[i], ll_surrog)
-            push!(loglik_target_cur[i], ll_target)
-            push!(loglik_target_prop[i], 0.0)  # will be updated in M-step
-            push!(_logImportanceWeights[i], ll_target - ll_surrog)
-            push!(ImportanceWeights[i], 1.0)  # single path gets weight 1
-            
-            # set initial ESS to 1 (will be augmented by DrawSamplePaths!)
-            ess_cur[i] = 1.0
-        end
-        
-        if verbose println("Viterbi MAP initialization complete. Drawing additional paths...\n") end
+        NormConstantProposal = compute_markov_marginal_loglik(model, markov_surrogate)
     end
 
     # draw sample paths until the target ess is reached 
@@ -971,7 +978,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # increase ess is necessary
         if ascent_lb < 0
             # increase the target ess for the factor ess_increase
-            ess_target = ceil(ess_increase*ess_target) # TODO: alternatively, use Caffo's power calculation to determine the new ESS target
+            ess_target = ceil(ess_increase * ess_target)
             if verbose  println("Target ESS is increased to $ess_target, because ascent lower bound < 0.\n") end
 
             # no need to sample paths for subjects with a single possible path
@@ -1241,21 +1248,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         offset += block_sizes[i]
     end
     
-    # Build transformed NamedTuple: exp to get natural scale, wrap with positive()
-    haznames = sort(collect(model.hazkeys), by = x -> x[2])
-    params_transformed_pairs = [
-        haznames[i].first => safe_positive(exp.(log_scale_params[i]))
-        for i in eachindex(haznames)
-    ]
-    params_transformed = NamedTuple(params_transformed_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_transformed)
-    params_natural = ParameterHandling.value(params_transformed)
-    parameters_fitted = (
-        flat = params_flat,
-        transformed = params_transformed,
-        natural = params_natural,
-        unflatten = unflatten_fn
-    )
+    # Rebuild parameters with proper constraints using model's hazard info
+    parameters_fitted = rebuild_parameters(log_scale_params, model)
 
     # wrap results
     model_fitted = MultistateModelFitted(

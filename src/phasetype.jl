@@ -43,6 +43,13 @@ Configuration for MCEM path proposals.
   - `:heuristic`: 2 phases for states with non-Markovian transitions, 1 for exponential
   - `Int`: Same number of phases for all transient states
   - `Vector{Int}`: Per-state specification (length = number of transient states)
+- `structure::Symbol`: Coxian structure for phase-type initialization (default: `:unstructured`)
+  - `:unstructured`: All progression rates (r₁, r₂, ...) and absorption rates (a₁, a₂, ..., aₙ) 
+    are free parameters (most flexible, recommended default)
+  - `:prop_to_prog`: Absorption rates proportional to progression rates: aᵢ = c × rᵢ for i < n,
+    where c is a common proportionality constant (Titman & Sharples 2010, Section 2)
+  - `:allequal`: All progression rates equal (r₁ = r₂ = ... = r), all absorption rates equal 
+    (a₁ = a₂ = ... = a), but r and a may differ
 - `max_phases::Int`: Maximum phases for `:auto` BIC selection (default: 5)
 - `optimize::Bool`: Optimize surrogate parameters (default: true)
 - `parameters`: Manual parameter override (default: nothing)
@@ -75,6 +82,9 @@ fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=:heuristic))
 # Phase-type with manual override
 fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=3))
 fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=[2, 3, 1]))
+
+# Phase-type with Titman-Sharples proportionality constraint
+fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=3, structure=:prop_to_prog))
 ```
 
 For backward compatibility, the existing kwargs `optimize_surrogate`,
@@ -86,6 +96,7 @@ See also: [`PhaseTypeConfig`](@ref), [`PhaseTypeSurrogate`](@ref), [`PhaseTypePr
 struct ProposalConfig
     type::Symbol
     n_phases::Union{Symbol, Int, Vector{Int}}
+    structure::Symbol
     max_phases::Int
     optimize::Bool
     parameters::Union{Nothing, Any}
@@ -94,6 +105,7 @@ struct ProposalConfig
     function ProposalConfig(;
             type::Symbol = :markov,
             n_phases::Union{Symbol, Int, Vector{Int}} = :auto,
+            structure::Symbol = :unstructured,
             max_phases::Int = 5,
             optimize::Bool = true,
             parameters = nothing,
@@ -113,6 +125,10 @@ struct ProposalConfig
             all(n >= 1 for n in n_phases) || throw(ArgumentError("all n_phases must be >= 1"))
         end
         
+        # Validate structure
+        structure in (:unstructured, :prop_to_prog, :allequal) ||
+            throw(ArgumentError("structure must be :unstructured, :prop_to_prog, or :allequal, got :$structure"))
+        
         # Validate max_phases
         max_phases >= 1 || throw(ArgumentError("max_phases must be >= 1"))
         
@@ -121,7 +137,7 @@ struct ProposalConfig
             @warn "n_phases is ignored for type=:markov proposals"
         end
         
-        new(type, n_phases, max_phases, optimize, parameters, constraints)
+        new(type, n_phases, structure, max_phases, optimize, parameters, constraints)
     end
 end
 
@@ -252,55 +268,65 @@ resolve_proposal_config(proposal::ProposalConfig, model) = proposal
 Representation of a phase-type distribution for sojourn time approximation.
 
 # Fields
-- `n_phases::Int`: Number of latent phases
-- `S::Matrix{Float64}`: Sub-intensity matrix (p × p), negative diagonal
-- `initial::Vector{Float64}`: Initial distribution over phases (sums to 1)
-- `absorption::Vector{Float64}`: Absorption rates from each phase (s = -S*1)
+- `n_phases::Int`: Number of latent phases (transient states)
+- `Q::Matrix{Float64}`: Full intensity matrix ((p+1) × (p+1)), including absorbing state
+- `initial::Vector{Float64}`: Initial distribution over phases (length p, sums to 1)
 
 # Mathematical Background
 
-A phase-type distribution PH(π, S) has CDF:
+A phase-type distribution PH(π, Q) represents the time until absorption in a 
+finite-state continuous-time Markov chain. The intensity matrix Q has the form:
+
+```
+Q = [ S   s ]
+    [ 0   0 ]
+```
+
+where S is the p×p sub-intensity matrix (transient states), s is the p×1 
+absorption rate vector, and the last row is zeros (absorbing state).
+
+The CDF is:
 ```
 F(t) = 1 - π' exp(St) 𝟙
 ```
 
-where π is the initial distribution, S is the sub-intensity matrix,
+where π is the initial distribution, S is extracted from Q[1:p, 1:p],
 and 𝟙 is a vector of ones.
 
-The mean and variance are:
+For a Coxian distribution with p phases:
 ```
-E[T] = -π' S^{-1} 𝟙
-Var(T) = 2π' S^{-2} 𝟙 - (E[T])²
+Q = [-(r₁+a₁)    r₁        0     ...    a₁  ]
+    [    0    -(r₂+a₂)    r₂     ...    a₂  ]
+    [    ⋮        ⋮        ⋱      ⋱      ⋮   ]
+    [    0        0       ...   -aₚ     aₚ  ]
+    [    0        0       ...     0      0  ]
 ```
+
+where rᵢ is the progression rate to phase i+1 and aᵢ is the absorption rate.
 
 # Example
 ```julia
-# 2-phase Coxian distribution
-ph = PhaseTypeDistribution(
-    2,
-    [-2.0 1.5; 0.0 -1.0],    # S matrix
-    [1.0, 0.0],               # start in phase 1
-    [0.5, 1.0]                # absorption rates
-)
+# 2-phase Coxian distribution with Q matrix
+Q = [-2.0  1.5  0.5;    # Phase 1: prog=1.5, abs=0.5
+      0.0 -1.0  1.0;    # Phase 2: abs=1.0
+      0.0  0.0  0.0]    # Absorbing state
+ph = PhaseTypeDistribution(2, Q, [1.0, 0.0])  # Start in phase 1
 ```
 
-See also: [`PhaseTypeConfig`](@ref), [`build_phasetype_surrogate`](@ref)
+See also: [`PhaseTypeConfig`](@ref), [`absorption_rates`](@ref), [`subintensity`](@ref)
 """
 struct PhaseTypeDistribution
     n_phases::Int
-    S::Matrix{Float64}          # Sub-intensity matrix (p × p)
+    Q::Matrix{Float64}           # Full intensity matrix ((p+1) × (p+1))
     initial::Vector{Float64}     # Initial distribution (length p)
-    absorption::Vector{Float64}  # Absorption rates (length p)
     
-    function PhaseTypeDistribution(n_phases::Int, S::Matrix{Float64}, 
-                                   initial::Vector{Float64}, absorption::Vector{Float64})
-        # Validate dimensions
-        size(S, 1) == size(S, 2) == n_phases || 
-            throw(DimensionMismatch("S must be $n_phases × $n_phases"))
+    function PhaseTypeDistribution(n_phases::Int, Q::Matrix{Float64}, 
+                                   initial::Vector{Float64})
+        # Validate dimensions - Q is (n_phases+1) × (n_phases+1)
+        size(Q, 1) == size(Q, 2) == n_phases + 1 || 
+            throw(DimensionMismatch("Q must be $(n_phases+1) × $(n_phases+1)"))
         length(initial) == n_phases || 
             throw(DimensionMismatch("initial must have length $n_phases"))
-        length(absorption) == n_phases || 
-            throw(DimensionMismatch("absorption must have length $n_phases"))
         
         # Validate initial distribution
         abs(sum(initial) - 1.0) < 1e-10 || 
@@ -308,16 +334,66 @@ struct PhaseTypeDistribution
         all(initial .>= 0) || 
             throw(ArgumentError("initial distribution must be non-negative"))
         
-        # Validate S matrix structure (diagonal should be negative)
-        all(diag(S) .<= 0) || 
-            throw(ArgumentError("diagonal of S must be non-positive"))
+        # Validate Q matrix structure
+        # Diagonal of transient states should be negative
+        all(diag(Q)[1:n_phases] .<= 0) || 
+            throw(ArgumentError("diagonal of Q (transient states) must be non-positive"))
         
-        # Validate absorption rates
-        all(absorption .>= 0) || 
-            throw(ArgumentError("absorption rates must be non-negative"))
+        # Last row should be zeros (absorbing state)
+        all(Q[end, :] .== 0) || 
+            throw(ArgumentError("last row of Q (absorbing state) must be zeros"))
         
-        new(n_phases, S, initial, absorption)
+        new(n_phases, Q, initial)
     end
+end
+
+"""
+    subintensity(ph::PhaseTypeDistribution)
+
+Extract the sub-intensity matrix S from the full intensity matrix Q.
+
+The sub-intensity matrix S is the p×p upper-left block of Q, containing
+only the transitions between transient phases.
+
+# Returns
+- `Matrix{Float64}`: p × p sub-intensity matrix
+"""
+function subintensity(ph::PhaseTypeDistribution)
+    return ph.Q[1:ph.n_phases, 1:ph.n_phases]
+end
+
+"""
+    absorption_rates(ph::PhaseTypeDistribution)
+
+Extract absorption rates from the full intensity matrix Q.
+
+The absorption rate from each phase is the rate of transitioning to the
+absorbing state (last column of Q, excluding the absorbing state row).
+
+# Returns
+- `Vector{Float64}`: Absorption rate from each phase
+"""
+function absorption_rates(ph::PhaseTypeDistribution)
+    return ph.Q[1:ph.n_phases, end]
+end
+
+"""
+    progression_rates(ph::PhaseTypeDistribution)
+
+Extract progression rates from the full intensity matrix Q (for Coxian distributions).
+
+For a Coxian distribution, the progression rate from phase i to phase i+1
+is Q[i, i+1].
+
+# Returns
+- `Vector{Float64}`: Progression rates r₁, r₂, ..., rₚ₋₁ (length n_phases - 1)
+"""
+function progression_rates(ph::PhaseTypeDistribution)
+    n = ph.n_phases
+    if n == 1
+        return Float64[]
+    end
+    return [ph.Q[i, i+1] for i in 1:n-1]
 end
 
 """
@@ -331,6 +407,16 @@ Configuration options for phase-type surrogate model.
   - `:heuristic`: 2 phases for states with non-Markovian transitions, 1 for exponential
   - `Int`: Same number of phases for all transient states
   - `Vector{Int}`: Per-state phase counts (length = n_transient_states)
+- `structure::Symbol`: Coxian structure for initialization (default: `:unstructured`)
+  - `:unstructured`: All progression rates (r₁, r₂, ...) and absorption rates (a₁, a₂, ..., aₙ) 
+    are free parameters (most flexible, recommended default)
+  - `:prop_to_prog`: Absorption rates proportional to progression rates: aᵢ = c × rᵢ for i < n,
+    where c is a common constant of proportionality (Titman & Sharples 2010, Section 2)
+  - `:allequal`: All progression rates equal (r₁ = r₂ = ... = r), all absorption rates equal 
+    (a₁ = a₂ = ... = a), but r and a may differ
+  
+  Note: This controls initial structure. For MLE fitting with custom constraints, pass
+  `surrogate_constraints` to `fit()` or `set_surrogate!()` which will supersede these defaults.
 - `constraints::Bool`: Apply Titman-Sharples constraints (default: true)
 - `max_phases::Int`: Maximum phases to consider when n_phases=:auto (default: 5)
 
@@ -353,15 +439,21 @@ surrogate = build_phasetype_surrogate(tmat, config; data=my_data)
 # For MCEM surrogates - heuristic defaults without BIC fitting
 config = PhaseTypeConfig(n_phases=:heuristic)
 surrogate = build_phasetype_surrogate(tmat, config; hazards=model.hazards)
+
+# Different Coxian structures
+config = PhaseTypeConfig(n_phases=3, structure=:prop_to_prog)  # Titman-Sharples constraint
+config = PhaseTypeConfig(n_phases=3, structure=:unstructured)  # Free parameters
 ```
 """
 struct PhaseTypeConfig
     n_phases::Union{Symbol, Int, Vector{Int}}
+    structure::Symbol
     constraints::Bool
     max_phases::Int
     
     function PhaseTypeConfig(; 
             n_phases::Union{Symbol, Int, Vector{Int}} = 2,
+            structure::Symbol = :unstructured,
             constraints::Bool = true,
             max_phases::Int = 5)
         
@@ -373,9 +465,11 @@ struct PhaseTypeConfig
         else
             all(n_phases .>= 1) || throw(ArgumentError("all n_phases must be >= 1"))
         end
+        structure in (:unstructured, :prop_to_prog, :allequal) ||
+            throw(ArgumentError("structure must be :unstructured, :prop_to_prog, or :allequal, got :$structure"))
         max_phases >= 1 || throw(ArgumentError("max_phases must be >= 1"))
         
-        new(n_phases, constraints, max_phases)
+        new(n_phases, structure, constraints, max_phases)
     end
 end
 
@@ -526,182 +620,58 @@ function _select_n_phases_bic(tmat::Matrix{Int64}, data::DataFrame;
 end
 
 # =============================================================================
-# Phase-Type Moment Computations
-# =============================================================================
-
-"""
-    phasetype_mean(ph::PhaseTypeDistribution)
-
-Compute the mean of a phase-type distribution.
-
-E[T] = -π' S⁻¹ 𝟙
-"""
-function phasetype_mean(ph::PhaseTypeDistribution)
-    ones_vec = ones(ph.n_phases)
-    return -dot(ph.initial, ph.S \ ones_vec)
-end
-
-"""
-    phasetype_variance(ph::PhaseTypeDistribution)
-
-Compute the variance of a phase-type distribution.
-
-Var(T) = 2π' S⁻² 𝟙 - (E[T])²
-"""
-function phasetype_variance(ph::PhaseTypeDistribution)
-    ones_vec = ones(ph.n_phases)
-    S_inv = ph.S \ I(ph.n_phases)
-    mean_val = -dot(ph.initial, S_inv * ones_vec)
-    second_moment = 2 * dot(ph.initial, S_inv * S_inv * ones_vec)
-    return second_moment - mean_val^2
-end
-
-"""
-    phasetype_cv(ph::PhaseTypeDistribution)
-
-Compute the coefficient of variation (CV = std/mean) of a phase-type distribution.
-"""
-function phasetype_cv(ph::PhaseTypeDistribution)
-    μ = phasetype_mean(ph)
-    σ² = phasetype_variance(ph)
-    return sqrt(σ²) / μ
-end
-
-"""
-    phasetype_cdf(ph::PhaseTypeDistribution, t::Real)
-
-Compute the CDF of a phase-type distribution at time t.
-
-F(t) = 1 - π' exp(St) 𝟙
-"""
-function phasetype_cdf(ph::PhaseTypeDistribution, t::Real)
-    t <= 0 && return 0.0
-    ones_vec = ones(ph.n_phases)
-    expSt = exp(ph.S * t)
-    return 1.0 - dot(ph.initial, expSt * ones_vec)
-end
-
-"""
-    phasetype_pdf(ph::PhaseTypeDistribution, t::Real)
-
-Compute the PDF (density) of a phase-type distribution at time t.
-
-f(t) = π' exp(St) s
-
-where s is the absorption rate vector.
-"""
-function phasetype_pdf(ph::PhaseTypeDistribution, t::Real)
-    t <= 0 && return 0.0
-    expSt = exp(ph.S * t)
-    return dot(ph.initial, expSt * ph.absorption)
-end
-
-"""
-    phasetype_hazard(ph::PhaseTypeDistribution, t::Real)
-
-Compute the hazard rate of a phase-type distribution at time t.
-
-h(t) = f(t) / (1 - F(t))
-"""
-function phasetype_hazard(ph::PhaseTypeDistribution, t::Real)
-    t <= 0 && return 0.0
-    expSt = exp(ph.S * t)
-    ones_vec = ones(ph.n_phases)
-    
-    survival = dot(ph.initial, expSt * ones_vec)
-    density = dot(ph.initial, expSt * ph.absorption)
-    
-    survival <= 0 && return Inf
-    return density / survival
-end
-
-# =============================================================================
 # Coxian Phase-Type Construction
 # =============================================================================
 
 """
-    build_coxian_subintensity(λ::Vector{Float64}, μ::Vector{Float64})
+    build_coxian_intensity(λ::Vector{Float64}, μ::Vector{Float64})
 
-Build sub-intensity matrix S for a Coxian phase-type distribution.
+Build the full intensity matrix Q for a Coxian phase-type distribution.
 
 # Arguments
-- `λ::Vector{Float64}`: Transition rates between consecutive phases (length p-1)
+- `λ::Vector{Float64}`: Progression rates between consecutive phases (length p-1)
 - `μ::Vector{Float64}`: Absorption rates from each phase (length p)
 
 # Returns
-- `S::Matrix{Float64}`: p × p sub-intensity matrix
+- `Q::Matrix{Float64}`: (p+1) × (p+1) intensity matrix (including absorbing state)
 
 # Structure
-For a p-phase Coxian:
+For a p-phase Coxian, the (p+1)×(p+1) intensity matrix Q is:
 ```
-S = [-λ₁-μ₁    λ₁       0    ...    0  ]
-    [   0    -λ₂-μ₂    λ₂   ...    0  ]
-    [   ⋮       ⋮       ⋱    ⋱     ⋮  ]
-    [   0       0      ...  -λₚ₋₁-μₚ₋₁  λₚ₋₁]
-    [   0       0      ...     0    -μₚ ]
+Q = [-(λ₁+μ₁)    λ₁        0    ...    0      μ₁  ]
+    [    0    -(λ₂+μ₂)    λ₂   ...    0      μ₂  ]
+    [    ⋮        ⋮        ⋱    ⋱      ⋮       ⋮   ]
+    [    0        0       ...  -(λₚ₋₁+μₚ₋₁) λₚ₋₁  μₚ₋₁]
+    [    0        0       ...     0     -μₚ    μₚ  ]
+    [    0        0       ...     0      0      0  ]
 ```
+
+The last row is the absorbing state (all zeros).
 """
-function build_coxian_subintensity(λ::Vector{Float64}, μ::Vector{Float64})
+function build_coxian_intensity(λ::Vector{Float64}, μ::Vector{Float64})
     p = length(μ)
     length(λ) == p - 1 || throw(DimensionMismatch("λ must have length $(p-1)"))
     
-    S = zeros(p, p)
+    Q = zeros(p + 1, p + 1)
     
     for i in 1:p
-        # Diagonal: -(transition rate + absorption rate)
+        # Diagonal: -(progression rate + absorption rate)
         if i < p
-            S[i, i] = -(λ[i] + μ[i])
-            S[i, i+1] = λ[i]  # Transition to next phase
+            Q[i, i] = -(λ[i] + μ[i])
+            Q[i, i+1] = λ[i]          # Progression to next phase
         else
-            S[i, i] = -μ[i]   # Last phase: only absorption
+            Q[i, i] = -μ[i]           # Last phase: only absorption
         end
+        Q[i, p+1] = μ[i]              # Absorption (transition to absorbing state)
     end
+    # Last row (absorbing state) is already zeros
     
-    return S
+    return Q
 end
 
-# =============================================================================
-# Titman-Sharples Constraints
-# =============================================================================
-
-"""
-    apply_titman_sharples_constraints!(S::Matrix{Float64})
-
-Apply constraints from Titman & Sharples (2010) Section 2.2 to ensure
-the phase-type distribution has a valid semi-Markov interpretation.
-
-The key constraints are:
-1. Coxian structure: transitions only to next phase or absorption
-2. All transition rates positive
-3. Initial distribution concentrated on first phase
-
-Modifies S in place, zeroing non-Coxian entries and warning.
-"""
-function apply_titman_sharples_constraints!(S::Matrix{Float64})
-    n = size(S, 1)
-    modified = false
-    
-    # Verify Coxian structure
-    for i in 1:n
-        for j in 1:n
-            if j != i && j != i+1 && S[i,j] != 0
-                @warn "Non-Coxian structure detected at S[$i,$j]. Zeroing entry."
-                S[i,j] = 0.0
-                modified = true
-            end
-        end
-    end
-    
-    # Re-adjust diagonals if modified
-    if modified
-        for i in 1:n
-            row_sum = sum(S[i, :]) - S[i, i]
-            S[i, i] = -row_sum
-        end
-    end
-    
-    return S
-end
+# Legacy alias for backward compatibility
+build_coxian_subintensity(λ::Vector{Float64}, μ::Vector{Float64}) = 
+    build_coxian_intensity(λ, μ)[1:end-1, 1:end-1]
 
 # =============================================================================
 # Phase-Type Surrogate Struct (model integration in surrogates.jl)
@@ -989,8 +959,10 @@ some long via progression through all phases).
 function _build_default_phasetype(n_phases::Int)
     if n_phases == 1
         # Single phase = exponential with rate 1
-        S = reshape([-1.0], 1, 1)
-        return PhaseTypeDistribution(1, S, [1.0], [1.0])
+        # Q is 2×2: phase + absorbing state
+        Q = [-1.0  1.0;
+              0.0  0.0]
+        return PhaseTypeDistribution(1, Q, [1.0])
     else
         # Coxian-n: progression rates and absorption from each phase
         # Choose rates so mean ≈ 1 with balanced absorption
@@ -1014,11 +986,11 @@ function _build_default_phasetype(n_phases::Int)
         # Last phase: must absorb (no further progression)
         μ[n_phases] = base_rate
         
-        S = build_coxian_subintensity(λ, μ)
+        Q = build_coxian_intensity(λ, μ)
         initial = zeros(n_phases)
         initial[1] = 1.0  # Always start in phase 1
         
-        return PhaseTypeDistribution(n_phases, S, initial, μ)
+        return PhaseTypeDistribution(n_phases, Q, initial)
     end
 end
 
@@ -1080,6 +1052,8 @@ function build_expanded_Q(tmat::Matrix{Int64},
         end
         
         ph = phasetype_dists[s]
+        abs_rates = absorption_rates(ph)
+        S = subintensity(ph)  # Extract subintensity for within-state transitions
         
         # Fill in within-state phase transitions from S matrix
         for i in 1:n_phases
@@ -1091,15 +1065,15 @@ function build_expanded_Q(tmat::Matrix{Int64},
                 if i != j
                     phase_j = phases[j]
                     # S[i,j] is the rate from phase i to phase j within the state
-                    if ph.S[i, j] > 0
-                        Q[phase_i, phase_j] = ph.S[i, j]
+                    if S[i, j] > 0
+                        Q[phase_i, phase_j] = S[i, j]
                     end
                 end
             end
             
             # Between-state transitions (absorption from this phase)
             # Distribute absorption rate among destination states
-            abs_rate = ph.absorption[i]
+            abs_rate = abs_rates[i]
             if abs_rate > 0 && !isempty(dest_states)
                 if isnothing(transition_rates)
                     # Distribute equally among destinations
@@ -1175,18 +1149,20 @@ function update_expanded_Q(surrogate::PhaseTypeSurrogate,
         end
         
         ph = phasetype_dists[s]
+        abs_rates = absorption_rates(ph)
+        S = subintensity(ph)  # Extract subintensity for within-state transitions
         
         # Within-state phase transitions
         for i in 1:n_phases
             phase_i = phases[i]
             for j in 1:n_phases
-                if i != j && ph.S[i, j] > 0
-                    Q[phase_i, phases[j]] = ph.S[i, j]
+                if i != j && S[i, j] > 0
+                    Q[phase_i, phases[j]] = S[i, j]
                 end
             end
             
             # Between-state transitions using provided rates
-            abs_rate = ph.absorption[i]
+            abs_rate = abs_rates[i]
             if abs_rate > 0
                 # Distribute according to transition_rates
                 total_rate_out = sum(get(transition_rates, (s, d), 0.0) 
@@ -2353,103 +2329,4 @@ function phasetype_parameters_to_Q(fitted_model, surrogate::PhaseTypeSurrogate)
     end
     
     return Q
-end
-
-# =============================================================================
-# Utility Functions for Phase-Type Distributions
-# =============================================================================
-
-"""
-    phasetype_sample(ph::PhaseTypeDistribution)
-
-Sample a sojourn time from a phase-type distribution.
-
-Uses the representation as absorption time in a Markov chain.
-"""
-function phasetype_sample(ph::PhaseTypeDistribution)
-    # Sample initial phase
-    phase = StatsBase.sample(1:ph.n_phases, Weights(ph.initial))
-    
-    total_time = 0.0
-    
-    while true
-        # Total exit rate from current phase
-        exit_rate = -ph.S[phase, phase]
-        
-        if exit_rate <= 0
-            # Absorbing phase reached (shouldn't happen in transient chain)
-            break
-        end
-        
-        # Time in current phase
-        sojourn = randexp() / exit_rate
-        total_time += sojourn
-        
-        # Determine next event: absorption or transition to next phase
-        if phase < ph.n_phases && ph.S[phase, phase+1] > 0
-            # Probability of going to next phase vs absorption
-            trans_rate = ph.S[phase, phase+1]
-            abs_rate = ph.absorption[phase]
-            
-            if rand() < trans_rate / (trans_rate + abs_rate)
-                phase += 1  # Transition to next phase
-            else
-                break  # Absorption
-            end
-        else
-            # Last phase or no transition: must absorb
-            break
-        end
-    end
-    
-    return total_time
-end
-
-"""
-    validate_phasetype(ph::PhaseTypeDistribution; verbose::Bool=false)
-
-Validate a phase-type distribution by checking moment accuracy.
-
-# Arguments
-- `ph::PhaseTypeDistribution`: Distribution to validate
-- `verbose::Bool=false`: Print diagnostic information
-
-# Returns
-- `Bool`: True if validation passes
-"""
-function validate_phasetype(ph::PhaseTypeDistribution; verbose::Bool=false)
-    # Check row sums approximately zero
-    n = ph.n_phases
-    row_sums = [sum(ph.S[i,:]) + ph.absorption[i] for i in 1:n]
-    
-    max_error = maximum(abs.(row_sums))
-    if max_error > 1e-10
-        verbose && @warn "Row sums not zero: max error = $max_error"
-        return false
-    end
-    
-    # Check mean and variance are positive
-    μ = phasetype_mean(ph)
-    σ² = phasetype_variance(ph)
-    
-    if μ <= 0
-        verbose && @warn "Non-positive mean: $μ"
-        return false
-    end
-    
-    if σ² < 0
-        verbose && @warn "Negative variance: $σ²"
-        return false
-    end
-    
-    if verbose
-        cv = sqrt(σ²) / μ
-        println("PH Distribution validated:")
-        println("  n_phases = $(ph.n_phases)")
-        println("  mean = $μ")
-        println("  variance = $σ²")
-        println("  CV = $cv")
-    end
-    
-    return true
 end

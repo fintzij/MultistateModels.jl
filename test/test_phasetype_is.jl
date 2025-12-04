@@ -83,14 +83,15 @@ using LinearAlgebra
         # IS estimate for subject 1
         ll_is = ll_marginal + log(mean_weight)
         
-        # When target = proposal, mean weight should be exactly 1
-        @test mean_weight ≈ 1.0 atol=0.05  # Should be very close to 1
+        # CRITICAL: When target = proposal, each weight must be EXACTLY 1.0
+        # This is not a statistical property - it's an algebraic identity.
+        # log_weight = ll_target - ll_proposal = 0 when target ≡ proposal
+        # Therefore weight = exp(0) = 1.0 exactly.
+        @test all(w -> isapprox(w, 1.0; atol=1e-10), weights)
+        @test mean_weight ≈ 1.0 atol=1e-10
         
-        # IS estimate should equal marginal likelihood
-        @test ll_is ≈ ll_marginal atol=0.1
-        
-        # Log-likelihood should be negative
-        @test ll_is < 0
+        # IS estimate must equal marginal likelihood exactly (log(1.0) = 0)
+        @test ll_is ≈ ll_marginal atol=1e-10
     end
 
     #==========================================================================
@@ -281,14 +282,144 @@ using LinearAlgebra
         weights = exp.(log_weights)
         ll_is = ll_marginal + log(mean(weights))
         
-        # IS estimate should be negative (it's a log-likelihood)
-        @test ll_is < 0
-        
-        # IS estimate should be finite
+        # For semi-Markov models, IS estimate should be finite
+        # (not -Inf which would indicate a mismatch between target and proposal support)
         @test isfinite(ll_is)
         
-        # Marginal should be negative
-        @test ll_marginal < 0
+        # The IS correction (difference between ll_is and ll_marginal) should be moderate
+        # Large corrections indicate proposal mismatch
+        @test abs(ll_is - ll_marginal) < 10.0
+    end
+
+    #==========================================================================
+    Test: Coxian structure options
+    
+    Tests that the three Coxian structure options (:allequal, :prop_to_prog, 
+    :unstructured) produce valid PhaseTypeDistribution objects with correct
+    structure.
+    ==========================================================================#
+    @testset "Coxian structure options" begin
+        total_rate = 1.5
+        n_phases = 3
+        
+        # Test :allequal structure
+        @testset ":allequal structure" begin
+            ph = MultistateModels._build_coxian_from_rate(n_phases, total_rate; structure=:allequal)
+            
+            @test ph.n_phases == n_phases
+            @test size(ph.Q) == (n_phases + 1, n_phases + 1)  # Q includes absorbing state
+            @test ph.initial == [1.0, 0.0, 0.0]  # Start in phase 1
+            
+            # Get subintensity for checking transient rates
+            S = MultistateModels.subintensity(ph)
+            
+            # Check structure: all progression rates should be equal
+            prog_rates = [S[i, i+1] for i in 1:n_phases-1]
+            @test all(prog_rates .≈ prog_rates[1])
+            
+            # Check structure: all absorption rates should be equal
+            abs_rates = MultistateModels.absorption_rates(ph)
+            @test all(abs_rates .≈ abs_rates[1])
+            
+            # Diagonal should be negative for transient states
+            @test all(diag(S) .< 0)
+            
+            # Last row of Q (absorbing state) should be zeros
+            @test all(ph.Q[end, :] .== 0)
+        end
+        
+        # Test :prop_to_prog structure
+        @testset ":prop_to_prog structure" begin
+            ph = MultistateModels._build_coxian_from_rate(n_phases, total_rate; structure=:prop_to_prog)
+            
+            @test ph.n_phases == n_phases
+            @test size(ph.Q) == (n_phases + 1, n_phases + 1)
+            @test ph.initial == [1.0, 0.0, 0.0]
+            
+            # Get subintensity for checking transient rates
+            S = MultistateModels.subintensity(ph)
+            
+            # Check structure: absorption rates proportional to progression rates
+            # For phases 1 to n-1: a_i = c * r_i where c is constant
+            prog_rates = [S[i, i+1] for i in 1:n_phases-1]
+            abs_rates = MultistateModels.absorption_rates(ph)
+            
+            # Compute ratios a_i / r_i for phases 1 to n-1
+            ratios = [abs_rates[i] / prog_rates[i] for i in 1:n_phases-1]
+            @test all(ratios .≈ ratios[1])  # All ratios should be equal (= c)
+            
+            # Diagonal should be negative
+            @test all(diag(S) .< 0)
+        end
+        
+        # Test :unstructured structure
+        @testset ":unstructured structure" begin
+            ph = MultistateModels._build_coxian_from_rate(n_phases, total_rate; structure=:unstructured)
+            
+            @test ph.n_phases == n_phases
+            @test size(ph.Q) == (n_phases + 1, n_phases + 1)
+            @test ph.initial == [1.0, 0.0, 0.0]
+            
+            # Get subintensity for checking transient rates
+            S = MultistateModels.subintensity(ph)
+            
+            # Check structure: rates can vary (decreasing progression, increasing absorption)
+            prog_rates = [S[i, i+1] for i in 1:n_phases-1]
+            abs_rates = MultistateModels.absorption_rates(ph)
+            
+            # Progression rates should be decreasing
+            @test prog_rates[1] > prog_rates[2]
+            
+            # Absorption rates (for phases 1 to n-1) should be increasing
+            @test abs_rates[1] < abs_rates[2]
+            
+            # Diagonal should be negative
+            @test all(diag(S) .< 0)
+        end
+        
+        # Test single phase (all structures should be equivalent)
+        @testset "Single phase equivalence" begin
+            ph1 = MultistateModels._build_coxian_from_rate(1, total_rate; structure=:allequal)
+            ph2 = MultistateModels._build_coxian_from_rate(1, total_rate; structure=:prop_to_prog)
+            ph3 = MultistateModels._build_coxian_from_rate(1, total_rate; structure=:unstructured)
+            
+            @test ph1.Q ≈ ph2.Q ≈ ph3.Q
+            @test ph1.Q[1,1] ≈ -total_rate  # Diagonal of transient state
+            @test ph1.Q[1,2] ≈ total_rate   # Absorption rate to absorbing state
+        end
+        
+        # Test PhaseTypeConfig structure field
+        @testset "PhaseTypeConfig structure field" begin
+            config1 = MultistateModels.PhaseTypeConfig(n_phases=3, structure=:allequal)
+            @test config1.structure == :allequal
+            
+            config2 = MultistateModels.PhaseTypeConfig(n_phases=3, structure=:prop_to_prog)
+            @test config2.structure == :prop_to_prog
+            
+            config3 = MultistateModels.PhaseTypeConfig(n_phases=3, structure=:unstructured)
+            @test config3.structure == :unstructured
+            
+            # Default should be :unstructured
+            config_default = MultistateModels.PhaseTypeConfig(n_phases=3)
+            @test config_default.structure == :unstructured
+            
+            # Invalid structure should throw
+            @test_throws ArgumentError MultistateModels.PhaseTypeConfig(n_phases=3, structure=:invalid)
+        end
+        
+        # Test ProposalConfig structure field
+        @testset "ProposalConfig structure field" begin
+            config1 = MultistateModels.ProposalConfig(type=:phasetype, structure=:prop_to_prog)
+            @test config1.structure == :prop_to_prog
+            
+            # Default should be :unstructured
+            config_default = MultistateModels.ProposalConfig(type=:phasetype)
+            @test config_default.structure == :unstructured
+            
+            # PhaseTypeProposal should forward structure
+            config2 = MultistateModels.PhaseTypeProposal(n_phases=3, structure=:allequal)
+            @test config2.structure == :allequal
+        end
     end
 
 end

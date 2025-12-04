@@ -163,23 +163,23 @@ end
 
 @assert test_time_transform_spline(tt_model) "Time transform spline test failed"
 
-# Test that the _maybe_transform functions work through the full call path
+# Test that eval_hazard and eval_cumhaz work through the full call path
 function test_full_transform_path(model)
     for (i, haz) in enumerate(model.hazards)
         pars = get_parameters(model, i, scale=:log)
         covars = haz.has_covariates ? (x = 0.3,) : NamedTuple()
         
         # Call through the transform path
-        h_val = MultistateModels._maybe_transform_hazard(
-            haz, pars, covars, 0.5;
+        h_val = MultistateModels.eval_hazard(
+            haz, 0.5, pars, covars;
             apply_transform=true,
             cache_context=nothing,
             hazard_slot=i
         )
         @assert isfinite(h_val) "Full path hazard $i is not finite"
         
-        H_val = MultistateModels._maybe_transform_cumulhaz(
-            haz, pars, covars, 0.0, 1.0;
+        H_val = MultistateModels.eval_cumhaz(
+            haz, 0.0, 1.0, pars, covars;
             apply_transform=true,
             cache_context=nothing,
             hazard_slot=i
