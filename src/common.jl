@@ -296,6 +296,74 @@ struct RuntimeSplineHazard <: _SplineHazard
     shared_baseline_key::Union{Nothing,SharedBaselineKey}
 end
 
+"""
+    PhaseTypeCoxianHazard <: _MarkovHazard
+
+Runtime hazard type for phase-type (Coxian) transitions on the expanded state space.
+
+This type represents the internal structure of a phase-type hazard after model
+construction. It inherits from `_MarkovHazard` because the expanded state space
+is Markovian (each phase transition is exponential).
+
+# Coxian Structure
+
+For a transition s → d with n phases, this hazard manages:
+- Progression rates λ₁...λₙ₋₁ (between phases within origin state)
+- Exit rates μ₁...μₙ (from each phase to destination state)
+
+The expanded hazard from phase i has rate:
+- λᵢ + μᵢ (for i < n)
+- μₙ (for i = n, final phase)
+
+# Fields
+
+**Standard hazard fields:**
+- `hazname::Symbol`: Name identifier (e.g., :h12)
+- `statefrom::Int64`: Observed origin state
+- `stateto::Int64`: Observed destination state
+- `family::String`: Always "pt"
+- `parnames::Vector{Symbol}`: Parameter names [λ₁...λₙ₋₁, μ₁...μₙ, covariates...]
+- `npar_baseline::Int`: Baseline parameters (2n - 1)
+- `npar_total::Int`: Total parameters (baseline + covariates)
+- `hazard_fn::Function`: Total hazard out of current phase
+- `cumhaz_fn::Function`: Cumulative hazard
+- `has_covariates::Bool`: Whether covariates are present
+- `covar_names::Vector{Symbol}`: Pre-extracted covariate names
+- `metadata::HazardMetadata`: Tang/linpred metadata
+- `shared_baseline_key`: Tang baseline sharing key
+
+**Phase-type specific fields:**
+- `n_phases::Int`: Number of Coxian phases
+- `phase_index::Int`: Which phase this hazard represents (1 to n_phases)
+- `is_progression::Bool`: True if this is a progression hazard (λ), false if exit (μ)
+- `progression_param_indices::UnitRange{Int}`: Indices of λ parameters in parnames
+- `exit_param_indices::UnitRange{Int}`: Indices of μ parameters in parnames
+
+See also: [`PhaseTypeHazardSpec`](@ref), [`PhaseTypeModel`](@ref)
+"""
+struct PhaseTypeCoxianHazard <: _MarkovHazard
+    hazname::Symbol
+    statefrom::Int64                 # observed state from
+    stateto::Int64                   # observed state to
+    family::String                   # "pt"
+    parnames::Vector{Symbol}         # [λ₁, ..., λₙ₋₁, μ₁, ..., μₙ, covariates...]
+    npar_baseline::Int64             # 2n - 1
+    npar_total::Int64                # baseline + covariates
+    hazard_fn::Function              # hazard function (t, pars, covars) -> rate
+    cumhaz_fn::Function              # cumulative hazard function
+    has_covariates::Bool
+    covar_names::Vector{Symbol}
+    metadata::HazardMetadata
+    shared_baseline_key::Union{Nothing, SharedBaselineKey}
+    
+    # Phase-type specific fields
+    n_phases::Int                    # number of Coxian phases
+    phase_index::Int                 # which phase this hazard represents (1..n_phases)
+    is_progression::Bool             # true = progression (λ), false = exit (μ)
+    progression_param_indices::UnitRange{Int}  # indices of λ params (1:n-1)
+    exit_param_indices::UnitRange{Int}         # indices of μ params (n:2n-1)
+end
+
 # =============================================================================
 # User-Facing Hazard Specification Types
 # =============================================================================
@@ -372,6 +440,69 @@ struct SplineHazard <: HazardFunction
     metadata::HazardMetadata
 end
 
+"""
+    PhaseTypeHazardSpec(hazard, family, statefrom, stateto, n_phases, metadata)
+
+User-facing specification for a phase-type (Coxian) hazard.
+Created by `Hazard(:pt, ...)` and converted to internal types during model construction.
+
+A phase-type hazard models the sojourn time as absorption in a Coxian Markov chain
+with `n_phases` latent phases. This provides a flexible family of distributions
+(including exponential as n_phases=1) while maintaining Markovian structure.
+
+# Parameterization (Coxian)
+
+For a transition s → d with n phases, the parameter vector contains:
+- λ₁, ..., λₙ₋₁: progression rates between phases (n-1 parameters)
+- μ₁, ..., μₙ: exit rates to destination state (n parameters)
+
+Total baseline parameters: 2n - 1
+
+# Fields
+- `hazard`: StatsModels.jl formula for covariates
+- `family`: Always "pt"
+- `statefrom`: Origin state number
+- `stateto`: Destination state number  
+- `n_phases`: Number of Coxian phases (≥ 1)
+- `structure`: Coxian structure constraint (`:unstructured`, `:allequal`, or `:prop_to_prog`)
+- `metadata`: HazardMetadata for time_transform and linpred_effect
+
+# Structures
+- `:unstructured` (default): All λᵢ and μᵢ are free parameters
+- `:allequal`: All λᵢ equal, all μᵢ equal (2 free parameters + covariates)
+- `:prop_to_prog`: μᵢ = c × λᵢ for i < n (Titman-Sharples constraint)
+
+# Example
+```julia
+# 3-phase Coxian hazard for transition 1 → 2
+h = Hazard(@formula(0 ~ 1 + age), :pt, 1, 2; n_phases=3)
+
+# With all-equal constraint (Erlang-like)
+h = Hazard(:pt, 1, 2; n_phases=3, coxian_structure=:allequal)
+```
+
+See also: [`PhaseTypeCoxianHazard`](@ref), [`PhaseTypeModel`](@ref)
+"""
+struct PhaseTypeHazardSpec <: HazardFunction
+    hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
+    family::String                     # "pt"
+    statefrom::Int64
+    stateto::Int64
+    n_phases::Int                      # number of Coxian phases (≥1)
+    structure::Symbol                  # :unstructured, :allequal, or :prop_to_prog
+    metadata::HazardMetadata
+    
+    function PhaseTypeHazardSpec(hazard::StatsModels.FormulaTerm, family::String,
+                                  statefrom::Int64, stateto::Int64, n_phases::Int,
+                                  structure::Symbol, metadata::HazardMetadata)
+        family == "pt" || throw(ArgumentError("PhaseTypeHazardSpec family must be \"pt\""))
+        n_phases >= 1 || throw(ArgumentError("n_phases must be ≥ 1, got $n_phases"))
+        structure in (:unstructured, :allequal, :prop_to_prog) ||
+            throw(ArgumentError("structure must be :unstructured, :allequal, or :prop_to_prog, got :$structure"))
+        new(hazard, family, statefrom, stateto, n_phases, structure, metadata)
+    end
+end
+
 # -----------------------------------------------------------------------------
 # Baseline signature helpers (Tang shared trajectories)
 # -----------------------------------------------------------------------------
@@ -420,6 +551,46 @@ function shared_baseline_key(h::SplineHazard, runtime_family::AbstractString)
     sig = baseline_signature(h, runtime_family)
     sig === nothing && return nothing
     return SharedBaselineKey(h.statefrom, sig)
+end
+
+function baseline_signature(h::PhaseTypeHazardSpec, runtime_family::AbstractString)
+    parts = (:phasetype, Symbol(runtime_family), h.n_phases)
+    return UInt64(hash(parts))
+end
+
+function shared_baseline_key(h::PhaseTypeHazardSpec, runtime_family::AbstractString)
+    h.metadata.time_transform || return nothing
+    sig = baseline_signature(h, runtime_family)
+    sig === nothing && return nothing
+    return SharedBaselineKey(h.statefrom, sig)
+end
+
+# =============================================================================
+# Hazard Classification Helpers
+# =============================================================================
+
+"""
+    _is_markov_hazard(hazard::_Hazard) -> Bool
+
+Check if a hazard is Markovian (time-homogeneous).
+Returns true for `_MarkovHazard` subtypes and degree-0 splines.
+
+This is the authoritative check for model classification - models with all
+Markov hazards are classified as `:markov`, otherwise `:semi_markov`.
+
+Note: `PhaseTypeCoxianHazard <: _MarkovHazard`, so phase-type hazards are
+considered Markovian (the expanded state space is Markovian).
+"""
+@inline function _is_markov_hazard(hazard::_Hazard)
+    # MarkovHazard and PhaseTypeCoxianHazard are Markovian
+    hazard isa _MarkovHazard && return true
+    
+    # Degree-0 splines are piecewise constant (step hazards) - Markovian
+    if hazard isa RuntimeSplineHazard
+        return hazard.degree == 0
+    end
+    
+    return false
 end
 
 """
@@ -578,6 +749,105 @@ mutable struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     modelcall::NamedTuple
 end
 
+# =============================================================================
+# Phase-Type Hazard Model (for :pt family hazards)
+# =============================================================================
+
+# Forward declaration for PhaseTypeMappings (defined in phasetype.jl)
+# The actual struct is defined in phasetype.jl and included after common.jl
+
+"""
+    PhaseTypeModel <: MultistateMarkovProcess
+
+A multistate model with phase-type (Coxian) hazards.
+
+This is a wrapper around an expanded Markov model where states with `:pt` hazards
+are split into multiple latent phases. The user interacts with the model in terms
+of the original observed states and phase-type parameters (λ progression rates, 
+μ exit rates), while internally the model operates on the expanded state space.
+
+Phase-type models are classified as Markov processes (`<: MultistateMarkovProcess`)
+because the expanded state space is Markovian - each phase transition follows an
+exponential distribution.
+
+# Fields
+
+**Original (observed) state space:**
+- `data::DataFrame`: Original data on observed states
+- `parameters::NamedTuple`: Parameters in phase-type parameterization (λ, μ)
+- `tmat::Matrix{Int64}`: Original transition matrix
+- `hazards_spec::Vector{<:HazardFunction}`: Original user hazard specifications
+
+**Expanded (internal) state space:**
+- `expanded_data::DataFrame`: Data expanded to phase-level observations
+- `expanded_parameters::NamedTuple`: Parameters for expanded Markov model
+- `expanded_model::MultistateMarkovProcess`: The internal expanded Markov model
+- `mappings::PhaseTypeMappings`: Bidirectional state space mappings
+
+**Model metadata:**
+- `totalhazards::Vector{_TotalHazard}`: Total hazards (on expanded space)
+- `emat::Matrix{Float64}`: Emission matrix (for panel data)
+- `hazkeys::Dict{Symbol, Int64}`: Hazard name → index mapping
+- `subjectindices::Vector{Vector{Int64}}`: Subject data indices
+- `SubjectWeights::Vector{Float64}`: Subject-level weights
+- `ObservationWeights::Union{Nothing, Vector{Float64}}`: Observation weights
+- `CensoringPatterns::Matrix{Float64}`: Censoring pattern matrix
+- `markovsurrogate::Union{Nothing, MarkovSurrogate}`: Markov surrogate (if any)
+- `modelcall::NamedTuple`: Model specification call
+
+# Behavior
+
+- **Fitting**: Uses the expanded Markov model internally; results are translated back
+  to phase-type parameters
+- **Simulation**: Can output paths on expanded or collapsed state space via `expanded` kwarg
+- **Likelihood**: Computed on expanded state space using standard Markov likelihood
+
+# Example
+
+```julia
+# Specify model with phase-type hazard
+h12 = Hazard(@formula(0 ~ 1), :pt, 1, 2; n_phases=3)
+h23 = Hazard(@formula(0 ~ 1), :exp, 2, 3)
+model = multistatemodel(data, (h12, h23))
+
+# Fit (internally uses expanded Markov model)
+fitted = fit(model)
+
+# Simulate (returns collapsed paths by default)
+sim = simulate(model; paths=true)
+sim_expanded = simulate(model; paths=true, expanded=true)
+```
+
+See also: [`PhaseTypeHazardSpec`](@ref), [`PhaseTypeMappings`](@ref), [`PhaseTypeFittedModel`](@ref)
+"""
+mutable struct PhaseTypeModel <: MultistateMarkovProcess
+    # Expanded (internal) state space - these are standard fields for loglik compatibility
+    # Note: `data`, `tmat`, `parameters` MUST contain expanded versions for loglik_markov
+    data::DataFrame                  # Expanded data (phase-type internal states)
+    tmat::Matrix{Int64}              # Expanded transition matrix
+    parameters::NamedTuple           # Expanded parameters (for loglik_markov)
+    expanded_model::Any              # MultistateMarkovProcess (expanded), may be nothing
+    mappings::Any                    # PhaseTypeMappings (defined in phasetype.jl)
+    
+    # Original (observed) state space - user-facing
+    original_data::DataFrame         # Original user data (observed states)
+    original_tmat::Matrix{Int64}     # Original transition matrix
+    original_parameters::NamedTuple  # Phase-type parameterization (λ, μ) for users
+    hazards_spec::Vector{<:HazardFunction}  # Original user hazard specs
+    
+    # Standard model fields (on expanded space for internal operations)
+    hazards::Vector{_MarkovHazard}   # Expanded hazards (all Markov)
+    totalhazards::Vector{_TotalHazard}
+    emat::Matrix{Float64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    SubjectWeights::Vector{Float64}
+    ObservationWeights::Union{Nothing, Vector{Float64}}
+    CensoringPatterns::Matrix{Float64}
+    markovsurrogate::Union{Nothing, MarkovSurrogate}
+    modelcall::NamedTuple
+end
+
 """
     MultistateModelFitted
 
@@ -718,4 +988,297 @@ struct SubjectCovarCache
     tstart::Vector{Float64}   # Start times for covariate intervals
     covar_data::DataFrame     # Covariate columns only (no id, tstart, tstop, etc.)
 end
+
+# =============================================================================
+# AD Backend Selection
+# =============================================================================
+
+"""
+    ADBackend
+
+Abstract type for automatic differentiation backend selection.
+Enables switching between ForwardDiff (forward-mode, mutation-tolerant) and 
+Enzyme (reverse-mode, mutation-free) based on problem characteristics.
+"""
+abstract type ADBackend end
+
+"""
+    ForwardDiffBackend <: ADBackend
+
+Use ForwardDiff.jl for automatic differentiation.
+
+**Characteristics:**
+- Forward-mode AD: O(n) cost where n = number of parameters
+- Efficient for small to medium parameter counts (< ~100 params)
+- Tolerates in-place mutation in the objective function
+- Default choice for most multistate models
+
+**When to use:**
+- Models with few parameters (exponential, Weibull hazards)
+- When the mutating likelihood implementation is preferred for speed
+"""
+struct ForwardDiffBackend <: ADBackend end
+
+"""
+    EnzymeBackend <: ADBackend
+
+Use Enzyme.jl for automatic differentiation.
+
+**Characteristics:**
+- Reverse-mode AD: O(1) cost in parameters (scales with output size)  
+- Efficient for large parameter counts (> ~100 params)
+- Requires mutation-free objective function
+- Uses `loglik_*_functional` variants internally
+
+**When to use:**
+- Models with many parameters (complex spline hazards, many covariates)
+- Neural ODE hazards (future extension)
+- When Hessian computation is also needed efficiently
+
+**Requirements:**
+Enzyme requires the likelihood function to be mutation-free. The package
+automatically selects functional (non-mutating) likelihood implementations
+when this backend is specified.
+
+**Note:** Enzyme.jl Julia 1.12 support is experimental (as of Dec 2024).
+For Julia 1.12, use ForwardDiffBackend or MooncakeBackend.
+"""
+struct EnzymeBackend <: ADBackend end
+
+"""
+    MooncakeBackend <: ADBackend
+
+Use Mooncake.jl for automatic differentiation (reverse-mode).
+
+**Characteristics:**
+- Reverse-mode AD: O(1) cost in number of parameters
+- Efficient for large parameter counts (> ~100 params)  
+- Pure Julia, good version compatibility
+- Supports mutation (unlike Zygote)
+
+**Works well for:**
+- Semi-Markov models (no matrix exponential in likelihood)
+- Models with many parameters where reverse-mode efficiency matters
+
+**Known limitation (as of Dec 2024):**
+Does NOT work for Markov panel models. The matrix exponential computation
+uses LAPACK.gebal! internally, which Mooncake cannot differentiate through.
+ChainRules.jl has an rrule for exp(::Matrix), but that rule itself calls
+LAPACK, so Mooncake still fails. Use `ForwardDiffBackend()` for Markov models.
+"""
+struct MooncakeBackend <: ADBackend end
+
+"""
+    default_ad_backend(n_params::Int; is_markov::Bool=false) -> ADBackend
+
+Select default AD backend based on parameter count and model type.
+
+# Arguments
+- `n_params::Int`: Number of parameters in the model
+- `is_markov::Bool=false`: Whether the model uses Markov panel likelihoods
+
+# Returns
+- `ADBackend`: ForwardDiff for Markov models, Mooncake for large non-Markov models
+
+# Notes
+ForwardDiff is used for Markov models because matrix exponential differentiation
+requires forward-mode AD (Mooncake/Enzyme cannot differentiate LAPACK calls).
+For non-Markov models with many parameters, Mooncake's reverse-mode is more efficient.
+"""
+function default_ad_backend(n_params::Int; is_markov::Bool=false)
+    if is_markov
+        # Markov models require ForwardDiff due to matrix exponential
+        return ForwardDiffBackend()
+    else
+        # For non-Markov, use reverse-mode for large parameter counts
+        return n_params < 100 ? ForwardDiffBackend() : MooncakeBackend()
+    end
+end
+
+"""
+    get_optimization_ad(backend::ADBackend)
+
+Convert ADBackend to Optimization.jl AD specification.
+"""
+get_optimization_ad(::ForwardDiffBackend) = Optimization.AutoForwardDiff()
+get_optimization_ad(::EnzymeBackend) = Optimization.AutoEnzyme()
+get_optimization_ad(::MooncakeBackend) = Optimization.AutoMooncake()
+
+# =============================================================================
+# Threading Configuration
+# =============================================================================
+#
+# Parallelization support for likelihood evaluation. Uses Julia's built-in 
+# Threads.@threads with physical core detection to avoid hyperthreading overhead.
+#
+# Thread safety considerations:
+# - Each subject/path computes an independent likelihood contribution
+# - Thread-local accumulators are used for the final sum
+# - Shared read-only data (TPM books, hazards) is accessed without locks
+# - No mutation of shared state during parallel execution
+#
+# Usage:
+#   fit(model; parallel=true)  # Enable parallel likelihood evaluation
+#   fit(model; parallel=false) # Sequential evaluation (default for AD)
+#   fit(model; nthreads=4)     # Use exactly 4 threads
+#
+# =============================================================================
+
+"""
+    get_physical_cores() -> Int
+
+Detect the number of physical CPU cores (excluding hyperthreads).
+
+Uses Sys.CPU_THREADS as total threads, then estimates physical cores by
+dividing by 2 on systems that typically have 2 threads per core (Intel/AMD x86).
+On ARM (Apple Silicon), threads typically equal physical cores.
+
+Returns at least 1 to ensure valid thread count.
+"""
+function get_physical_cores()
+    total_threads = Sys.CPU_THREADS
+    # Heuristic: ARM typically doesn't hyperthread, x86 does
+    # Check architecture via pointer size and platform hints
+    if Sys.ARCH == :aarch64 || Sys.ARCH == :arm64
+        # Apple Silicon and ARM: threads ≈ physical cores
+        return max(1, total_threads)
+    else
+        # x86: assume 2 threads per core (hyperthreading)
+        return max(1, total_threads ÷ 2)
+    end
+end
+
+"""
+    recommended_nthreads(; task_count::Int=0) -> Int
+
+Recommend number of threads for parallel likelihood evaluation.
+
+# Arguments
+- `task_count::Int=0`: Number of parallel tasks (subjects/paths). If 0, ignored.
+
+# Returns
+Number of threads to use, considering:
+1. Available Julia threads (Threads.nthreads())
+2. Physical cores (to avoid hyperthreading overhead)
+3. Task count (no benefit from more threads than tasks)
+
+# Notes
+- Returns min(available_threads, physical_cores, task_count)
+- Leaves 1 core free for main thread if > 4 physical cores available
+- Returns 1 if threading provides no benefit
+"""
+function recommended_nthreads(; task_count::Int=0)
+    available = Threads.nthreads()
+    physical = get_physical_cores()
+    
+    # Don't use more threads than physical cores
+    n = min(available, physical)
+    
+    # Leave 1 core for main thread on larger systems
+    if n > 4
+        n = n - 1
+    end
+    
+    # Don't use more threads than tasks
+    if task_count > 0
+        n = min(n, task_count)
+    end
+    
+    # At least 1 thread
+    return max(1, n)
+end
+
+"""
+    ThreadingConfig
+
+Configuration for parallel likelihood evaluation.
+
+# Fields
+- `enabled::Bool`: Whether parallelization is active
+- `nthreads::Int`: Number of threads to use
+- `min_batch_size::Int`: Minimum tasks per thread to justify overhead
+"""
+struct ThreadingConfig
+    enabled::Bool
+    nthreads::Int
+    min_batch_size::Int
+end
+
+"""
+    ThreadingConfig(; parallel=false, nthreads=nothing, min_batch_size=10)
+
+Create threading configuration for likelihood evaluation.
+
+# Arguments
+- `parallel::Bool=false`: Enable parallel execution
+- `nthreads::Union{Nothing,Int}=nothing`: Number of threads. If nothing, auto-detect.
+- `min_batch_size::Int=10`: Minimum tasks per thread to justify threading overhead
+
+# Notes
+When `parallel=true` and `nthreads=nothing`, uses `recommended_nthreads()` for auto-detection.
+"""
+function ThreadingConfig(; parallel::Bool=false, nthreads::Union{Nothing,Int}=nothing, 
+                          min_batch_size::Int=10)
+    if !parallel
+        return ThreadingConfig(false, 1, min_batch_size)
+    end
+    
+    n = isnothing(nthreads) ? recommended_nthreads() : nthreads
+    
+    # Disable if only 1 thread available
+    if n <= 1
+        return ThreadingConfig(false, 1, min_batch_size)
+    end
+    
+    return ThreadingConfig(true, n, min_batch_size)
+end
+
+"""
+    should_parallelize(config::ThreadingConfig, task_count::Int) -> Bool
+
+Determine whether to use parallel execution for given task count.
+
+Returns true if:
+1. Threading is enabled in config
+2. Task count exceeds min_batch_size × nthreads threshold
+"""
+function should_parallelize(config::ThreadingConfig, task_count::Int)
+    config.enabled || return false
+    return task_count >= config.nthreads * config.min_batch_size
+end
+
+# Global threading configuration (can be overridden per-call)
+const _GLOBAL_THREADING_CONFIG = Ref(ThreadingConfig(parallel=false))
+
+"""
+    set_threading_config!(; parallel=false, nthreads=nothing, min_batch_size=10)
+
+Set global threading configuration for likelihood evaluation.
+
+# Example
+```julia
+# Enable parallel likelihood evaluation globally
+set_threading_config!(parallel=true)
+
+# Use exactly 4 threads
+set_threading_config!(parallel=true, nthreads=4)
+
+# Disable parallelization
+set_threading_config!(parallel=false)
+```
+"""
+function set_threading_config!(; parallel::Bool=false, nthreads::Union{Nothing,Int}=nothing,
+                                 min_batch_size::Int=10)
+    _GLOBAL_THREADING_CONFIG[] = ThreadingConfig(parallel=parallel, nthreads=nthreads,
+                                                  min_batch_size=min_batch_size)
+    return _GLOBAL_THREADING_CONFIG[]
+end
+
+"""
+    get_threading_config() -> ThreadingConfig
+
+Get current global threading configuration.
+"""
+get_threading_config() = _GLOBAL_THREADING_CONFIG[]
+
 

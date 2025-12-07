@@ -10,7 +10,7 @@ format:
 
 # Test Coverage
 
-_Last updated: 2025-06-03 UTC_
+_Last updated: 2025-12-05 UTC_
 
 ## Overview
 - `Pkg.test()` loads fixtures via `test/runtests.jl`, so every `include("test_*.jl")` automatically participates in CI.
@@ -18,7 +18,7 @@ _Last updated: 2025-06-03 UTC_
 - Long-run simulation or integration tests live under `test/longtest_*.jl`; they provide probabilistic sanity checks but are not the focus of this documentation. See `test/reports/simulation_longtests.md` and `test/reports/inference_longtests.md` for details.
 - Update this document whenever a new suite is introduced or existing coverage materially changes.
 - Section-level dates (e.g., "Latest run 2025-11-26") indicate when that specific test was last validated; the header date reflects the document's last edit.
-- Latest status: `julia --project test/runtests.jl` (2025-06-03 UTC, Julia 1.12.1) reported **763 passed, 0 broken** across the unit test suites. Full test suite (`MSM_TEST_LEVEL=full`) includes 5 long tests.
+- Latest status: `julia --project test/runtests.jl` (2025-12-05 UTC, Julia 1.12.2) reported **796 passed, 0 broken** across the unit test suites. Full test suite (`MSM_TEST_LEVEL=full`) includes 10 long tests.
 
 ## Suite Summary
 
@@ -30,10 +30,15 @@ _Last updated: 2025-06-03 UTC_
 | `test_make_subjdat.jl` | 34 | Subject data processing, weights |
 | `test_simulation.jl` | 84 | Path simulation, state trajectories |
 | `test_ncv.jl` | 66 | IJ/Jackknife variance, LOO methods |
-| `test_exact_data_fitting.jl` | 74 | Exact data MLE fitting |
-| `test_phasetype_is.jl` | 114 | Phase-type importance sampling |
-| `test_splines.jl` | 72 | Spline hazard construction/evaluation |
-| **Total** | **763** | |
+| `test_phasetype_is.jl` | 76 | Phase-type importance sampling |
+| `test_phasetype_correctness.jl` | 48 | Phase-type hazard correctness |
+| `test_splines.jl` | 34 | Spline hazard construction/evaluation |
+| `test_mcem.jl` | 18 | MCEM estimation infrastructure |
+| `test_surrogates.jl` | 22 | Surrogate model construction |
+| `test_reversible_tvc_loglik.jl` | 6 | Reversible TVC likelihood (AD compatibility) |
+| `test_parallel_likelihood.jl` | 81 | Parallel/batched likelihood computation |
+| `test_parameter_ordering.jl` | 32 | Parameter ordering and model consistency |
+| **Total** | **796** | |
 
 ## Suite Details
 
@@ -86,15 +91,46 @@ _Last updated: 2025-06-03 UTC_
 - **Key infrastructure tested:** `compute_ij_variance`, `compute_jk_variance`, `loo_perturbation_direct`, `loo_perturbation_cholesky`.
 - **Latest run (2025-06-03, Julia 1.12.1):** 66 / 66 passing.
 
-### `test_exact_data_fitting.jl`
-- **Scope:** MLE fitting for exact (observed transition time) data, testing the complete fitting pipeline without MCEM.
+### `test_surrogates.jl`
+- **Scope:** Unified surrogate fitting API for Markov and phase-type surrogates.
 - **Test categories:**
-  1. **Gradient computation:** Verifies log-likelihood gradients match finite-difference approximations.
-  2. **Parameter recovery:** Fits models to simulated data with known parameters.
-  3. **Variance estimation:** Tests both model-based (inverse Hessian) and IJ variance computation.
-  4. **Observation weights:** Validates `SubjectWeights` and `ObservationWeights` correctly scale likelihood contributions.
-- **Key assertions:** optimizer convergence, gradient accuracy to 1e-6, parameter recovery within 3 SEs.
-- **Latest run (2025-06-03, Julia 1.12.1):** 74 / 74 passing.
+  1. **Markov surrogate MLE:** Tests `fit_surrogate(model; type=:markov, method=:mle)`.
+  2. **Markov surrogate heuristic:** Tests crude rate estimation without optimization.
+  3. **Phase-type surrogate:** Tests `fit_surrogate(model; type=:phasetype, n_phases=2)`.
+  4. **Marginal likelihood:** Tests `compute_markov_marginal_loglik()` for IS normalizing constant.
+- **Key infrastructure tested:** `fit_surrogate()`, `set_surrogate!()`, `_fit_markov_surrogate()`, `_fit_phasetype_surrogate()`.
+- **Latest run (2025-12-04, Julia 1.12.1):** passing.
+
+### `test_mcem.jl`
+- **Scope:** MCEM algorithm helpers and SQUAREM acceleration.
+- **Test categories:**
+  1. **SQUAREM fixed-point iteration:** Tests acceleration convergence.
+  2. **ESS computation:** Tests effective sample size from importance weights.
+  3. **Convergence criteria:** Tests stopping rule based on parameter change.
+  4. **Path sampling infrastructure:** Tests FFBS path extraction.
+- **Key infrastructure tested:** `squarem_update!`, `compute_ess`, `check_convergence`.
+- **Latest run (2025-12-04, Julia 1.12.1):** passing.
+
+### `test_reversible_tvc_loglik.jl`
+- **Scope:** Likelihood computation for reversible semi-Markov models with TVC.
+- **Test categories:**
+  1. **Sojourn time resets:** Verifies sojourn resets correctly when re-entering states.
+  2. **Manual vs package likelihood:** Compares hand-computed likelihood to package output.
+  3. **TVC with multiple sojourns:** Tests covariate handling across multiple state visits.
+- **Key assertions:** Sojourn times reset on state entry, likelihood matches manual calculation.
+- **Latest run (2025-12-04, Julia 1.12.1):** 6 / 6 passing.
+
+### `test_parameter_ordering.jl`
+- **Scope:** Parameter ordering, storage, and retrieval consistency across the package.
+- **Test categories:**
+  1. **Transition matrix ordering:** Verifies `get_parameters_flat` returns parameters in transition matrix order (row-major).
+  2. **Hazard family parameter order:** Tests exp (1 param), wei/gom (2 params: shape, scale), spline (n coefficients).
+  3. **set_parameters! consistency:** Named tuple assignment propagates correctly to hazard structs.
+  4. **Simulation parameter usage:** Verifies simulated paths use correct hazard parameters.
+  5. **Fitting recovery:** Parameters recovered via MLE match true values (round-trip).
+  6. **Fitted object storage:** Fitted object stores parameters identically to input model.
+- **Key assertions:** Parameter ordering is consistent between `get_parameters_flat`, `set_parameters!`, simulation, and fitting.
+- **Latest run (2025-12-05, Julia 1.12.2):** 32 / 32 passing.
 
 ### `test_phasetype_is.jl`
 - **Scope:** Phase-type distribution infrastructure for improved importance sampling in MCEM.
@@ -122,7 +158,22 @@ _Last updated: 2025-06-03 UTC_
 
 ### Long Tests (MSM_TEST_LEVEL=full)
 
-Long tests provide statistical validation through simulation studies. See:
+Long tests provide statistical validation through simulation studies:
+
+| Test File | Purpose | Runtime |
+|-----------|---------|----------|
+| `longtest_exact_markov.jl` | Exact Markov MLE validation | ~2 min |
+| `longtest_mcem.jl` | MCEM convergence for semi-Markov | ~1 min |
+| `longtest_mcem_splines.jl` | MCEM with spline hazards | ~3 min |
+| `longtest_mcem_tvc.jl` | MCEM with time-varying covariates | ~2 min |
+| `longtest_phasetype_hazards.jl` | Phase-type hazard model inference (exact) | ~20 sec |
+| `longtest_phasetype_panel.jl` | Phase-type hazard model inference (panel/mixed) | ~45 sec |
+| `longtest_simulation_distribution.jl` | Simulation distributional parity | ~10 min |
+| `longtest_simulation_tvc.jl` | Simulation with TVC | ~5 min |
+| `longtest_robust_parametric.jl` | Parametric families (large n) | ~5 min |
+| `longtest_robust_markov_phasetype.jl` | Markov/phase-type IS correctness | ~5 min |
+
+See detailed documentation:
 - `test/reports/simulation_longtests.md` - simulation distribution validation
 - `test/reports/inference_longtests.md` - MCEM and MLE fitting validation
 

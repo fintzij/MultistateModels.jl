@@ -3,6 +3,20 @@
 ########################################################
 
 # =============================================================================
+# Helper Functions for ForwardDiff Dual Types
+# =============================================================================
+
+"""
+    _unwrap_to_float(x)
+
+Recursively unwrap ForwardDiff Dual numbers to their underlying Float64 value.
+Handles nested Duals (e.g., during Hessian computation with forward-over-forward AD).
+"""
+_unwrap_to_float(x::Float64) = x
+_unwrap_to_float(x::Real) = Float64(x)  # Handle other numeric types
+_unwrap_to_float(x::ForwardDiff.Dual) = _unwrap_to_float(ForwardDiff.value(x))
+
+# =============================================================================
 # Parameter Preparation (dispatch-based normalization)
 # =============================================================================
 
@@ -939,26 +953,249 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
     end
 end
 
+# =============================================================================
+# Non-Mutating Markov Likelihood (Reverse-Mode AD Compatible)
+# =============================================================================
+
 """
-    loglik(parameters, data::SMPanelData; neg = true)
+    loglik_markov_functional(parameters, data::MPanelData; neg=true)
 
-Return sum of (negative) complete data log-likelihood terms in the Monte Carlo maximum likelihood algorithm for fitting a semi-Markov model to panel data.
+Non-mutating version of `loglik_markov` compatible with reverse-mode AD (Enzyme, Zygote).
 
-This implementation uses the fused path-centric approach from `loglik_exact`, calling
-`_compute_path_loglik_fused` directly to avoid DataFrame allocation overhead.
+This version avoids all in-place mutations:
+- Uses `compute_hazmat` and `compute_tmat` instead of their `!` variants
+- Accumulates log-likelihood functionally without pre-allocated containers
+- Uses comprehensions and reductions instead of loops with mutation
+
+Performance: ~10-20% slower than mutating version due to allocations,
+but enables Enzyme gradient computation which may be faster overall for large models.
+
+# Arguments
+- `parameters`: Flat parameter vector
+- `data::MPanelData`: Markov panel data container
+- `neg::Bool=true`: Return negative log-likelihood
+
+# Returns
+Scalar (negative) log-likelihood value.
 """
-function loglik_semi_markov(parameters, data::SMPanelData; neg = true, use_sampling_weight = true)
+function loglik_markov_functional(parameters, data::MPanelData; neg = true)
+    # Nest parameters (AD-compatible)
+    pars = nest_params(parameters, data.model.parameters)
+    
+    # Model components
+    hazards = data.model.hazards
+    tmat = data.model.tmat
+    n_states = size(tmat, 1)
+    T = eltype(parameters)
+    
+    # Build TPM book functionally (no mutation)
+    # For each unique covariate/time pattern, compute Q then P = exp(Q*dt)
+    tpm_dict = Dict{Tuple{Int,Int}, Matrix{T}}()
+    for (t_idx, tpm_index_df) in enumerate(data.books[1])
+        Q = compute_hazmat(T, n_states, pars, hazards, tpm_index_df, data.model.data)
+        # Compute P for each time interval in this pattern
+        for t in eachindex(tpm_index_df.tstop)
+            dt = tpm_index_df.tstop[t]
+            P = compute_tmat(Q, dt)
+            # Store with composite key (could be optimized)
+            tpm_dict[(t_idx, t)] = P
+        end
+    end
+    
+    # Accumulate log-likelihood functionally
+    nsubj = length(data.model.subjectindices)
+    has_obs_weights = !isnothing(data.model.ObservationWeights)
+    
+    # Compute subject contributions using map (no mutation)
+    subj_contributions = map(1:nsubj) do subj
+        subj_inds = data.model.subjectindices[subj]
+        subj_weight = data.model.SubjectWeights[subj]
+        
+        # Check if any censored observations
+        all_uncensored = all(data.model.data.obstype[subj_inds] .∈ Ref([1, 2]))
+        
+        if all_uncensored
+            # Simple case: no forward algorithm needed
+            subj_ll = sum(subj_inds) do i
+                obs_weight = has_obs_weights ? data.model.ObservationWeights[i] : one(T)
+                obstype_i = data.model.data.obstype[i]
+                
+                if obstype_i == 1  # exact data
+                    row_data = @view data.model.data[i, :]
+                    statefrom_i = data.model.data.statefrom[i]
+                    stateto_i = data.model.data.stateto[i]
+                    dt = data.model.data.tstop[i] - data.model.data.tstart[i]
+                    
+                    obs_ll = survprob(zero(T), dt, pars, row_data, 
+                                     data.model.totalhazards[statefrom_i], hazards; 
+                                     give_log = true)
+                    
+                    if statefrom_i != stateto_i
+                        trans_idx = tmat[statefrom_i, stateto_i]
+                        haz_value = eval_hazard(hazards[trans_idx], dt, pars[trans_idx], row_data)
+                        obs_ll += log(haz_value)
+                    end
+                    
+                    obs_ll * obs_weight
+                else  # panel data (obstype == 2)
+                    statefrom_i = data.model.data.statefrom[i]
+                    stateto_i = data.model.data.stateto[i]
+                    book_idx1 = data.books[2][i, 1]
+                    book_idx2 = data.books[2][i, 2]
+                    P = tpm_dict[(book_idx1, book_idx2)]
+                    log(P[statefrom_i, stateto_i]) * obs_weight
+                end
+            end
+            
+            subj_ll * subj_weight
+        else
+            # Forward algorithm for censored observations
+            # Build log-likelihood via matrix-vector products
+            subj_ll = _forward_algorithm_functional(
+                subj_inds, pars, data, tpm_dict, T, n_states, hazards, tmat
+            )
+            subj_ll * subj_weight
+        end
+    end
+    
+    ll = sum(subj_contributions)
+    return neg ? -ll : ll
+end
 
-    # nest the model parameters using nest_params (AD-compatible)
+"""
+    _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, T, n_states, hazards, tmat)
+
+Non-mutating forward algorithm for censored state observations.
+Returns the log-likelihood contribution for one subject.
+"""
+function _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, ::Type{T}, 
+                                       n_states::Int, hazards, tmat) where T
+    # Initialize: probability vector for initial state
+    init_state = data.model.data.statefrom[subj_inds[1]]
+    α = zeros(T, n_states)
+    α = setindex_immutable_vec(α, one(T), init_state)
+    
+    # Forward pass: α[t+1] = α[t] * P[t] (with emission probabilities for censored states)
+    for i in subj_inds
+        obstype_i = data.model.data.obstype[i]
+        dt = data.model.data.tstop[i] - data.model.data.tstart[i]
+        
+        if obstype_i == 1
+            # Exact data: compute transition probabilities directly
+            row_data = @view data.model.data[i, :]
+            statefrom = data.model.data.statefrom[i]
+            stateto = data.model.data.stateto[i]
+            
+            # Survival probability + hazard
+            log_surv = survprob(zero(T), dt, pars, row_data,
+                               data.model.totalhazards[statefrom], hazards; give_log = true)
+            
+            if statefrom != stateto
+                trans_idx = tmat[statefrom, stateto]
+                haz_value = eval_hazard(hazards[trans_idx], dt, pars[trans_idx], row_data)
+                log_prob = log_surv + log(haz_value)
+            else
+                log_prob = log_surv
+            end
+            
+            # Update probability vector: concentrate mass on observed state
+            new_α = zeros(T, n_states)
+            prob_from = α[statefrom]
+            new_α = setindex_immutable_vec(new_α, prob_from * exp(log_prob), stateto)
+            α = new_α
+        else
+            # Panel/censored data: multiply by TPM
+            book_idx1 = data.books[2][i, 1]
+            book_idx2 = data.books[2][i, 2]
+            P = tpm_dict[(book_idx1, book_idx2)]
+            
+            # Matrix-vector product (non-mutating)
+            α = P' * α  # transpose because α is a column vector
+            
+            # Apply emission probabilities for censored observations
+            stateto_i = data.model.data.stateto[i]
+            if stateto_i > 0
+                # Exact observation at panel time - concentrate on observed state
+                prob = α[stateto_i]
+                new_α = zeros(T, n_states)
+                new_α = setindex_immutable_vec(new_α, prob, stateto_i)
+                α = new_α
+            elseif obstype_i > 2
+                # Censored observation - weight by emission probabilities
+                new_α = zeros(T, n_states)
+                for s in 1:n_states
+                    emission_prob = data.model.emat[i, s]
+                    if emission_prob > zero(T)
+                        new_α = setindex_immutable_vec(new_α, new_α[s] + α[s] * emission_prob, s)
+                    end
+                end
+                α = new_α
+            end
+        end
+    end
+    
+    # Log-likelihood is log of sum of final probabilities
+    return log(sum(α))
+end
+
+"""
+    setindex_immutable_vec(v, val, i)
+
+Return a new vector with v[i] = val without mutating v.
+"""
+@inline function setindex_immutable_vec(v::AbstractVector{T}, val, i::Int) where T
+    w = copy(v)
+    w[i] = convert(T, val)
+    return w
+end
+
+"""
+    loglik_semi_markov(parameters, data::SMPanelData; neg=true, use_sampling_weight=true, parallel=false)
+
+Compute importance-weighted log-likelihood for semi-Markov panel data (MCEM).
+
+This function computes:
+```math
+Q(θ|θ') = Σᵢ SubjectWeights[i] × Σⱼ ImportanceWeights[i][j] × ℓᵢⱼ(θ)
+```
+
+where `ℓᵢⱼ` is the complete-data log-likelihood for path j of subject i.
+
+# Arguments
+- `parameters`: Flat parameter vector
+- `data::SMPanelData`: Semi-Markov panel data with sample paths and importance weights
+- `neg::Bool=true`: Return negative log-likelihood
+- `use_sampling_weight::Bool=true`: Apply subject sampling weights
+- `parallel::Bool=false`: Use multi-threaded parallel computation
+
+# Parallel Execution
+When `parallel=true` and `Threads.nthreads() > 1`, uses flat path-level parallelism
+with `@threads :static`. This provides good load balance even when subjects have
+highly variable numbers of paths (e.g., some subjects have 1 path, others have 500).
+
+The flat-indexing approach maps each (subject, path) pair to a linear index,
+ensuring work is distributed evenly across threads regardless of path distribution.
+
+# Returns
+Scalar (negative) log-likelihood value.
+
+# See Also
+- [`mcem_mll`](@ref): Uses this for MCEM objective computation
+- [`loglik_semi_markov!`](@ref): In-place version for path log-likelihoods
+"""
+function loglik_semi_markov(parameters, data::SMPanelData; neg=true, use_sampling_weight=true, parallel=false)
+
+    # Nest the model parameters using nest_params (AD-compatible)
     pars = nest_params(parameters, data.model.parameters)
 
-    # snag the hazards and model components
+    # Get hazards and model components
     hazards = data.model.hazards
     totalhazards = data.model.totalhazards
     tmat = data.model.tmat
     n_hazards = length(hazards)
+    nsubj = length(data.paths)
 
-    # update spline hazards with current parameters (no-op for functional splines)
+    # Update spline hazards with current parameters (no-op for functional splines)
     _update_spline_hazards!(hazards, pars)
 
     # Build subject covariate cache (reusable across all paths)
@@ -975,37 +1212,97 @@ function loglik_semi_markov(parameters, data::SMPanelData; neg = true, use_sampl
         for h in 1:n_hazards
     ]
     
-    # Check if any hazard uses time transform and create context if needed
+    # Check if any hazard uses time transform
     any_time_transform = any(h -> h.metadata.time_transform, hazards)
-    tt_context = if any_time_transform && !isempty(data.paths) && !isempty(data.paths[1])
-        sample_subj = subject_covars[data.paths[1][1].subj]
-        sample_df = isempty(sample_subj.covar_data) ? nothing : sample_subj.covar_data[1:1, :]
-        maybe_time_transform_context(pars, sample_df, hazards)
-    else
-        nothing
-    end
-
-    # compute the semi-markov log-likelihoods using fused approach
-    ll = zero(T)
-    for i in eachindex(data.paths)
-        lls = zero(T)
-        for j in eachindex(data.paths[i])
+    
+    # Count total paths for parallel decision
+    n_total_paths = sum(length(data.paths[i]) for i in eachindex(data.paths))
+    use_parallel = parallel && Threads.nthreads() > 1 && n_total_paths >= 50
+    
+    if use_parallel
+        # Flat path-level parallelism for load balance
+        # Build flat index mapping: path k → (subject i, path j)
+        path_to_subj = Vector{Int}(undef, n_total_paths)
+        path_to_j = Vector{Int}(undef, n_total_paths)
+        k = 1
+        for i in eachindex(data.paths)
+            for j in eachindex(data.paths[i])
+                path_to_subj[k] = i
+                path_to_j[k] = j
+                k += 1
+            end
+        end
+        
+        # Pre-allocate flat log-likelihood array
+        ll_flat = Vector{T}(undef, n_total_paths)
+        
+        # Parallel over flat path index
+        Threads.@threads :static for k in 1:n_total_paths
+            i = path_to_subj[k]
+            j = path_to_j[k]
             path = data.paths[i][j]
             subj_cache = subject_covars[path.subj]
             
-            path_ll = _compute_path_loglik_fused(
+            # Thread-local TimeTransformContext
+            tt_context = if any_time_transform
+                sample_df = isempty(subj_cache.covar_data) ? nothing : subj_cache.covar_data[1:1, :]
+                maybe_time_transform_context(pars, sample_df, hazards)
+            else
+                nothing
+            end
+            
+            ll_flat[k] = _compute_path_loglik_fused(
                 path, pars, hazards, totalhazards, tmat,
                 subj_cache, covar_names_per_hazard, tt_context, T
             )
-            lls += path_ll * data.ImportanceWeights[i][j]
         end
-        if use_sampling_weight
-            lls *= data.model.SubjectWeights[i]
+        
+        # Weighted reduction: reassemble by subject and apply importance weights
+        ll = zero(T)
+        k = 1
+        for i in eachindex(data.paths)
+            subj_ll = zero(T)
+            for j in eachindex(data.paths[i])
+                subj_ll += ll_flat[k] * data.ImportanceWeights[i][j]
+                k += 1
+            end
+            if use_sampling_weight
+                ll += subj_ll * data.model.SubjectWeights[i]
+            else
+                ll += subj_ll
+            end
         end
-        ll += lls
+    else
+        # Sequential path: simpler, AD-compatible
+        tt_context = if any_time_transform && !isempty(data.paths) && !isempty(data.paths[1])
+            sample_subj = subject_covars[data.paths[1][1].subj]
+            sample_df = isempty(sample_subj.covar_data) ? nothing : sample_subj.covar_data[1:1, :]
+            maybe_time_transform_context(pars, sample_df, hazards)
+        else
+            nothing
+        end
+
+        ll = zero(T)
+        for i in eachindex(data.paths)
+            lls = zero(T)
+            for j in eachindex(data.paths[i])
+                path = data.paths[i][j]
+                subj_cache = subject_covars[path.subj]
+                
+                path_ll = _compute_path_loglik_fused(
+                    path, pars, hazards, totalhazards, tmat,
+                    subj_cache, covar_names_per_hazard, tt_context, T
+                )
+                lls += path_ll * data.ImportanceWeights[i][j]
+            end
+            if use_sampling_weight
+                lls *= data.model.SubjectWeights[i]
+            end
+            ll += lls
+        end
     end
 
-    # return the log-likelihood
+    # Return the log-likelihood
     neg ? -ll : ll
 end
 
@@ -1354,31 +1651,31 @@ Extract covariates from the subject cache without DataFrame row access overhead.
 end
 
 """
-    loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false)
+    loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false, parallel=false)
 
-Compute (negative) log-likelihood for exactly observed sample paths.
-
-This is a fused batched implementation that processes intervals and computes hazards 
-in a single pass, optimized for memory locality by processing all hazards per interval
-rather than all intervals per hazard.
-
-# Features
-- ForwardDiff (forward-mode AD) via parametric element types
-- Zygote/Enzyme (reverse-mode AD) via functional accumulation (no in-place mutation)
-- Time transforms (Tang-style caching) when hazards have `time_transform=true`
-- Time-varying covariates with proper sojourn tracking
+Compute log-likelihood for exact (fully observed) multistate data.
 
 # Arguments
 - `parameters`: Flat parameter vector
 - `data::ExactData`: Exact data containing model and sample paths
-- `neg::Bool=true`: Return negative log-likelihood (for minimization)
-- `return_ll_subj::Bool=false`: Return per-path log-likelihoods instead of sum
+- `neg::Bool=true`: Return negative log-likelihood
+- `return_ll_subj::Bool=false`: Return per-path weighted log-likelihoods instead of scalar
+- `parallel::Bool=false`: Use multi-threaded parallel computation
+
+# Parallel Execution
+When `parallel=true` and `Threads.nthreads() > 1`, uses `@threads :static` for 
+path-level parallelism. This is beneficial when:
+- Number of paths > 100
+- Per-path computation cost > 10μs
+
+Note: Parallel mode is NOT used during AD gradient computation (ForwardDiff uses
+the sequential path). Use parallel for objective evaluation during line search.
 
 # Returns
 - If `return_ll_subj=false`: Scalar (negative) log-likelihood
-- If `return_ll_subj=true`: Vector of weighted per-path log-likelihoods
+- If `return_ll_subj=true`: Vector of per-path weighted log-likelihoods
 """
-function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false)
+function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false, parallel=false)
     # Nest parameters using nest_params - preserves dual number types (AD-compatible)
     pars = nest_params(parameters, data.model.parameters)
     
@@ -1391,10 +1688,12 @@ function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=fals
     
     # Remake spline parameters if needed
     # Note: parameters are already on log scale (from optimizer flat vector)
+    # Use concrete Float64 for spline remaking (splines don't need AD through their basis)
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            # pars[i] is already log-scale, pass directly
-            log_pars = Vector{Float64}(collect(pars[i]))
+            # pars[i] is already log-scale, extract values (drop Dual wrapper for spline basis)
+            # Use recursive unwrapping for nested Duals (Hessian computation uses nested duals)
+            log_pars = Float64.(_unwrap_to_float.(collect(pars[i])))
             remake_splines!(hazards[i], log_pars)
             set_riskperiod!(hazards[i])
         end
@@ -1417,31 +1716,54 @@ function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=fals
     # Check if any hazard uses time transform
     any_time_transform = any(h -> h.metadata.time_transform, hazards)
     
-    # Create TimeTransformContext if needed
-    # We need a sample DataFrame for type inference - build minimal one
-    tt_context = if any_time_transform && !isempty(data.paths)
-        sample_subj = subject_covars[data.paths[1].subj]
-        sample_df = isempty(sample_subj.covar_data) ? nothing : sample_subj.covar_data[1:1, :]
-        maybe_time_transform_context(pars, sample_df, hazards)
-    else
-        nothing
-    end
-    
     # Subject weights (precomputed lookup for efficiency)
     subj_weights = data.model.SubjectWeights
     
-    # Accumulate log-likelihoods functionally for reverse-mode AD compatibility
-    # Using map instead of in-place mutation
-    ll_paths = map(enumerate(data.paths)) do (path_idx, path)
-        _compute_path_loglik_fused(
-            path, pars, hazards, totalhazards, tmat, 
-            subject_covars[path.subj], covar_names_per_hazard,
-            tt_context, T
-        )
-    end
+    # Parallel vs sequential execution
+    use_parallel = parallel && Threads.nthreads() > 1 && n_paths >= 10
     
-    # Convert to proper array type
-    ll_array = collect(T, ll_paths)
+    if use_parallel
+        # Parallel path: pre-allocate and use @threads :static
+        ll_array = Vector{T}(undef, n_paths)
+        
+        Threads.@threads :static for path_idx in 1:n_paths
+            path = data.paths[path_idx]
+            
+            # Thread-local TimeTransformContext (avoid cache sharing)
+            tt_context = if any_time_transform
+                sample_subj = subject_covars[path.subj]
+                sample_df = isempty(sample_subj.covar_data) ? nothing : sample_subj.covar_data[1:1, :]
+                maybe_time_transform_context(pars, sample_df, hazards)
+            else
+                nothing
+            end
+            
+            ll_array[path_idx] = _compute_path_loglik_fused(
+                path, pars, hazards, totalhazards, tmat,
+                subject_covars[path.subj], covar_names_per_hazard,
+                tt_context, T
+            )
+        end
+    else
+        # Sequential path: functional style for reverse-mode AD compatibility
+        # Create TimeTransformContext once (shared across all paths)
+        tt_context = if any_time_transform && !isempty(data.paths)
+            sample_subj = subject_covars[data.paths[1].subj]
+            sample_df = isempty(sample_subj.covar_data) ? nothing : sample_subj.covar_data[1:1, :]
+            maybe_time_transform_context(pars, sample_df, hazards)
+        else
+            nothing
+        end
+        
+        ll_paths = map(enumerate(data.paths)) do (path_idx, path)
+            _compute_path_loglik_fused(
+                path, pars, hazards, totalhazards, tmat, 
+                subject_covars[path.subj], covar_names_per_hazard,
+                tt_context, T
+            )
+        end
+        ll_array = collect(T, ll_paths)
+    end
     
     if return_ll_subj
         # Element-wise multiplication preserves AD types

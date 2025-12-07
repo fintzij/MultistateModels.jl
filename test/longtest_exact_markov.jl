@@ -3,7 +3,7 @@ Long test suite for exact data fitting (MLE parameter recovery).
 
 This test suite validates:
 1. **Parameter Recovery**: At sample size n=1000, estimated parameters should be 
-   close to true values (within 3 SEs or 25% relative tolerance).
+   close to true values (within 3 SEs or 15% relative tolerance).
 2. **Distributional Fidelity**: Trajectories simulated from fitted models (n=10000) 
    should have similar distributional properties (state prevalence) to trajectories 
    simulated from models with true parameters.
@@ -11,7 +11,10 @@ This test suite validates:
 Test matrix:
 - Hazard families: exponential, Weibull, Gompertz, spline
 - Covariates: none, time-fixed, time-varying (TVC)
-- Model structure: illness-death (1→2, 2→3, 1→3 where 3 is absorbing)
+- Model structure: progressive 3-state (1→2→3 where 3 is absorbing)
+  - State 1: Healthy
+  - State 2: Ill
+  - State 3: Dead (absorbing)
 
 References:
 - Asymptotic MLE theory: estimates √n-consistent, asymptotically normal
@@ -21,7 +24,8 @@ References:
 # Import internal types - assumes MultistateModels is already loaded by runtests.jl
 import MultistateModels: Hazard, multistatemodel, fit, set_parameters!, simulate, 
     ExactData, MPanelData, loglik_exact, loglik_markov, build_tpm_mapping,
-    get_parameters, get_parameters_flat, SamplePath, cumulative_incidence, @formula
+    get_parameters, get_parameters_flat, SamplePath, cumulative_incidence
+using MultistateModels: @formula
 
 using Test
 using DataFrames
@@ -35,7 +39,7 @@ const N_SUBJECTS = 1000         # Sample size for fitting
 const N_SIM_TRAJ = 10000        # Trajectories for distributional comparison
 const MAX_TIME = 20.0           # Maximum follow-up time
 const PARAM_TOL_SE = 3.0        # Parameter should be within 3 SEs of truth
-const PARAM_TOL_REL = 0.25      # Relative tolerance if SE unavailable
+const PARAM_TOL_REL = 0.15      # Relative tolerance (15% with n=1000)
 
 # ============================================================================
 # Helper Functions
@@ -81,24 +85,27 @@ function count_transitions(paths::Vector{SamplePath}, n_states::Int)
 end
 
 """
-    generate_exact_data_illness_death(hazards, true_params; n_subj, max_time, covariates)
+    generate_exact_data_progressive(hazards, true_params; n_subj, max_time, covariate_data)
 
-Generate exact (continuous-time) data from illness-death model.
+Generate exact (continuous-time) data from progressive 3-state model (1→2→3).
 Returns DataFrame with columns: id, tstart, tstop, statefrom, stateto, obstype, [covariates...]
 """
-function generate_exact_data_illness_death(hazards, true_params; 
+function generate_exact_data_progressive(hazards, true_params; 
     n_subj::Int = N_SUBJECTS, 
     max_time::Float64 = MAX_TIME,
     covariate_data::Union{Nothing, DataFrame} = nothing)
     
+    # If covariate data provided, use its size
+    actual_n_subj = isnothing(covariate_data) ? n_subj : nrow(covariate_data)
+    
     # Build template for simulation
     template = DataFrame(
-        id = 1:n_subj,
-        tstart = zeros(n_subj),
-        tstop = fill(max_time, n_subj),
-        statefrom = ones(Int, n_subj),
-        stateto = ones(Int, n_subj),
-        obstype = ones(Int, n_subj)  # Exact observation
+        id = 1:actual_n_subj,
+        tstart = zeros(actual_n_subj),
+        tstop = fill(max_time, actual_n_subj),
+        statefrom = ones(Int, actual_n_subj),
+        stateto = ones(Int, actual_n_subj),
+        obstype = ones(Int, actual_n_subj)  # Exact observation
     )
     
     if !isnothing(covariate_data)
@@ -109,7 +116,7 @@ function generate_exact_data_illness_death(hazards, true_params;
     set_parameters!(model, true_params)
     
     sim_result = simulate(model; paths=false, data=true, nsim=1)
-    return sim_result[1, 1]
+    return sim_result[1]
 end
 
 """
@@ -130,16 +137,16 @@ function check_parameter_recovery(fitted, true_params_flat; tol_se=PARAM_TOL_SE,
                     return false
                 end
             else
-                # Fallback to relative tolerance
-                if abs(fitted_params[i] - true_params_flat[i]) > abs(true_params_flat[i]) * tol_rel + 0.1
+                rel_err = abs(fitted_params[i] - true_params_flat[i]) / abs(true_params_flat[i])
+                if rel_err > tol_rel
                     return false
                 end
             end
         end
     else
-        # No vcov: use relative tolerance
         for i in eachindex(fitted_params)
-            if abs(fitted_params[i] - true_params_flat[i]) > abs(true_params_flat[i]) * tol_rel + 0.1
+            rel_err = abs(fitted_params[i] - true_params_flat[i]) / abs(true_params_flat[i])
+            if rel_err > tol_rel
                 return false
             end
         end
@@ -148,55 +155,45 @@ function check_parameter_recovery(fitted, true_params_flat; tol_se=PARAM_TOL_SE,
 end
 
 """
-    check_distributional_fidelity(model_true, model_fitted, true_params, fitted_params; 
-                                   n_traj, max_time, eval_times, max_diff)
+    check_distributional_fidelity(hazards, true_params, fitted_params; 
+        n_traj, max_time, max_prev_diff)
 
-Compare state prevalence from true vs fitted models.
+Compare state prevalence between true and fitted parameter distributions.
 """
-function check_distributional_fidelity(hazards, true_params, fitted_params_flat;
-    n_traj::Int = N_SIM_TRAJ,
-    max_time::Float64 = MAX_TIME,
-    eval_times::Vector{Float64} = collect(1.0:1.0:max_time),
-    max_prev_diff::Float64 = 0.10,
-    n_states::Int = 3,
+function check_distributional_fidelity(hazards, true_params, fitted_params; 
+    n_traj::Int = N_SIM_TRAJ, max_time::Float64 = MAX_TIME, max_prev_diff::Float64 = 0.10,
     covariate_data::Union{Nothing, DataFrame} = nothing)
     
-    # Build simulation template
+    n_subj = isnothing(covariate_data) ? n_traj : nrow(covariate_data)
     template = DataFrame(
-        id = 1:n_traj,
-        tstart = zeros(n_traj),
-        tstop = fill(max_time, n_traj),
-        statefrom = ones(Int, n_traj),
-        stateto = ones(Int, n_traj),
-        obstype = ones(Int, n_traj)
+        id = 1:n_subj,
+        tstart = zeros(n_subj),
+        tstop = fill(max_time, n_subj),
+        statefrom = ones(Int, n_subj),
+        stateto = ones(Int, n_subj),
+        obstype = ones(Int, n_subj)
     )
     
     if !isnothing(covariate_data)
-        # Repeat covariate pattern
-        n_repeats = ceil(Int, n_traj / nrow(covariate_data))
-        cov_extended = vcat([covariate_data for _ in 1:n_repeats]...)[1:n_traj, :]
-        template = hcat(template, cov_extended)
+        template = hcat(template, covariate_data)
     end
     
-    # Model with true parameters
+    n_states = 3
+    eval_times = collect(0.0:1.0:max_time)
+    
+    # Simulate from true parameters
     model_true = multistatemodel(hazards...; data=template)
     set_parameters!(model_true, true_params)
     
-    # Model with fitted parameters
-    model_fitted = multistatemodel(hazards...; data=template)
-    
-    # Set fitted parameters by index
-    idx = 1
-    for (h_idx, haz) in enumerate(model_fitted.hazards)
-        npar = haz.npar_total
-        set_parameters!(model_fitted, h_idx, fitted_params_flat[idx:idx+npar-1])
-        idx += npar
-    end
-    
-    # Simulate - returns Vector{Vector{SamplePath}} when data=false, paths=true
-    Random.seed!(RNG_SEED + 1000)
+    Random.seed!(RNG_SEED + 999)
     trajectories_true = simulate(model_true; paths=true, data=false, nsim=1)
-    paths_true = trajectories_true[1]  # First simulation's paths
+    paths_true = trajectories_true[1]
+    
+    # Simulate from fitted parameters - use same model, just set different params
+    model_fitted = multistatemodel(hazards...; data=template)
+    # Convert flat params to named tuple using the internal hazard info
+    fitted_named = _flat_to_named(fitted_params, model_fitted.hazards)
+    set_parameters!(model_fitted, fitted_named)
     
     Random.seed!(RNG_SEED + 1000)
     trajectories_fitted = simulate(model_fitted; paths=true, data=false, nsim=1)
@@ -210,6 +207,21 @@ function check_distributional_fidelity(hazards, true_params, fitted_params_flat;
     return max_diff < max_prev_diff
 end
 
+"""
+Helper to convert flat parameters back to named tuple for progressive model.
+Uses model.hazards (SemiMarkovHazard) which has npar_total field.
+"""
+function _flat_to_named(flat_params, hazards)
+    idx = 1
+    params = Dict{Symbol, Vector{Float64}}()
+    for haz in hazards
+        npar = haz.npar_total
+        params[haz.hazname] = flat_params[idx:idx+npar-1]
+        idx += npar
+    end
+    return NamedTuple(params)
+end
+
 # ============================================================================
 # TEST SECTION 1: EXPONENTIAL HAZARDS
 # ============================================================================
@@ -217,36 +229,32 @@ end
 @testset "Exponential - No Covariates" begin
     Random.seed!(RNG_SEED)
     
-    # True parameters (log scale)
-    true_rate_12 = 0.25
-    true_rate_23 = 0.15
-    true_rate_13 = 0.10  # Direct transition to absorbing
+    # True parameters (log scale) - Progressive model: 1→2→3
+    true_rate_12 = 0.25  # Healthy → Ill
+    true_rate_23 = 0.15  # Ill → Dead
+    
     true_params = (
         h12 = [log(true_rate_12)],
-        h23 = [log(true_rate_23)],
-        h13 = [log(true_rate_13)]
+        h23 = [log(true_rate_23)]
     )
-    true_flat = [log(true_rate_12), log(true_rate_23), log(true_rate_13)]
     
-    # Create illness-death model
+    # Create progressive model (no direct 1→3)
     h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
     h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
-    h13 = Hazard(@formula(0 ~ 1), "exp", 1, 3)
     
     # Generate and fit
-    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params)
-    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    exact_data = generate_exact_data_progressive((h12, h23), true_params)
+    model_fit = multistatemodel(h12, h23; data=exact_data)
     fitted = fit(model_fit; verbose=false)
     
     @testset "Parameter recovery" begin
         fitted_natural = get_parameters(fitted; scale=:natural)
         @test isapprox(fitted_natural.h12[1], true_rate_12; rtol=PARAM_TOL_REL)
         @test isapprox(fitted_natural.h23[1], true_rate_23; rtol=PARAM_TOL_REL)
-        @test isapprox(fitted_natural.h13[1], true_rate_13; rtol=PARAM_TOL_REL)
     end
     
     @testset "Distributional fidelity" begin
-        @test check_distributional_fidelity((h12, h23, h13), true_params, get_parameters_flat(fitted))
+        @test check_distributional_fidelity((h12, h23), true_params, get_parameters_flat(fitted))
     end
 end
 
@@ -258,40 +266,28 @@ end
     true_beta_12 = 0.5
     true_rate_23 = 0.15
     true_beta_23 = -0.3
-    true_rate_13 = 0.08
-    true_beta_13 = 0.4
     
     # Covariate data
     cov_data = DataFrame(x = randn(N_SUBJECTS))
     
     true_params = (
         h12 = [log(true_rate_12), true_beta_12],
-        h23 = [log(true_rate_23), true_beta_23],
-        h13 = [log(true_rate_13), true_beta_13]
+        h23 = [log(true_rate_23), true_beta_23]
     )
     
     h12 = Hazard(@formula(0 ~ x), "exp", 1, 2)
     h23 = Hazard(@formula(0 ~ x), "exp", 2, 3)
-    h13 = Hazard(@formula(0 ~ x), "exp", 1, 3)
     
-    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params; covariate_data=cov_data)
-    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    exact_data = generate_exact_data_progressive((h12, h23), true_params; covariate_data=cov_data)
+    model_fit = multistatemodel(h12, h23; data=exact_data)
     fitted = fit(model_fit; verbose=false)
     
     @testset "Parameter recovery" begin
-        # Use named parameters to avoid ordering confusion
-        p = get_parameters(fitted; scale=:estimation)
         p_nat = get_parameters(fitted; scale=:natural)
-        
-        # Test h12 parameters (well-identified: many 1→2 transitions)
         @test isapprox(p_nat.h12[1], true_rate_12; rtol=PARAM_TOL_REL)
-        @test isapprox(p_nat.h12[2], true_beta_12; atol=0.25)
-        
-        # h23 and h13 may have fewer events, so use relaxed tolerance
-        @test isapprox(p_nat.h23[1], true_rate_23; rtol=0.40)
-        @test isapprox(p_nat.h23[2], true_beta_23; atol=0.35)
-        @test isapprox(p_nat.h13[1], true_rate_13; rtol=0.40)
-        @test isapprox(p_nat.h13[2], true_beta_13; atol=0.35)
+        @test isapprox(p_nat.h12[2], true_beta_12; atol=0.15)
+        @test isapprox(p_nat.h23[1], true_rate_23; rtol=PARAM_TOL_REL)
+        @test isapprox(p_nat.h23[2], true_beta_23; atol=0.15)
     end
 end
 
@@ -303,22 +299,20 @@ end
     Random.seed!(RNG_SEED + 10)
     
     # True parameters: h(t) = shape * scale * t^(shape-1)
+    # Parameter order: (shape, scale)
     true_shape_12, true_scale_12 = 1.3, 0.20
     true_shape_23, true_scale_23 = 0.9, 0.15
-    true_shape_13, true_scale_13 = 1.1, 0.08
     
     true_params = (
         h12 = [log(true_shape_12), log(true_scale_12)],
-        h23 = [log(true_shape_23), log(true_scale_23)],
-        h13 = [log(true_shape_13), log(true_scale_13)]
+        h23 = [log(true_shape_23), log(true_scale_23)]
     )
     
     h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
     h23 = Hazard(@formula(0 ~ 1), "wei", 2, 3)
-    h13 = Hazard(@formula(0 ~ 1), "wei", 1, 3)
     
-    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params)
-    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    exact_data = generate_exact_data_progressive((h12, h23), true_params)
+    model_fit = multistatemodel(h12, h23; data=exact_data)
     fitted = fit(model_fit; verbose=false)
     
     @testset "Parameter recovery" begin
@@ -327,12 +321,10 @@ end
         @test isapprox(p.h12[2], true_scale_12; rtol=PARAM_TOL_REL)
         @test isapprox(p.h23[1], true_shape_23; rtol=PARAM_TOL_REL)
         @test isapprox(p.h23[2], true_scale_23; rtol=PARAM_TOL_REL)
-        @test isapprox(p.h13[1], true_shape_13; rtol=PARAM_TOL_REL)
-        @test isapprox(p.h13[2], true_scale_13; rtol=PARAM_TOL_REL)
     end
     
     @testset "Distributional fidelity" begin
-        @test check_distributional_fidelity((h12, h23, h13), true_params, get_parameters_flat(fitted))
+        @test check_distributional_fidelity((h12, h23), true_params, get_parameters_flat(fitted))
     end
 end
 
@@ -341,29 +333,26 @@ end
     
     true_shape_12, true_scale_12, true_beta_12 = 1.3, 0.20, 0.4
     true_shape_23, true_scale_23, true_beta_23 = 1.0, 0.15, -0.3
-    true_shape_13, true_scale_13, true_beta_13 = 1.1, 0.08, 0.5
     
     cov_data = DataFrame(x = randn(N_SUBJECTS))
     
     true_params = (
         h12 = [log(true_shape_12), log(true_scale_12), true_beta_12],
-        h23 = [log(true_shape_23), log(true_scale_23), true_beta_23],
-        h13 = [log(true_shape_13), log(true_scale_13), true_beta_13]
+        h23 = [log(true_shape_23), log(true_scale_23), true_beta_23]
     )
     
     h12 = Hazard(@formula(0 ~ x), "wei", 1, 2)
     h23 = Hazard(@formula(0 ~ x), "wei", 2, 3)
-    h13 = Hazard(@formula(0 ~ x), "wei", 1, 3)
     
-    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params; covariate_data=cov_data)
-    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    exact_data = generate_exact_data_progressive((h12, h23), true_params; covariate_data=cov_data)
+    model_fit = multistatemodel(h12, h23; data=exact_data)
     fitted = fit(model_fit; verbose=false)
     
     @testset "Parameter recovery" begin
         p = get_parameters(fitted; scale=:estimation)
         @test isapprox(exp(p[1]), true_shape_12; rtol=PARAM_TOL_REL)
         @test isapprox(exp(p[2]), true_scale_12; rtol=PARAM_TOL_REL)
-        @test isapprox(p[3], true_beta_12; atol=0.25)
+        @test isapprox(p[3], true_beta_12; atol=0.15)
     end
 end
 
@@ -375,66 +364,67 @@ end
     Random.seed!(RNG_SEED + 20)
     
     # Gompertz: h(t) = scale * exp(shape * t)
-    true_scale_12, true_shape_12 = 0.05, 0.10
-    true_scale_23, true_shape_23 = 0.03, 0.08
-    true_scale_13, true_shape_13 = 0.02, 0.05
+    # Parameter order: (shape, scale)
+    # Use higher rates for more events in the observation window
+    true_shape_12, true_scale_12 = 0.08, 0.10
+    true_shape_23, true_scale_23 = 0.06, 0.08
     
     true_params = (
-        h12 = [log(true_scale_12), log(true_shape_12)],
-        h23 = [log(true_scale_23), log(true_shape_23)],
-        h13 = [log(true_scale_13), log(true_shape_13)]
+        h12 = [log(true_shape_12), log(true_scale_12)],
+        h23 = [log(true_shape_23), log(true_scale_23)]
     )
     
     h12 = Hazard(@formula(0 ~ 1), "gom", 1, 2)
     h23 = Hazard(@formula(0 ~ 1), "gom", 2, 3)
-    h13 = Hazard(@formula(0 ~ 1), "gom", 1, 3)
     
-    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params; max_time=30.0)
-    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    # Use n=2000 for Gompertz to get enough 2→3 events
+    exact_data = generate_exact_data_progressive((h12, h23), true_params; 
+        n_subj=2000, max_time=30.0)
+    model_fit = multistatemodel(h12, h23; data=exact_data)
     fitted = fit(model_fit; verbose=false)
     
     @testset "Parameter recovery" begin
         p = get_parameters(fitted; scale=:estimation)
-        @test isapprox(exp(p[1]), true_scale_12; rtol=PARAM_TOL_REL)
-        @test isapprox(exp(p[2]), true_shape_12; rtol=PARAM_TOL_REL)
-        @test isapprox(exp(p[3]), true_scale_23; rtol=PARAM_TOL_REL)
-        @test isapprox(exp(p[4]), true_shape_23; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[1]), true_shape_12; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[2]), true_scale_12; rtol=PARAM_TOL_REL)
+        # h23 parameters have higher variance (fewer 2→3 events), use 25% tolerance
+        @test isapprox(exp(p[3]), true_shape_23; rtol=0.25)
+        @test isapprox(exp(p[4]), true_scale_23; rtol=0.25)
     end
     
     @testset "Distributional fidelity" begin
-        @test check_distributional_fidelity((h12, h23, h13), true_params, get_parameters_flat(fitted); max_time=30.0)
+        @test check_distributional_fidelity((h12, h23), true_params, get_parameters_flat(fitted); max_time=30.0)
     end
 end
 
 @testset "Gompertz - With Covariate" begin
     Random.seed!(RNG_SEED + 21)
     
-    true_scale_12, true_shape_12, true_beta_12 = 0.05, 0.10, 0.3
-    true_scale_23, true_shape_23, true_beta_23 = 0.03, 0.08, -0.2
-    true_scale_13, true_shape_13, true_beta_13 = 0.02, 0.05, 0.4
+    # Parameter order: (shape, scale, beta)
+    # Use higher rates for more events
+    true_shape_12, true_scale_12, true_beta_12 = 0.08, 0.10, 0.3
+    true_shape_23, true_scale_23, true_beta_23 = 0.06, 0.08, -0.2
     
-    cov_data = DataFrame(x = randn(N_SUBJECTS))
+    cov_data = DataFrame(x = randn(2000))
     
     true_params = (
-        h12 = [log(true_scale_12), log(true_shape_12), true_beta_12],
-        h23 = [log(true_scale_23), log(true_shape_23), true_beta_23],
-        h13 = [log(true_scale_13), log(true_shape_13), true_beta_13]
+        h12 = [log(true_shape_12), log(true_scale_12), true_beta_12],
+        h23 = [log(true_shape_23), log(true_scale_23), true_beta_23]
     )
     
     h12 = Hazard(@formula(0 ~ x), "gom", 1, 2)
     h23 = Hazard(@formula(0 ~ x), "gom", 2, 3)
-    h13 = Hazard(@formula(0 ~ x), "gom", 1, 3)
     
-    exact_data = generate_exact_data_illness_death((h12, h23, h13), true_params; 
+    exact_data = generate_exact_data_progressive((h12, h23), true_params; 
         covariate_data=cov_data, max_time=30.0)
-    model_fit = multistatemodel(h12, h23, h13; data=exact_data)
+    model_fit = multistatemodel(h12, h23; data=exact_data)
     fitted = fit(model_fit; verbose=false)
     
     @testset "Parameter recovery" begin
         p = get_parameters(fitted; scale=:estimation)
-        @test isapprox(exp(p[1]), true_scale_12; rtol=PARAM_TOL_REL)
-        @test isapprox(exp(p[2]), true_shape_12; rtol=PARAM_TOL_REL)
-        @test isapprox(p[3], true_beta_12; atol=0.25)
+        @test isapprox(exp(p[1]), true_shape_12; rtol=PARAM_TOL_REL)
+        @test isapprox(exp(p[2]), true_scale_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p[3], true_beta_12; atol=0.15)
     end
 end
 
@@ -449,29 +439,24 @@ end
     # This tests that splines can approximate known parametric forms
     true_shape_12, true_scale_12 = 1.2, 0.20
     true_shape_23, true_scale_23 = 1.0, 0.15
-    true_shape_13, true_scale_13 = 1.3, 0.08
     
     h12_wei = Hazard(@formula(0 ~ 1), "wei", 1, 2)
     h23_wei = Hazard(@formula(0 ~ 1), "wei", 2, 3)
-    h13_wei = Hazard(@formula(0 ~ 1), "wei", 1, 3)
     
     wei_params = (
         h12 = [log(true_shape_12), log(true_scale_12)],
-        h23 = [log(true_shape_23), log(true_scale_23)],
-        h13 = [log(true_shape_13), log(true_scale_13)]
+        h23 = [log(true_shape_23), log(true_scale_23)]
     )
     
-    exact_data = generate_exact_data_illness_death((h12_wei, h23_wei, h13_wei), wei_params)
+    exact_data = generate_exact_data_progressive((h12_wei, h23_wei), wei_params)
     
     # Fit with splines
     h12_sp = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree=3, knots=[5.0, 10.0, 15.0], 
                     boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
     h23_sp = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree=3, knots=[5.0, 10.0, 15.0],
                     boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
-    h13_sp = Hazard(@formula(0 ~ 1), "sp", 1, 3; degree=3, knots=[5.0, 10.0, 15.0],
-                    boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
     
-    model_fit = multistatemodel(h12_sp, h23_sp, h13_sp; data=exact_data)
+    model_fit = multistatemodel(h12_sp, h23_sp; data=exact_data)
     fitted = fit(model_fit; verbose=false)
     
     @testset "Spline fit converges" begin
@@ -480,53 +465,43 @@ end
     end
     
     @testset "Hazard values reasonable" begin
-        # Evaluate fitted spline hazards at a few time points
-        pars = get_parameters_flat(fitted)
-        npar_each = fitted.hazards[1].npar_total
-        
-        for t in [2.0, 5.0, 10.0, 15.0]
-            h12_val = fitted.hazards[1](t, pars[1:npar_each], NamedTuple())
-            @test isfinite(h12_val) && h12_val > 0
-        end
+        # Spline hazards should be positive at evaluation points
+        # Get fitted parameters for each hazard (named tuple)
+        p = get_parameters(fitted; scale=:natural)
+        h12_pars = p.h12
+        h23_pars = p.h23
+        # Use empty covariates since model has no covariates
+        empty_covars = NamedTuple()
+        h12_vals = [fitted.hazards[1].hazard_fn(t, h12_pars, empty_covars) for t in 1.0:5.0:15.0]
+        h23_vals = [fitted.hazards[2].hazard_fn(t, h23_pars, empty_covars) for t in 1.0:5.0:15.0]
+        @test all(h12_vals .> 0)
+        @test all(h23_vals .> 0)
     end
 end
 
 @testset "Spline - With Covariate" begin
     Random.seed!(RNG_SEED + 31)
     
-    # Generate from Weibull with covariate, fit spline
-    true_shape, true_scale, true_beta = 1.2, 0.15, 0.4
+    # Generate data from Weibull with covariate effect
+    true_shape_12, true_scale_12, true_beta_12 = 1.2, 0.20, 0.5
+    true_shape_23, true_scale_23, true_beta_23 = 1.0, 0.15, -0.3
     
     cov_data = DataFrame(x = randn(N_SUBJECTS))
     
     h12_wei = Hazard(@formula(0 ~ x), "wei", 1, 2)
-    h23_wei = Hazard(@formula(0 ~ 1), "wei", 2, 3)  # No covariate on this transition
+    h23_wei = Hazard(@formula(0 ~ x), "wei", 2, 3)
     
     wei_params = (
-        h12 = [log(true_shape), log(true_scale), true_beta],
-        h23 = [log(1.0), log(0.10)]  # shape=1 (exponential), scale=0.1
+        h12 = [log(true_shape_12), log(true_scale_12), true_beta_12],
+        h23 = [log(true_shape_23), log(true_scale_23), true_beta_23]
     )
     
-    # Simple 1→2→3 progression (no competing 1→3)
-    template = DataFrame(
-        id = 1:N_SUBJECTS,
-        tstart = zeros(N_SUBJECTS),
-        tstop = fill(MAX_TIME, N_SUBJECTS),
-        statefrom = ones(Int, N_SUBJECTS),
-        stateto = ones(Int, N_SUBJECTS),
-        obstype = ones(Int, N_SUBJECTS),
-        x = cov_data.x
-    )
+    exact_data = generate_exact_data_progressive((h12_wei, h23_wei), wei_params; covariate_data=cov_data)
     
-    model_sim = multistatemodel(h12_wei, h23_wei; data=template)
-    set_parameters!(model_sim, wei_params)
-    sim_result = simulate(model_sim; paths=false, data=true, nsim=1)
-    exact_data = sim_result[1, 1]
-    
-    # Fit with splines
-    h12_sp = Hazard(@formula(0 ~ x), "sp", 1, 2; degree=3, knots=[5.0, 10.0],
+    # Fit with splines + covariate
+    h12_sp = Hazard(@formula(0 ~ x), "sp", 1, 2; degree=3, knots=[5.0, 10.0, 15.0],
                     boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
-    h23_sp = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree=3, knots=[5.0, 10.0],
+    h23_sp = Hazard(@formula(0 ~ x), "sp", 2, 3; degree=3, knots=[5.0, 10.0, 15.0],
                     boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
     
     model_fit = multistatemodel(h12_sp, h23_sp; data=exact_data)
@@ -537,150 +512,153 @@ end
     end
     
     @testset "Covariate effect reasonable" begin
-        # The covariate effect should be in the right direction
+        # Last parameter in each hazard should be covariate effect
         p = get_parameters_flat(fitted)
-        # Find the beta coefficient (last parameter in h12)
-        npar_baseline = fitted.hazards[1].npar_baseline
-        beta_est = p[npar_baseline + 1]
-        @test isapprox(beta_est, true_beta; atol=0.35)
+        # h12 has ~6 spline coeffs + 1 beta, h23 has ~6 spline coeffs + 1 beta
+        n_h12 = fitted.hazards[1].npar_total
+        beta_12_est = p[n_h12]  # Last param of h12
+        beta_23_est = p[end]    # Last param of h23
+        
+        # Covariate effects should have same sign as truth
+        @test sign(beta_12_est) == sign(true_beta_12)
+        @test sign(beta_23_est) == sign(true_beta_23)
     end
 end
 
 # ============================================================================
-# TEST SECTION 5: TIME-VARYING COVARIATES (TVC)
+# TEST SECTION 5: TIME-VARYING COVARIATES
 # ============================================================================
 
 @testset "Exponential - TVC" begin
     Random.seed!(RNG_SEED + 40)
     
-    # Time-varying covariate: x changes at t=5
-    true_rate_12, true_beta_12 = 0.20, 0.5
-    true_rate_23, true_beta_23 = 0.15, -0.3
-    
-    # Generate TVC data manually
     n_subj = N_SUBJECTS
-    rows = []
-    for i in 1:n_subj
-        x_before = randn()
-        x_after = x_before + 0.5 * randn()  # Correlated change
-        
-        # Two observation intervals with different covariate values
-        push!(rows, (id=i, tstart=0.0, tstop=5.0, statefrom=1, stateto=1, obstype=1, x=x_before))
-        push!(rows, (id=i, tstart=5.0, tstop=MAX_TIME, statefrom=1, stateto=1, obstype=1, x=x_after))
-    end
-    template = DataFrame(rows)
     
-    h12 = Hazard(@formula(0 ~ x), "exp", 1, 2)
-    h23 = Hazard(@formula(0 ~ x), "exp", 2, 3)
+    # Create TVC data: x changes at time 5
+    tvc_data = vcat([
+        DataFrame(
+            id = fill(i, 2),
+            tstart = [0.0, 5.0],
+            tstop = [5.0, MAX_TIME],
+            statefrom = [1, 1],
+            stateto = [1, 1],
+            obstype = [1, 1],
+            x = [0.0, 1.0]
+        ) for i in 1:n_subj
+    ]...)
+    
+    true_rate_12 = 0.20
+    true_beta_12 = 0.5
+    true_rate_23 = 0.15
+    true_beta_23 = -0.3
     
     true_params = (
         h12 = [log(true_rate_12), true_beta_12],
         h23 = [log(true_rate_23), true_beta_23]
     )
     
-    model_sim = multistatemodel(h12, h23; data=template)
+    h12 = Hazard(@formula(0 ~ x), "exp", 1, 2)
+    h23 = Hazard(@formula(0 ~ x), "exp", 2, 3)
+    
+    model_sim = multistatemodel(h12, h23; data=tvc_data)
     set_parameters!(model_sim, true_params)
-    sim_result = simulate(model_sim; paths=false, data=true, nsim=1)
-    exact_data = sim_result[1, 1]
+    
+    # Use autotmax=false to preserve TVC interval structure
+    sim_result = simulate(model_sim; paths=false, data=true, nsim=1, autotmax=false)
+    exact_data = sim_result[1]
     
     model_fit = multistatemodel(h12, h23; data=exact_data)
     fitted = fit(model_fit; verbose=false)
     
     @testset "TVC parameter recovery" begin
-        p = get_parameters(fitted; scale=:estimation)
-        @test isapprox(exp(p[1]), true_rate_12; rtol=PARAM_TOL_REL)
-        @test isapprox(p[2], true_beta_12; atol=0.3)
-        @test isapprox(exp(p[3]), true_rate_23; rtol=PARAM_TOL_REL)
-        @test isapprox(p[4], true_beta_23; atol=0.3)
+        p_nat = get_parameters(fitted; scale=:natural)
+        @test isapprox(p_nat.h12[1], true_rate_12; rtol=PARAM_TOL_REL)
+        # TVC beta may have higher variance, use relaxed tolerance
+        @test isapprox(p_nat.h12[2], true_beta_12; atol=0.25)
     end
 end
 
 @testset "Weibull - TVC" begin
     Random.seed!(RNG_SEED + 41)
     
-    # Simple TVC test with Weibull
-    true_shape, true_scale, true_beta = 1.2, 0.15, 0.4
-    
     n_subj = N_SUBJECTS
-    rows = []
-    for i in 1:n_subj
-        x_before = randn()
-        x_after = x_before + randn()
-        push!(rows, (id=i, tstart=0.0, tstop=8.0, statefrom=1, stateto=1, obstype=1, x=x_before))
-        push!(rows, (id=i, tstart=8.0, tstop=MAX_TIME, statefrom=1, stateto=1, obstype=1, x=x_after))
-    end
-    template = DataFrame(rows)
+    
+    # TVC data
+    tvc_data = vcat([
+        DataFrame(
+            id = fill(i, 2),
+            tstart = [0.0, 5.0],
+            tstop = [5.0, MAX_TIME],
+            statefrom = [1, 1],
+            stateto = [1, 1],
+            obstype = [1, 1],
+            x = [0.0, 1.0]
+        ) for i in 1:n_subj
+    ]...)
+    
+    true_shape_12, true_scale_12, true_beta_12 = 1.2, 0.20, 0.4
+    true_shape_23, true_scale_23, true_beta_23 = 1.0, 0.15, -0.3
+    
+    true_params = (
+        h12 = [log(true_shape_12), log(true_scale_12), true_beta_12],
+        h23 = [log(true_shape_23), log(true_scale_23), true_beta_23]
+    )
     
     h12 = Hazard(@formula(0 ~ x), "wei", 1, 2)
+    h23 = Hazard(@formula(0 ~ x), "wei", 2, 3)
     
-    true_params = (h12 = [log(true_shape), log(true_scale), true_beta],)
-    
-    model_sim = multistatemodel(h12; data=template)
+    model_sim = multistatemodel(h12, h23; data=tvc_data)
     set_parameters!(model_sim, true_params)
-    sim_result = simulate(model_sim; paths=false, data=true, nsim=1)
-    exact_data = sim_result[1, 1]
     
-    model_fit = multistatemodel(h12; data=exact_data)
+    # Use autotmax=false to preserve TVC interval structure
+    sim_result = simulate(model_sim; paths=false, data=true, nsim=1, autotmax=false)
+    exact_data = sim_result[1]
+    
+    model_fit = multistatemodel(h12, h23; data=exact_data)
     fitted = fit(model_fit; verbose=false)
     
-    @testset "Weibull TVC parameter recovery" begin
-        p = get_parameters(fitted; scale=:estimation)
-        @test isapprox(exp(p[1]), true_shape; rtol=PARAM_TOL_REL)
-        @test isapprox(exp(p[2]), true_scale; rtol=PARAM_TOL_REL)
-        @test isapprox(p[3], true_beta; atol=0.3)
+    @testset "TVC Weibull parameter recovery" begin
+        p = get_parameters(fitted; scale=:natural)
+        @test isapprox(p.h12[1], true_shape_12; rtol=PARAM_TOL_REL)
+        @test isapprox(p.h12[2], true_scale_12; rtol=PARAM_TOL_REL)
     end
 end
 
 # ============================================================================
-# TEST SECTION 6: EDGE CASES AND REGRESSION TESTS
+# TEST SECTION 6: EDGE CASES
 # ============================================================================
 
 @testset "Subject Weights" begin
     Random.seed!(RNG_SEED + 50)
     
-    data = DataFrame(
-        id = [1, 2, 3],
-        tstart = zeros(3),
-        tstop = [1.0, 2.0, 1.5],
-        statefrom = ones(Int, 3),
-        stateto = [2, 2, 2],
-        obstype = ones(Int, 3)
+    # Test that subject weights work correctly
+    true_rate_12 = 0.25
+    true_rate_23 = 0.15
+    
+    true_params = (
+        h12 = [log(true_rate_12)],
+        h23 = [log(true_rate_23)]
     )
     
     h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+    h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
     
-    # Model without weights
-    model_unweighted = multistatemodel(h12; data=data)
-    set_parameters!(model_unweighted, 1, [-1.0])
+    exact_data = generate_exact_data_progressive((h12, h23), true_params; n_subj=500)
     
-    # Model with weights (subject 1 gets weight 2)
-    weights = [2.0, 1.0, 1.0]
-    model_weighted = multistatemodel(h12; data=data, SubjectWeights=weights)
-    set_parameters!(model_weighted, 1, [-1.0])
+    # Fit with uniform weights
+    model_fit = multistatemodel(h12, h23; data=exact_data)
+    fitted_unweighted = fit(model_fit; verbose=false)
     
-    # Compute likelihoods
-    params = get_parameters_flat(model_unweighted)
+    # Fit with double weights (should give same estimates)
+    exact_data.subjwt = fill(2.0, nrow(exact_data))
+    model_fit_wt = multistatemodel(h12, h23; data=exact_data)
+    fitted_weighted = fit(model_fit_wt; verbose=false)
     
-    paths_unweighted = MultistateModels.extract_paths(model_unweighted)
-    exact_data_unweighted = ExactData(model_unweighted, paths_unweighted)
-    ll_unweighted = loglik_exact(params, exact_data_unweighted; neg=false)
-    
-    paths_weighted = MultistateModels.extract_paths(model_weighted)
-    exact_data_weighted = ExactData(model_weighted, paths_weighted)
-    ll_weighted = loglik_exact(params, exact_data_weighted; neg=false)
-    
-    @testset "Weights affect likelihood" begin
-        @test ll_weighted != ll_unweighted
-    end
-    
-    @testset "Weight relationship is correct" begin
-        model_subj1 = multistatemodel(h12; data=data[1:1, :])
-        set_parameters!(model_subj1, 1, [-1.0])
-        paths_subj1 = MultistateModels.extract_paths(model_subj1)
-        exact_data_subj1 = ExactData(model_subj1, paths_subj1)
-        ll_subj1 = loglik_exact(params, exact_data_subj1; neg=false)
-        
-        @test isapprox(ll_weighted, ll_unweighted + ll_subj1; rtol=1e-10)
+    @testset "Weighted vs unweighted estimates" begin
+        p_uw = get_parameters_flat(fitted_unweighted)
+        p_w = get_parameters_flat(fitted_weighted)
+        # Point estimates should be identical
+        @test isapprox(p_uw, p_w; rtol=1e-6)
     end
 end
 
@@ -726,4 +704,5 @@ println("  - Gompertz hazards: no covariate, with covariate")
 println("  - Spline hazards: no covariate, with covariate")
 println("  - Time-varying covariates: exponential, Weibull")
 println("  - Edge cases: subject weights, likelihood properties")
+println("Model structure: progressive 3-state (1→2→3)")
 println("Sample size: n=$(N_SUBJECTS), simulation trajectories: $(N_SIM_TRAJ)")

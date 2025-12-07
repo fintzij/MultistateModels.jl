@@ -19,7 +19,12 @@ has covariates; when you omit it, the constructor automatically supplies the
 intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yourself.
 
 # Positional arguments
-- `family`: "exp", "wei", "gom", or "sp" (string or symbol, case-insensitive).
+- `family`: "exp", "wei", "gom", "sp", or "pt" (string or symbol, case-insensitive).
+  - "exp": Exponential (constant hazard)
+  - "wei": Weibull
+  - "gom": Gompertz
+  - "sp": Spline (flexible baseline hazard)
+  - "pt": Phase-type (Coxian) - flexible sojourn distribution via latent phases
 - `statefrom` / `stateto`: integers describing the transition.
 - `hazard` *(optional)*: a `StatsModels.FormulaTerm` describing covariates that act
     multiplicatively on the baseline hazard. Skip this argument for intercept-only hazards.
@@ -29,6 +34,9 @@ intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yoursel
     spline controls used only when `family == "sp"`. See the BSplineKit docs for details.
 - `monotone`: `0` (default) leaves the spline unconstrained, `1` enforces an increasing
     hazard, and `-1` enforces a decreasing hazard.
+- `n_phases::Int`: Number of Coxian phases (only for `family == "pt"`, default: 2).
+    Must be ≥ 1. With n phases, the baseline has 2n-1 parameters (n-1 progression rates,
+    n exit rates). n_phases=1 is equivalent to exponential.
 - `time_transform::Bool`: enable Tang-style shared-trajectory caching for this transition.
 - `linpred_effect::Symbol`: `:ph` (default) for proportional hazards or `:aft` for
     accelerated-failure-time behaviour.
@@ -37,6 +45,8 @@ intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yoursel
 ```julia
 julia> Hazard("exp", 1, 2)                      # intercept only
 julia> Hazard(@formula(0 ~ age + trt), "wei", 1, 3)
+julia> Hazard(:pt, 1, 2; n_phases=3)            # 3-phase Coxian
+julia> Hazard(@formula(0 ~ age), :pt, 1, 2; n_phases=2)  # with covariates
 julia> @hazard begin                             # macro front-end uses the same rules
                      family = :gom
                      transition = 2 => 4
@@ -55,6 +65,8 @@ function Hazard(
     natural_spline = true,
     extrapolation = "linear",
     monotone = 0,
+    n_phases::Int = 2,
+    coxian_structure::Symbol = :unstructured,
     time_transform::Bool = false,
     linpred_effect::Symbol = :ph)
 
@@ -66,7 +78,7 @@ function Hazard(
     family_str = family isa String ? family : String(family)
     family_key = lowercase(family_str)
     
-    valid_families = ("exp", "wei", "gom", "sp")
+    valid_families = ("exp", "wei", "gom", "sp", "pt")
     @assert family_key in valid_families "family must be one of $valid_families, got \"$family_key\""
     
     if family_key == "sp"
@@ -75,11 +87,19 @@ function Hazard(
         @assert monotone in (-1, 0, 1) "monotone must be -1, 0, or 1, got $monotone"
     end
     
+    if family_key == "pt"
+        @assert n_phases >= 1 "n_phases must be ≥ 1, got $n_phases"
+        @assert coxian_structure in (:unstructured, :allequal, :prop_to_prog) "coxian_structure must be :unstructured, :allequal, or :prop_to_prog, got :$coxian_structure"
+    end
+    
     @assert linpred_effect in (:ph, :aft) "linpred_effect must be :ph or :aft, got :$linpred_effect"
     
     metadata = HazardMetadata(time_transform = time_transform, linpred_effect = linpred_effect)
 
-    if family_key != "sp"
+    if family_key == "pt"
+        # Phase-type (Coxian) hazard
+        h = PhaseTypeHazardSpec(hazard, family_key, statefrom, stateto, n_phases, coxian_structure, metadata)
+    elseif family_key != "sp"
         h = ParametricHazard(hazard, family_key, statefrom, stateto, metadata)
     else 
         if natural_spline & (monotone != 0)
@@ -882,7 +902,9 @@ end
 end
 
 @inline function _process_class(hazards::Vector{<:_Hazard})
-    return all(isa.(hazards, _MarkovHazard)) ? :markov : :semi_markov
+    # Use the _is_markov_hazard helper for consistent classification
+    # This correctly handles PhaseTypeCoxianHazard (Markov) and degree-0 splines
+    return all(_is_markov_hazard.(hazards)) ? :markov : :semi_markov
 end
 
 @inline function _model_constructor(mode::Symbol, process::Symbol)
@@ -982,6 +1004,19 @@ function multistatemodel(hazards::HazardFunction...;
     
     # Validate inputs
     isempty(hazards) && throw(ArgumentError("At least one hazard must be provided"))
+
+    # Check for phase-type hazards and route accordingly
+    if any(h -> h isa PhaseTypeHazardSpec, hazards)
+        return _build_phasetype_model_from_hazards(hazards;
+            data = data,
+            constraints = constraints,
+            SubjectWeights = SubjectWeights,
+            ObservationWeights = ObservationWeights,
+            CensoringPatterns = CensoringPatterns,
+            EmissionMatrix = EmissionMatrix,
+            verbose = verbose
+        )
+    end
 
     # catch the model call (includes constraints for use by fit())
     modelcall = (hazards = hazards, data = data, constraints = constraints, SubjectWeights = SubjectWeights, ObservationWeights = ObservationWeights, CensoringPatterns = CensoringPatterns, EmissionMatrix = EmissionMatrix)

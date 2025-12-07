@@ -3,15 +3,20 @@
 
 Fit a multistate model to continuously observed (exact) data.
 
-Uses L-BFGS optimization for unconstrained problems (5-6× faster than interior-point methods)
-and Ipopt for constrained problems by default.
+Uses Ipopt optimization for both constrained and unconstrained problems by default.
 
 # Arguments
 - `model::MultistateModel`: multistate model object with exact observation times
 - `constraints`: parameter constraints (see Constraints documentation)
 - `verbose::Bool=true`: print optimization messages
-- `solver`: optimization solver (default: L-BFGS for unconstrained, Ipopt for constrained).
+- `solver`: optimization solver (default: Ipopt for both constrained and unconstrained).
   See [Optimization Solvers](@ref) for available options.
+- `parallel::Bool=false`: enable parallel likelihood evaluation using Julia threads.
+  Recommended for large datasets (n > 500) with multiple cores available.
+  Uses physical cores (not hyperthreads) for optimal performance.
+- `nthreads::Union{Nothing,Int}=nothing`: number of threads for parallel execution.
+  If nothing, auto-detects based on physical cores (not hyperthreads).
+  Ignored when `parallel=false`.
 - `compute_vcov::Bool=true`: compute model-based variance-covariance matrix (H⁻¹).
   Useful for diagnostics by comparing to robust variance.
 - `vcov_threshold::Bool=true`: if true, uses adaptive threshold `1/√(log(n)·p)` for pseudo-inverse 
@@ -39,6 +44,20 @@ By default, both model-based and IJ (sandwich) variance are computed:
 
 Use `compare_variance_estimates(fitted)` to diagnose potential model misspecification.
 
+# Parallelization
+
+When `parallel=true`, likelihood evaluations during optimization use multiple threads.
+This is beneficial for:
+- Large datasets (n > 500 subjects/paths)
+- Models with expensive per-path computations (splines, many covariates)
+- Systems with multiple physical cores
+
+Thread count is auto-detected based on physical cores (not hyperthreads) to avoid
+overhead from hardware threads. Use `nthreads` to override.
+
+Note: Gradient computation always uses sequential ForwardDiff for AD correctness.
+Parallelization applies to objective function evaluation only.
+
 # Example
 ```julia
 # Default fit: computes both model-based and robust (IJ) variance
@@ -54,16 +73,27 @@ result = compare_variance_estimates(fitted)
 # Fit with model-based variance only (faster, but less robust)
 fitted = fit(model; compute_ij_vcov=false)
 
+# Enable parallel likelihood evaluation (useful for large datasets)
+fitted = fit(model; parallel=true)
+
+# Use exactly 4 threads for parallel evaluation
+fitted = fit(model; parallel=true, nthreads=4)
+
 # Use a custom solver (e.g., BFGS instead of L-BFGS)
 using Optim
 fitted = fit(model; solver=Optim.BFGS())
 ```
 
-See also: [`get_vcov`](@ref), [`get_ij_vcov`](@ref), [`compare_variance_estimates`](@ref)
+See also: [`get_vcov`](@ref), [`get_ij_vcov`](@ref), [`compare_variance_estimates`](@ref),
+          [`recommended_nthreads`](@ref), [`get_physical_cores`](@ref)
 """
-function fit(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function fit(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing, 
+             parallel = false, nthreads = nothing,
+             compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, 
+             compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # initialize array of sample paths
+
     samplepaths = extract_paths(model)
 
     # Initialize parameters to crude estimates for better optimizer starting point
@@ -82,15 +112,36 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
         constraints = model.modelcall.constraints
     end
 
+    # Configure threading
+    n_paths = length(samplepaths)
+    threading_config = ThreadingConfig(parallel=parallel, nthreads=nthreads)
+    use_parallel = should_parallelize(threading_config, n_paths)
+    
+    if use_parallel && verbose
+        println("Using $(threading_config.nthreads) threads for likelihood evaluation ($(n_paths) paths)")
+    end
+
     # parse constraints, or not, and solve
     if isnothing(constraints) 
-        # get estimates - use L-BFGS for unconstrained (5-6x faster than Ipopt)
-        optf = OptimizationFunction(loglik_exact, Optimization.AutoForwardDiff())
+        # Create likelihood function - parallel or sequential
+        # Note: ForwardDiff uses the function passed to OptimizationFunction for both
+        # objective and gradient. We pass the sequential version for AD correctness,
+        # but create a parallel version for objective-only evaluation.
+        if use_parallel
+            # Create wrapper that uses parallel evaluation
+            # ForwardDiff will still use sequential for gradient computation
+            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
+        else
+            loglik_fn = loglik_exact
+        end
+        
+        # get estimates - use Ipopt for unconstrained
+        optf = OptimizationFunction(loglik_fn, Optimization.AutoForwardDiff())
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
 
-        # solve with user-specified solver or default L-BFGS
-        _solver = isnothing(solver) ? Optim.LBFGS() : solver
-        sol  = solve(prob, _solver)
+        # solve with user-specified solver or default Ipopt
+        _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
+        sol  = solve(prob, _solver; print_level = 0)
 
         # rectify spline coefs
         if any(isa.(model.hazards, _SplineHazard))
@@ -99,22 +150,24 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
         
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success) && !any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
-            # preallocate the hessian matrix
-            diffres = DiffResults.HessianResult(sol.u)
-
-            # single argument function for log-likelihood
-            ll = pars -> loglik_exact(pars, ExactData(model, samplepaths); neg=false)
-
-            # compute gradient and hessian
-            diffres = ForwardDiff.hessian!(diffres, ll, sol.u)
-
-            # grab results
-            gradient = DiffResults.gradient(diffres)
-            fishinf = -DiffResults.hessian(diffres)
+            # Compute subject-level gradients and Hessians to cache them for robust variance
+            # This avoids redundant computation when computing robust variance estimates
+            subject_grads_cache = compute_subject_gradients(sol.u, model, samplepaths)
+            subject_hessians_cache = compute_subject_hessians(sol.u, model, samplepaths)
+            
+            # Aggregate Fisher information from subject Hessians
+            nparams = length(sol.u)
+            fishinf = zeros(Float64, nparams, nparams)
+            for H_i in subject_hessians_cache
+                fishinf .-= H_i
+            end
+            
             vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(length(samplepaths)) * length(sol.u))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
             vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)), rtol = sqrt(eps(Float64)))] .= 0.0
             vcov = Symmetric(vcov)
         else
+            subject_grads_cache = nothing
+            subject_hessians_cache = nothing
             vcov = nothing
         end
     else
@@ -128,7 +181,14 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
             error("Constraints $badcons are violated at the initial parameter values.")
         end
 
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_multistate)
+        # Create likelihood function - parallel or sequential
+        if use_parallel
+            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
+        else
+            loglik_fn = loglik
+        end
+
+        optf = OptimizationFunction(loglik_fn, Optimization.AutoForwardDiff(), cons = consfun_multistate)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths), lcons = constraints.lcons, ucons = constraints.ucons)
         
         # solve with user-specified solver or default Ipopt
@@ -144,6 +204,8 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
         if compute_vcov == true
             @warn "No covariance matrix is returned when constraints are provided."
         end
+        subject_grads_cache = nothing
+        subject_hessians_cache = nothing
         vcov = nothing
     end
 
@@ -163,7 +225,9 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
                                            compute_ij = compute_ij_vcov,
                                            compute_jk = compute_jk_vcov,
                                            loo_method = loo_method,
-                                           vcov_threshold = vcov_threshold)
+                                           vcov_threshold = vcov_threshold,
+                                           subject_grads = subject_grads_cache,
+                                           subject_hessians = subject_hessians_cache)
         ij_variance = robust_result.ij_vcov
         jk_variance = robust_result.jk_vcov
         subject_grads = robust_result.subject_gradients
@@ -232,21 +296,282 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
     return model_fitted;
 end
 
+# =============================================================================
+# Phase 7: Fitting for PhaseTypeModel
+# =============================================================================
+
+"""
+    fit(model::PhaseTypeModel; kwargs...)
+
+Fit a phase-type model to panel data via maximum likelihood.
+
+Phase-type models are Markov on the expanded (internal) state space, so fitting
+uses the panel data likelihood with the expanded hazards. The fitted parameters
+are then collapsed back to the user-facing phase-type parameterization.
+
+# Arguments
+- `model::PhaseTypeModel`: The phase-type model to fit
+- `constraints`: Optional parameter constraints (on expanded parameters)
+- `verbose::Bool = true`: Print progress messages
+- `solver`: Optimization solver (default: Ipopt)
+- `adbackend::ADBackend`: Automatic differentiation backend (default: ForwardDiff)
+- `compute_vcov::Bool = true`: Compute variance-covariance matrix
+- `vcov_threshold::Bool = true`: Apply threshold in vcov computation
+- `compute_ij_vcov::Bool = true`: Compute infinitesimal jackknife variance
+- `compute_jk_vcov::Bool = false`: Compute jackknife variance
+
+# Returns
+- `PhaseTypeFittedModel`: Fitted model with results in phase-type parameterization
+
+# Algorithm
+1. Initialize parameters using crude rates (respecting structure constraints)
+2. Fit the model on the expanded state space using Markov panel likelihood
+3. Collapse fitted parameters to phase-type (λ, μ) representation
+4. Compute variance-covariance matrix
+
+# Example
+```julia
+h12 = Hazard(@formula(0 ~ 1), "pt", 1, 2; n_phases=3, coxian_structure=:allequal)
+h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
+model = multistatemodel(h12, h23; data=data)
+fitted = fit(model)
+
+# Get parameters on natural scale
+params = get_parameters(fitted)
+
+# Access the fitted expanded model for diagnostics
+fitted.fitted_expanded
+```
+
+See also: [`PhaseTypeModel`](@ref), [`PhaseTypeFittedModel`](@ref), [`get_parameters`](@ref)
+"""
+function fit(model::PhaseTypeModel; 
+             constraints = nothing, 
+             verbose = true, 
+             solver = nothing, 
+             adbackend::ADBackend = ForwardDiffBackend(), 
+             compute_vcov = true, 
+             vcov_threshold = true, 
+             compute_ij_vcov = true, 
+             compute_jk_vcov = false, 
+             loo_method = :direct, 
+             kwargs...)
+
+    # Build TPM mapping - model.data is expanded data for PhaseTypeModel
+    books = build_tpm_mapping(model.data)
+
+    # Initialize parameters if not constrained
+    if isnothing(constraints)
+        set_crude_init!(model)
+    end
+
+    # Get flat parameters on expanded space
+    parameters = get_parameters_flat(model)
+
+    # Number of subjects
+    nsubj = length(model.subjectindices)
+
+    # Use model constraints if none provided and model has them
+    if isnothing(constraints) && haskey(model.modelcall, :constraints) && !isnothing(model.modelcall.constraints)
+        constraints = model.modelcall.constraints
+    end
+
+    # Warn if using reverse-mode AD for Markov models
+    if adbackend isa MooncakeBackend
+        @warn "MooncakeBackend may fail for Markov models due to LAPACK calls in matrix exponential. " *
+              "Use ForwardDiffBackend() if you encounter errors."
+    end
+
+    # Select likelihood function based on AD backend
+    loglik_fn = if adbackend isa EnzymeBackend || adbackend isa MooncakeBackend
+        loglik_markov_functional
+    else
+        loglik_markov
+    end
+
+    # Create panel data object using expanded data and hazards
+    panel_data = MPanelData(model, books)
+
+    # Parse constraints and solve
+    if isnothing(constraints)
+        optf = OptimizationFunction(loglik_fn, get_optimization_ad(adbackend))
+        prob = OptimizationProblem(optf, parameters, panel_data)
+        
+        _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
+        sol = solve(prob, _solver; print_level = 0)
+
+        # Compute variance-covariance
+        if compute_vcov && (sol.retcode == ReturnCode.Success)
+            subject_grads_cache = compute_subject_gradients(sol.u, model, books)
+            subject_hessians_cache = compute_subject_hessians(sol.u, model, books)
+            
+            nparams = length(sol.u)
+            fishinf = zeros(Float64, nparams, nparams)
+            for H_i in subject_hessians_cache
+                fishinf .-= H_i
+            end
+            
+            vcov_expanded = pinv(Symmetric(fishinf), 
+                atol = vcov_threshold ? (log(nsubj) * length(sol.u))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
+            vcov_expanded[isapprox.(vcov_expanded, 0.0; atol = eps(Float64))] .= 0.0
+            vcov_expanded = Symmetric(vcov_expanded)
+        else
+            subject_grads_cache = nothing
+            subject_hessians_cache = nothing
+            vcov_expanded = nothing
+        end
+    else
+        _constraints = deepcopy(constraints)
+        consfun_markov = parse_constraints(_constraints.cons, model.hazards; consfun_name = :consfun_markov)
+
+        initcons = consfun_markov(zeros(length(constraints.cons)), parameters, nothing)
+        badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
+        if length(badcons) > 0
+            error("Constraints $badcons are violated at the initial parameter values.")
+        end
+
+        optf = OptimizationFunction(loglik_fn, get_optimization_ad(adbackend), cons = consfun_markov)
+        prob = OptimizationProblem(optf, parameters, panel_data, lcons = constraints.lcons, ucons = constraints.ucons)
+        
+        _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
+        sol = solve(prob, _solver; print_level = 0)
+
+        if compute_vcov == true
+            @warn "No covariance matrix is returned when constraints are provided."
+        end
+        subject_grads_cache = nothing
+        subject_hessians_cache = nothing
+        vcov_expanded = nothing
+    end
+
+    # Update model with fitted parameters
+    params_nested = model.parameters.unflatten(sol.u)
+    
+    # Compute natural scale for expanded parameters
+    params_natural_pairs = [
+        hazname => extract_natural_vector(params_nested[hazname])
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    params_natural = NamedTuple(params_natural_pairs)
+    
+    # Update expanded parameters in model (model.parameters is the expanded params)
+    model.parameters = (
+        flat = Vector{Float64}(sol.u),
+        nested = params_nested,
+        natural = params_natural,
+        unflatten = model.parameters.unflatten
+    )
+
+    # Sync back to user-facing parameters
+    _sync_phasetype_parameters_to_original!(model)
+
+    # Compute loglikelihood
+    loglik_val = -sol.objective
+
+    # Build logliks tuple for expanded model (for compatibility)
+    logliks_expanded = (
+        loglik = loglik_val, 
+        subj_lml = loglik_markov(sol.u, panel_data; return_ll_subj = true)
+    )
+
+    # Build parameters for expanded model
+    expanded_parameters_fitted = (
+        flat = Vector{Float64}(sol.u),
+        nested = params_nested,
+        natural = params_natural,
+        unflatten = model.parameters.unflatten
+    )
+
+    # Compute robust variance if requested
+    ij_variance = nothing
+    jk_variance = nothing
+    subject_grads = nothing
+    
+    if (compute_ij_vcov || compute_jk_vcov) && !isnothing(vcov_expanded) && isnothing(constraints)
+        if verbose
+            println("Computing robust variance estimates...")
+        end
+        robust_result = compute_robust_vcov(sol.u, model, books;
+                                           compute_ij = compute_ij_vcov,
+                                           compute_jk = compute_jk_vcov,
+                                           loo_method = loo_method,
+                                           vcov_threshold = vcov_threshold,
+                                           subject_grads = subject_grads_cache,
+                                           subject_hessians = subject_hessians_cache)
+        ij_variance = robust_result.ij_vcov
+        jk_variance = robust_result.jk_vcov
+        subject_grads = robust_result.subject_gradients
+    end
+
+    # Build modelcall with phase-type specific info for later access
+    # This allows get_parameters to return user-facing phase-type parameters
+    phasetype_modelcall = (
+        # Standard modelcall fields
+        hazards = model.modelcall.hazards,
+        data = model.modelcall.data,
+        constraints = model.modelcall.constraints,
+        SubjectWeights = model.modelcall.SubjectWeights,
+        ObservationWeights = model.modelcall.ObservationWeights,
+        CensoringPatterns = model.modelcall.CensoringPatterns,
+        EmissionMatrix = model.modelcall.EmissionMatrix,
+        # Phase-type specific fields
+        is_phasetype = true,
+        mappings = model.mappings,
+        original_parameters = model.original_parameters,
+        original_tmat = model.original_tmat,
+        original_data = model.original_data,
+        convergence = sol.retcode == ReturnCode.Success,
+        solution = sol
+    )
+
+    # Return MultistateModelFitted directly (no wrapper)
+    # Phase-type info stored in modelcall for accessor functions
+    return MultistateModelFitted(
+        model.data,  # expanded data
+        expanded_parameters_fitted,
+        logliks_expanded,
+        isnothing(vcov_expanded) ? nothing : Matrix(vcov_expanded),
+        isnothing(ij_variance) ? nothing : Matrix(ij_variance),
+        isnothing(jk_variance) ? nothing : Matrix(jk_variance),
+        subject_grads,
+        model.hazards,
+        model.totalhazards,
+        model.mappings.expanded_tmat,
+        model.emat,
+        model.hazkeys,
+        model.subjectindices,
+        model.SubjectWeights,
+        model.ObservationWeights,
+        model.CensoringPatterns,
+        model.markovsurrogate,
+        (solution = sol,),
+        nothing,
+        phasetype_modelcall
+    )
+end
 
 """
     fit(model::MultistateMarkovModel; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
 
 Fit a Markov multistate model to interval-censored or panel data.
 
-Uses L-BFGS optimization for unconstrained problems (5-6× faster than interior-point methods)
-and Ipopt for constrained problems by default.
+Uses Ipopt optimization for both constrained and unconstrained problems by default.
 
 # Arguments
 - `model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}`: Markov model with panel observations
 - `constraints`: parameter constraints (see Constraints documentation)
 - `verbose::Bool=true`: print optimization messages
-- `solver`: optimization solver (default: L-BFGS for unconstrained, Ipopt for constrained).
+- `solver`: optimization solver (default: Ipopt for both constrained and unconstrained).
   See [Optimization Solvers](@ref) for available options.
+- `adbackend::ADBackend=ForwardDiffBackend()`: automatic differentiation backend.
+  - `ForwardDiffBackend()`: forward-mode AD (default, required for Markov models)
+  - `EnzymeBackend()`: reverse-mode AD (Julia 1.12 not supported)
+  - `MooncakeBackend()`: reverse-mode AD (fails on Markov models - see below)
+  
+  **Important:** Markov panel likelihoods require `ForwardDiffBackend()` because matrix
+  exponential differentiation uses LAPACK calls that reverse-mode AD cannot handle.
+  ChainRules.jl has an rrule for exp(::Matrix), but it also uses LAPACK internally.
+  
 - `compute_vcov::Bool=true`: compute model-based variance-covariance matrix (for diagnostics)
 - `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse of Fisher information
 - `compute_ij_vcov::Bool=true`: compute infinitesimal jackknife (sandwich/robust) variance.
@@ -284,11 +609,17 @@ result = compare_variance_estimates(fitted)
 # Use a custom solver
 using Optim
 fitted = fit(markov_model; solver=Optim.BFGS())
+
+# Use Enzyme for reverse-mode AD (useful for large models)
+fitted = fit(markov_model; adbackend=EnzymeBackend())
+
+# Use Mooncake for reverse-mode AD (works on all Julia versions)
+fitted = fit(markov_model; adbackend=MooncakeBackend())
 ```
 
 See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, solver = nothing, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, solver = nothing, adbackend::ADBackend = ForwardDiffBackend(), compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -312,34 +643,50 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         constraints = model.modelcall.constraints
     end
 
+    # Warn if using reverse-mode AD for Markov models (matrix exponential issue)
+    if adbackend isa MooncakeBackend
+        @warn "MooncakeBackend may fail for Markov models due to LAPACK calls in matrix exponential. " *
+              "ChainRules.jl's exp rule also uses LAPACK internally. Use ForwardDiffBackend() if you encounter errors."
+    end
+
+    # Select likelihood function based on AD backend
+    # Enzyme and Mooncake (reverse-mode) require non-mutating code
+    loglik_fn = if adbackend isa EnzymeBackend || adbackend isa MooncakeBackend
+        loglik_markov_functional
+    else
+        loglik_markov
+    end
+
     # parse constraints, or not, and solve
     if isnothing(constraints)
-        # get estimates - use L-BFGS for unconstrained (5-6x faster than Ipopt)
-        optf = OptimizationFunction(loglik_markov, Optimization.AutoForwardDiff())
+        # get estimates - use Ipopt for unconstrained
+        optf = OptimizationFunction(loglik_fn, get_optimization_ad(adbackend))
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
         
-        # solve with user-specified solver or default L-BFGS
-        _solver = isnothing(solver) ? Optim.LBFGS() : solver
-        sol  = solve(prob, _solver)
+        # solve with user-specified solver or default Ipopt
+        _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
+        sol  = solve(prob, _solver; print_level = 0)
 
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success)
-            # preallocate the hessian matrix
-            diffres = DiffResults.HessianResult(sol.u)
-
-            # single argument function for log-likelihood            
-            ll = pars -> loglik_markov(pars, MPanelData(model, books); neg=false)
-
-            # compute gradient and hessian
-            diffres = ForwardDiff.hessian!(diffres, ll, sol.u)
-
-            # grab results
-            gradient = DiffResults.gradient(diffres)
-            fishinf = Symmetric(.-DiffResults.hessian(diffres))
+            # Compute subject-level gradients and Hessians to cache them for robust variance
+            # This avoids redundant computation when computing robust variance estimates
+            subject_grads_cache = compute_subject_gradients(sol.u, model, books)
+            subject_hessians_cache = compute_subject_hessians(sol.u, model, books)
+            
+            # Aggregate Fisher information from subject Hessians
+            nparams = length(sol.u)
+            fishinf = zeros(Float64, nparams, nparams)
+            for H_i in subject_hessians_cache
+                fishinf .-= H_i
+            end
+            
             vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(nsubj) * length(sol.u))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
             vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
             vcov = Symmetric(vcov)
         else
+            subject_grads_cache = nothing
+            subject_hessians_cache = nothing
             vcov = nothing
         end
     else
@@ -353,7 +700,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
             error("Constraints $badcons are violated at the initial parameter values.")
         end
 
-        optf = OptimizationFunction(loglik_markov, Optimization.AutoForwardDiff(), cons = consfun_markov)
+        optf = OptimizationFunction(loglik_fn, get_optimization_ad(adbackend), cons = consfun_markov)
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books), lcons = constraints.lcons, ucons = constraints.ucons)
         
         # solve with user-specified solver or default Ipopt
@@ -364,6 +711,8 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         if compute_vcov == true
             @warn "No covariance matrix is returned when constraints are provided."
         end
+        subject_grads_cache = nothing
+        subject_hessians_cache = nothing
         vcov = nothing
     end
 
@@ -383,7 +732,9 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
                                            compute_ij = compute_ij_vcov,
                                            compute_jk = compute_jk_vcov,
                                            loo_method = loo_method,
-                                           vcov_threshold = vcov_threshold)
+                                           vcov_threshold = vcov_threshold,
+                                           subject_grads = subject_grads_cache,
+                                           subject_hessians = subject_hessians_cache)
         ij_variance = robust_result.ij_vcov
         jk_variance = robust_result.jk_vcov
         subject_grads = robust_result.subject_gradients
@@ -437,8 +788,7 @@ end
 
 Fit a semi-Markov model to panel data via Monte Carlo EM (MCEM).
 
-Uses L-BFGS optimization for unconstrained M-steps (5-6× faster than interior-point methods)
-and Ipopt for constrained M-steps by default.
+Uses Ipopt optimization for both constrained and unconstrained M-steps by default.
 
 !!! note "Surrogate Required"
     MCEM requires a Markov surrogate for importance sampling proposals. 
@@ -476,7 +826,7 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
 - `constraints`: parameter constraints tuple
 
 **Optimization:**
-- `solver`: optimization solver for M-step (default: L-BFGS for unconstrained, Ipopt for constrained).
+- `solver`: optimization solver for M-step (default: Ipopt for both constrained and unconstrained).
   See [Optimization Solvers](@ref) for available options.
 
 **MCEM algorithm control:**
@@ -720,11 +1070,51 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
     end
 
-    # Build phase-type TPM book if using phase-type proposals
+    # Build phase-type infrastructure if using phase-type proposals
+    # For exact observations, we need to expand the data to properly express
+    # phase uncertainty during sojourn times
+    expanded_ph_data = nothing
+    ph_censoring_patterns = nothing
+    ph_original_row_map = nothing
+    ph_subjectindices = nothing
+    expanded_ph_tpm_map = nothing  # tpm_map for expanded data
+    
     if use_phasetype
-        tpm_book_ph, hazmat_book_ph = build_phasetype_tpm_book(phasetype_surrogate, books, model.data)
-        fbmats_ph = build_fbmats_phasetype(model, phasetype_surrogate)
-        emat_ph = build_phasetype_emat_expanded(model, phasetype_surrogate)
+        # Check if data needs expansion (has exact observations)
+        if needs_data_expansion_for_phasetype(model.data)
+            n_states = size(model.tmat, 1)
+            expansion_result = expand_data_for_phasetype(model.data, n_states)
+            expanded_ph_data = expansion_result.expanded_data
+            ph_censoring_patterns = expansion_result.censoring_patterns
+            ph_original_row_map = expansion_result.original_row_map
+            ph_subjectindices = compute_expanded_subject_indices(expanded_ph_data)
+            
+            if verbose
+                n_orig = nrow(model.data)
+                n_exp = nrow(expanded_ph_data)
+                println("  Expanded data for phase-type: $n_orig → $n_exp rows")
+            end
+        end
+        
+        # Build TPM book using original or expanded data
+        data_for_ph = isnothing(expanded_ph_data) ? model.data : expanded_ph_data
+        
+        # Rebuild books for expanded data if needed
+        if !isnothing(expanded_ph_data)
+            books_ph = build_tpm_mapping(expanded_ph_data)
+            expanded_ph_tpm_map = books_ph[2]  # Save tpm_map for sampling
+            tpm_book_ph, hazmat_book_ph = build_phasetype_tpm_book(phasetype_surrogate, books_ph, expanded_ph_data)
+        else
+            tpm_book_ph, hazmat_book_ph = build_phasetype_tpm_book(phasetype_surrogate, books, model.data)
+        end
+        
+        # Build fbmats with correct sizes (using expanded subject indices if available)
+        subj_inds_for_ph = isnothing(ph_subjectindices) ? model.subjectindices : ph_subjectindices
+        fbmats_ph = build_fbmats_phasetype_with_indices(subj_inds_for_ph, phasetype_surrogate)
+        
+        emat_ph = build_phasetype_emat_expanded(model, phasetype_surrogate;
+                                                 expanded_data = expanded_ph_data,
+                                                 censoring_patterns = ph_censoring_patterns)
     end
 
     # compute normalizing constant of proposal distribution
@@ -733,7 +1123,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     #   This is r(Y|θ') in the importance sampling formula:
     #   log f̂(Y|θ) = log r(Y|θ') + Σᵢ log(mean(νᵢ))
     if use_phasetype
-        NormConstantProposal = compute_phasetype_marginal_loglik(model, phasetype_surrogate, emat_ph)
+        NormConstantProposal = compute_phasetype_marginal_loglik(
+            model, phasetype_surrogate, emat_ph;
+            expanded_data = expanded_ph_data,
+            expanded_subjectindices = ph_subjectindices)
     else
         NormConstantProposal = compute_markov_marginal_loglik(model, markov_surrogate)
     end
@@ -764,7 +1157,12 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         tpm_book_ph = tpm_book_ph,
         hazmat_book_ph = hazmat_book_ph,
         fbmats_ph = fbmats_ph,
-        emat_ph = emat_ph)
+        emat_ph = emat_ph,
+        # Expanded data infrastructure (nothing if not using/not needed)
+        expanded_ph_data = expanded_ph_data,
+        expanded_ph_subjectindices = ph_subjectindices,
+        expanded_ph_tpm_map = expanded_ph_tpm_map,
+        ph_original_row_map = ph_original_row_map)
     
     # get current estimate of marginal log likelihood
     mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SubjectWeights)
@@ -811,10 +1209,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             squarem_state.step = 1
         end
         
-        # solve M-step: use user-specified solver or default (L-BFGS for unconstrained, Ipopt for constrained)
+        # solve M-step: use user-specified solver or default Ipopt
         if isnothing(constraints)
-            _solver = isnothing(solver) ? Optim.LBFGS() : solver
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), _solver)
+            _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), _solver; print_level = 0)
         else
             _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
             params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), _solver; print_level = 0)
@@ -1010,7 +1408,12 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             tpm_book_ph = tpm_book_ph,
             hazmat_book_ph = hazmat_book_ph,
             fbmats_ph = fbmats_ph,
-            emat_ph = emat_ph)
+            emat_ph = emat_ph,
+            # Expanded data infrastructure (nothing if not using/not needed)
+            expanded_ph_data = expanded_ph_data,
+            expanded_ph_subjectindices = ph_subjectindices,
+            expanded_ph_tpm_map = expanded_ph_tpm_map,
+            ph_original_row_map = ph_original_row_map)
     end # end-while
 
     if !is_converged

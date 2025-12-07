@@ -11,7 +11,7 @@ format:
 
 # Simulation Long Tests
 
-_Last updated: 2025-06-03 UTC_
+_Last updated: 2025-12-04 UTC_
 
 This document describes the long-running statistical validation tests for the simulation infrastructure in MultistateModels.jl. These tests verify that `simulate_path` correctly samples from the target sojourn time distributions across all supported hazard families and covariate configurations.
 
@@ -633,6 +633,84 @@ Pkg.test("MultistateModels")
 Or run just model generation tests:
 ```julia
 include("test/test_modelgeneration.jl")
+```
+
+---
+
+## Phase-Type Simulation Validation
+
+Phase-type models (`:pt` hazard family) implement flexible sojourn time distributions via Coxian expansions. To validate the simulation infrastructure, we compare the output of phase-type models against manually-expanded Markov models with explicit exponential hazards on the expanded state space.
+
+### Test Methodology
+
+1. **PhaseType Model**: Uses the `:pt` hazard specification with `n_phases` phases
+2. **Manual Model**: Explicitly constructs the expanded state space with exponential hazards
+3. **Comparison**: Both models are seeded identically; paths are collapsed and compared
+
+The key validation is that when both models use the same RNG seed, they should produce **identical paths** (after collapsing the manual model's expanded states to observed states).
+
+### Model Structure
+
+- **Observed states:** 1 → 2 → 3 (progressive, state 3 absorbing)
+- **Expanded states (2-phase):** 1a=1 → 1b=2 → 2a=3 → 2b=4 → 3=5
+
+### Test Results Summary
+
+| Test | Path Equivalence | Prevalence Diff | CumIncid Diff | Status |
+|------|------------------|-----------------|---------------|--------|
+| `ptsim_2phase_nocov` | 100.0% | 0.0 | 0.0 | ✅ PASS |
+| `ptsim_3phase_nocov` | 100.0% | 0.0 | 0.0 | ✅ PASS |
+| `ptsim_2phase_allequal` | 100.0% | 0.0 | 0.0 | ✅ PASS |
+
+### 2-Phase Coxian (Unstructured)
+
+![PT 2phase prevalence](./assets/phasetype_simulation/ptsim_2phase_nocov_prevalence.png)
+
+![PT 2phase cumulative incidence](./assets/phasetype_simulation/ptsim_2phase_nocov_cumincid.png)
+
+#### Log-Likelihood Distributions
+
+The log-likelihood proxy is computed as the negative total sojourn time. Since paths are identical, distributions match exactly.
+
+![PT 2phase log-likelihood histogram](./assets/phasetype_simulation/ptsim_2phase_nocov_loglik_hist.png)
+
+![PT 2phase log-likelihood scatter](./assets/phasetype_simulation/ptsim_2phase_nocov_loglik_scatter.png)
+
+### 3-Phase Coxian on 1→2, 2-Phase on 2→3
+
+![PT 3phase prevalence](./assets/phasetype_simulation/ptsim_3phase_nocov_prevalence.png)
+
+![PT 3phase cumulative incidence](./assets/phasetype_simulation/ptsim_3phase_nocov_cumincid.png)
+
+![PT 3phase log-likelihood histogram](./assets/phasetype_simulation/ptsim_3phase_nocov_loglik_hist.png)
+
+### 2-Phase Coxian (All-Equal Exit Rates)
+
+![PT allequal prevalence](./assets/phasetype_simulation/ptsim_2phase_allequal_prevalence.png)
+
+![PT allequal cumulative incidence](./assets/phasetype_simulation/ptsim_2phase_allequal_cumincid.png)
+
+![PT allequal log-likelihood histogram](./assets/phasetype_simulation/ptsim_2phase_allequal_loglik_hist.png)
+
+### Conclusions
+
+✅ **All 3 phase-type simulation tests pass.** The `:pt` hazard family produces simulated paths that are bitwise identical to manually-expanded Markov models when both are seeded identically. This validates:
+
+- Correct Coxian matrix construction (`build_coxian_generator`)
+- Correct embedded Markov chain simulation (`simulate_embedded_chain`)
+- Correct sojourn time sampling from phase-type distributions
+- Path collapsing correctly maps expanded states to observed states
+
+### Test File Location
+
+Phase-type simulation tests are located in:
+```
+test/longtests/phasetype_simulation_tests.jl
+```
+
+Report generator:
+```
+test/longtests/run_phasetype_simulation_report.jl
 ```
 
 ---

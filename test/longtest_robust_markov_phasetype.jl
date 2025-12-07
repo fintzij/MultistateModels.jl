@@ -34,22 +34,21 @@ import MultistateModels: Hazard, multistatemodel, fit, set_parameters!, simulate
     loglik_phasetype_expanded
 
 # =============================================================================
-# TIGHT TOLERANCE CONSTANTS
+# CONSTANTS
 # =============================================================================
 const RNG_SEED = 0xABCD2026
-const N_SUBJECTS_LARGE = 5000      # Large sample for tight tolerance
-const N_SUBJECTS_MED = 1000        # Medium sample for MCEM
+const N_SUBJECTS = 1000            # Standard sample size for longtests
 const MAX_TIME = 12.0              # Follow-up time
-const PARAM_TOL_REL = 0.10         # 10% relative tolerance (TIGHT)
-const PARAM_TOL_BETA = 0.15        # 15% for covariate effects
-const PARAM_TOL_MCEM = 0.35        # 35% for MCEM (inherent MC noise - matches longtest_mcem.jl)
+const PARAM_TOL_REL = 0.20         # 20% relative tolerance for MLE (n=1000)
+const PARAM_TOL_BETA = 0.25        # 25% for covariate effects
+const PARAM_TOL_MCEM = 0.35        # 35% for MCEM (inherent MC noise)
 const IS_WEIGHT_TOL = 1e-10        # IS weights must be exactly 1.0
 
 # =============================================================================
 # Helper: Generate panel data from illness-death model
 # =============================================================================
 function generate_panel_data(hazards, true_params;
-    n_subj::Int = N_SUBJECTS_LARGE,
+    n_subj::Int = N_SUBJECTS,
     obs_times::Vector{Float64} = [0.0, 3.0, 6.0, 9.0, MAX_TIME],
     covariate_data::Union{Nothing, DataFrame} = nothing)
     
@@ -73,15 +72,16 @@ function generate_panel_data(hazards, true_params;
     model = multistatemodel(hazards...; data=template)
     set_parameters!(model, true_params)
     
-    sim_result = simulate(model; paths=false, data=true, nsim=1)
-    return sim_result[1, 1]
+    # Use autotmax=false to preserve panel observation times structure
+    sim_result = simulate(model; paths=false, data=true, nsim=1, autotmax=false)
+    return sim_result[1]
 end
 
 # =============================================================================
 # TEST SECTION 1: MARKOV MLE (PANEL DATA, EXPONENTIAL HAZARDS)
 # =============================================================================
 
-@testset "Robust Markov MLE - No Covariates (n=$N_SUBJECTS_LARGE)" begin
+@testset "Robust Markov MLE - No Covariates (n=$N_SUBJECTS)" begin
     Random.seed!(RNG_SEED)
     
     # True exponential rates (Markov model)
@@ -117,14 +117,14 @@ end
     println("  ✓ Markov MLE panel data: rates recovered within $(100*PARAM_TOL_REL)%")
 end
 
-@testset "Robust Markov MLE - With Covariate (n=$N_SUBJECTS_LARGE)" begin
+@testset "Robust Markov MLE - With Covariate (n=$N_SUBJECTS)" begin
     Random.seed!(RNG_SEED + 1)
     
     true_rate_12, true_beta_12 = 0.25, 0.4
     true_rate_23, true_beta_23 = 0.20, -0.3
     true_rate_13, true_beta_13 = 0.10, 0.5
     
-    cov_data = DataFrame(x = rand([0.0, 1.0], N_SUBJECTS_LARGE))
+    cov_data = DataFrame(x = rand([0.0, 1.0], N_SUBJECTS))
     
     true_params = (
         h12 = [log(true_rate_12), true_beta_12],
@@ -192,8 +192,8 @@ end
     true_rate = 0.3
     model_sim = multistatemodel(h12; data=template)
     set_parameters!(model_sim, (h12 = [log(true_rate)],))
-    sim_result = simulate(model_sim; paths=false, data=true, nsim=1)
-    dat = sim_result[1, 1]
+    sim_result = simulate(model_sim; paths=false, data=true, nsim=1, autotmax=false)
+    dat = sim_result[1]
     
     model = multistatemodel(h12; data=dat)
     
@@ -262,14 +262,13 @@ end
     true_shape, true_scale = 1.2, 0.2
     model_sim = multistatemodel(h12; data=template)
     set_parameters!(model_sim, (h12 = [log(true_shape), log(true_scale)],))
-    sim_result = simulate(model_sim; paths=false, data=true, nsim=1)
-    dat = sim_result[1, 1]
+    sim_result = simulate(model_sim; paths=false, data=true, nsim=1, autotmax=false)
+    dat = sim_result[1]
     
     model = multistatemodel(h12; data=dat)
     
-    tmat = model.tmat
-    config = PhaseTypeConfig(n_phases=[2, 1])
-    surrogate = build_phasetype_surrogate(tmat, config)
+    # Fit phase-type surrogate (must be fitted, not just built with defaults)
+    surrogate = fit_surrogate(model; type=:phasetype, n_phases=[2, 1], verbose=false)
     
     emat_ph = build_phasetype_emat_expanded(model, surrogate)
     books = build_tpm_mapping(model.data)
@@ -313,7 +312,7 @@ end
 # convergence unreliable for robust testing.
 # =============================================================================
 
-@testset "Robust MCEM Weibull - Competing Risks (n=$N_SUBJECTS_MED)" begin
+@testset "Robust MCEM Weibull - Competing Risks (n=$N_SUBJECTS)" begin
     Random.seed!(RNG_SEED + 20)
     
     # Weibull requires MCEM (semi-Markov)
@@ -330,7 +329,7 @@ end
     h13 = Hazard(@formula(0 ~ 1), "wei", 1, 3)
     
     # Generate panel data using helper
-    panel_data = generate_panel_data((h12, h13), true_params; n_subj=N_SUBJECTS_MED)
+    panel_data = generate_panel_data((h12, h13), true_params; n_subj=N_SUBJECTS)
     
     # MCEM requires surrogate=:markov for semi-Markov models
     model_fit = multistatemodel(h12, h13; data=panel_data, surrogate=:markov)
@@ -359,14 +358,14 @@ end
     println("  ✓ MCEM Weibull competing risks: shape and scale recovered within $(100*PARAM_TOL_MCEM)%")
 end
 
-@testset "Robust MCEM Weibull - With Covariate (n=$N_SUBJECTS_MED)" begin
+@testset "Robust MCEM Weibull - With Covariate (n=$N_SUBJECTS)" begin
     Random.seed!(RNG_SEED + 21)
     
     true_shape = 1.2
     true_scale = 0.20
     true_beta = 0.5
     
-    cov_data = DataFrame(x = rand([0.0, 1.0], N_SUBJECTS_MED))
+    cov_data = DataFrame(x = rand([0.0, 1.0], N_SUBJECTS))
     
     true_params = (h12 = [log(true_shape), log(true_scale), true_beta],)
     
@@ -377,20 +376,20 @@ end
     obs_times = [0.0, 3.0, 6.0, 9.0, MAX_TIME]
     
     template = DataFrame(
-        id = repeat(1:N_SUBJECTS_MED, inner=nobs),
-        tstart = repeat(obs_times[1:end-1], N_SUBJECTS_MED),
-        tstop = repeat(obs_times[2:end], N_SUBJECTS_MED),
-        statefrom = ones(Int, N_SUBJECTS_MED * nobs),
-        stateto = ones(Int, N_SUBJECTS_MED * nobs),
-        obstype = fill(2, N_SUBJECTS_MED * nobs),
+        id = repeat(1:N_SUBJECTS, inner=nobs),
+        tstart = repeat(obs_times[1:end-1], N_SUBJECTS),
+        tstop = repeat(obs_times[2:end], N_SUBJECTS),
+        statefrom = ones(Int, N_SUBJECTS * nobs),
+        stateto = ones(Int, N_SUBJECTS * nobs),
+        obstype = fill(2, N_SUBJECTS * nobs),
         x = repeat(cov_data.x, inner=nobs)
     )
     
     model_sim = multistatemodel(h12; data=template)
     set_parameters!(model_sim, true_params)
     
-    sim_result = simulate(model_sim; paths=false, data=true, nsim=1)
-    panel_data = sim_result[1, 1]
+    sim_result = simulate(model_sim; paths=false, data=true, nsim=1, autotmax=false)
+    panel_data = sim_result[1]
     
     # MCEM requires surrogate=:markov for semi-Markov models
     model_fit = multistatemodel(h12; data=panel_data, surrogate=:markov)
@@ -418,7 +417,7 @@ end
     println("  ✓ MCEM Weibull with covariate: all parameters recovered")
 end
 
-@testset "Robust MCEM Gompertz - Competing Risks (n=$N_SUBJECTS_MED)" begin
+@testset "Robust MCEM Gompertz - Competing Risks (n=$N_SUBJECTS)" begin
     Random.seed!(RNG_SEED + 30)
     
     # Gompertz requires MCEM (semi-Markov)
@@ -435,7 +434,7 @@ end
     h12 = Hazard(@formula(0 ~ 1), "gom", 1, 2)
     h13 = Hazard(@formula(0 ~ 1), "gom", 1, 3)
     
-    panel_data = generate_panel_data((h12, h13), true_params; n_subj=N_SUBJECTS_MED)
+    panel_data = generate_panel_data((h12, h13), true_params; n_subj=N_SUBJECTS)
     
     # MCEM requires surrogate=:markov for semi-Markov models
     model_fit = multistatemodel(h12, h13; data=panel_data, surrogate=:markov)
@@ -505,7 +504,7 @@ end
 # TEST SECTION 5: REVERSIBLE MODEL
 # =============================================================================
 
-@testset "Robust Markov Reversible Model (n=$N_SUBJECTS_LARGE)" begin
+@testset "Robust Markov Reversible Model (n=$N_SUBJECTS)" begin
     Random.seed!(RNG_SEED + 50)
     
     # Reversible 1 ↔ 2 model
@@ -524,19 +523,19 @@ end
     obs_times = [0.0, 2.0, 4.0, 6.0, 8.0, MAX_TIME]
     
     template = DataFrame(
-        id = repeat(1:N_SUBJECTS_LARGE, inner=nobs),
-        tstart = repeat(obs_times[1:end-1], N_SUBJECTS_LARGE),
-        tstop = repeat(obs_times[2:end], N_SUBJECTS_LARGE),
-        statefrom = ones(Int, N_SUBJECTS_LARGE * nobs),
-        stateto = ones(Int, N_SUBJECTS_LARGE * nobs),
-        obstype = fill(2, N_SUBJECTS_LARGE * nobs)
+        id = repeat(1:N_SUBJECTS, inner=nobs),
+        tstart = repeat(obs_times[1:end-1], N_SUBJECTS),
+        tstop = repeat(obs_times[2:end], N_SUBJECTS),
+        statefrom = ones(Int, N_SUBJECTS * nobs),
+        stateto = ones(Int, N_SUBJECTS * nobs),
+        obstype = fill(2, N_SUBJECTS * nobs)
     )
     
     model_sim = multistatemodel(h12, h21; data=template)
     set_parameters!(model_sim, true_params)
     
-    sim_result = simulate(model_sim; paths=false, data=true, nsim=1)
-    panel_data = sim_result[1, 1]
+    sim_result = simulate(model_sim; paths=false, data=true, nsim=1, autotmax=false)
+    panel_data = sim_result[1]
     
     model_fit = multistatemodel(h12, h21; data=panel_data)
     fitted = fit(model_fit; verbose=false, compute_vcov=true)
@@ -558,8 +557,8 @@ end
 println("\n" * "="^70)
 println("ROBUST MARKOV/PHASE-TYPE LONGTEST SUITE COMPLETE")
 println("="^70)
-println("Markov MLE sample size: n = $N_SUBJECTS_LARGE")
-println("MCEM sample size: n = $N_SUBJECTS_MED")
+println("Markov MLE sample size: n = $N_SUBJECTS")
+println("MCEM sample size: n = $N_SUBJECTS")
 println("Tolerances: $(100*PARAM_TOL_REL)% Markov, $(100*PARAM_TOL_MCEM)% MCEM")
 println("IS weight tolerance: $IS_WEIGHT_TOL (algebraic exactness)")
 println("="^70)

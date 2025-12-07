@@ -1,4 +1,177 @@
 
+# =============================================================================
+# Phase-Type Fitted Model Detection and Accessors
+# =============================================================================
+
+"""
+    is_phasetype_fitted(model::MultistateModelFitted) -> Bool
+
+Check if a fitted model was produced by fitting a `PhaseTypeModel`.
+
+Phase-type fitted models store additional information in `modelcall`:
+- `is_phasetype`: Flag indicating phase-type origin
+- `mappings`: `PhaseTypeMappings` for state space translation
+- `original_parameters`: User-facing phase-type parameters (λ, μ)
+- `original_tmat`: Original transition matrix (on observed states)
+- `original_data`: Original data (on observed states)
+
+# Example
+```julia
+# Fit a phase-type model
+h12 = Hazard(@formula(0 ~ 1), "pt", 1, 2; n_phases=3)
+model = multistatemodel(h12; data=data)
+fitted = fit(model)
+
+# Check if phase-type
+is_phasetype_fitted(fitted)  # true
+
+# Access phase-type parameters (convenience function)
+params = get_phasetype_parameters(fitted)
+```
+
+See also: [`get_phasetype_parameters`](@ref), [`get_mappings`](@ref), [`PhaseTypeModel`](@ref)
+"""
+function is_phasetype_fitted(model::MultistateModelFitted)
+    haskey(model.modelcall, :is_phasetype) && model.modelcall.is_phasetype === true
+end
+
+# Fallback for other model types
+is_phasetype_fitted(::MultistateProcess) = false
+
+"""
+    get_phasetype_parameters(model::MultistateModelFitted; scale::Symbol=:natural)
+
+Get phase-type parameters from a fitted phase-type model.
+
+Returns the user-facing phase-type parameterization (λ progression rates, μ exit rates).
+Throws an error if the model is not a fitted phase-type model.
+
+# Arguments
+- `model::MultistateModelFitted`: A fitted model (must be from `PhaseTypeModel`)
+- `scale::Symbol=:natural`: Parameter scale
+  - `:natural` - Human-readable scale (rates as positive values)
+  - `:flat` or `:estimation` or `:log` - Flat vector on log scale
+  - `:nested` - Nested NamedTuple structure
+
+# Returns
+- `NamedTuple`: Phase-type parameters per original hazard
+
+# Example
+```julia
+fitted = fit(phasetype_model)
+params = get_phasetype_parameters(fitted)
+# (h12 = (λ = [1.2, 0.8], μ = [0.5, 0.3, 0.4]), h23 = [0.6, 0.25])
+```
+
+See also: [`is_phasetype_fitted`](@ref), [`get_expanded_parameters`](@ref)
+"""
+function get_phasetype_parameters(model::MultistateModelFitted; scale::Symbol=:natural)
+    if !is_phasetype_fitted(model)
+        throw(ArgumentError("Model is not a fitted phase-type model. " *
+                           "Use `get_parameters(model)` for standard models."))
+    end
+    
+    original_params = model.modelcall.original_parameters
+    if scale == :natural
+        return original_params.natural
+    elseif scale == :flat || scale == :estimation || scale == :log
+        return original_params.flat
+    elseif scale == :nested
+        return original_params.nested
+    else
+        throw(ArgumentError("scale must be :natural, :flat, :estimation, :log, or :nested (got :$scale)"))
+    end
+end
+
+"""
+    get_mappings(model::MultistateModelFitted)
+
+Get the `PhaseTypeMappings` from a fitted phase-type model.
+
+Throws an error if the model is not a fitted phase-type model.
+
+# Returns
+- `PhaseTypeMappings`: State space translation information
+
+See also: [`is_phasetype_fitted`](@ref), [`PhaseTypeMappings`](@ref)
+"""
+function get_mappings(model::MultistateModelFitted)
+    if !is_phasetype_fitted(model)
+        throw(ArgumentError("Model is not a fitted phase-type model."))
+    end
+    return model.modelcall.mappings
+end
+
+"""
+    get_original_data(model::MultistateModelFitted)
+
+Get the original (non-expanded) data from a fitted phase-type model.
+
+Throws an error if the model is not a fitted phase-type model.
+
+# Returns
+- `DataFrame`: Original data on observed state space
+
+See also: [`is_phasetype_fitted`](@ref)
+"""
+function get_original_data(model::MultistateModelFitted)
+    if !is_phasetype_fitted(model)
+        throw(ArgumentError("Model is not a fitted phase-type model."))
+    end
+    return model.modelcall.original_data
+end
+
+"""
+    get_original_tmat(model::MultistateModelFitted)
+
+Get the original transition matrix from a fitted phase-type model.
+
+Throws an error if the model is not a fitted phase-type model.
+
+# Returns
+- `Matrix{Int64}`: Original transition matrix on observed state space
+
+See also: [`is_phasetype_fitted`](@ref)
+"""
+function get_original_tmat(model::MultistateModelFitted)
+    if !is_phasetype_fitted(model)
+        throw(ArgumentError("Model is not a fitted phase-type model."))
+    end
+    return model.modelcall.original_tmat
+end
+
+"""
+    get_convergence(model::MultistateModelFitted)
+
+Check if the model fitting converged.
+
+For phase-type models, returns the convergence status from optimization.
+For other fitted models, checks the convergence records if available.
+
+# Returns
+- `Bool`: Whether the model fitting converged
+"""
+function get_convergence(model::MultistateModelFitted)
+    if is_phasetype_fitted(model)
+        return model.modelcall.convergence
+    else
+        # For non-phase-type models, check ConvergenceRecords
+        if !isnothing(model.ConvergenceRecords)
+            if haskey(model.ConvergenceRecords, :retcode)
+                return model.ConvergenceRecords.retcode == :Success
+            elseif haskey(model.ConvergenceRecords, :solution)
+                sol = model.ConvergenceRecords.solution
+                return hasfield(typeof(sol), :retcode) && sol.retcode == ReturnCode.Success
+            end
+        end
+        return true  # Assume converged if no info
+    end
+end
+
+# Deprecated: PhaseTypeFittedModel is no longer used
+# Fitted phase-type models are now returned as MultistateModelFitted with
+# phase-type specific info stored in modelcall. Use is_phasetype_fitted() to check.
+
 """
 get_loglik(model::MultistateModelFitted) 
 
@@ -58,6 +231,90 @@ function get_parameters(model::MultistateProcess; scale::Symbol=:natural)
     else
         throw(ArgumentError("scale must be :natural, :estimation, :log, :flat, or :nested (got :$scale)"))
     end
+end
+
+"""
+    get_parameters(model::MultistateModelFitted; scale::Symbol=:natural, expanded::Bool=false)
+
+Return model parameters on the specified scale.
+
+For fitted phase-type models, `expanded=false` (default) returns the user-facing 
+phase-type parameters (λ, μ). Set `expanded=true` to get the internal expanded
+Markov parameters.
+
+For non-phase-type fitted models, the `expanded` argument is ignored.
+
+# Arguments 
+- `model`: A fitted model (MultistateModelFitted)
+- `scale::Symbol=:natural`: Parameter scale
+  - `:natural` - Human-readable scale (rates as positive values)
+  - `:estimation` or `:log` or `:flat` - Flat vector on log scale
+  - `:nested` - Nested NamedTuple structure
+- `expanded::Bool=false`: For phase-type models, whether to return expanded parameters
+
+# Returns
+- For `:natural`: `NamedTuple` with parameters per hazard on natural scale
+- For `:estimation`/`:log`/`:flat`: `Vector{Float64}` flat parameter vector
+- For `:nested`: `NamedTuple` with full structure
+
+# Example
+```julia
+# For phase-type fitted models:
+fitted = fit(phasetype_model)
+
+# Get user-facing phase-type parameters (default)
+params = get_parameters(fitted)
+# (h12 = [λ₁, μ₁, μ₂], h23 = [rate])
+
+# Get expanded internal parameters  
+exp_params = get_parameters(fitted; expanded=true)
+# (h1_prog1 = [λ₁], h12_exit1 = [μ₁], ...)
+```
+
+# See also
+- [`get_phasetype_parameters`](@ref) - Get phase-type params explicitly
+- [`get_expanded_parameters`](@ref) - Get expanded params explicitly
+- [`is_phasetype_fitted`](@ref) - Check if model is fitted phase-type
+"""
+function get_parameters(model::MultistateModelFitted; scale::Symbol=:natural, expanded::Bool=false)
+    # For phase-type models with expanded=false, return user-facing parameters
+    if is_phasetype_fitted(model) && !expanded
+        return get_phasetype_parameters(model; scale=scale)
+    end
+    
+    # Otherwise, return expanded/internal parameters
+    if scale == :natural
+        return model.parameters.natural
+    elseif scale == :estimation || scale == :log || scale == :flat
+        return model.parameters.flat
+    elseif scale == :nested
+        return model.parameters.nested
+    else
+        throw(ArgumentError("scale must be :natural, :estimation, :log, :flat, or :nested (got :$scale)"))
+    end
+end
+
+"""
+    get_expanded_parameters(model::MultistateModelFitted; scale::Symbol=:natural)
+
+Get the expanded (internal) parameters from a fitted model.
+
+For phase-type models, this returns the internal Markov parameters 
+(progression λ and exit μ rates as separate hazards).
+
+For non-phase-type models, this is equivalent to `get_parameters`.
+
+# Example
+```julia
+fitted = fit(phasetype_model)
+exp_params = get_expanded_parameters(fitted)
+# (h1_prog1 = [λ₁], h1_prog2 = [λ₂], h12_exit1 = [μ₁], ...)
+```
+
+See also: [`get_parameters`](@ref), [`get_phasetype_parameters`](@ref)
+"""
+function get_expanded_parameters(model::MultistateModelFitted; scale::Symbol=:natural)
+    return get_parameters(model; scale=scale, expanded=true)
 end
 
 """
@@ -688,50 +945,131 @@ end
     Base.show(io::IO, model::MultistateModelFitted)
 
 Pretty print a fitted multistate model with parameter estimates.
+For phase-type fitted models, displays user-facing parameters.
 """
 function Base.show(io::IO, model::MultistateModelFitted)
+    # Check if this is a phase-type fitted model
+    is_pt = is_phasetype_fitted(model)
+    
     # Header
-    println(io, "MultistateModelFitted")
+    if is_pt
+        println(io, "MultistateModelFitted (Phase-Type)")
+    else
+        println(io, "MultistateModelFitted")
+    end
     println(io, "─" ^ 50)
     
     # Basic info
     n_subj = length(model.subjectindices)
     n_states = size(model.tmat, 1)
     n_hazards = length(model.hazards)
-    println(io, "  Subjects: $n_subj")
-    println(io, "  States: $n_states")
-    println(io, "  Hazards: $n_hazards")
+    
+    if is_pt
+        # Show both original and expanded state counts
+        orig_tmat = model.modelcall.original_tmat
+        n_orig_states = size(orig_tmat, 1)
+        println(io, "  Subjects: $n_subj")
+        println(io, "  States: $n_orig_states (observed), $n_states (expanded)")
+        println(io, "  Hazards: $n_hazards (expanded)")
+    else
+        println(io, "  Subjects: $n_subj")
+        println(io, "  States: $n_states")
+        println(io, "  Hazards: $n_hazards")
+    end
     
     # Log-likelihood
     ll = model.loglik.loglik
     println(io, "  Log-likelihood: $(round(ll, digits=4))")
     
+    # Convergence status for phase-type
+    if is_pt
+        conv = get_convergence(model) ? "converged" : "not converged"
+        println(io, "  Status: $conv")
+    end
+    
     # Parameters
     println(io)
-    println(io, "Parameter estimates (natural scale):")
+    if is_pt
+        println(io, "Phase-type parameter estimates (natural scale):")
+    else
+        println(io, "Parameter estimates (natural scale):")
+    end
     println(io, "─" ^ 50)
     
-    # Get sorted hazard names
-    sorted_hazkeys = sort(collect(model.hazkeys), by = x -> x[2])
-    
-    for (hazname, idx) in sorted_hazkeys
-        haz = model.hazards[idx]
-        parnames = haz.parnames
-        natural_pars = model.parameters.natural[hazname]
+    if is_pt
+        # Display user-facing phase-type parameters
+        pt_params = get_phasetype_parameters(model; scale=:natural)
+        mappings = model.modelcall.mappings
+        original_hazards = mappings.original_hazards
         
-        # Format transition
-        trans_str = "$(haz.statefrom)→$(haz.stateto)"
-        family_str = string(haz.family)
-        println(io, "  $hazname ($trans_str, $family_str):")
-        
-        for (i, (pname, pval)) in enumerate(zip(parnames, natural_pars))
-            # Clean up parameter name for display
-            pname_str = string(pname)
-            # Remove hazard prefix if present
-            if startswith(pname_str, string(hazname) * "_")
-                pname_str = pname_str[length(string(hazname))+2:end]
+        for hazname in keys(pt_params)
+            pars = pt_params[hazname]
+            hazname_str = string(hazname)
+            
+            # Find matching original hazard to get phase-type info
+            pt_haz = nothing
+            for haz in original_hazards
+                if Symbol("h$(haz.statefrom)$(haz.stateto)") == hazname
+                    pt_haz = haz
+                    break
+                end
             end
-            println(io, "    $pname_str = $(round(pval, digits=4))")
+            
+            if !isnothing(pt_haz) && pt_haz isa PhaseTypeHazardSpec
+                n_phases = pt_haz.n_phases
+                statefrom = pt_haz.statefrom
+                stateto = pt_haz.stateto
+                println(io, "  $hazname ($(statefrom)→$(stateto), pt, $n_phases phases):")
+                
+                # Display λ and μ parameters separately
+                n_lambda = n_phases - 1
+                n_mu = n_phases
+                
+                for i in 1:n_lambda
+                    println(io, "    λ$i = $(round(pars[i], digits=4))")
+                end
+                for i in 1:n_mu
+                    println(io, "    μ$i = $(round(pars[n_lambda + i], digits=4))")
+                end
+            elseif !isnothing(pt_haz)
+                # Non-phase-type hazard (e.g., exp) in mixed model
+                trans_str = "$(pt_haz.statefrom)→$(pt_haz.stateto)"
+                family_str = pt_haz.family
+                println(io, "  $hazname ($trans_str, $family_str):")
+                for (i, pval) in enumerate(pars)
+                    println(io, "    par$i = $(round(pval, digits=4))")
+                end
+            else
+                # Fallback
+                println(io, "  $hazname:")
+                for (i, pval) in enumerate(pars)
+                    println(io, "    par$i = $(round(pval, digits=4))")
+                end
+            end
+        end
+    else
+        # Standard display for non-phase-type models
+        sorted_hazkeys = sort(collect(model.hazkeys), by = x -> x[2])
+        
+        for (hazname, idx) in sorted_hazkeys
+            haz = model.hazards[idx]
+            parnames = haz.parnames
+            natural_pars = model.parameters.natural[hazname]
+            
+            # Format transition
+            trans_str = "$(haz.statefrom)→$(haz.stateto)"
+            family_str = string(haz.family)
+            println(io, "  $hazname ($trans_str, $family_str):")
+            
+            for (i, (pname, pval)) in enumerate(zip(parnames, natural_pars))
+                # Clean up parameter name for display
+                pname_str = string(pname)
+                # Remove hazard prefix if present
+                if startswith(pname_str, string(hazname) * "_")
+                    pname_str = pname_str[length(string(hazname))+2:end]
+                end
+                println(io, "    $pname_str = $(round(pval, digits=4))")
+            end
         end
     end
     
@@ -750,5 +1088,86 @@ end
 Extended pretty print for REPL display.
 """
 function Base.show(io::IO, ::MIME"text/plain", model::MultistateModelFitted)
+    show(io, model)
+end
+
+# =============================================================================
+# Pretty printing for PhaseTypeModel (unfitted)
+# =============================================================================
+
+"""
+    Base.show(io::IO, model::PhaseTypeModel)
+
+Pretty print an unfitted phase-type model showing state space structure.
+"""
+function Base.show(io::IO, model::PhaseTypeModel)
+    println(io, "PhaseTypeModel")
+    println(io, "─" ^ 50)
+    
+    # Basic info
+    n_subj = length(model.subjectindices)
+    n_orig_states = size(model.original_tmat, 1)
+    n_exp_states = size(model.tmat, 1)
+    n_orig_hazards = length(model.hazards_spec)
+    n_exp_hazards = length(model.hazards)
+    
+    println(io, "  Subjects: $n_subj")
+    println(io, "  Observed states: $n_orig_states")
+    println(io, "  Expanded states: $n_exp_states")
+    println(io, "  Original hazards: $n_orig_hazards")
+    println(io, "  Expanded hazards: $n_exp_hazards")
+    
+    # Show phase-type hazards
+    println(io)
+    println(io, "Hazard specifications:")
+    println(io, "─" ^ 50)
+    
+    for (i, haz) in enumerate(model.hazards_spec)
+        trans_str = "$(haz.statefrom)→$(haz.stateto)"
+        
+        if haz isa PhaseTypeHazardSpec
+            structure_str = string(haz.structure)
+            println(io, "  h$(haz.statefrom)$(haz.stateto) ($trans_str, pt):")
+            println(io, "    n_phases: $(haz.n_phases)")
+            println(io, "    structure: $structure_str")
+            println(io, "    parameters: $(2*haz.n_phases - 1) baseline")
+        else
+            family_str = haz.family
+            println(io, "  h$(haz.statefrom)$(haz.stateto) ($trans_str, $family_str)")
+        end
+    end
+    
+    # Show state mappings summary
+    if !isnothing(model.mappings) && hasfield(typeof(model.mappings), :observed_to_expanded)
+        println(io)
+        println(io, "State expansion:")
+        println(io, "─" ^ 50)
+        
+        obs_to_exp = model.mappings.observed_to_expanded
+        for (obs_state, exp_states) in sort(collect(obs_to_exp), by = x -> x[1])
+            if length(exp_states) == 1
+                println(io, "  State $obs_state → state $(exp_states[1])")
+            else
+                println(io, "  State $obs_state → states $(first(exp_states))-$(last(exp_states)) ($(length(exp_states)) phases)")
+            end
+        end
+    end
+    
+    # Parameters status
+    println(io)
+    params = model.original_parameters
+    if haskey(params, :natural) && !isnothing(params.natural)
+        println(io, "  Parameters: initialized")
+    else
+        println(io, "  Parameters: not initialized")
+    end
+end
+
+"""
+    Base.show(io::IO, ::MIME"text/plain", model::PhaseTypeModel)
+
+Extended pretty print for REPL display.
+"""
+function Base.show(io::IO, ::MIME"text/plain", model::PhaseTypeModel)
     show(io, model)
 end

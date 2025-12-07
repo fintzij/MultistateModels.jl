@@ -268,7 +268,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 <section id="simulation-long-tests" class="level1">
 <h1>Simulation Long Tests</h1>
-<p><em>Last updated: 2025-06-03 UTC</em></p>
+<p><em>Last updated: 2025-12-04 UTC</em></p>
 <p>This document describes the long-running statistical validation tests for the simulation infrastructure in MultistateModels.jl. These tests verify that <code>simulate_path</code> correctly samples from the target sojourn time distributions across all supported hazard families and covariate configurations.</p>
 <section id="overview" class="level2">
 <h2 class="anchored" data-anchor-id="overview">Overview</h2>
@@ -1034,6 +1034,154 @@ State 3:    0  0  0    # Absorbing state (no exits)</code></pre>
 <p>Or run just model generation tests:</p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb23"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="fu">include</span>(<span class="st">"test/test_modelgeneration.jl"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <hr>
+</section>
+<section id="phase-type-simulation-validation" class="level2">
+<h2 class="anchored" data-anchor-id="phase-type-simulation-validation">Phase-Type Simulation Validation</h2>
+<p>Phase-type models (<code>:pt</code> hazard family) implement flexible sojourn time distributions via Coxian expansions. To validate the simulation infrastructure, we compare the output of phase-type models against manually-expanded Markov models with explicit exponential hazards on the expanded state space.</p>
+<section id="test-methodology" class="level3">
+<h3 class="anchored" data-anchor-id="test-methodology">Test Methodology</h3>
+<ol type="1">
+<li><strong>PhaseType Model</strong>: Uses the <code>:pt</code> hazard specification with <code>n_phases</code> phases</li>
+<li><strong>Manual Model</strong>: Explicitly constructs the expanded state space with exponential hazards</li>
+<li><strong>Comparison</strong>: Both models are seeded identically; paths are collapsed and compared</li>
+</ol>
+<p>The key validation is that when both models use the same RNG seed, they should produce <strong>identical paths</strong> (after collapsing the manual model’s expanded states to observed states).</p>
+</section>
+<section id="model-structure" class="level3">
+<h3 class="anchored" data-anchor-id="model-structure">Model Structure</h3>
+<ul>
+<li><strong>Observed states:</strong> 1 → 2 → 3 (progressive, state 3 absorbing)</li>
+<li><strong>Expanded states (2-phase):</strong> 1a=1 → 1b=2 → 2a=3 → 2b=4 → 3=5</li>
+</ul>
+</section>
+<section id="test-results-summary" class="level3">
+<h3 class="anchored" data-anchor-id="test-results-summary">Test Results Summary</h3>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Test</th>
+<th>Path Equivalence</th>
+<th>Prevalence Diff</th>
+<th>CumIncid Diff</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>ptsim_2phase_nocov</code></td>
+<td>100.0%</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>✅ PASS</td>
+</tr>
+<tr class="even">
+<td><code>ptsim_3phase_nocov</code></td>
+<td>100.0%</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>✅ PASS</td>
+</tr>
+<tr class="odd">
+<td><code>ptsim_2phase_allequal</code></td>
+<td>100.0%</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>✅ PASS</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="phase-coxian-unstructured" class="level3">
+<h3 class="anchored" data-anchor-id="phase-coxian-unstructured">2-Phase Coxian (Unstructured)</h3>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="./assets/phasetype_simulation/ptsim_2phase_nocov_prevalence.png" class="img-fluid figure-img"></p>
+<figcaption>PT 2phase prevalence</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="./assets/phasetype_simulation/ptsim_2phase_nocov_cumincid.png" class="img-fluid figure-img"></p>
+<figcaption>PT 2phase cumulative incidence</figcaption>
+</figure>
+</div>
+<section id="log-likelihood-distributions" class="level4">
+<h4 class="anchored" data-anchor-id="log-likelihood-distributions">Log-Likelihood Distributions</h4>
+<p>The log-likelihood proxy is computed as the negative total sojourn time. Since paths are identical, distributions match exactly.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="./assets/phasetype_simulation/ptsim_2phase_nocov_loglik_hist.png" class="img-fluid figure-img"></p>
+<figcaption>PT 2phase log-likelihood histogram</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="./assets/phasetype_simulation/ptsim_2phase_nocov_loglik_scatter.png" class="img-fluid figure-img"></p>
+<figcaption>PT 2phase log-likelihood scatter</figcaption>
+</figure>
+</div>
+</section>
+</section>
+<section id="phase-coxian-on-12-2-phase-on-23" class="level3">
+<h3 class="anchored" data-anchor-id="phase-coxian-on-12-2-phase-on-23">3-Phase Coxian on 1→2, 2-Phase on 2→3</h3>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="./assets/phasetype_simulation/ptsim_3phase_nocov_prevalence.png" class="img-fluid figure-img"></p>
+<figcaption>PT 3phase prevalence</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="./assets/phasetype_simulation/ptsim_3phase_nocov_cumincid.png" class="img-fluid figure-img"></p>
+<figcaption>PT 3phase cumulative incidence</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="./assets/phasetype_simulation/ptsim_3phase_nocov_loglik_hist.png" class="img-fluid figure-img"></p>
+<figcaption>PT 3phase log-likelihood histogram</figcaption>
+</figure>
+</div>
+</section>
+<section id="phase-coxian-all-equal-exit-rates" class="level3">
+<h3 class="anchored" data-anchor-id="phase-coxian-all-equal-exit-rates">2-Phase Coxian (All-Equal Exit Rates)</h3>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="./assets/phasetype_simulation/ptsim_2phase_allequal_prevalence.png" class="img-fluid figure-img"></p>
+<figcaption>PT allequal prevalence</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="./assets/phasetype_simulation/ptsim_2phase_allequal_cumincid.png" class="img-fluid figure-img"></p>
+<figcaption>PT allequal cumulative incidence</figcaption>
+</figure>
+</div>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="./assets/phasetype_simulation/ptsim_2phase_allequal_loglik_hist.png" class="img-fluid figure-img"></p>
+<figcaption>PT allequal log-likelihood histogram</figcaption>
+</figure>
+</div>
+</section>
+<section id="conclusions" class="level3">
+<h3 class="anchored" data-anchor-id="conclusions">Conclusions</h3>
+<p>✅ <strong>All 3 phase-type simulation tests pass.</strong> The <code>:pt</code> hazard family produces simulated paths that are bitwise identical to manually-expanded Markov models when both are seeded identically. This validates:</p>
+<ul>
+<li>Correct Coxian matrix construction (<code>build_coxian_generator</code>)</li>
+<li>Correct embedded Markov chain simulation (<code>simulate_embedded_chain</code>)</li>
+<li>Correct sojourn time sampling from phase-type distributions</li>
+<li>Path collapsing correctly maps expanded states to observed states</li>
+</ul>
+</section>
+<section id="test-file-location-1" class="level3">
+<h3 class="anchored" data-anchor-id="test-file-location-1">Test File Location</h3>
+<p>Phase-type simulation tests are located in:</p>
+<pre><code>test/longtests/phasetype_simulation_tests.jl</code></pre>
+<p>Report generator:</p>
+<pre><code>test/longtests/run_phasetype_simulation_report.jl</code></pre>
+<hr>
+</section>
 </section>
 <section id="roadmap-unified-dsl-ode-neural-hazards" class="level2">
 <h2 class="anchored" data-anchor-id="roadmap-unified-dsl-ode-neural-hazards">Roadmap: Unified DSL + ODE / Neural Hazards</h2>

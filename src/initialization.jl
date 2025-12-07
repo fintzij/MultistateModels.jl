@@ -48,13 +48,18 @@ function initialize_parameters(model::MultistateProcess; constraints = nothing, 
         surrog = fit_surrogate(model; surrogate_constraints = constraints, surrogate_parameters = surrogate_parameters, verbose = false)
 
         for i in eachindex(model.hazards)
-            set_par_to = init_par(model.hazards[i], surrog.parameters[i][1])
+            hazard = model.hazards[i]
+            
+            # Get log-scale baseline parameter from surrogate's nested structure
+            surrog_log_rate = surrog.parameters.nested[hazard.hazname].baseline[1]
+            set_par_to = init_par(hazard, surrog_log_rate)
 
             # Copy covariate effects if there are any
-            hazard = model.hazards[i]
             if hazard.has_covariates
                 ncovar = hazard.npar_total - hazard.npar_baseline
-                set_par_to[reverse(range(length(set_par_to); step = -1, length = ncovar))] .= surrog.parameters[i][Not(1)]
+                # Get full parameter vector for this hazard from surrogate
+                surrog_params_flat = collect(Iterators.flatten(values(surrog.parameters.nested[hazard.hazname])))
+                set_par_to[reverse(range(length(set_par_to); step = -1, length = ncovar))] .= surrog_params_flat[Not(1:hazard.npar_baseline)]
             end
             
             set_parameters!(model, NamedTuple{(hazard.hazname,)}((set_par_to,)))
@@ -89,13 +94,18 @@ function initialize_parameters!(model::MultistateProcess; constraints = nothing,
         surrog = fit_surrogate(model; surrogate_constraints = constraints, surrogate_parameters = surrogate_parameters, verbose = false)
 
         for i in eachindex(model.hazards)
-            set_par_to = init_par(model.hazards[i], surrog.parameters[i][1])
+            hazard = model.hazards[i]
+            
+            # Get log-scale baseline parameter from surrogate's nested structure
+            surrog_log_rate = surrog.parameters.nested[hazard.hazname].baseline[1]
+            set_par_to = init_par(hazard, surrog_log_rate)
 
             # Copy covariate effects if there are any
-            hazard = model.hazards[i]
             if hazard.has_covariates
                 ncovar = hazard.npar_total - hazard.npar_baseline
-                set_par_to[reverse(range(length(set_par_to); step = -1, length = ncovar))] .= surrog.parameters[i][Not(1)]
+                # Get full parameter vector for this hazard from surrogate
+                surrog_params_flat = collect(Iterators.flatten(values(surrog.parameters.nested[hazard.hazname])))
+                set_par_to[reverse(range(length(set_par_to); step = -1, length = ncovar))] .= surrog_params_flat[Not(1:hazard.npar_baseline)]
             end
             
             set_parameters!(model, NamedTuple{(hazard.hazname,)}((set_par_to,)))

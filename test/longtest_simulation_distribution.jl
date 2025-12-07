@@ -29,8 +29,6 @@ const EVENT_RATE = 0.18
 const PANEL_HORIZON = 200.0
 const QUANTILES = (0.1, 0.5, 0.9)
 const NUM_QUANTILES = length(QUANTILES)
-const DELTA_U = sqrt(eps())
-const DELTA_T = sqrt(eps())
 const PARITY_SEED = 0x4d5e6f77
 
 """Concrete configuration for a long-run path simulation scenario."""
@@ -269,7 +267,7 @@ function collect_event_durations(model, nsamples; use_cached_strategy::Bool = fa
         attempts += 1
         attempts <= max_attempts || error("Insufficient uncensored sample paths; consider increasing PANEL_HORIZON.")
 
-        path = simulate_path(model, 1, DELTA_U, DELTA_T; strategy = strategy, rng = rng)
+        path = simulate_path(model, 1; strategy = strategy, rng = rng)
         if path.states[end] != path.states[1]
             collected += 1
             durations[collected] = path.times[end] - path.times[1]

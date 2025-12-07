@@ -1,248 +1,160 @@
 ---
-title: "Inference Long Tests"
+title: "Inference Long Tests - Illness-Death Model"
 format:
     html:
         theme:
-            light: darkly
+            light: flatly
             dark: darkly
-        prefer-dark: true
         highlight-style: atom-one-dark
 ---
 
-# Inference Long Tests
+# Inference Long Tests - Illness-Death Model
 
-_Last updated: 2025-06-03 UTC_
+_Generated: 2025-12-06  (updated non-MCEM tests)_
 
-This document describes the long-running statistical validation tests for model fitting and inference in MultistateModels.jl. These tests verify MLE recovery, variance estimation, and MCEM convergence for semi-Markov multistate models.
+_Julia: 1.12.2, Threads: 10_
 
-## Overview
+This document contains results from inference validation tests using a 3-state 
+illness-death model:
 
-Inference validation tests live in:
-- `test/longtest_exact_markov.jl` - Exact data MLE fitting validation
-- `test/longtest_mcem.jl` - MCEM algorithm for semi-Markov models
-- `test/longtest_mcem_splines.jl` - MCEM with spline hazards
+```
+Healthy (1) ──→ Ill (2) ──→ Dead (3)
+     │                         ↑
+     └─────────────────────────┘
+```
 
-Run with: `MSM_TEST_LEVEL=full julia --project -e 'using Pkg; Pkg.test()'`
-
----
-
-## `longtest_exact_markov.jl`
-
-**Scope:** Validates exact Markov likelihood computation and MLE fitting for panel-observed data.
-
-### Test Categories
-
-1. **MLE Recovery for Exponential Models**
-   - Simulates data from 3-state exponential Markov model (1↔2→3)
-   - True parameters: λ₁₂ = 0.223, λ₂₁ = 0.135, λ₂₃ = 0.082
-   - Fits model and verifies parameter recovery within 3 SEs
-   - N = 500 subjects per simulation
-
-2. **Exact vs Markov Consistency**
-   - For obstype=1 (exact observations), both exact and Markov likelihoods should match
-   - Validates transition probability matrix computation via `ExpMethodGeneric`
-   - Confirms log-likelihood is finite and negative
-
-3. **Subject Weights**
-   - Tests that `SubjectWeights` correctly scale likelihood contributions
-   - Weighted likelihood = unweighted with duplicated subjects
-
-4. **Observation Weights**
-   - Tests `ObservationWeights` for interval-specific weighting
-   - Validates mutual exclusivity with `SubjectWeights`
-
-5. **Emission Probabilities**
-   - Tests censored observations (statefrom=0) with state uncertainty
-   - Validates emission matrix computation for hidden state models
-
-6. **Variance Estimation**
-   - Model-based variance (inverse Hessian)
-   - IJ variance (sandwich estimator): H⁻¹KH⁻¹
-   - Bootstrap comparison (optional, N_BOOTSTRAP=200)
-
-### Key Assertions
-
-| Check | Criterion |
-|-------|-----------|
-| Parameter recovery | \|θ̂ - θ₀\| < 3 × SE |
-| Log-likelihood | Finite and negative |
-| Gradient accuracy | \|∇ℓ_FD - ∇ℓ_AD\| < 1e-6 |
-| Variance PSD | All eigenvalues > 0 |
-
-### Latest Run
-
-**Date:** 2025-06-03, Julia 1.12.1, ~2 min
-
-| Test | Result |
-|------|--------|
-| MLE recovery (exponential) | ✅ Pass |
-| Exact vs Markov consistency | ✅ Pass |
-| Subject weights | ✅ Pass |
-| Observation weights | ✅ Pass |
-| Emission probabilities | ✅ Pass |
-| Variance estimation | ✅ Pass |
+All tests use n = 1000 subjects.
 
 ---
 
-## `longtest_mcem.jl`
+## Summary (Non-MCEM Inference Longtests)
 
-**Scope:** Statistical validation of MCEM algorithm for semi-Markov multistate models.
-
-**References:**
-- Morsomme et al. (2025) Biostatistics kxaf038 - multistate semi-Markov MCEM
-- Titman & Sharples (2010) Biometrics 66(3):742-752 - phase-type approximations
-- Caffo et al. (2005) JRSS-B - ascent-based MCEM stopping rules
-
-### Test Categories
-
-1. **Parameter Recovery (Weibull Illness-Death)**
-   - Simulates panel data from illness-death model (1→2→3)
-   - Weibull hazards: h₁₂ with shape=1.5, scale=0.3; h₂₃ with shape=1.2, scale=0.2
-   - Observation times: [0, 2, 4, 6, 8, 10, 15, 20]
-   - N = 100 subjects, MAX_ITER = 30, tolerance = 0.05
-   - Validates parameter estimates within 50% of true values (accounts for MC variance)
-
-2. **Phase-Type vs Markov Proposal Selection**
-   - Tests `needs_phasetype_proposal()` for hazard type detection
-   - Weibull (shape ≠ 1) → needs phase-type proposal
-   - Exponential → Markov proposal sufficient
-   - Validates `resolve_proposal_config()` for `:auto`, `:markov`, `:phasetype`
-
-3. **Convergence Diagnostics**
-   - Verifies convergence records contain valid traces:
-     - Monte Carlo log-likelihood trace
-     - ESS trace
-     - Parameter trace
-     - Pareto-k diagnostics for importance weights
-   - Tests SQUAREM acceleration integration
-
-4. **Surrogate Fitting**
-   - `fit_surrogate()` produces valid Markov surrogate
-   - Surrogate log-likelihood is finite
-   - TPM book construction succeeds
-
-5. **Viterbi MAP Warm Start**
-   - Tests Viterbi path initialization for MCEM
-   - Validates path structure (states, times)
-
-### Key Infrastructure Tested
-
-- `DrawSamplePaths!` - FFBS path sampling
-- `ComputeImportanceWeightsESS!` - IS weight computation
-- `fit_surrogate()` - Markov surrogate MLE
-- `resolve_proposal_config()` - Proposal type resolution
-- Louis's identity for observed Fisher information
-- PSIS weight stabilization
-
-### Latest Run
-
-**Date:** 2025-06-03, Julia 1.12.1, ~40 s
-
-| Test Category | Result |
-|---------------|--------|
-| Parameter recovery (Weibull) | 8 / 8 ✅ |
-| Phase-type vs Markov proposal | 7 / 7 ✅ |
-| Convergence diagnostics | 7 / 7 ✅ |
-| Surrogate fitting | 4 / 4 ✅ |
-| Viterbi MAP warm start | 5 / 5 ✅ |
-| **Total** | **31 / 31** |
+| Test | Family | N | Status |
+|------|--------|---|--------|
+| Exponential (exact) | exp | 1000 | ✅ PASS |
+| Weibull (exact) | wei | 1000 | ✅ PASS |
+| Gompertz (exact) | gom | 1000 | ✅ PASS |
+| Exponential + Covariate (exact) | exp | 1000 | ✅ PASS |
+| Weibull AFT (exact) | wei-aft | 1000 | ✅ PASS |
+| Phase-Type Exact (2-phase) | phasetype | 1000 | ✅ PASS |
+| Phase-Type Panel & Mixed (2-phase) | phasetype | 1000 | ✅ PASS |
 
 ---
 
-## `longtest_mcem_splines.jl`
+## Parameter Estimates and Relative Errors
 
-**Scope:** Validates MCEM with spline baseline hazards, demonstrating that flexible splines can recover known parametric shapes.
-
-**References:**
-- Ramsay (1988) Statistical Science - spline smoothing
-- Jackson (2023) survextrap: BMC Med Res Meth 23:282
-
-### Test Categories
-
-1. **Spline Approximation to Exponential**
-   - Fits linear spline (degree=1, no interior knots) to exponential data
-   - Should recover approximately constant hazard
-   - True rate = 0.3
-   - Validates hazard evaluation at multiple time points
-
-2. **Piecewise Exponential**
-   - Fits linear spline with interior knots to piecewise-constant hazard
-   - Tests ability to capture rate changes at knot boundaries
-   - Validates cumulative hazard integration
-
-3. **Gompertz Approximation**
-   - Fits cubic spline (degree=3) with monotone constraint
-   - Should recover exponentially increasing hazard shape
-   - Tests I-spline coefficient transformation
-
-4. **Covariates with Splines**
-   - Fits spline hazard with PH covariate effect
-   - Validates that covariate coefficient is recovered
-
-5. **Monotone Constraints**
-   - Tests `monotone=1` constraint for increasing hazards
-   - Tests `monotone=-1` constraint for decreasing hazards
-   - Validates coefficient cumsum transformation
-
-### Key Infrastructure Tested
-
-- `RuntimeSplineHazard` construction and evaluation
-- `_spline_ests2coefs()` / `_spline_coefs2ests()` transformations
-- BSplineKit.jl `RecombinedBSplineBasis` with natural boundaries
-- Automatic knot placement via `place_interior_knots()`
-
-### Latest Run
-
-**Date:** 2025-06-03, Julia 1.12.1, ~3 min
-
-| Test Category | Result |
-|---------------|--------|
-| Spline vs exponential | ✅ Pass |
-| Piecewise exponential | ✅ Pass |
-| Gompertz approximation | ✅ Pass |
-| Covariates test | ✅ Pass |
-| Monotone constraints | ✅ Pass |
+| Test | Parameter | True | Estimate | Rel. Error (%) | SE | 95% CI |
+|------|-----------|------|----------|----------------|-----|--------|
+| Exponential | h12 (Healthy→Ill) | -1.8971 | -1.8907 | -0.34 | 0.0380 | (-1.9651, -1.8162) |
+|  | h13 (Healthy→Dead) | -2.9957 | -2.8826 | -3.78 | 0.0624 | (-3.0049, -2.7604) |
+|  | h23 (Ill→Dead) | -1.6094 | -1.5351 | -4.62 | 0.0407 | (-1.6148, -1.4554) |
+| Weibull | h12_scale | -2.1203 | -2.1867 | 3.13 | 0.0748 | (-2.3333, -2.0401) |
+|  | h12_shape | 0.5878 | 0.6167 | 4.92 | 0.0273 | (0.5631, 0.6703) |
+|  | h13_scale | -3.2189 | -3.1670 | -1.61 | 0.1304 | (-3.4226, -2.9114) |
+|  | h13_shape | 0.4055 | 0.4003 | -1.27 | 0.0592 | (0.2843, 0.5163) |
+|  | h23_scale | -1.8971 | -1.8862 | -0.57 | 0.0728 | (-2.0289, -1.7435) |
+|  | h23_shape | 0.6931 | 0.6875 | -0.82 | 0.0277 | (0.6333, 0.7417) |
+| Gompertz | h12_scale | 0.4055 | 0.4120 | 1.62 | 0.0786 | (0.2580, 0.5661) |
+|  | h12_shape | -2.3026 | -2.3086 | 0.26 | 0.0564 | (-2.4190, -2.1981) |
+|  | h13_scale | -0.4700 | -0.4176 | -11.15 | 0.1708 | (-0.7524, -0.0827) |
+|  | h13_shape | -2.5257 | -2.5540 | 1.12 | 0.1324 | (-2.8136, -2.2945) |
+|  | h23_scale | 0.6931 | 0.6994 | 0.91 | 0.0890 | (0.5250, 0.8738) |
+|  | h23_shape | -2.3026 | -2.3131 | 0.46 | 0.0656 | (-2.4416, -2.1846) |
+| Exponential + Covariate | h12_beta | 0.5000 | 0.5450 | 9.00 | 0.0534 | (0.4404, 0.6496) |
+|  | h12_intercept | -2.1203 | -2.1586 | 1.81 | 0.0382 | (-2.2335, -2.0837) |
+|  | h13_beta | 0.5000 | 0.5529 | 10.57 | 0.0919 | (0.3727, 0.7330) |
+|  | h13_intercept | -3.2189 | -3.2500 | 0.97 | 0.0659 | (-3.3792, -3.1207) |
+|  | h23_beta | 0.4000 | 0.3351 | -16.23 | 0.0589 | (0.2197, 0.4505) |
+|  | h23_intercept | -1.8971 | -1.8471 | -2.64 | 0.0438 | (-1.9329, -1.7612) |
+| Weibull AFT | h12_beta | 0.3000 | 0.2885 | -3.82 | 0.0271 | (0.2355, 0.3416) |
+|  | h12_scale | -2.1203 | -2.2056 | 4.02 | 0.0582 | (-2.3197, -2.0915) |
+|  | h12_shape | 0.5878 | 0.6085 | 3.53 | 0.0192 | (0.5709, 0.6461) |
+|  | h13_beta | 0.4000 | 0.3617 | -9.57 | 0.0676 | (0.2292, 0.4943) |
+|  | h13_scale | -3.2189 | -3.1772 | -1.29 | 0.1053 | (-3.3836, -2.9709) |
+|  | h13_shape | 0.4055 | 0.4163 | 2.67 | 0.0415 | (0.3350, 0.4975) |
+|  | h23_beta | 0.2000 | 0.2263 | 13.14 | 0.0259 | (0.1754, 0.2771) |
+|  | h23_scale | -1.8971 | -1.7703 | -6.68 | 0.0551 | (-1.8783, -1.6624) |
+|  | h23_shape | 0.6931 | 0.6515 | -6.00 | 0.0193 | (0.6136, 0.6895) |
+| Phase-Type Exact (2-phase) | λ₁ (Healthy 1→2) | -0.2231 | -0.1853 | -16.98 | 0.0385 | (-0.2608, -0.1097) |
+|  | λ₂ (Ill 3→4) | -0.5108 | -0.5037 | -1.39 | 0.0433 | (-0.5885, -0.4189) |
+|  | μ₁₂_p1 (H1→Ill) | -1.2040 | -1.1363 | -5.62 | 0.0620 | (-1.2579, -1.0148) |
+|  | μ₁₂_p2 (H2→Ill) | -0.9163 | -0.8816 | -3.79 | 0.0450 | (-0.9698, -0.7933) |
+|  | μ₁₃_p1 (H1→Dead) | -2.3026 | -2.4923 | 8.24 | 0.1222 | (-2.7318, -2.2529) |
+|  | μ₁₃_p2 (H2→Dead) | -1.8971 | -1.8891 | -0.42 | 0.0745 | (-2.0352, -1.7430) |
+|  | μ₂₃_p3 (I3→Dead) | -1.3863 | -1.3951 | 0.63 | 0.0676 | (-1.5275, -1.2626) |
+|  | μ₂₃_p4 (I4→Dead) | -1.0498 | -1.0871 | 3.55 | 0.0439 | (-1.1730, -1.0011) |
+| Phase-Type Panel (2-phase) | h12 (Healthy→Ill) | NaN | -0.9663 | NaN | 0.0533 | (-1.0707, -0.8619) |
+|  | h13 (Healthy→Dead) | NaN | -2.0856 | NaN | 0.1216 | (-2.3240, -1.8472) |
+|  | h23 (Ill→Dead) | NaN | -1.1832 | NaN | 0.0509 | (-1.2830, -1.0834) |
 
 ---
 
-## Variance Estimation Details
+## Diagnostic Plots
 
-The package implements two robust variance estimators following Wood (2020) Biometrics:
+### Exponential
 
-### Infinitesimal Jackknife (IJ) Variance
+#### State Prevalence
+![](assets/diagnostics/prevalence_exponential.png)
 
-$$\hat{V}_{IJ} = H^{-1} K H^{-1}$$
+#### Cumulative Incidence
+![](assets/diagnostics/cumincid_exponential.png)
 
-where:
-- $H = -\nabla^2 \ell(\hat{\theta})$ is the observed Fisher information
-- $K = \sum_{i=1}^n g_i g_i^\top$ where $g_i = \nabla \ell_i(\hat{\theta})$
+### Weibull
 
-This is the "sandwich" or "robust" variance that is consistent even under model misspecification.
+#### State Prevalence
+![](assets/diagnostics/prevalence_weibull.png)
 
-### Jackknife Variance
+#### Cumulative Incidence
+![](assets/diagnostics/cumincid_weibull.png)
 
-$$\hat{V}_{JK} = \frac{n-1}{n} \sum_{i=1}^n \Delta_i \Delta_i^\top$$
+### Gompertz
 
-where $\Delta_i = \hat{\theta}_{-i} - \hat{\theta}$ are leave-one-out perturbations.
+#### State Prevalence
+![](assets/diagnostics/prevalence_gompertz.png)
 
-Two methods are available via `loo_method`:
-- `:direct` (default): $\Delta_i = H^{-1} g_i$, O(p²n) complexity
-- `:cholesky`: Exact $H_{-i}^{-1}$ via rank-k downdates, O(np³) complexity
+#### Cumulative Incidence
+![](assets/diagnostics/cumincid_gompertz.png)
 
-The `:cholesky` method is more accurate when subjects contribute multiple observations, but `:direct` is faster for large n with few observations per subject.
+### Exponential + Covariate
 
-### Eigenvalue Thresholding
+#### State Prevalence
+![](assets/diagnostics/prevalence_exponential_covariate.png)
 
-Both estimators apply eigenvalue thresholding to handle ill-conditioned Hessians:
-- Eigenvalues below `sqrt(eps())` are replaced
-- Warning issued when thresholding is applied
-- Ensures variance matrix is positive definite
+#### Cumulative Incidence
+![](assets/diagnostics/cumincid_exponential_covariate.png)
+
+### Weibull AFT
+
+#### State Prevalence
+![](assets/diagnostics/prevalence_weibull_aft.png)
+
+#### Cumulative Incidence
+![](assets/diagnostics/cumincid_weibull_aft.png)
+
+### Phase-Type Exact (2-phase)
+
+#### State Prevalence
+![](assets/diagnostics/prevalence_phase-type_exact_(2-phase).png)
+
+#### Cumulative Incidence
+![](assets/diagnostics/cumincid_phase-type_exact_(2-phase).png)
+
+### Phase-Type Panel (2-phase)
+
+#### State Prevalence
+![](assets/diagnostics/prevalence_phase-type_panel_(2-phase).png)
+
+#### Cumulative Incidence
+![](assets/diagnostics/cumincid_phase-type_panel_(2-phase).png)
+
 
 ---
 
-## Maintenance Notes
+## Test Configuration
 
-- Update test counts after adding new test cases
-- Re-run long tests after major refactors (MCEM, likelihood, variance)
-- Document any changes to tolerance thresholds
-- Keep parameter recovery tests realistic (expect MC noise in small samples)
+- RNG Seed: 2882347045
+- Sample Size: 1000
+- Simulation Trajectories: 5000
+- Max Follow-up Time: 15.0
+- Parallel Enabled: Yes (10 threads)
+

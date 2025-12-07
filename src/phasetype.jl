@@ -473,6 +473,369 @@ struct PhaseTypeConfig
     end
 end
 
+# =============================================================================
+# Phase-Type Hazard Model Mappings
+# =============================================================================
+
+"""
+    PhaseTypeMappings
+
+Bidirectional mappings between observed and expanded state spaces for phase-type hazard models.
+
+This struct is used when building a model with `:pt` (phase-type) hazards. It provides
+the infrastructure to map between the original observed state space and the expanded
+Markov state space where each state with phase-type hazards is split into multiple phases.
+
+# Fields
+
+**State space dimensions:**
+- `n_observed::Int`: Number of observed (original) states
+- `n_expanded::Int`: Number of expanded states (sum of phases across all states)
+
+**Per-state phase information:**
+- `n_phases_per_state::Vector{Int}`: Number of phases for each observed state
+- `state_to_phases::Vector{UnitRange{Int}}`: Observed state → expanded phase indices
+- `phase_to_state::Vector{Int}`: Expanded phase index → observed state
+
+**Transition structure:**
+- `expanded_tmat::Matrix{Int}`: Transition matrix on expanded state space
+- `original_tmat::Matrix{Int}`: Original transition matrix (for reference)
+
+**Hazard tracking:**
+- `original_hazards::Vector{<:HazardFunction}`: Original user-specified hazards
+- `pt_hazard_indices::Vector{Int}`: Indices of hazards that are phase-type
+- `expanded_hazard_indices::Dict{Symbol, Vector{Int}}`: Maps original hazard name to
+  expanded hazard indices (e.g., :h12 → [1, 2, 3] for λ₁, λ₂, μ₁ hazards)
+
+# Example
+
+For a 3-state model (states 1, 2, 3) with 2-phase Coxian on transition 1→2:
+
+```
+Original: State 1 ──h12──> State 2 ──h23──> State 3
+
+Expanded: Phase 1.1 ──λ₁──> Phase 1.2 ──μ₂──> Phase 2.1 ──h23──> State 3
+              │                                    │
+              └────────────μ₁─────────────────────>│
+```
+
+- `n_phases_per_state = [2, 1, 1]` (state 1 has 2 phases)
+- `state_to_phases = [1:2, 3:3, 4:4]`
+- `phase_to_state = [1, 1, 2, 3]`
+
+See also: [`PhaseTypeHazardSpec`](@ref), [`PhaseTypeModel`](@ref)
+"""
+struct PhaseTypeMappings
+    # State space dimensions
+    n_observed::Int
+    n_expanded::Int
+    
+    # Per-state phase information
+    n_phases_per_state::Vector{Int}
+    state_to_phases::Vector{UnitRange{Int}}
+    phase_to_state::Vector{Int}
+    
+    # Transition structure
+    expanded_tmat::Matrix{Int}
+    original_tmat::Matrix{Int}
+    
+    # Hazard tracking
+    original_hazards::Vector{<:HazardFunction}
+    pt_hazard_indices::Vector{Int}
+    expanded_hazard_indices::Dict{Symbol, Vector{Int}}
+    
+    function PhaseTypeMappings(n_observed::Int, n_expanded::Int,
+                                n_phases_per_state::Vector{Int},
+                                state_to_phases::Vector{UnitRange{Int}},
+                                phase_to_state::Vector{Int},
+                                expanded_tmat::Matrix{Int},
+                                original_tmat::Matrix{Int},
+                                original_hazards::Vector{<:HazardFunction},
+                                pt_hazard_indices::Vector{Int},
+                                expanded_hazard_indices::Dict{Symbol, Vector{Int}})
+        # Validation
+        length(n_phases_per_state) == n_observed || 
+            throw(DimensionMismatch("n_phases_per_state length must equal n_observed"))
+        length(state_to_phases) == n_observed || 
+            throw(DimensionMismatch("state_to_phases length must equal n_observed"))
+        length(phase_to_state) == n_expanded || 
+            throw(DimensionMismatch("phase_to_state length must equal n_expanded"))
+        size(expanded_tmat) == (n_expanded, n_expanded) || 
+            throw(DimensionMismatch("expanded_tmat must be n_expanded × n_expanded"))
+        size(original_tmat) == (n_observed, n_observed) || 
+            throw(DimensionMismatch("original_tmat must be n_observed × n_observed"))
+        sum(n_phases_per_state) == n_expanded || 
+            throw(ArgumentError("sum of n_phases_per_state must equal n_expanded"))
+        
+        new(n_observed, n_expanded, n_phases_per_state, state_to_phases,
+            phase_to_state, expanded_tmat, original_tmat, original_hazards,
+            pt_hazard_indices, expanded_hazard_indices)
+    end
+end
+
+# =============================================================================
+# Phase 3: State Space Expansion Functions
+# =============================================================================
+
+"""
+    build_phasetype_mappings(hazards, tmat) -> PhaseTypeMappings
+
+Build state space mappings from hazard specifications.
+
+Analyzes hazard specifications to determine which transitions use phase-type hazards,
+computes the number of phases per state, and builds bidirectional mappings between
+the original observed state space and the expanded phase-type state space.
+
+# Algorithm
+
+1. Identify :pt hazards and extract n_phases for each origin state
+2. States without :pt outgoing hazards get 1 phase (no expansion)
+3. Build state_to_phases and phase_to_state mappings
+4. Construct expanded transition matrix with internal phase transitions
+5. Track which original hazards map to which expanded hazard indices
+
+# Arguments
+- `hazards::Vector{<:HazardFunction}`: User-specified hazard specifications
+- `tmat::Matrix{Int}`: Original transition matrix
+
+# Returns
+- `PhaseTypeMappings`: Complete bidirectional mappings
+
+# Example
+```julia
+h12 = Hazard(:pt, 1, 2; n_phases=3)
+h23 = Hazard(:exp, 2, 3)
+tmat = [0 1 0; 0 0 1; 0 0 0]
+mappings = build_phasetype_mappings([h12, h23], tmat)
+# n_phases_per_state = [3, 1, 1]  # State 1 has 3 phases from :pt hazard
+# n_expanded = 5  # Total phases
+```
+
+See also: [`PhaseTypeMappings`](@ref), [`build_expanded_tmat`](@ref)
+"""
+function build_phasetype_mappings(hazards::Vector{<:HazardFunction}, 
+                                   tmat::Matrix{Int})
+    n_observed = size(tmat, 1)
+    
+    # Step 1: Determine n_phases per state from :pt hazards
+    # A state's n_phases is determined by the maximum n_phases of any outgoing :pt hazard
+    n_phases_per_state = ones(Int, n_observed)
+    pt_hazard_indices = Int[]
+    
+    for (i, h) in enumerate(hazards)
+        if h isa PhaseTypeHazardSpec
+            push!(pt_hazard_indices, i)
+            s = h.statefrom
+            # Take maximum n_phases if multiple :pt hazards from same state
+            n_phases_per_state[s] = max(n_phases_per_state[s], h.n_phases)
+        end
+    end
+    
+    # Step 2: Build state_to_phases mapping
+    n_expanded = sum(n_phases_per_state)
+    state_to_phases = Vector{UnitRange{Int}}(undef, n_observed)
+    phase_to_state = Vector{Int}(undef, n_expanded)
+    
+    phase_idx = 1
+    for s in 1:n_observed
+        n_phases = n_phases_per_state[s]
+        state_to_phases[s] = phase_idx:(phase_idx + n_phases - 1)
+        for p in 1:n_phases
+            phase_to_state[phase_idx + p - 1] = s
+        end
+        phase_idx += n_phases
+    end
+    
+    # Step 3: Build expanded transition matrix
+    expanded_tmat = _build_expanded_tmat(tmat, n_phases_per_state, state_to_phases, hazards)
+    
+    # Step 4: Build expanded hazard indices mapping
+    expanded_hazard_indices = _build_expanded_hazard_indices(hazards, n_phases_per_state, state_to_phases)
+    
+    return PhaseTypeMappings(
+        n_observed, n_expanded,
+        n_phases_per_state, state_to_phases, phase_to_state,
+        expanded_tmat, tmat,
+        hazards, pt_hazard_indices, expanded_hazard_indices
+    )
+end
+
+"""
+    _build_expanded_tmat(original_tmat, n_phases_per_state, state_to_phases, hazards)
+
+Build the expanded transition matrix for the phase-type state space.
+
+# Structure
+
+For a state s with n phases and outgoing transition to state d:
+
+```
+Within state s (progression):
+  Phase 1 → Phase 2 → ... → Phase n  (rates λ₁, ..., λₙ₋₁)
+
+Exit transitions (to first phase of destination d):
+  Phase 1 → d.Phase 1  (rate μ₁)
+  Phase 2 → d.Phase 1  (rate μ₂)
+  ...
+  Phase n → d.Phase 1  (rate μₙ)
+```
+
+The expanded tmat uses positive integers to index hazards:
+- Internal progressions: indexed sequentially
+- Exit transitions: indexed after progressions
+
+# Returns
+- `Matrix{Int}`: Expanded transition matrix with hazard indices
+"""
+function _build_expanded_tmat(original_tmat::Matrix{Int}, 
+                               n_phases_per_state::Vector{Int},
+                               state_to_phases::Vector{UnitRange{Int}},
+                               hazards::Vector{<:HazardFunction})
+    n_observed = size(original_tmat, 1)
+    n_expanded = sum(n_phases_per_state)
+    expanded_tmat = zeros(Int, n_expanded, n_expanded)
+    
+    hazard_counter = 1
+    
+    # For each observed state
+    for s in 1:n_observed
+        phases_s = state_to_phases[s]
+        n_phases = n_phases_per_state[s]
+        
+        # Check if this state has :pt outgoing hazards
+        has_pt = any(h -> h isa PhaseTypeHazardSpec && h.statefrom == s, hazards)
+        
+        if has_pt && n_phases > 1
+            # Add internal progression transitions (λ rates)
+            for p in 1:(n_phases - 1)
+                from_phase = phases_s[p]
+                to_phase = phases_s[p + 1]
+                expanded_tmat[from_phase, to_phase] = hazard_counter
+                hazard_counter += 1
+            end
+        end
+        
+        # Add exit transitions to each destination
+        for d in 1:n_observed
+            if original_tmat[s, d] > 0
+                # Find the hazard for this transition
+                haz_idx = findfirst(h -> h.statefrom == s && h.stateto == d, hazards)
+                @assert !isnothing(haz_idx) "No hazard found for transition $s → $d"
+                
+                h = hazards[haz_idx]
+                first_phase_d = first(state_to_phases[d])
+                
+                if h isa PhaseTypeHazardSpec
+                    # Phase-type: exit from each phase (μ rates)
+                    for p in 1:n_phases
+                        from_phase = phases_s[p]
+                        expanded_tmat[from_phase, first_phase_d] = hazard_counter
+                        hazard_counter += 1
+                    end
+                else
+                    # Non-PT hazard: single transition from each phase
+                    # All phases use the same hazard (will share parameters)
+                    for p in 1:n_phases
+                        from_phase = phases_s[p]
+                        expanded_tmat[from_phase, first_phase_d] = hazard_counter
+                    end
+                    hazard_counter += 1
+                end
+            end
+        end
+    end
+    
+    return expanded_tmat
+end
+
+"""
+    _build_expanded_hazard_indices(hazards, n_phases_per_state, state_to_phases)
+
+Build mapping from original hazard names to expanded hazard indices.
+
+For each original hazard, tracks which indices in the expanded hazard vector
+correspond to it. For :pt hazards, this includes both progression (λ) and
+exit (μ) transitions.
+
+# Returns
+- `Dict{Symbol, Vector{Int}}`: Maps hazard name (e.g., :h12) to expanded indices
+"""
+function _build_expanded_hazard_indices(hazards::Vector{<:HazardFunction},
+                                         n_phases_per_state::Vector{Int},
+                                         state_to_phases::Vector{UnitRange{Int}})
+    expanded_indices = Dict{Symbol, Vector{Int}}()
+    hazard_counter = 1
+    n_observed = length(n_phases_per_state)
+    
+    # Track which hazards we've processed (by origin state)
+    processed_states = Set{Int}()
+    
+    for s in 1:n_observed
+        n_phases = n_phases_per_state[s]
+        
+        # Check if this state has :pt outgoing hazards
+        has_pt = any(h -> h isa PhaseTypeHazardSpec && h.statefrom == s, hazards)
+        
+        if has_pt && n_phases > 1
+            # Count progression hazards (internal λ transitions)
+            # These are shared across all :pt hazards from this state
+            progression_indices = collect(hazard_counter:(hazard_counter + n_phases - 2))
+            hazard_counter += n_phases - 1
+        end
+        
+        # Process each outgoing hazard from state s
+        for h in hazards
+            h.statefrom == s || continue
+            
+            hazname = Symbol("h$(s)$(h.stateto)")
+            
+            if h isa PhaseTypeHazardSpec
+                # PT hazard: n exit transitions (μ rates)
+                exit_indices = collect(hazard_counter:(hazard_counter + n_phases - 1))
+                hazard_counter += n_phases
+                
+                # Include both progression and exit indices
+                if has_pt && n_phases > 1
+                    expanded_indices[hazname] = vcat(progression_indices, exit_indices)
+                else
+                    expanded_indices[hazname] = exit_indices
+                end
+            else
+                # Non-PT hazard: single index
+                expanded_indices[hazname] = [hazard_counter]
+                hazard_counter += 1
+            end
+        end
+    end
+    
+    return expanded_indices
+end
+
+"""
+    has_phasetype_hazards(hazards::Vector{<:HazardFunction}) -> Bool
+
+Check if any hazard in the vector is a phase-type specification.
+"""
+function has_phasetype_hazards(hazards::Vector{<:HazardFunction})
+    return any(h -> h isa PhaseTypeHazardSpec, hazards)
+end
+
+"""
+    get_phasetype_n_phases(hazards::Vector{<:HazardFunction}, statefrom::Int)
+
+Get the number of phases for outgoing transitions from a state.
+Returns the maximum n_phases across all :pt hazards from that state, or 1 if none.
+"""
+function get_phasetype_n_phases(hazards::Vector{<:HazardFunction}, statefrom::Int)
+    max_phases = 1
+    for h in hazards
+        if h isa PhaseTypeHazardSpec && h.statefrom == statefrom
+            max_phases = max(max_phases, h.n_phases)
+        end
+    end
+    return max_phases
+end
+
 """
     _compute_default_n_phases(tmat, hazards)
 
@@ -533,6 +896,784 @@ function _compute_default_n_phases(tmat::Matrix{Int64}, hazards::Vector)
     end
     
     return n_phases_per_state
+end
+
+# =============================================================================
+# Phase 3: Hazard and Data Expansion for Phase-Type Fitting
+# =============================================================================
+
+"""
+    expand_hazards_for_phasetype(hazards, mappings, data) -> Vector{_Hazard}
+
+Convert user hazard specifications to runtime hazards on the expanded phase-type state space.
+
+This function transforms the user's hazard specifications into the internal hazard
+representations needed for the expanded Markov model. Each original hazard maps to
+one or more hazards in the expanded space.
+
+# Expansion Logic
+
+For each original hazard `s → d`:
+
+**Phase-type hazards (`:pt`)**:
+Creates multiple `MarkovHazard` instances:
+- `n - 1` progression hazards (λ): phase i → phase i+1 within state s
+- `n` exit hazards (μ): phase i → first phase of destination d
+
+**Exponential hazards (`:exp`)**:
+- Creates one `MarkovHazard` per source phase, all sharing the same rate
+
+**Semi-Markov hazards (`:wei`, `:gom`, `:sp`)**:
+- Creates the appropriate hazard type on the expanded space
+- All source phases share the same hazard (approximation for phase-type fitting)
+
+# Arguments
+- `hazards::Vector{<:HazardFunction}`: User-specified hazard specifications
+- `mappings::PhaseTypeMappings`: State space mappings from `build_phasetype_mappings`
+- `data::DataFrame`: Model data for parameter schema resolution
+
+# Returns
+- `Vector{_Hazard}`: Runtime hazard objects for the expanded model
+- `Vector{Vector{Float64}}`: Initial parameters for each hazard
+
+# Example
+```julia
+mappings = build_phasetype_mappings(hazards, tmat)
+expanded_hazards, expanded_params = expand_hazards_for_phasetype(hazards, mappings, data)
+```
+
+See also: [`build_phasetype_mappings`](@ref), [`PhaseTypeCoxianHazard`](@ref)
+"""
+function expand_hazards_for_phasetype(hazards::Vector{<:HazardFunction}, 
+                                       mappings::PhaseTypeMappings,
+                                       data::DataFrame)
+    expanded_hazards = _Hazard[]
+    expanded_params = Vector{Float64}[]
+    
+    n_observed = mappings.n_observed
+    
+    # Process each observed state's outgoing transitions
+    for s in 1:n_observed
+        n_phases = mappings.n_phases_per_state[s]
+        phases_s = mappings.state_to_phases[s]
+        
+        # Check if this state has :pt hazards (determines if we need progression hazards)
+        has_pt = any(h -> h isa PhaseTypeHazardSpec && h.statefrom == s, hazards)
+        
+        # Add progression hazards (λ: phase i → phase i+1) if this state has :pt
+        if has_pt && n_phases > 1
+            for p in 1:(n_phases - 1)
+                from_phase = phases_s[p]
+                to_phase = phases_s[p + 1]
+                
+                # Create progression hazard (exponential rate)
+                prog_haz, prog_pars = _build_progression_hazard(s, p, n_phases, from_phase, to_phase)
+                push!(expanded_hazards, prog_haz)
+                push!(expanded_params, prog_pars)
+            end
+        end
+        
+        # Add exit hazards for each destination
+        for h in hazards
+            h.statefrom == s || continue
+            d = h.stateto
+            first_phase_d = first(mappings.state_to_phases[d])
+            
+            if h isa PhaseTypeHazardSpec
+                # PT hazard: create exit hazard from each phase
+                for p in 1:n_phases
+                    from_phase = phases_s[p]
+                    exit_haz, exit_pars = _build_exit_hazard(h, s, d, p, n_phases, 
+                                                              from_phase, first_phase_d, data)
+                    push!(expanded_hazards, exit_haz)
+                    push!(expanded_params, exit_pars)
+                end
+            else
+                # Non-PT hazard: single hazard from each phase (shared rate)
+                # Build the hazard once, then replicate for each phase
+                base_haz, base_pars = _build_expanded_hazard(h, s, d, phases_s[1], first_phase_d, data)
+                push!(expanded_hazards, base_haz)
+                push!(expanded_params, base_pars)
+                
+                # For multi-phase states, create additional hazards that share parameters
+                # These are distinct hazard objects but will use the same parameter indices
+                for p in 2:n_phases
+                    from_phase = phases_s[p]
+                    shared_haz = _build_shared_phase_hazard(base_haz, from_phase, first_phase_d)
+                    push!(expanded_hazards, shared_haz)
+                    # No additional parameters - shares with base_haz
+                end
+            end
+        end
+    end
+    
+    return expanded_hazards, expanded_params
+end
+
+"""
+    _build_progression_hazard(observed_state, phase_index, n_phases, from_phase, to_phase)
+
+Build a MarkovHazard for internal phase progression (λ rate).
+
+These hazards represent transitions between phases within the same observed state.
+They are exponential hazards with no covariates.
+"""
+function _build_progression_hazard(observed_state::Int, phase_index::Int, n_phases::Int,
+                                    from_phase::Int, to_phase::Int)
+    # Parameter name: λᵢ for phase i progression
+    hazname = Symbol("h$(observed_state)_prog$(phase_index)")
+    parname = Symbol("$(hazname)_lambda")
+    
+    # Simple exponential hazard function (no covariates)
+    hazard_fn = (t, pars, covars) -> exp(pars[1])
+    cumhaz_fn = (lb, ub, pars, covars) -> exp(pars[1]) * (ub - lb)
+    
+    metadata = HazardMetadata(
+        linpred_effect = :ph,
+        time_transform = false
+    )
+    
+    haz = MarkovHazard(
+        hazname,
+        from_phase,        # expanded state from
+        to_phase,          # expanded state to
+        "exp",
+        [parname],
+        1,                 # npar_baseline
+        1,                 # npar_total
+        hazard_fn,
+        cumhaz_fn,
+        false,             # no covariates
+        Symbol[],          # covar_names
+        metadata,
+        nothing            # shared_baseline_key
+    )
+    
+    return haz, [0.0]  # Initial rate = exp(0) = 1
+end
+
+"""
+    _build_exit_hazard(pt_spec, observed_from, observed_to, phase_index, n_phases, 
+                       from_phase, to_phase, data)
+
+Build a MarkovHazard for phase-type exit transition (μ rate).
+
+These hazards represent transitions from a specific phase to the destination state.
+Covariates from the original :pt specification are included.
+"""
+function _build_exit_hazard(pt_spec::PhaseTypeHazardSpec, 
+                             observed_from::Int, observed_to::Int,
+                             phase_index::Int, n_phases::Int,
+                             from_phase::Int, to_phase::Int,
+                             data::DataFrame)
+    # Parameter name: μᵢ for phase i exit
+    hazname = Symbol("h$(observed_from)$(observed_to)_exit$(phase_index)")
+    baseline_parname = Symbol("$(hazname)_mu")
+    
+    # Get covariate info from original specification
+    schema = StatsModels.schema(pt_spec.hazard, data)
+    hazschema = apply_schema(pt_spec.hazard, schema)
+    rhs_names = _phasetype_rhs_names(hazschema)
+    
+    # Build parameter names
+    covar_labels = length(rhs_names) > 1 ? rhs_names[2:end] : String[]
+    covar_parnames = [Symbol("$(hazname)_$(c)") for c in covar_labels]
+    parnames = vcat([baseline_parname], covar_parnames)
+    
+    has_covars = !isempty(covar_parnames)
+    covar_names = Symbol.(covar_labels)
+    npar_total = 1 + length(covar_parnames)
+    
+    # Build hazard functions with covariates if present
+    linpred_effect = pt_spec.metadata.linpred_effect
+    hazard_fn, cumhaz_fn = _generate_exit_hazard_fns(parnames, linpred_effect, has_covars)
+    
+    metadata = HazardMetadata(
+        linpred_effect = linpred_effect,
+        time_transform = false  # Exit hazards are exponential
+    )
+    
+    haz = MarkovHazard(
+        hazname,
+        from_phase,
+        to_phase,
+        "exp",
+        parnames,
+        1,                 # npar_baseline (just μ)
+        npar_total,
+        hazard_fn,
+        cumhaz_fn,
+        has_covars,
+        covar_names,
+        metadata,
+        nothing            # Each exit hazard is independent
+    )
+    
+    return haz, zeros(Float64, npar_total)
+end
+
+"""
+    _generate_exit_hazard_fns(parnames, linpred_effect, has_covars)
+
+Generate hazard and cumulative hazard functions for exit transitions.
+"""
+function _generate_exit_hazard_fns(parnames::Vector{Symbol}, linpred_effect::Symbol, has_covars::Bool)
+    if !has_covars
+        hazard_fn = (t, pars, covars) -> exp(pars[1])
+        cumhaz_fn = (lb, ub, pars, covars) -> exp(pars[1]) * (ub - lb)
+    else
+        # Use generate_exponential_hazard from hazards.jl
+        hazard_fn, cumhaz_fn = generate_exponential_hazard(parnames, linpred_effect)
+    end
+    return hazard_fn, cumhaz_fn
+end
+
+"""
+    _phasetype_rhs_names(hazschema)
+
+Extract RHS names from a hazard formula schema (helper for phase-type expansion).
+"""
+function _phasetype_rhs_names(hazschema)
+    has_intercept = _phasetype_formula_has_intercept(hazschema.rhs)
+    coef_names = StatsModels.coefnames(hazschema.rhs)
+    coef_vec = coef_names isa AbstractVector ? collect(coef_names) : [coef_names]
+    return has_intercept ? coef_vec : vcat("(Intercept)", coef_vec)
+end
+
+"""
+    _phasetype_formula_has_intercept(rhs_term)
+
+Check if formula RHS includes an intercept term.
+Uses the same logic as _hazard_formula_has_intercept in modelgeneration.jl.
+"""
+@inline function _phasetype_formula_has_intercept(rhs_term)
+    rhs_term isa StatsModels.ConstantTerm && return true
+    rhs_term isa StatsModels.InterceptTerm && return true
+    if rhs_term isa StatsModels.MatrixTerm
+        return any(_phasetype_formula_has_intercept, rhs_term.terms)
+    end
+    return false
+end
+
+"""
+    _build_expanded_hazard(h, observed_from, observed_to, from_phase, to_phase, data)
+
+Build a runtime hazard for non-PT hazard types on the expanded space.
+
+This handles :exp, :wei, :gom, and :sp hazards by creating the appropriate
+hazard type with adjusted state indices for the expanded space.
+"""
+function _build_expanded_hazard(h::HazardFunction, 
+                                 observed_from::Int, observed_to::Int,
+                                 from_phase::Int, to_phase::Int,
+                                 data::DataFrame)
+    # Create a modified hazard spec with expanded state indices
+    # The family determines which builder to use
+    family = lowercase(h.family)
+    
+    hazname = Symbol("h$(observed_from)$(observed_to)")
+    
+    # Use the existing hazard building infrastructure
+    # Create context for the hazard
+    schema = StatsModels.schema(h.hazard, data)
+    hazschema = apply_schema(h.hazard, schema)
+    modelcols(hazschema, data)  # validate
+    rhs_names = _phasetype_rhs_names(hazschema)
+    shared_key = shared_baseline_key(h, family)
+    
+    ctx = HazardBuildContext(
+        h,
+        hazname,
+        family,
+        h.metadata,
+        rhs_names,
+        shared_key,
+        data
+    )
+    
+    # Get the builder and create the hazard
+    builder = get(_HAZARD_BUILDERS, family, nothing)
+    if builder === nothing
+        error("Unknown hazard family for phase-type expansion: $(family)")
+    end
+    
+    haz_struct, hazpars = builder(ctx)
+    
+    # Adjust the state indices to expanded space
+    adjusted_haz = _adjust_hazard_states(haz_struct, from_phase, to_phase)
+    
+    return adjusted_haz, hazpars
+end
+
+"""
+    _adjust_hazard_states(haz, new_statefrom, new_stateto)
+
+Create a copy of a hazard with adjusted state indices for the expanded space.
+"""
+function _adjust_hazard_states(haz::MarkovHazard, new_statefrom::Int, new_stateto::Int)
+    return MarkovHazard(
+        haz.hazname, new_statefrom, new_stateto, haz.family,
+        haz.parnames, haz.npar_baseline, haz.npar_total,
+        haz.hazard_fn, haz.cumhaz_fn, haz.has_covariates,
+        haz.covar_names, haz.metadata, haz.shared_baseline_key
+    )
+end
+
+function _adjust_hazard_states(haz::SemiMarkovHazard, new_statefrom::Int, new_stateto::Int)
+    return SemiMarkovHazard(
+        haz.hazname, new_statefrom, new_stateto, haz.family,
+        haz.parnames, haz.npar_baseline, haz.npar_total,
+        haz.hazard_fn, haz.cumhaz_fn, haz.has_covariates,
+        haz.covar_names, haz.metadata, haz.shared_baseline_key
+    )
+end
+
+function _adjust_hazard_states(haz::RuntimeSplineHazard, new_statefrom::Int, new_stateto::Int)
+    return RuntimeSplineHazard(
+        haz.hazname, new_statefrom, new_stateto, haz.family,
+        haz.parnames, haz.npar_baseline, haz.npar_total,
+        haz.hazard_fn, haz.cumhaz_fn, haz.has_covariates,
+        haz.covar_names, haz.metadata, haz.shared_baseline_key,
+        haz.basis, haz.knots, haz.degree, haz.monotone
+    )
+end
+
+"""
+    _build_shared_phase_hazard(base_haz, from_phase, to_phase)
+
+Create a hazard that shares parameters with a base hazard but has different state indices.
+
+Used for non-PT hazards when the source state has multiple phases.
+All phases share the same transition rate to the destination.
+"""
+function _build_shared_phase_hazard(base_haz::_Hazard, from_phase::Int, to_phase::Int)
+    return _adjust_hazard_states(base_haz, from_phase, to_phase)
+end
+
+"""
+    expand_data_for_phasetype_fitting(data, mappings) -> (expanded_data, censoring_patterns)
+
+Expand observation data to handle phase uncertainty during phase-type model fitting.
+
+When fitting a phase-type model, the latent phase of each observation is unknown.
+This function prepares the data for the forward-backward algorithm by mapping
+observed states to their corresponding phase ranges in the expanded space.
+
+# Phase Uncertainty
+
+For an observation in observed state `s` with `n` phases:
+- The subject could be in any of phases `1, 2, ..., n` of state `s`
+- The emission matrix will encode this uncertainty
+- Forward-backward will marginalize over the unknown phase
+
+# Data Transformation
+
+The function:
+1. Maps `statefrom` and `stateto` to their first phases (conservative)
+2. Builds censoring patterns that allow any phase of the observed state
+3. Preserves all covariates and timing information
+
+# Arguments
+- `data::DataFrame`: Original observation data with observed state indices
+- `mappings::PhaseTypeMappings`: State space mappings
+
+# Returns
+- `expanded_data::DataFrame`: Data with phase-space state indices
+- `censoring_patterns::Matrix{Float64}`: Emission patterns for phase uncertainty
+
+# Example
+```julia
+mappings = build_phasetype_mappings(hazards, tmat)
+exp_data, cens_pats = expand_data_for_phasetype_fitting(data, mappings)
+```
+
+See also: [`build_phasetype_mappings`](@ref)
+"""
+function expand_data_for_phasetype_fitting(data::DataFrame, mappings::PhaseTypeMappings)
+    # Copy the data to avoid mutation
+    expanded_data = copy(data)
+    
+    n_expanded = mappings.n_expanded
+    n_observed = mappings.n_observed
+    
+    # Map observed states to first phase of each state
+    # This is the "reference" state for each observation
+    expanded_data.statefrom = [first(mappings.state_to_phases[s]) for s in data.statefrom]
+    expanded_data.stateto = [first(mappings.state_to_phases[s]) for s in data.stateto]
+    
+    # Build censoring patterns for phase uncertainty
+    # Each observed state maps to a set of possible phases
+    censoring_patterns = _build_phase_censoring_patterns(mappings)
+    
+    return expanded_data, censoring_patterns
+end
+
+"""
+    _build_phase_censoring_patterns(mappings) -> Matrix{Float64}
+
+Build censoring patterns that encode phase uncertainty.
+
+For each observed state, creates a pattern where all phases of that state
+have probability 1 (possible) and all other states have probability 0 (impossible).
+
+The patterns are indexed by observed state (rows) and expanded state (columns).
+"""
+function _build_phase_censoring_patterns(mappings::PhaseTypeMappings)
+    n_observed = mappings.n_observed
+    n_expanded = mappings.n_expanded
+    
+    # Pattern matrix: row = observed state code, column = expanded state
+    # Pattern 0 = absorbing (no uncertainty)
+    # Patterns 1..n_observed = each observed state's phase set
+    patterns = zeros(Float64, n_observed + 1, n_expanded)
+    
+    # Pattern 0: all zeros (for absorbing states, not used typically)
+    # Patterns 1..n_observed: each observed state allows its phases
+    for s in 1:n_observed
+        phases = mappings.state_to_phases[s]
+        for p in phases
+            patterns[s + 1, p] = 1.0
+        end
+    end
+    
+    return patterns
+end
+
+"""
+    map_observation_to_phases(obstype, statefrom, stateto, mappings) -> (emission_pattern_index, allowed_phases)
+
+Map an observation to its compatible phases in the expanded space.
+
+# Returns
+- `emission_pattern_index::Int`: Index into censoring patterns (0 = exact, 1+ = uncertain)
+- `allowed_phases::Vector{Int}`: Which expanded states are compatible
+
+This is used during likelihood computation to determine the emission matrix entries.
+"""
+function map_observation_to_phases(obstype::Int, statefrom::Int, stateto::Int, 
+                                    mappings::PhaseTypeMappings)
+    if obstype == 1
+        # Exact observation: still uncertain about phase
+        return statefrom + 1, collect(mappings.state_to_phases[statefrom])
+    elseif obstype == 2
+        # Right-censored: could be in any phase of current state
+        return statefrom + 1, collect(mappings.state_to_phases[statefrom])
+    elseif obstype == 3
+        # Interval-censored: could be in source or dest phases
+        src_phases = collect(mappings.state_to_phases[statefrom])
+        dst_phases = collect(mappings.state_to_phases[stateto])
+        return 0, vcat(src_phases, dst_phases)  # Custom pattern needed
+    else
+        # Default: all phases of statefrom
+        return statefrom + 1, collect(mappings.state_to_phases[statefrom])
+    end
+end
+
+# =============================================================================
+# Phase 4: Model Building for Phase-Type Hazards
+# =============================================================================
+
+"""
+    _build_phasetype_model_from_hazards(hazards, data; kwargs...) -> PhaseTypeModel
+
+Internal function to build a PhaseTypeModel from user hazard specifications.
+
+This is called by `multistatemodel()` when any hazard is a `PhaseTypeHazardSpec`.
+It builds the expanded state space model and wraps it with the necessary
+mappings for parameter interpretation.
+
+# Algorithm
+
+1. Build state mappings from :pt hazards (`build_phasetype_mappings`)
+2. Expand hazards to internal representation (`expand_hazards_for_phasetype`)
+3. Expand data for phase uncertainty (`expand_data_for_phasetype_fitting`)
+4. Build the internal Markov model on expanded space
+5. Wrap with `PhaseTypeModel` containing mappings and original specifications
+
+# Arguments
+- `hazards::Tuple{Vararg{HazardFunction}}`: User hazard specifications (some :pt)
+- `data::DataFrame`: Observation data
+- `constraints`: Optional parameter constraints
+- `SubjectWeights`, `ObservationWeights`: Optional weights
+- `CensoringPatterns`: Optional censoring patterns
+- `EmissionMatrix`: Optional emission matrix
+- `verbose`: Print progress information
+
+# Returns
+- `PhaseTypeModel`: Complete phase-type model with expanded internal representation
+
+See also: [`PhaseTypeModel`](@ref), [`build_phasetype_mappings`](@ref)
+"""
+function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunction}};
+                                              data::DataFrame,
+                                              constraints = nothing,
+                                              SubjectWeights::Union{Nothing,Vector{Float64}} = nothing,
+                                              ObservationWeights::Union{Nothing,Vector{Float64}} = nothing,
+                                              CensoringPatterns::Union{Nothing,Matrix{<:Real}} = nothing,
+                                              EmissionMatrix::Union{Nothing,Matrix{Float64}} = nothing,
+                                              verbose::Bool = false)
+    
+    hazards_vec = collect(hazards)
+    
+    # Step 1: Enumerate hazards and build original tmat
+    hazinfo = enumerate_hazards(hazards...)
+    hazards_ordered = hazards_vec[hazinfo.order]
+    select!(hazinfo, Not(:order))
+    tmat_original = create_tmat(hazinfo)
+    
+    if verbose
+        println("Building phase-type model...")
+        println("  Original states: $(size(tmat_original, 1))")
+    end
+    
+    # Step 2: Build mappings from hazard specifications
+    mappings = build_phasetype_mappings(hazards_ordered, tmat_original)
+    
+    if verbose
+        println("  Expanded states: $(mappings.n_expanded)")
+        println("  Phases per state: $(mappings.n_phases_per_state)")
+    end
+    
+    # Step 3: Expand hazards to runtime representation
+    expanded_hazards, expanded_params_list = expand_hazards_for_phasetype(
+        hazards_ordered, mappings, data
+    )
+    
+    if verbose
+        println("  Expanded hazards: $(length(expanded_hazards))")
+    end
+    
+    # Step 4: Expand data for phase uncertainty
+    expanded_data, phase_censoring_patterns = expand_data_for_phasetype_fitting(data, mappings)
+    
+    # Step 5: Build expanded hazkeys
+    expanded_hazkeys = Dict{Symbol, Int64}()
+    for (idx, h) in enumerate(expanded_hazards)
+        expanded_hazkeys[h.hazname] = idx
+    end
+    
+    # Step 6: Build parameters structure
+    expanded_parameters = _build_expanded_parameters(expanded_params_list, expanded_hazkeys, expanded_hazards)
+    
+    # Step 7: Get subject indices on expanded data
+    subjinds, nsubj = get_subjinds(expanded_data)
+    
+    # Step 8: Handle weights
+    SubjectWeights, ObservationWeights = check_weight_exclusivity(SubjectWeights, ObservationWeights, nsubj)
+    
+    # Step 9: Prepare censoring patterns for expanded space
+    if CensoringPatterns === nothing
+        CensoringPatterns_expanded = phase_censoring_patterns
+    else
+        # Merge user patterns with phase uncertainty patterns
+        CensoringPatterns_expanded = _merge_censoring_patterns(CensoringPatterns, phase_censoring_patterns, mappings)
+    end
+    
+    # Validate inputs
+    CensoringPatterns_final = _prepare_censoring_patterns(CensoringPatterns_expanded, mappings.n_expanded)
+    _validate_inputs!(expanded_data, mappings.expanded_tmat, CensoringPatterns_final, SubjectWeights, ObservationWeights; verbose = verbose)
+    
+    # Step 10: Build emission matrix
+    emat = build_emat(expanded_data, CensoringPatterns_final, EmissionMatrix, mappings.expanded_tmat)
+    
+    # Step 11: Build total hazards on expanded space
+    expanded_totalhazards = build_totalhazards(expanded_hazards, mappings.expanded_tmat)
+    
+    # Step 12: Store modelcall
+    modelcall = (
+        hazards = hazards, 
+        data = data, 
+        constraints = constraints, 
+        SubjectWeights = SubjectWeights, 
+        ObservationWeights = ObservationWeights, 
+        CensoringPatterns = CensoringPatterns, 
+        EmissionMatrix = EmissionMatrix
+    )
+    
+    # Step 13: Build original parameters structure (for user-facing API)
+    original_parameters = _build_original_parameters(hazards_ordered, data)
+    
+    # Step 14: Assemble the PhaseTypeModel
+    # Note: `data` and `tmat` fields contain expanded versions for loglik_markov compatibility
+    # Original user data/tmat stored in `original_data` and `original_tmat` fields
+    model = PhaseTypeModel(
+        # Expanded state space (standard fields for loglik compatibility)
+        expanded_data,
+        mappings.expanded_tmat,
+        expanded_parameters,
+        nothing,  # expanded_model - set later if needed
+        mappings,
+        # Original state space (user-facing)
+        data,
+        tmat_original,
+        original_parameters,
+        hazards_ordered,
+        # Standard model fields (on expanded space)
+        expanded_hazards,
+        expanded_totalhazards,
+        emat,
+        expanded_hazkeys,
+        subjinds,
+        SubjectWeights,
+        ObservationWeights,
+        CensoringPatterns_final,
+        nothing,  # markovsurrogate - set during fitting
+        modelcall
+    )
+    
+    if verbose
+        println("  PhaseTypeModel created successfully")
+    end
+    
+    return model
+end
+
+"""
+    _build_expanded_parameters(params_list, hazkeys, hazards)
+
+Build ParameterHandling-compatible parameter structure for expanded hazards.
+"""
+function _build_expanded_parameters(params_list::Vector{Vector{Float64}}, 
+                                     hazkeys::Dict{Symbol, Int64}, 
+                                     hazards::Vector{<:_Hazard})
+    # Build nested parameters structure per hazard
+    params_nested_pairs = [
+        hazname => build_hazard_params(params_list[idx], hazards[idx].npar_baseline)
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    params_nested = NamedTuple(params_nested_pairs)
+    
+    # Use ParameterHandling to flatten/unflatten
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
+    
+    # Get natural scale parameters
+    params_natural_pairs = [
+        hazname => extract_natural_vector(params_nested[hazname])
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    params_natural = NamedTuple(params_natural_pairs)
+    
+    return (
+        flat = params_flat,
+        nested = params_nested,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
+end
+
+"""
+    _build_original_parameters(hazards, data)
+
+Build parameter structure for the original (user-facing) hazard specifications.
+
+This is used for storing and reporting parameters in terms of the user's
+specification, not the expanded internal representation.
+"""
+function _build_original_parameters(hazards::Vector{<:HazardFunction}, data::DataFrame)
+    # For now, build a placeholder structure
+    # Will be properly populated during initialization
+    params_list = Vector{Vector{Float64}}()
+    hazkeys = Dict{Symbol, Int64}()
+    
+    for (idx, h) in enumerate(hazards)
+        hazname = Symbol("h$(h.statefrom)$(h.stateto)")
+        hazkeys[hazname] = idx
+        
+        if h isa PhaseTypeHazardSpec
+            # PT hazard: 2n-1 baseline + covariates
+            n = h.n_phases
+            npar_baseline = 2 * n - 1
+            npar_covar = _count_covariates(h.hazard, data)
+            push!(params_list, zeros(Float64, npar_baseline + npar_covar))
+        else
+            # Other hazards: use their standard parameter count
+            npar = _count_hazard_parameters(h, data)
+            push!(params_list, zeros(Float64, npar))
+        end
+    end
+    
+    # Build simple parameter structure (will be updated during init)
+    params_nested_pairs = [
+        hazname => (baseline = zeros(1), covariates = Float64[])
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    params_nested = NamedTuple(params_nested_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
+    
+    return (
+        flat = params_flat,
+        nested = params_nested,
+        natural = params_nested,  # Placeholder
+        unflatten = unflatten_fn
+    )
+end
+
+"""
+    _count_covariates(formula, data)
+
+Count the number of covariate parameters in a hazard formula.
+"""
+function _count_covariates(formula::FormulaTerm, data::DataFrame)
+    schema = StatsModels.schema(formula, data)
+    hazschema = apply_schema(formula, schema)
+    rhs_names = _phasetype_rhs_names(hazschema)
+    # Subtract 1 for intercept
+    return max(0, length(rhs_names) - 1)
+end
+
+"""
+    _count_hazard_parameters(h, data)
+
+Count the total number of parameters for a hazard specification.
+"""
+function _count_hazard_parameters(h::HazardFunction, data::DataFrame)
+    ncovar = _count_covariates(h.hazard, data)
+    family = lowercase(h.family)
+    
+    if family == "exp"
+        return 1 + ncovar
+    elseif family in ("wei", "gom")
+        return 2 + ncovar
+    elseif family == "sp"
+        # Splines have variable number of basis functions
+        # This is an approximation; actual count determined during build
+        return 5 + ncovar
+    else
+        return 1 + ncovar  # Default
+    end
+end
+
+"""
+    _merge_censoring_patterns(user_patterns, phase_patterns, mappings)
+
+Merge user-provided censoring patterns with phase uncertainty patterns.
+
+User patterns are on the observed state space; this expands them to the
+phase space and combines with phase uncertainty.
+"""
+function _merge_censoring_patterns(user_patterns::Matrix{<:Real}, 
+                                    phase_patterns::Matrix{Float64},
+                                    mappings::PhaseTypeMappings)
+    n_user = size(user_patterns, 1)
+    n_expanded = mappings.n_expanded
+    
+    # Create expanded patterns
+    expanded = zeros(Float64, n_user, n_expanded)
+    
+    for p in 1:n_user
+        for s_obs in 1:mappings.n_observed
+            obs_prob = user_patterns[p, s_obs]
+            phases = mappings.state_to_phases[s_obs]
+            n_phases = length(phases)
+            # Divide probability mass equally among phases of this observed state
+            # This preserves the total probability mass for each observed state
+            for phase in phases
+                expanded[p, phase] = obs_prob / n_phases
+            end
+        end
+    end
+    
+    return expanded
 end
 
 # Internal: Select optimal number of phases for a single transient state via BIC
@@ -1761,7 +2902,9 @@ end
 """
     compute_phasetype_marginal_loglik(model::MultistateProcess, 
                                       surrogate::PhaseTypeSurrogate,
-                                      emat_ph::Matrix{Float64})
+                                      emat_ph::Matrix{Float64};
+                                      expanded_data::Union{Nothing, DataFrame} = nothing,
+                                      expanded_subjectindices::Union{Nothing, Vector{UnitRange{Int64}}} = nothing)
 
 Compute the marginal log-likelihood of the observed data under the phase-type surrogate.
 
@@ -1774,6 +2917,8 @@ where νᵢ = f(Zᵢ|θ) / h(Zᵢ|θ') are the importance weights.
 - `model::MultistateProcess`: The multistate model with observed data
 - `surrogate::PhaseTypeSurrogate`: The phase-type surrogate
 - `emat_ph::Matrix{Float64}`: Emission matrix mapping expanded states to observations
+- `expanded_data`: Optional expanded data (for exact observations)
+- `expanded_subjectindices`: Optional subject indices for expanded data
 
 # Returns
 - `Float64`: Log marginal likelihood Σᵢ wᵢ * log P(Yᵢ|θ') under phase-type surrogate
@@ -1785,35 +2930,41 @@ phase sequences consistent with the observations.
 """
 function compute_phasetype_marginal_loglik(model::MultistateProcess, 
                                            surrogate::PhaseTypeSurrogate,
-                                           emat_ph::Matrix{Float64})
+                                           emat_ph::Matrix{Float64};
+                                           expanded_data::Union{Nothing, DataFrame} = nothing,
+                                           expanded_subjectindices::Union{Nothing, Vector{UnitRange{Int64}}} = nothing)
     
     Q = surrogate.expanded_Q
     n_expanded = surrogate.n_expanded_states
+    
+    # Use expanded data and indices if provided
+    data = isnothing(expanded_data) ? model.data : expanded_data
+    subjectindices = isnothing(expanded_subjectindices) ? model.subjectindices : expanded_subjectindices
     
     # Allocate memory for matrix exponential
     cache = ExponentialUtilities.alloc_mem(similar(Q), ExpMethodGeneric())
     
     ll_total = 0.0
     
-    for subj_idx in eachindex(model.subjectindices)
+    for subj_idx in eachindex(subjectindices)
         # Get subject data indices
-        subj_inds = model.subjectindices[subj_idx]
+        subj_inds = subjectindices[subj_idx]
         n_obs = length(subj_inds)
         
         # Extract times (include initial time)
-        times = vcat(model.data.tstart[subj_inds[1]], model.data.tstop[subj_inds])
+        times = vcat(data.tstart[subj_inds[1]], data.tstop[subj_inds])
         
         # Extract state info
-        statefrom = model.data.statefrom[subj_inds]
-        stateto = model.data.stateto[subj_inds]
-        obstype = model.data.obstype[subj_inds]
+        statefrom_subj = data.statefrom[subj_inds]
+        stateto_subj = data.stateto[subj_inds]
+        obstype_subj = data.obstype[subj_inds]
         
         # Get subject-specific emission matrix rows
         subj_emat = emat_ph[subj_inds, :]
         
         # Compute subject log-likelihood via forward algorithm
-        subj_ll = loglik_phasetype_stable_internal(Q, subj_emat, times, statefrom, 
-                                                    stateto, obstype, surrogate, cache)
+        subj_ll = loglik_phasetype_stable_internal(Q, subj_emat, times, statefrom_subj, 
+                                                    stateto_subj, obstype_subj, surrogate, cache)
         
         # Weight and accumulate
         ll_total += subj_ll * model.SubjectWeights[subj_idx]
@@ -2141,6 +3292,255 @@ function expand_data_states!(data::DataFrame, surrogate::PhaseTypeSurrogate)
     return data
 end
 
+# =============================================================================
+# Data Expansion for Phase-Type Forward-Backward
+# =============================================================================
+#
+# For phase-type importance sampling, the data must be expanded to properly
+# express uncertainty about which phase the subject is in during sojourn times.
+#
+# **Problem**: With exact observations (obstype=1), the user provides:
+#   (tstart=t1, tstop=t2, statefrom=1, stateto=2, obstype=1)
+# This says: "Subject was in state 1, then transitioned to state 2 at time t2."
+# But for phase-type FFBS, we need to express:
+#   - During [t1, t2): subject was in state 1 but UNKNOWN which phase
+#   - At t2: subject transitioned to state 2
+#
+# **Solution**: Expand exact observations into two rows:
+#   1. (tstart=t1, tstop=t2-ε, statefrom=1, stateto=0, obstype=censoring_code)
+#      → "During this interval, subject was in some state in the censored set"
+#   2. (tstart=t2-ε, tstop=t2, statefrom=0, stateto=2, obstype=1)
+#      → "At this time, we observe the subject in state 2"
+#
+# For panel observations (obstype=2), no expansion is needed since we already
+# don't know the exact transition time.
+# =============================================================================
+
+"""
+    expand_data_for_phasetype(data::DataFrame, n_states::Int; 
+                              epsilon::Float64 = sqrt(eps()))
+
+Expand data for phase-type forward-backward sampling.
+
+Exact observations (obstype=1) are split into two rows:
+1. A sojourn interval where the subject is in `statefrom` but phase is unknown
+2. An exact observation of the transition to `stateto`
+
+This ensures the forward-backward algorithm properly accounts for phase
+uncertainty during sojourn times.
+
+# Arguments
+- `data::DataFrame`: Original data with columns id, tstart, tstop, statefrom, stateto, obstype
+- `n_states::Int`: Number of observed states (used to generate censoring patterns)
+- `epsilon::Float64`: Time offset for splitting exact observations (default: sqrt(eps()))
+
+# Returns
+- `NamedTuple` with fields:
+  - `expanded_data::DataFrame`: Data with exact observations expanded
+  - `censoring_patterns::Matrix{Float64}`: Censoring patterns for the expanded obstypes
+  - `original_row_map::Vector{Int}`: Maps expanded row index to original row index
+
+# Censoring Pattern Convention
+For each observed state s, we create a censoring pattern with obstype = 2 + s
+that indicates "subject is known to be in state s (but phase is unknown)".
+
+The censoring patterns matrix has structure:
+  - Row 1 (obstype=3): state 1 possible (1.0 in column 2, 0.0 elsewhere)
+  - Row 2 (obstype=4): state 2 possible (1.0 in column 3, 0.0 elsewhere)
+  - ...
+  - Row n (obstype=2+n): state n possible
+
+# Example
+```julia
+# Original exact data
+data = DataFrame(
+    id = [1, 1],
+    tstart = [0.0, 1.0],
+    tstop = [1.0, 2.0],
+    statefrom = [1, 2],
+    stateto = [2, 3],
+    obstype = [1, 1]  # Both exact observations
+)
+
+result = expand_data_for_phasetype(data, 3)
+
+# Expanded data has 4 rows:
+# Row 1: id=1, [0.0, 1.0-ε), statefrom=1, stateto=0, obstype=3 (censored to state 1)
+# Row 2: id=1, [1.0-ε, 1.0], statefrom=0, stateto=2, obstype=1 (exact obs of state 2)
+# Row 3: id=1, [1.0, 2.0-ε), statefrom=2, stateto=0, obstype=4 (censored to state 2)
+# Row 4: id=1, [2.0-ε, 2.0], statefrom=0, stateto=3, obstype=1 (exact obs of state 3)
+```
+
+See also: [`build_phasetype_emat`](@ref), [`build_phasetype_emat_expanded`](@ref)
+"""
+function expand_data_for_phasetype(data::DataFrame, n_states::Int; 
+                                   epsilon::Float64 = sqrt(eps()))
+    
+    # Count how many rows we'll need
+    n_original = nrow(data)
+    n_exact = count(data.obstype .== 1)
+    n_expanded = n_original + n_exact  # Each exact obs becomes 2 rows
+    
+    # Pre-allocate expanded data columns
+    # Get covariate column names (everything except core columns)
+    core_cols = [:id, :tstart, :tstop, :statefrom, :stateto, :obstype]
+    covar_cols = setdiff(propertynames(data), core_cols)
+    
+    # Initialize expanded arrays
+    exp_id = Vector{eltype(data.id)}(undef, n_expanded)
+    exp_tstart = Vector{Float64}(undef, n_expanded)
+    exp_tstop = Vector{Float64}(undef, n_expanded)
+    exp_statefrom = Vector{Int}(undef, n_expanded)
+    exp_stateto = Vector{Int}(undef, n_expanded)
+    exp_obstype = Vector{Int}(undef, n_expanded)
+    
+    # Initialize covariate arrays
+    covar_arrays = Dict{Symbol, Vector}()
+    for col in covar_cols
+        covar_arrays[col] = Vector{eltype(data[!, col])}(undef, n_expanded)
+    end
+    
+    # Map from expanded row to original row
+    original_row_map = Vector{Int}(undef, n_expanded)
+    
+    # Expand the data
+    exp_idx = 0
+    for orig_idx in 1:n_original
+        row = data[orig_idx, :]
+        
+        if row.obstype == 1
+            # Exact observation: split into sojourn + observation
+            
+            # Row 1: Sojourn interval [tstart, tstop - epsilon)
+            # Subject is in statefrom, phase unknown
+            # Use censoring code = 2 + statefrom
+            exp_idx += 1
+            exp_id[exp_idx] = row.id
+            exp_tstart[exp_idx] = row.tstart
+            exp_tstop[exp_idx] = row.tstop - epsilon
+            exp_statefrom[exp_idx] = row.statefrom
+            exp_stateto[exp_idx] = 0  # Censored (state unknown at this point)
+            exp_obstype[exp_idx] = 2 + row.statefrom  # Censoring pattern for statefrom
+            original_row_map[exp_idx] = orig_idx
+            
+            # Copy covariates
+            for col in covar_cols
+                covar_arrays[col][exp_idx] = row[col]
+            end
+            
+            # Row 2: Exact observation at [tstop - epsilon, tstop]
+            # Transition to stateto observed
+            exp_idx += 1
+            exp_id[exp_idx] = row.id
+            exp_tstart[exp_idx] = row.tstop - epsilon
+            exp_tstop[exp_idx] = row.tstop
+            exp_statefrom[exp_idx] = 0  # Coming from censored interval
+            exp_stateto[exp_idx] = row.stateto
+            exp_obstype[exp_idx] = 1  # Exact observation
+            original_row_map[exp_idx] = orig_idx
+            
+            # Copy covariates
+            for col in covar_cols
+                covar_arrays[col][exp_idx] = row[col]
+            end
+            
+        else
+            # Non-exact observation: keep as-is
+            exp_idx += 1
+            exp_id[exp_idx] = row.id
+            exp_tstart[exp_idx] = row.tstart
+            exp_tstop[exp_idx] = row.tstop
+            exp_statefrom[exp_idx] = row.statefrom
+            exp_stateto[exp_idx] = row.stateto
+            exp_obstype[exp_idx] = row.obstype
+            original_row_map[exp_idx] = orig_idx
+            
+            # Copy covariates
+            for col in covar_cols
+                covar_arrays[col][exp_idx] = row[col]
+            end
+        end
+    end
+    
+    # Build expanded DataFrame
+    expanded_data = DataFrame(
+        id = exp_id,
+        tstart = exp_tstart,
+        tstop = exp_tstop,
+        statefrom = exp_statefrom,
+        stateto = exp_stateto,
+        obstype = exp_obstype
+    )
+    
+    # Add covariate columns
+    for col in covar_cols
+        expanded_data[!, col] = covar_arrays[col]
+    end
+    
+    # Build censoring patterns matrix
+    # Each row corresponds to obstype = 3, 4, ..., 2 + n_states
+    # Column 1 is the code (not used), columns 2:n_states+1 are state indicators
+    censoring_patterns = zeros(Float64, n_states, n_states + 1)
+    for s in 1:n_states
+        censoring_patterns[s, 1] = s + 2.0  # obstype code (for reference)
+        censoring_patterns[s, s + 1] = 1.0  # state s is possible
+    end
+    
+    return (
+        expanded_data = expanded_data,
+        censoring_patterns = censoring_patterns,
+        original_row_map = original_row_map
+    )
+end
+
+"""
+    needs_data_expansion_for_phasetype(data::DataFrame) -> Bool
+
+Check if the data contains exact observations that need expansion for phase-type.
+
+Returns true if any observations have obstype == 1 (exact), which require
+splitting for proper phase-type forward-backward sampling.
+"""
+function needs_data_expansion_for_phasetype(data::DataFrame)
+    return any(data.obstype .== 1)
+end
+
+"""
+    compute_expanded_subject_indices(expanded_data::DataFrame)
+
+Compute subject indices for expanded phase-type data.
+
+Returns a vector of UnitRange{Int64} where each element gives the row indices
+for one subject in the expanded data.
+
+# Arguments
+- `expanded_data::DataFrame`: Expanded data with id column
+
+# Returns
+- `Vector{UnitRange{Int64}}`: Subject indices for the expanded data
+"""
+function compute_expanded_subject_indices(expanded_data::DataFrame)
+    # Group by id and get row ranges
+    subject_ids = unique(expanded_data.id)
+    n_subjects = length(subject_ids)
+    
+    subjectindices = Vector{UnitRange{Int64}}(undef, n_subjects)
+    
+    current_row = 1
+    for (i, subj_id) in enumerate(subject_ids)
+        # Find rows for this subject
+        subj_mask = expanded_data.id .== subj_id
+        subj_rows = findall(subj_mask)
+        
+        # Should be contiguous
+        @assert subj_rows == subj_rows[1]:subj_rows[end] "Subject rows must be contiguous"
+        
+        subjectindices[i] = subj_rows[1]:subj_rows[end]
+    end
+    
+    return subjectindices
+end
+
 """
     build_phasetype_model(tmat::Matrix{Int64}, config::PhaseTypeConfig;
                           data::DataFrame,
@@ -2329,4 +3729,681 @@ function phasetype_parameters_to_Q(fitted_model, surrogate::PhaseTypeSurrogate)
     end
     
     return Q
+end
+
+# =============================================================================
+# Phase 5: Phase-Type Model Initialization
+# =============================================================================
+
+"""
+    set_crude_init!(model::PhaseTypeModel; constraints = nothing)
+
+Initialize phase-type model parameters using crude transition rates.
+
+For phase-type models, initialization is performed on the expanded (internal)
+Markov state space. The crude rates are calculated from the observed data,
+then mapped to the expanded space.
+
+# Algorithm
+
+For built-in structures (`:unstructured`, `:allequal`, `:prop_to_prog`):
+1. Calculate crude rates on the observed state space  
+2. For each phase-type hazard with structure:
+   - `:unstructured`: Progression (λ) and exit (μ) rates set independently
+   - `:allequal` or `:prop_to_prog`: All λ and μ set to crude_rate/(2n-1)
+     where n is the number of phases (assumes equal probability of 
+     progression vs absorption at each phase)
+
+Custom constraints are not supported - use `set_parameters!` instead.
+
+The goal is to achieve approximate mean sojourn times that match the data.
+"""
+function set_crude_init!(model::PhaseTypeModel; constraints = nothing)
+    if !isnothing(constraints)
+        error("Cannot initialize parameters to crude estimates when there are parameter constraints. " *
+              "For custom constraints, set parameters manually using set_parameters!().")
+    end
+    
+    # Calculate crude rates on observed space
+    crude_par = _calculate_crude_phasetype(model)
+    
+    # Build a lookup for structure by original hazard
+    # Maps (statefrom, stateto) -> structure for phase-type hazards
+    structure_lookup = _build_phasetype_structure_lookup(model.mappings)
+    
+    # Build new parameter vectors for expanded hazards
+    new_expanded_params = Vector{Vector{Float64}}(undef, length(model.hazards))
+    
+    for (idx, h) in enumerate(model.hazards)
+        # Determine crude rate for this expanded hazard, respecting structure
+        log_rate = _get_crude_rate_for_expanded_hazard_structured(
+            h, crude_par, model.mappings, structure_lookup
+        )
+        # Get initialized parameters (handles covariates too)
+        set_par_to = init_par(h, log_rate)
+        new_expanded_params[idx] = set_par_to
+    end
+    
+    # Rebuild expanded_parameters
+    model.parameters = _build_expanded_parameters(
+        new_expanded_params, model.hazkeys, model.hazards
+    )
+    
+    # Sync to user-facing parameters
+    _sync_phasetype_parameters_to_original!(model)
+end
+
+"""
+    _build_phasetype_structure_lookup(mappings::PhaseTypeMappings)
+
+Build a lookup table mapping (statefrom, stateto) to Coxian structure.
+
+Returns a Dict where keys are (observed_from, observed_to) tuples and values
+are the structure symbol (`:unstructured`, `:allequal`, `:prop_to_prog`).
+"""
+function _build_phasetype_structure_lookup(mappings::PhaseTypeMappings)
+    lookup = Dict{Tuple{Int,Int}, Symbol}()
+    
+    for h in mappings.original_hazards
+        if h isa PhaseTypeHazardSpec
+            lookup[(h.statefrom, h.stateto)] = h.structure
+        end
+    end
+    
+    return lookup
+end
+
+"""
+    _get_crude_rate_for_expanded_hazard_structured(h, crude_par, mappings, structure_lookup)
+
+Determine the appropriate crude rate for an expanded hazard, respecting structure.
+
+For all built-in structures (`:unstructured`, `:allequal`, `:prop_to_prog`):
+- All λ and μ are set to crude_rate / (2n-1) where n = number of phases
+- This assumes equal probability of progression to next phase vs absorption
+"""
+function _get_crude_rate_for_expanded_hazard_structured(
+    h::_Hazard, 
+    crude_par::Matrix{Float64}, 
+    mappings::PhaseTypeMappings,
+    structure_lookup::Dict{Tuple{Int,Int}, Symbol}
+)
+    hazname_str = String(h.hazname)
+    
+    # Determine which original transition this expanded hazard belongs to
+    origin_state, dest_state, structure = _identify_original_transition(
+        hazname_str, mappings, structure_lookup
+    )
+    
+    # For all built-in structures, use uniform initialization
+    # This gives crude_rate / (2n-1) for all λs and μs
+    if structure in (:unstructured, :allequal, :prop_to_prog)
+        n_phases = mappings.n_phases_per_state[origin_state]
+        n_params = 2 * n_phases - 1  # λ₁...λₙ₋₁, μ₁...μₙ
+        
+        # Total outgoing rate from observed state
+        total_rate = -crude_par[origin_state, origin_state]
+        
+        # All rates equal to crude_rate / (2n-1)
+        uniform_rate = total_rate / n_params
+        return log(max(uniform_rate, 0.01))
+    end
+    
+    # Unknown structure - error
+    error("Unknown Coxian structure: $structure. " *
+          "Supported structures are :unstructured, :allequal, :prop_to_prog")
+end
+
+"""
+    _identify_original_transition(hazname_str, mappings, structure_lookup)
+
+Identify which original (observed) transition an expanded hazard belongs to.
+
+Returns (origin_state, dest_state, structure) tuple.
+"""
+function _identify_original_transition(
+    hazname_str::String,
+    mappings::PhaseTypeMappings,
+    structure_lookup::Dict{Tuple{Int,Int}, Symbol}
+)
+    # Pattern for exit hazards: hXY_exitZ (X=from, Y=to, Z=phase)
+    m_exit = match(r"h(\d+)(\d+)_exit", hazname_str)
+    if !isnothing(m_exit)
+        origin = parse(Int, m_exit.captures[1])
+        dest = parse(Int, m_exit.captures[2])
+        structure = get(structure_lookup, (origin, dest), :unstructured)
+        return (origin, dest, structure)
+    end
+    
+    # Pattern for progression hazards: hX_progY (X=state, Y=phase)
+    m_prog = match(r"h(\d+)_prog", hazname_str)
+    if !isnothing(m_prog)
+        origin = parse(Int, m_prog.captures[1])
+        # Progression hazards belong to all destinations from this origin
+        # Find the structure - should be same for all destinations with PT
+        for (key, struc) in structure_lookup
+            from, to = key
+            if from == origin
+                return (origin, to, struc)
+            end
+        end
+        # If no PT hazard found (shouldn't happen), use unstructured
+        return (origin, 0, :unstructured)
+    end
+    
+    # Regular hazard (non-PT transition)
+    m_regular = match(r"h(\d+)(\d+)", hazname_str)
+    if !isnothing(m_regular)
+        origin = parse(Int, m_regular.captures[1])
+        dest = parse(Int, m_regular.captures[2])
+        return (origin, dest, :unstructured)
+    end
+    
+    error("Could not parse hazard name: $hazname_str")
+end
+
+"""
+    _sync_phasetype_parameters_to_original!(model::PhaseTypeModel)
+
+Synchronize expanded parameters back to the user-facing original parameter structure.
+
+This collapses the expanded hazard parameters (λ₁...λₙ₋₁, μ₁...μₙ) into the 
+phase-type parameterization expected by the user.
+"""
+function _sync_phasetype_parameters_to_original!(model::PhaseTypeModel)
+    mappings = model.mappings
+    original_hazards = mappings.original_hazards
+    
+    # Build new parameter vectors for original hazards
+    params_list = Vector{Vector{Float64}}()
+    hazkeys = Dict{Symbol, Int64}()
+    npar_baseline_list = Int[]
+    
+    for (orig_idx, h) in enumerate(original_hazards)
+        hazname = Symbol("h$(h.statefrom)$(h.stateto)")
+        hazkeys[hazname] = orig_idx
+        
+        if h isa PhaseTypeHazardSpec
+            # PT hazard: collect λ and μ parameters
+            params = _collect_phasetype_params(model, h, mappings)
+            push!(params_list, params)
+            push!(npar_baseline_list, 2 * h.n_phases - 1)
+        else
+            # Regular hazard: find in expanded hazards
+            exp_idx = model.hazkeys[hazname]
+            params = extract_params_vector(model.parameters.nested[hazname])
+            push!(params_list, params)
+            push!(npar_baseline_list, model.hazards[exp_idx].npar_baseline)
+        end
+    end
+    
+    # Rebuild original parameters structure
+    params_nested_pairs = [
+        hazname => build_hazard_params(params_list[idx], npar_baseline_list[idx])
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    params_nested = NamedTuple(params_nested_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
+    
+    params_natural_pairs = [
+        hazname => extract_natural_vector(params_nested[hazname])
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    params_natural = NamedTuple(params_natural_pairs)
+    
+    # Update original_parameters (user-facing), not parameters (internal expanded)
+    model.original_parameters = (
+        flat = params_flat,
+        nested = params_nested,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
+end
+
+"""
+    _collect_phasetype_params(model, h, mappings)
+
+Collect λ and μ parameters from expanded hazards for a :pt hazard specification.
+
+Returns parameters ordered as: [λ₁, λ₂, ..., λₙ₋₁, μ₁, μ₂, ..., μₙ, covariates...]
+"""
+function _collect_phasetype_params(model::PhaseTypeModel, 
+                                    h::PhaseTypeHazardSpec,
+                                    mappings::PhaseTypeMappings)
+    n = h.n_phases
+    params = Float64[]
+    covariate_params = Float64[]
+    
+    # Find expanded hazard indices for this transition
+    orig_from = h.statefrom
+    orig_to = h.stateto
+    
+    # Get phase range for origin state
+    phase_range = mappings.state_to_phases[orig_from]
+    
+    # Collect progression rates λ₁...λₙ₋₁ (internal phase transitions)
+    for phase_idx in 1:(n-1)
+        prog_name = Symbol("h$(orig_from)_prog$(phase_idx)")
+        if haskey(model.hazkeys, prog_name)
+            exp_idx = model.hazkeys[prog_name]
+            exp_params = model.parameters.nested[prog_name]
+            # First baseline param is the rate
+            push!(params, exp_params.baseline[1])
+        else
+            # Should not happen if model built correctly
+            push!(params, 0.0)
+        end
+    end
+    
+    # Collect exit rates μ₁...μₙ 
+    for phase_idx in 1:n
+        exit_name = Symbol("h$(orig_from)$(orig_to)_exit$(phase_idx)")
+        if haskey(model.hazkeys, exit_name)
+            exp_idx = model.hazkeys[exit_name]
+            exp_params = model.parameters.nested[exit_name]
+            push!(params, exp_params.baseline[1])
+            
+            # Collect covariates from first exit hazard (all should share same structure)
+            if phase_idx == 1 && haskey(exp_params, :covariates)
+                covariate_params = collect(exp_params.covariates)
+            end
+        else
+            push!(params, 0.0)
+        end
+    end
+    
+    return vcat(params, covariate_params)
+end
+
+"""
+    _calculate_crude_phasetype(model::PhaseTypeModel)
+
+Calculate crude transition rates for a phase-type model on the observed state space.
+
+Uses the original (observed) data and transition matrix to compute rates,
+which are then used to initialize the expanded hazards.
+"""
+function _calculate_crude_phasetype(model::PhaseTypeModel)
+    # Use original_data (observed data) and original_tmat
+    n_rs, T_r = compute_suff_stats(model.original_data, model.original_tmat, model.SubjectWeights)
+    
+    # Avoid log of zero
+    n_rs = max.(n_rs, 0.5)
+    T_r[T_r .== 0] .= mean(model.original_data.tstop .- model.original_data.tstart)
+    
+    crude_mat = n_rs ./ T_r
+    crude_mat[findall(model.original_tmat .== 0)] .= 0
+    
+    for i in 1:length(T_r)
+        crude_mat[i, i] = -sum(crude_mat[i, Not(i)])
+    end
+    
+    return crude_mat
+end
+
+"""
+    initialize_parameters!(model::PhaseTypeModel; constraints = nothing, 
+                          surrogate_constraints = nothing, 
+                          surrogate_parameters = nothing, 
+                          crude = false)
+
+Initialize phase-type model parameters.
+
+Phase-type models are Markov on the expanded space, so initialization
+can use crude rates directly without needing a surrogate.
+
+# Arguments
+- `model::PhaseTypeModel`: The model to initialize
+- `constraints`: Optional parameter constraints
+- `surrogate_constraints`: Ignored for phase-type (already Markov)
+- `surrogate_parameters`: Ignored for phase-type
+- `crude::Bool = false`: If true, use crude rates; otherwise also crude (PT is Markov)
+"""
+function initialize_parameters!(model::PhaseTypeModel; 
+                                constraints = nothing, 
+                                surrogate_constraints = nothing, 
+                                surrogate_parameters = nothing, 
+                                crude = false)
+    # Phase-type models are Markov on expanded space, so always use crude init
+    # The surrogate approach doesn't apply since we're already Markov
+    set_crude_init!(model; constraints = constraints)
+end
+
+"""
+    initialize_parameters(model::PhaseTypeModel; kwargs...)
+
+Non-mutating version of initialize_parameters! for phase-type models.
+"""
+function initialize_parameters(model::PhaseTypeModel; 
+                               constraints = nothing, 
+                               surrogate_constraints = nothing, 
+                               surrogate_parameters = nothing, 
+                               crude = false)
+    model_copy = deepcopy(model)
+    initialize_parameters!(model_copy; 
+                           constraints = constraints,
+                           surrogate_constraints = surrogate_constraints,
+                           surrogate_parameters = surrogate_parameters,
+                           crude = crude)
+    return model_copy
+end
+
+# =============================================================================
+# Phase 6: Parameter Management for PhaseTypeModel
+# =============================================================================
+
+"""
+    get_parameters(model::PhaseTypeModel; scale::Symbol = :natural)
+
+Get parameters from a phase-type model.
+
+# Arguments
+- `model::PhaseTypeModel`: The phase-type model
+- `scale::Symbol = :natural`: Parameter scale
+  - `:natural` - Human-readable scale (rates as positive values)
+  - `:estimation` or `:log` or `:flat` - Flat vector on log scale (for optimization)
+  - `:nested` - Nested NamedTuple with ParameterHandling structure
+
+# Returns
+For a phase-type hazard h12 with n phases, the parameters are organized as:
+- λ₁, λ₂, ..., λₙ₋₁ (progression rates)
+- μ₁, μ₂, ..., μₙ (exit rates)
+- covariates (if any)
+
+# Example
+```julia
+h12 = Hazard(:pt, 1, 2; n_phases=3)
+model = multistatemodel(h12; data=data)
+initialize_parameters!(model)
+
+# Get natural-scale parameters
+params = get_parameters(model)
+# (h12 = [λ₁, λ₂, μ₁, μ₂, μ₃], ...)
+
+# Get flat vector for optimization
+params_flat = get_parameters(model; scale=:estimation)
+```
+"""
+function get_parameters(model::PhaseTypeModel; scale::Symbol = :natural)
+    # Return user-facing parameters (original parameterization)
+    if scale == :natural
+        return model.original_parameters.natural
+    elseif scale == :estimation || scale == :log || scale == :flat
+        return model.original_parameters.flat
+    elseif scale == :nested
+        return model.original_parameters.nested
+    else
+        throw(ArgumentError("scale must be :natural, :estimation, :log, :flat, or :nested (got :$scale)"))
+    end
+end
+
+"""
+    get_expanded_parameters(model::PhaseTypeModel; scale::Symbol = :natural)
+
+Get parameters on the expanded (internal) state space.
+
+This returns parameters for the expanded hazards used internally for likelihood
+computation and simulation. Most users should use `get_parameters` instead.
+
+# Arguments
+- `model::PhaseTypeModel`: The phase-type model
+- `scale::Symbol = :natural`: Parameter scale (same options as `get_parameters`)
+
+# Example
+```julia
+# Get expanded hazard parameters
+exp_params = get_expanded_parameters(model)
+# (h1_prog1 = [λ₁], h1_prog2 = [λ₂], h12_exit1 = [μ₁], ...)
+```
+"""
+function get_expanded_parameters(model::PhaseTypeModel; scale::Symbol = :natural)
+    if scale == :natural
+        return model.parameters.natural
+    elseif scale == :estimation || scale == :log || scale == :flat
+        return model.parameters.flat
+    elseif scale == :nested
+        return model.parameters.nested
+    else
+        throw(ArgumentError("scale must be :natural, :estimation, :log, :flat, or :nested (got :$scale)"))
+    end
+end
+
+# -----------------------------------------------------------------------------
+# Standard accessor functions for compatibility with fitting infrastructure
+# These operate on the EXPANDED parameters (internal representation)
+# -----------------------------------------------------------------------------
+
+"""
+    get_parameters_flat(model::PhaseTypeModel)
+
+Get expanded model parameters as a flat vector for optimization.
+
+For phase-type models, fitting operates on the expanded (internal) state space,
+so this returns the flattened expanded parameters.
+
+# Returns
+- `Vector{Float64}`: Flat parameter vector on log scale
+
+# Note
+This is used internally by the fitting machinery. For user-facing parameter
+access, use `get_parameters(model)` or `get_expanded_parameters(model)`.
+"""
+function get_parameters_flat(model::PhaseTypeModel)
+    return model.parameters.flat
+end
+
+"""
+    get_parameters_nested(model::PhaseTypeModel)
+
+Get expanded model parameters as a nested NamedTuple.
+
+Returns the expanded hazard parameters organized by expanded hazard name.
+"""
+function get_parameters_nested(model::PhaseTypeModel)
+    return model.parameters.nested
+end
+
+"""
+    get_parameters_natural(model::PhaseTypeModel)
+
+Get expanded model parameters on the natural (human-readable) scale.
+
+Returns rates as positive values rather than log-transformed.
+"""
+function get_parameters_natural(model::PhaseTypeModel)
+    return model.parameters.natural
+end
+
+"""
+    get_unflatten_fn(model::PhaseTypeModel)
+
+Get the function that converts flat parameters to nested NamedTuple.
+
+This is the inverse of flatten() and is used by the fitting machinery
+to convert optimizer output back to structured parameters.
+"""
+function get_unflatten_fn(model::PhaseTypeModel)
+    return model.parameters.unflatten
+end
+
+"""
+    set_parameters!(model::PhaseTypeModel, newvalues::Vector{Vector{Float64}})
+
+Set phase-type model parameters from nested vectors.
+
+Parameters should be organized as one vector per original hazard, with
+phase-type hazards having [λ₁...λₙ₋₁, μ₁...μₙ, covariates...].
+
+# Arguments
+- `model::PhaseTypeModel`: The model to update
+- `newvalues`: Nested vector with parameters for each original hazard
+
+# Note
+This updates both the user-facing `parameters` and the internal `expanded_parameters`.
+"""
+function set_parameters!(model::PhaseTypeModel, newvalues::Vector{Vector{Float64}})
+    mappings = model.mappings
+    original_hazards = mappings.original_hazards
+    n_hazards = length(original_hazards)
+    
+    if length(newvalues) != n_hazards
+        error("Expected $n_hazards parameter vectors (one per original hazard), got $(length(newvalues))")
+    end
+    
+    # Build expanded parameter vectors from original values
+    new_expanded_params = _expand_phasetype_params(newvalues, model)
+    
+    # Rebuild expanded_parameters
+    model.parameters = _build_expanded_parameters(
+        new_expanded_params, model.hazkeys, model.hazards
+    )
+    
+    # Rebuild user-facing parameters from the new values
+    _rebuild_original_params_from_values!(model, newvalues)
+    
+    return nothing
+end
+
+"""
+    set_parameters!(model::PhaseTypeModel, newvalues::NamedTuple)
+
+Set phase-type model parameters from a NamedTuple.
+
+Keys should match original hazard names (e.g., :h12, :h23).
+"""
+function set_parameters!(model::PhaseTypeModel, newvalues::NamedTuple)
+    mappings = model.mappings
+    original_hazards = mappings.original_hazards
+    
+    # Build vector of vectors from NamedTuple
+    param_vectors = Vector{Vector{Float64}}(undef, length(original_hazards))
+    
+    for (idx, h) in enumerate(original_hazards)
+        hazname = Symbol("h$(h.statefrom)$(h.stateto)")
+        if haskey(newvalues, hazname)
+            param_vectors[idx] = collect(newvalues[hazname])
+        else
+            # Keep existing values
+            param_vectors[idx] = collect(model.parameters.natural[hazname])
+        end
+    end
+    
+    set_parameters!(model, param_vectors)
+    return nothing
+end
+
+"""
+    _expand_phasetype_params(original_params, model)
+
+Expand original hazard parameters to expanded hazard parameters.
+
+For a :pt hazard with parameters [λ₁...λₙ₋₁, μ₁...μₙ, covariates...],
+creates separate parameter vectors for each progression and exit hazard.
+"""
+function _expand_phasetype_params(original_params::Vector{Vector{Float64}}, 
+                                   model::PhaseTypeModel)
+    mappings = model.mappings
+    n_expanded = length(model.hazards)
+    expanded_params = Vector{Vector{Float64}}(undef, n_expanded)
+    
+    # Track which expanded hazards have been filled
+    filled = falses(n_expanded)
+    
+    for (orig_idx, h) in enumerate(mappings.original_hazards)
+        params = original_params[orig_idx]
+        orig_name = Symbol("h$(h.statefrom)$(h.stateto)")
+        
+        if h isa PhaseTypeHazardSpec
+            n = h.n_phases
+            npar_baseline = 2 * n - 1
+            
+            # Extract λ and μ values
+            λ_vals = params[1:(n-1)]
+            μ_vals = params[n:(2n-1)]
+            covar_vals = length(params) > npar_baseline ? params[(npar_baseline+1):end] : Float64[]
+            
+            # Assign to progression hazards
+            for phase_idx in 1:(n-1)
+                prog_name = Symbol("h$(h.statefrom)_prog$(phase_idx)")
+                if haskey(model.hazkeys, prog_name)
+                    exp_idx = model.hazkeys[prog_name]
+                    expanded_params[exp_idx] = [λ_vals[phase_idx]]
+                    filled[exp_idx] = true
+                end
+            end
+            
+            # Assign to exit hazards
+            for phase_idx in 1:n
+                exit_name = Symbol("h$(h.statefrom)$(h.stateto)_exit$(phase_idx)")
+                if haskey(model.hazkeys, exit_name)
+                    exp_idx = model.hazkeys[exit_name]
+                    expanded_params[exp_idx] = vcat([μ_vals[phase_idx]], covar_vals)
+                    filled[exp_idx] = true
+                end
+            end
+        else
+            # Regular hazard: direct assignment
+            if haskey(model.hazkeys, orig_name)
+                exp_idx = model.hazkeys[orig_name]
+                expanded_params[exp_idx] = params
+                filled[exp_idx] = true
+            end
+        end
+    end
+    
+    # Check all hazards were filled
+    if !all(filled)
+        unfilled = findall(.!filled)
+        unfilled_names = [model.hazards[i].hazname for i in unfilled]
+        error("Failed to assign parameters to expanded hazards: $unfilled_names")
+    end
+    
+    return expanded_params
+end
+
+"""
+    _rebuild_original_params_from_values!(model, newvalues)
+
+Rebuild the user-facing parameters structure from new values.
+"""
+function _rebuild_original_params_from_values!(model::PhaseTypeModel, 
+                                                newvalues::Vector{Vector{Float64}})
+    mappings = model.mappings
+    original_hazards = mappings.original_hazards
+    
+    hazkeys = Dict{Symbol, Int64}()
+    npar_baseline_list = Int[]
+    
+    for (idx, h) in enumerate(original_hazards)
+        hazname = Symbol("h$(h.statefrom)$(h.stateto)")
+        hazkeys[hazname] = idx
+        
+        if h isa PhaseTypeHazardSpec
+            push!(npar_baseline_list, 2 * h.n_phases - 1)
+        else
+            push!(npar_baseline_list, model.hazards[model.hazkeys[hazname]].npar_baseline)
+        end
+    end
+    
+    # Rebuild parameters structure
+    params_nested_pairs = [
+        hazname => build_hazard_params(newvalues[idx], npar_baseline_list[idx])
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    params_nested = NamedTuple(params_nested_pairs)
+    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
+    
+    params_natural_pairs = [
+        hazname => extract_natural_vector(params_nested[hazname])
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    params_natural = NamedTuple(params_natural_pairs)
+    
+    # Update original_parameters (user-facing), not parameters (internal expanded)
+    model.original_parameters = (
+        flat = params_flat,
+        nested = params_nested,
+        natural = params_natural,
+        unflatten = unflatten_fn
+    )
 end

@@ -45,9 +45,15 @@ include("setup_splines.jl")  # Spline hazards now implemented
     include("test_simulation.jl")
     include("test_ncv.jl")
     include("test_phasetype_is.jl")
+    include("test_phasetype_correctness.jl")
+    include("test_phasetype_fitting.jl")
+    include("test_phasetype_simulation.jl")
     include("test_splines.jl")
     include("test_surrogates.jl")
     include("test_mcem.jl")
+    include("test_reversible_tvc_loglik.jl")
+    include("test_parallel_likelihood.jl")
+    include("test_parameter_ordering.jl")
 end
 
 # =============================================================================
@@ -68,12 +74,32 @@ if TEST_LEVEL == "full"
         include("longtest_mcem_splines.jl")
     end
     
+    @testset "Long Tests - MCEM TVC" begin
+        include("longtest_mcem_tvc.jl")
+    end
+    
     @testset "Long Tests - Simulation Distribution" begin
         include("longtest_simulation_distribution.jl")
     end
     
     @testset "Long Tests - Simulation TVC" begin
         include("longtest_simulation_tvc.jl")
+    end
+    
+    @testset "Long Tests - Robust Parametric" begin
+        include("longtest_robust_parametric.jl")
+    end
+    
+    @testset "Long Tests - Robust Markov/PhaseType" begin
+        include("longtest_robust_markov_phasetype.jl")
+    end
+    
+    @testset "Long Tests - Phase-Type Hazards (Exact Data)" begin
+        include("longtest_phasetype_exact.jl")
+    end
+    
+    @testset "Long Tests - Phase-Type Hazards (Panel/Mixed Data)" begin
+        include("longtest_phasetype_panel.jl")
     end
 else
     @info "Running quick tests only. Set MSM_TEST_LEVEL=full for complete suite."

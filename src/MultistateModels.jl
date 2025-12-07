@@ -1,5 +1,6 @@
 module MultistateModels
 
+using ADTypes
 using BSplineKit
 using Chain
 using ComponentArrays
@@ -7,6 +8,7 @@ using DataFrames
 using DiffResults
 using Distributions
 using ElasticArrays
+using Enzyme
 using ExponentialUtilities
 using ForwardDiff
 using Ipopt
@@ -25,6 +27,7 @@ using RuntimeGeneratedFunctions
 using StatsBase
 using StatsFuns
 using StatsModels
+using Mooncake
 
 # make sure ForwardDiff is nan safe
 Preferences.set_preferences!(ForwardDiff, "nansafe_mode" => true)
@@ -55,6 +58,7 @@ export
     get_convergence_records,
     get_loglik,
     get_parameters,
+    get_expanded_parameters,
     get_parameters_flat,
     get_parameters_nested,
     get_parameters_transformed,  # Backward compat alias for get_parameters_nested
@@ -96,6 +100,13 @@ export
     initialize_parameters,
     initialize_parameters!,
     initialize_surrogate!,
+    # Threading configuration
+    get_physical_cores,
+    recommended_nthreads,
+    ThreadingConfig,
+    set_threading_config!,
+    get_threading_config,
+    should_parallelize,
     # Batched likelihood infrastructure (for advanced users / semi-Markov batched)
     is_separable,
     cache_path_data,
@@ -108,6 +119,7 @@ export
     loglik,
     loglik_exact,
     loglik_markov,
+    loglik_markov_functional,
     loglik_semi_markov,
     make_constraints,
     multistatemodel,
@@ -116,6 +128,7 @@ export
     simulate,
     simulate_data,
     simulate_paths,
+    simulate_path,
     path_to_dataframe,
     paths_to_dataset,
     OptimJumpSolver,
@@ -124,6 +137,12 @@ export
     # Legacy aliases (deprecated, use CachedTransformStrategy/DirectTransformStrategy)
     TangTransformStrategy,
     LegacyTransformStrategy,
+    # AD Backend selection
+    ADBackend,
+    ForwardDiffBackend,
+    EnzymeBackend,
+    MooncakeBackend,
+    default_ad_backend,
     # Phase-type surrogates
     PhaseTypeDistribution,
     PhaseTypeConfig,
@@ -138,6 +157,19 @@ export
     resolve_proposal_config,
     collapse_phases,
     expand_initial_state,
+    # Phase-type hazard models (:pt family)
+    PhaseTypeHazardSpec,
+    PhaseTypeCoxianHazard,
+    PhaseTypeMappings,
+    PhaseTypeModel,
+    # Phase-type fitted model accessors
+    is_phasetype_fitted,
+    get_phasetype_parameters,
+    get_mappings,
+    get_original_data,
+    get_original_tmat,
+    get_convergence,
+    get_expanded_parameters,
     # Spline utilities
     place_knots_from_paths!,
     default_nknots,

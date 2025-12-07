@@ -1,21 +1,60 @@
 # MultistateModels.jl Infrastructure Status
 
 **Branch:** `infrastructure_changes`  
-**Last updated:** 2025-12-03  
-**Test status:** ✅ 913 tests passing, 0 broken  
+**Last updated:** 2025-12-04  
+**Test status:** ✅ 605 quick tests passing, 0 broken  
 **PR readiness:** See Section 9
 
 ---
 
 ## Executive Summary
 
-The `infrastructure_changes` branch has made significant progress on testing infrastructure, simulation validation, code organization, and antipattern fixes. Key accomplishments include comprehensive exact data testing, spline hazard integration, ParameterHandling.jl migration, fail-fast error handling improvements, robust variance estimation with LOO method options, unified surrogate fitting API, and phase-type distribution improvements.
+The `infrastructure_changes` branch has made significant progress on testing infrastructure, simulation validation, code organization, and antipattern fixes. Key accomplishments include comprehensive exact data testing, spline hazard integration, ParameterHandling.jl migration, fail-fast error handling improvements, robust variance estimation with LOO method options, unified surrogate fitting API, phase-type distribution improvements, and AD backend infrastructure.
 
-**Recent Milestone:** PhaseTypeDistribution S→Q refactor and `place_knots_from_paths!` completed (2025-12-03).
+**Recent Milestone:** AD backend infrastructure with ForwardDiff/Mooncake support (2025-12-04).
 
 ---
 
-## Recent Session (2025-12-03)
+## Recent Session (2025-12-04)
+
+### AD Backend Infrastructure
+
+1. **ADTypes.jl Integration** (`src/common.jl`, `Project.toml`)
+   - Added `ForwardDiffBackend`, `EnzymeBackend`, `MooncakeBackend` exports
+   - `default_ad_backend(n_params; is_markov=false)` selects appropriate backend
+   - Markov models: ForwardDiff (matrix exp uses LAPACK, incompatible with reverse-mode)
+   - Semi-Markov models: Mooncake for large (>100 params), ForwardDiff otherwise
+
+2. **Non-mutating likelihood** (`src/likelihoods.jl`)
+   - `loglik_markov_functional()` - pure functional implementation for AD compatibility
+   - Uses `ExponentialUtilities.exp_generic` for AD-compatible matrix exponential
+
+3. **Documentation and Warnings** (`src/modelfitting.jl`)
+   - `fit()` warns if MooncakeBackend explicitly requested for Markov models
+   - Comprehensive docstrings documenting LAPACK limitation
+
+4. **Dependency Updates** (`Project.toml`)
+   - Added: ADTypes, Mooncake
+   - Removed: ChainRulesCore, ReverseDiff (not needed)
+   - Enzyme available but Julia 1.12 not yet supported (Issue #2699)
+
+### Test Infrastructure Updates
+
+1. **Added `test_reversible_tvc_loglik.jl`** to quick tests
+   - 6 tests for reversible semi-Markov models with TVC
+   - Validates sojourn time resets and likelihood correctness
+
+2. **Updated `runtests.jl`**
+   - Added `longtest_mcem_tvc.jl`, `longtest_robust_parametric.jl`, `longtest_robust_markov_phasetype.jl` to full test suite
+   - Quick tests: 605 passing
+
+3. **Updated `testcoverage-gfm.md`**
+   - Accurate test counts and suite listing
+   - Removed stale references to deleted files
+
+---
+
+## Previous Session (2025-12-03)
 
 ### PhaseTypeDistribution S→Q Refactor
 

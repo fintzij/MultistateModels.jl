@@ -8,7 +8,9 @@ is provided (phasetype_surrogate, tpm_book_ph, etc.), uses phase-type FFBS for s
 """
 function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, max_sampling_effort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, _logImportanceWeights, ImportanceWeights,tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates,
     # Phase-type proposal infrastructure (optional)
-    phasetype_surrogate=nothing, tpm_book_ph=nothing, hazmat_book_ph=nothing, fbmats_ph=nothing, emat_ph=nothing)
+    phasetype_surrogate=nothing, tpm_book_ph=nothing, hazmat_book_ph=nothing, fbmats_ph=nothing, emat_ph=nothing,
+    # Expanded data infrastructure for exact observations (optional)
+    expanded_ph_data=nothing, expanded_ph_subjectindices=nothing, expanded_ph_tpm_map=nothing, ph_original_row_map=nothing)
 
     # Determine if using phase-type proposals
     use_phasetype = !isnothing(phasetype_surrogate)
@@ -45,7 +47,12 @@ function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, max_sam
             tpm_book_ph = tpm_book_ph,
             hazmat_book_ph = hazmat_book_ph,
             fbmats_ph = fbmats_ph,
-            emat_ph = emat_ph)
+            emat_ph = emat_ph,
+            # Expanded data infrastructure
+            expanded_ph_data = expanded_ph_data,
+            expanded_ph_subjectindices = expanded_ph_subjectindices,
+            expanded_ph_tpm_map = expanded_ph_tpm_map,
+            ph_original_row_map = ph_original_row_map)
     end
 end
 
@@ -59,7 +66,9 @@ infrastructure is provided.
 """
 function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_sampling_effort, samplepaths, loglik_surrog, loglik_target_prop, loglik_target_cur, _logImportanceWeights, ImportanceWeights, tpm_book_surrogate, hazmat_book_surrogate, books, npaths_additional, params_cur, surrogate, psis_pareto_k, fbmats, absorbingstates,
     # Phase-type proposal infrastructure (optional)
-    phasetype_surrogate=nothing, tpm_book_ph=nothing, hazmat_book_ph=nothing, fbmats_ph=nothing, emat_ph=nothing)
+    phasetype_surrogate=nothing, tpm_book_ph=nothing, hazmat_book_ph=nothing, fbmats_ph=nothing, emat_ph=nothing,
+    # Expanded data infrastructure for exact observations (optional)
+    expanded_ph_data=nothing, expanded_ph_subjectindices=nothing, expanded_ph_tpm_map=nothing, ph_original_row_map=nothing)
 
     # Determine if using phase-type proposals
     use_phasetype = !isnothing(phasetype_surrogate)
@@ -99,9 +108,15 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
         for j in npaths.+(1:n_add)
             if use_phasetype
                 # Phase-type proposal: sample in expanded space, collapse to observed
+                # Use expanded data for tpm_map and FFBS when available (for exact observations)
+                ph_tpm_map = isnothing(expanded_ph_tpm_map) ? books[2] : expanded_ph_tpm_map
+                
                 path_result = draw_samplepath_phasetype(i, model, tpm_book_ph, hazmat_book_ph, 
-                                                         books[2], fbmats_ph, emat_ph, 
-                                                         phasetype_surrogate, absorbingstates)
+                                                         ph_tpm_map, fbmats_ph, emat_ph, 
+                                                         phasetype_surrogate, absorbingstates;
+                                                         expanded_data = expanded_ph_data,
+                                                         expanded_subjectindices = expanded_ph_subjectindices,
+                                                         original_row_map = ph_original_row_map)
                 
                 # Store collapsed path for target likelihood evaluation
                 samplepaths[i][j] = path_result.collapsed
@@ -189,173 +204,109 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
 end
 
 """
-    draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true)
+    draw_paths(model::MultistateProcess; min_ess=100, npaths=nothing, paretosmooth=true, return_logliks=false)
 
-Draw sample paths conditional on the data. Require that the minimum effective sample size is greater than min_ess.
+Draw sample paths conditional on observed data using importance sampling.
 
-Arguments
-- model: multistate model
-- min_ess: minimum effective sample size, defaults to 100.
-- paretosmooth: pareto smooth importance weights, defaults to true unless min_ess < 25. 
+This function samples latent paths from a Markov surrogate proposal distribution
+and computes importance weights for the target model. Supports both adaptive
+sampling (until ESS target is met) and fixed-count sampling.
+
+# Sampling Mode
+- If `npaths` is `nothing` (default): Adaptive sampling until `min_ess` is achieved
+- If `npaths` is an integer: Draw exactly `npaths` paths per subject
+
+# Arguments
+- `model::MultistateProcess`: Fitted or unfitted multistate model
+- `min_ess::Int`: Target effective sample size for adaptive mode (default: 100)
+- `npaths::Union{Nothing, Int}`: Fixed number of paths per subject (overrides adaptive)
+- `paretosmooth::Bool`: Apply Pareto smoothing to importance weights (default: true)
+- `return_logliks::Bool`: Include log-likelihoods and ESS in output (default: false)
+
+# Returns
+NamedTuple with:
+- `samplepaths`: Vector of SamplePath vectors, one per subject
+- `ImportanceWeightsNormalized`: Normalized importance weights per subject
+- If `return_logliks=true`: Also includes `loglik_target`, `loglik_surrog`, `subj_ess`, `ImportanceWeights`
+- If exact data (all obstype==1) on fitted model: Returns `(loglik=..., subj_lml=...)` shortcut
+
+# Example
+```julia
+# Adaptive sampling until ESS >= 100 (default)
+result = draw_paths(fitted_model)
+
+# Fixed number of paths
+result = draw_paths(fitted_model; npaths=500)
+
+# Get additional diagnostics
+result = draw_paths(fitted_model; npaths=200, return_logliks=true)
+paths, weights = result.samplepaths, result.ImportanceWeightsNormalized
+```
+
+See also: [`fit`](@ref), [`simulate`](@ref)
 """
-function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true, return_logliks = false)
+function draw_paths(model::MultistateProcess; 
+                    min_ess::Int = 100, 
+                    npaths::Union{Nothing, Int} = nothing,
+                    paretosmooth::Bool = true, 
+                    return_logliks::Bool = false)
 
-    # if exact data just return the loglik and subj_lml from the model fit
+    # Exact data shortcut for fitted models
     if model isa MultistateModelFitted && all(model.data.obstype .== 1)
         return (loglik = model.loglik.loglik,
                 subj_lml = model.loglik.subj_lml)
     end
 
+    # Determine sampling mode
+    adaptive_mode = isnothing(npaths)
+
     # number of subjects
     nsubj = length(model.subjectindices)
 
-    # is the model markov?
+    # is the model semi-Markov (needs importance sampling)?
     is_semimarkov = !all(isa.(model.hazards, _MarkovHazard))
 
-    # get log-scale parameters as tuples for hazard evaluation
+    # Get or fit surrogate for semi-Markov models
+    surrogate = _get_or_fit_surrogate(model, is_semimarkov)
+
+    # get log-scale parameters for hazard evaluation
     params_target = get_log_scale_params(model.parameters)
-    params_surrog = is_semimarkov ? get_log_scale_params(model.markovsurrogate.parameters) : params_target
+    params_surrog = is_semimarkov ? get_log_scale_params(surrogate.parameters) : params_target
 
     # get hazards
     hazards_target = model.hazards
-    hazards_surrog = is_semimarkov ? model.markovsurrogate.hazards : model.hazards
+    hazards_surrog = is_semimarkov ? surrogate.hazards : model.hazards
 
-    # containers for bookkeeping TPMs
-    books = build_tpm_mapping(model.data)
+    # Set up sampling infrastructure
+    books, tpm_book, hazmat_book, cache = _setup_tpm_infrastructure(model, params_surrog, hazards_surrog)
 
-    # build containers for transition intensity and prob mtcs for Markov surrogate
-    hazmat_book_surrogate = build_hazmat_book(Float64, model.tmat, books[1])
-    tpm_book_surrogate = build_tpm_book(Float64, model.tmat, books[1])
+    # Set up result containers
+    initial_capacity = adaptive_mode ? ceil(Int64, 4 * min_ess) : npaths
+    samplepaths, loglik_target, loglik_surrog, ImportanceWeights = 
+        _allocate_path_containers(nsubj, initial_capacity, adaptive_mode)
 
-    # allocate memory for matrix exponential
-    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book_surrogate[1]), ExpMethodGeneric())
-
-    # Solve Kolmogorov equations for TPMs
-    for t in eachindex(books[1])
-        # compute the transition intensity matrix
-        compute_hazmat!(hazmat_book_surrogate[t], params_surrog, hazards_surrog, books[1][t], model.data)
-        # compute transition probability matrices
-        compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
-    end
-
-    # set up objects for simulation
-    samplepaths     = [sizehint!(Vector{SamplePath}(), ceil(Int64, 4 * min_ess)) for i in 1:nsubj]
-    loglik_target   = [sizehint!(Vector{Float64}(), ceil(Int64, 4 * min_ess)) for i in 1:nsubj]
+    # ESS and diagnostic tracking
+    subj_ess = Vector{Float64}(undef, nsubj)
+    subj_pareto_k = zeros(nsubj)
     
-    loglik_surrog = [sizehint!(Vector{Float64}(), ceil(Int64, 4 * min_ess)) for i in 1:nsubj]
-    ImportanceWeights = [sizehint!(Vector{Float64}(), ceil(Int64, 4 * min_ess)) for i in 1:nsubj]
-
-    # continers
-    subj_ll                   = Vector{Float64}(undef, nsubj)
-    subj_ess                  = Vector{Float64}(undef, nsubj)
-    subj_pareto_k             = zeros(nsubj)
-    
-    # make fbmats if necessary
+    # Forward-backward matrices for panel data
     fbmats = build_fbmats(model)
     
-    # identify absorbing states
+    # Absorbing states
     absorbingstates = findall(map(x -> all(x .== 0), eachrow(model.tmat)))
 
-    # compute the normalizing constant of the proposal density
-    # subj_normalizing_constant = loglik(parameters, data::MPanelData; neg = true, return_ll_subj = true)
-
+    # Sample paths for each subject
     for i in eachindex(model.subjectindices) 
-
-        keep_sampling = true
-
-        # subject data
-        subj_inds = model.subjectindices[i]
-        subj_dat  = view(model.data, subj_inds, :)
-
-        # compute fbmats here
-        if any(subj_dat.obstype .∉ Ref([1,2]))
-            # subject data
-            subj_tpm_map = view(books[2], subj_inds, :)
-            subj_emat    = view(model.emat, subj_inds, :)
-            ForwardFiltering!(fbmats[i], subj_dat, tpm_book_surrogate, subj_tpm_map, subj_emat)
-        end
-
-        # sampling
-        while keep_sampling
-
-            # make sure there are at least 25 paths in order to fit pareto
-            npaths = length(samplepaths[i])
-            n_add  = npaths == 0 ? min_ess : ceil(Int64, npaths * 1.4)
-    
-            # augment the number of paths
-            append!(samplepaths[i], Vector{SamplePath}(undef, n_add))
-            append!(loglik_target[i], zeros(n_add))
-            append!(loglik_surrog[i], zeros(n_add))
-            append!(ImportanceWeights[i], zeros(n_add))
-    
-            # sample new paths and compute log likelihoods
-            for j in npaths.+(1:n_add)
-                # draw path
-                samplepaths[i][j] = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, books[2], fbmats, absorbingstates)
-
-                # compute log likelihood
-                loglik_target[i][j] = loglik(params_target, samplepaths[i][j], hazards_target, model)
-
-                # log likelihood of the surrogate
-                if is_semimarkov
-                    loglik_surrog[i][j] = loglik(params_surrog, samplepaths[i][j], hazards_surrog, model) 
-                else
-                    loglik_surrog[i][j] = loglik_target[i][j]
-                end
-
-                # compute the unsmoothed importance weight
-                ImportanceWeights[i][j] = exp(loglik_target[i][j] - loglik_surrog[i][j])
-            end
-    
-            # no need to keep all paths if redundant
-            if allequal(loglik_surrog[i])
-                samplepaths[i]       = [first(samplepaths[i]),]
-                loglik_target[i]     = [first(loglik_target[i]),]
-                loglik_surrog[i]     = [first(loglik_surrog[i]),]
-                ImportanceWeights[i] = [1.0,]
-                subj_ess[i]          = min_ess
-
-            else
-                if !is_semimarkov
-                    subj_ess[i] = length(samplepaths[i])
-                else
-                    # raw log importance weights
-                    logweights = reshape(copy(loglik_target[i] - loglik_surrog[i]), 1, length(loglik_target[i]), 1) 
-
-                     # might fail if not enough samples to fit pareto, e.g. a single sample if only one path is possible.
-                    if any(logweights .!= 0.0)
-                        if paretosmooth 
-                            try
-                                # pareto smoothed importance weights
-                                psiw = psis(logweights; source = "other");
-                
-                                # save importance weights and ess
-                                copyto!(ImportanceWeights[i], psiw.weights)
-                                subj_ess[i] = psiw.ess[1]
-                                subj_pareto_k[i] = psiw.pareto_k[1]
-
-                            catch err
-                                copyto!(ImportanceWeights[i], normalize(exp.(logweights), 1))
-                                subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
-                            end
-                        else
-                            subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
-                        end
-                    else
-                        subj_ess[i] = length(samplepaths[i])
-                    end
-                end
-            end
-            
-            # check whether to stop
-            if subj_ess[i] >= min_ess
-                keep_sampling = false
-            end
-        end
+        _draw_paths_for_subject!(
+            i, model, adaptive_mode, min_ess, npaths,
+            samplepaths, loglik_target, loglik_surrog, ImportanceWeights, subj_ess, subj_pareto_k,
+            params_target, hazards_target, params_surrog, hazards_surrog,
+            tpm_book, hazmat_book, books, fbmats, absorbingstates,
+            is_semimarkov, paretosmooth
+        )
     end
 
-    # normalize importance weights
-    # normalize!.(ImportanceWeights, 1)
+    # Normalize importance weights
     ImportanceWeightsNormalized = normalize.(ImportanceWeights, 1)
 
     if return_logliks
@@ -365,50 +316,62 @@ function draw_paths(model::MultistateProcess; min_ess = 100, paretosmooth = true
     end
 end
 
+# Backward compatibility: positional npaths argument (deprecated)
 """
-    draw_paths(model::MultistateProcess, npaths)
+    draw_paths(model::MultistateProcess, npaths::Int; paretosmooth=true, return_logliks=false)
 
-Draw sample paths conditional on the data. Require that the minimum effective sample size is greater than min_ess.
+Draw a fixed number of sample paths. This is a convenience method equivalent to
+`draw_paths(model; npaths=npaths, ...)`.
 
-Arguments
-- model: multistate model.
-- npaths: number of paths to sample.
-- paretosmooth: pareto smooth importance weights, defaults to true. 
+!!! note
+    This positional argument form is deprecated. Use `draw_paths(model; npaths=n)` instead.
 """
-function draw_paths(model::MultistateProcess, npaths; paretosmooth = true, return_logliks = false)
+function draw_paths(model::MultistateProcess, npaths::Int; paretosmooth::Bool = true, return_logliks::Bool = false)
+    Base.depwarn(
+        "draw_paths(model, npaths) is deprecated. Use draw_paths(model; npaths=npaths) instead.",
+        :draw_paths
+    )
+    return draw_paths(model; npaths=npaths, paretosmooth=paretosmooth, return_logliks=return_logliks)
+end
 
-    # if exact data just return the loglik and subj_lml from the model fit
-    if model isa MultistateModelFitted && all(model.data.obstype .== 1)
-        return (loglik = model.loglik.loglik,
-                subj_lml = model.loglik.subj_lml)
+# ============================================================================
+# draw_paths Helper Functions
+# ============================================================================
+
+"""
+    _get_or_fit_surrogate(model, is_semimarkov)
+
+Get existing surrogate from model or fit a new one if needed.
+
+For fitted models, reuses the stored `markovsurrogate` to avoid refitting.
+For unfitted models, fits a new Markov surrogate.
+"""
+function _get_or_fit_surrogate(model::MultistateProcess, is_semimarkov::Bool)
+    if !is_semimarkov
+        return nothing  # Markov models don't need surrogate
     end
-
-    # number of subjects
-    nsubj = length(model.subjectindices)
-
-    # is the model markov?
-    is_semimarkov = !all(isa.(model.hazards, _MarkovHazard))
-
-    # Build surrogate if needed for semi-Markov models
-    markovsurrogate = model.markovsurrogate
-    if is_semimarkov && isnothing(markovsurrogate)
-        # Fit a Markov surrogate model
-        surrogate_fitted = fit_surrogate(model; verbose = false)
-        markovsurrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters)
+    
+    # Check if model already has a surrogate
+    if !isnothing(model.markovsurrogate)
+        return model.markovsurrogate
     end
+    
+    # Need to fit a new surrogate
+    surrogate_fitted = fit_surrogate(model; verbose = false)
+    return MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters)
+end
 
-    # get log-scale parameters as tuples for hazard evaluation
-    params_target = get_log_scale_params(model.parameters)
-    params_surrog = is_semimarkov ? get_log_scale_params(markovsurrogate.parameters) : params_target
+"""
+    _setup_tpm_infrastructure(model, params_surrog, hazards_surrog)
 
-    # get hazards
-    hazards_target = model.hazards
-    hazards_surrog = is_semimarkov ? markovsurrogate.hazards : model.hazards
-
+Set up TPM books, hazmat books, and solve Kolmogorov equations.
+Returns (books, tpm_book, hazmat_book, cache).
+"""
+function _setup_tpm_infrastructure(model::MultistateProcess, params_surrog, hazards_surrog)
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
 
-    # build containers for transition intensity and prob mtcs
+    # build containers for transition intensity and prob matrices
     hazmat_book = build_hazmat_book(Float64, model.tmat, books[1])
     tpm_book = build_tpm_book(Float64, model.tmat, books[1])
 
@@ -417,121 +380,230 @@ function draw_paths(model::MultistateProcess, npaths; paretosmooth = true, retur
 
     # Solve Kolmogorov equations for TPMs
     for t in eachindex(books[1])
-
-        # compute the transition intensity matrix
-        compute_hazmat!(
-            hazmat_book[t],
-            params_surrog,
-            hazards_surrog,
-            books[1][t],
-            model.data)
-
-        # compute transition probability matrices
-        compute_tmat!(
-            tpm_book[t],
-            hazmat_book[t],
-            books[1][t],
-            cache)
+        compute_hazmat!(hazmat_book[t], params_surrog, hazards_surrog, books[1][t], model.data)
+        compute_tmat!(tpm_book[t], hazmat_book[t], books[1][t], cache)
     end
 
-    # set up objects for simulation
-    samplepaths     = [Vector{SamplePath}(undef, npaths) for i in 1:nsubj]
-    loglik_target   = [Vector{Float64}(undef, npaths) for i in 1:nsubj]
-    
-    loglik_surrog = [Vector{Float64}(undef, npaths) for i in 1:nsubj]
-    ImportanceWeights = [Vector{Float64}(undef, npaths) for i in 1:nsubj]
+    return books, tpm_book, hazmat_book, cache
+end
 
-    # for ess 
-    subj_ll   = Vector{Float64}(undef, nsubj)
-    subj_ess  = Vector{Float64}(undef, nsubj)
-    
-    # make fbmats if necessary
-    fbmats = build_fbmats(model)
-    
-    # identify absorbing states
-    absorbingstates = findall(map(x -> all(x .== 0), eachrow(model.tmat)))
+"""
+    _allocate_path_containers(nsubj, capacity, adaptive)
 
-    for i in eachindex(model.subjectindices) 
-
-        keep_sampling = true
-
-        # subject data
-        subj_inds = model.subjectindices[i]
-        subj_dat  = view(model.data, subj_inds, :)
-
-        # compute fbmats here
-        if any(subj_dat.obstype .∉ Ref([1,2]))
-            # subject data
-            subj_tpm_map = view(books[2], subj_inds, :)
-            subj_emat    = view(model.emat, subj_inds, :)
-            ForwardFiltering!(fbmats[i], subj_dat, tpm_book, subj_tpm_map, subj_emat)
-        end
-
-        # sample new paths and compute log likelihoods
-        for j in 1:npaths
-            # draw path
-            samplepaths[i][j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2], fbmats, absorbingstates)
-
-            # log likelihood of the target
-            loglik_target[i][j] = loglik(params_target, samplepaths[i][j], hazards_target, model)
-
-            # log likelihood of the surrogate
-            if is_semimarkov
-                loglik_surrog[i][j] = loglik(params_surrog, samplepaths[i][j], hazards_surrog, model) 
-            else
-                loglik_surrog[i][j] = loglik_target[i][j]
-            end
-
-            # compute the unsmoothed importance weight
-            ImportanceWeights[i][j] = exp(loglik_target[i][j] - loglik_surrog[i][j])
-        end
-
-        # no need to keep all paths if redundant
-        if allequal(loglik_surrog[i])
-            samplepaths[i]       = [first(samplepaths[i]),]
-            loglik_target[i]     = [first(loglik_target[i]),]
-            loglik_surrog[i]     = [first(loglik_surrog[i]),]
-            ImportanceWeights[i] = [1.0,]
-            subj_ess[i]          = npaths
-
-        else
-            if !is_semimarkov
-                subj_ess[i] = length(samplepaths[i])
-            else
-                # raw log importance weights
-                logweights = reshape(copy(log.(ImportanceWeights[i])), 1, length(loglik_target[i]), 1) 
-
-                # might fail if not enough samples to fit pareto
-                if any(logweights .!= 0.0)
-                    if paretosmooth 
-                        try
-                            # pareto smoothed importance weights
-                            psiw = psis(logweights; source = "other");
-            
-                            # save importance weights and ess
-                            copyto!(ImportanceWeights[i], psiw.weights)
-                            subj_ess[i] = psiw.ess[1]            
-
-                        catch err
-                            subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
-                        end
-                    else
-                        subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
-                    end
-                else
-                    subj_ess[i] = length(samplepaths[i])
-                end
-            end
-        end
-    end
-
-    # normalize importance weights
-    ImportanceWeightsNormalized = normalize.(ImportanceWeights, 1)
-
-    if return_logliks
-        return (; samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights)
+Allocate containers for sample paths and likelihoods.
+"""
+function _allocate_path_containers(nsubj::Int, capacity::Int, adaptive::Bool)
+    if adaptive
+        samplepaths = [sizehint!(Vector{SamplePath}(), capacity) for _ in 1:nsubj]
+        loglik_target = [sizehint!(Vector{Float64}(), capacity) for _ in 1:nsubj]
+        loglik_surrog = [sizehint!(Vector{Float64}(), capacity) for _ in 1:nsubj]
+        ImportanceWeights = [sizehint!(Vector{Float64}(), capacity) for _ in 1:nsubj]
     else
-        return (; samplepaths, ImportanceWeightsNormalized)
+        samplepaths = [Vector{SamplePath}(undef, capacity) for _ in 1:nsubj]
+        loglik_target = [Vector{Float64}(undef, capacity) for _ in 1:nsubj]
+        loglik_surrog = [Vector{Float64}(undef, capacity) for _ in 1:nsubj]
+        ImportanceWeights = [Vector{Float64}(undef, capacity) for _ in 1:nsubj]
+    end
+    return samplepaths, loglik_target, loglik_surrog, ImportanceWeights
+end
+
+"""
+    _draw_paths_for_subject!(i, model, adaptive_mode, min_ess, npaths, ...)
+
+Draw sample paths for subject i. Handles both adaptive and fixed-count modes.
+"""
+function _draw_paths_for_subject!(
+        i::Int, model::MultistateProcess, adaptive_mode::Bool, min_ess::Int, npaths_fixed::Union{Nothing, Int},
+        samplepaths, loglik_target, loglik_surrog, ImportanceWeights, subj_ess, subj_pareto_k,
+        params_target, hazards_target, params_surrog, hazards_surrog,
+        tpm_book, hazmat_book, books, fbmats, absorbingstates,
+        is_semimarkov::Bool, paretosmooth::Bool)
+
+    # Subject data
+    subj_inds = model.subjectindices[i]
+    subj_dat = view(model.data, subj_inds, :)
+
+    # Compute forward-backward matrices for panel data
+    if any(subj_dat.obstype .∉ Ref([1,2]))
+        subj_tpm_map = view(books[2], subj_inds, :)
+        subj_emat = view(model.emat, subj_inds, :)
+        ForwardFiltering!(fbmats[i], subj_dat, tpm_book, subj_tpm_map, subj_emat)
+    end
+
+    if adaptive_mode
+        _draw_paths_adaptive!(
+            i, model, min_ess,
+            samplepaths, loglik_target, loglik_surrog, ImportanceWeights, subj_ess, subj_pareto_k,
+            params_target, hazards_target, params_surrog, hazards_surrog,
+            tpm_book, hazmat_book, books, fbmats, absorbingstates,
+            is_semimarkov, paretosmooth
+        )
+    else
+        _draw_paths_fixed!(
+            i, model, npaths_fixed,
+            samplepaths, loglik_target, loglik_surrog, ImportanceWeights, subj_ess, subj_pareto_k,
+            params_target, hazards_target, params_surrog, hazards_surrog,
+            tpm_book, hazmat_book, books, fbmats, absorbingstates,
+            is_semimarkov, paretosmooth
+        )
+    end
+end
+
+"""
+    _draw_paths_adaptive!(i, model, min_ess, ...)
+
+Adaptive sampling: keep sampling until ESS >= min_ess.
+"""
+function _draw_paths_adaptive!(
+        i::Int, model::MultistateProcess, min_ess::Int,
+        samplepaths, loglik_target, loglik_surrog, ImportanceWeights, subj_ess, subj_pareto_k,
+        params_target, hazards_target, params_surrog, hazards_surrog,
+        tpm_book, hazmat_book, books, fbmats, absorbingstates,
+        is_semimarkov::Bool, paretosmooth::Bool)
+
+    keep_sampling = true
+
+    while keep_sampling
+        # Determine how many paths to add
+        current_npaths = length(samplepaths[i])
+        n_add = current_npaths == 0 ? min_ess : ceil(Int64, current_npaths * 1.4)
+
+        # Augment containers
+        append!(samplepaths[i], Vector{SamplePath}(undef, n_add))
+        append!(loglik_target[i], zeros(n_add))
+        append!(loglik_surrog[i], zeros(n_add))
+        append!(ImportanceWeights[i], zeros(n_add))
+
+        # Sample new paths
+        for j in current_npaths .+ (1:n_add)
+            _sample_one_path!(
+                j, i, model,
+                samplepaths, loglik_target, loglik_surrog, ImportanceWeights,
+                params_target, hazards_target, params_surrog, hazards_surrog,
+                tpm_book, hazmat_book, books, fbmats, absorbingstates,
+                is_semimarkov
+            )
+        end
+
+        # Compute ESS and update importance weights
+        _compute_ess_and_weights!(
+            i, samplepaths, loglik_target, loglik_surrog, ImportanceWeights, 
+            subj_ess, subj_pareto_k, is_semimarkov, paretosmooth, min_ess
+        )
+
+        # Check stopping criterion
+        if subj_ess[i] >= min_ess
+            keep_sampling = false
+        end
+    end
+end
+
+"""
+    _draw_paths_fixed!(i, model, npaths, ...)
+
+Fixed-count sampling: draw exactly npaths paths.
+"""
+function _draw_paths_fixed!(
+        i::Int, model::MultistateProcess, npaths::Int,
+        samplepaths, loglik_target, loglik_surrog, ImportanceWeights, subj_ess, subj_pareto_k,
+        params_target, hazards_target, params_surrog, hazards_surrog,
+        tpm_book, hazmat_book, books, fbmats, absorbingstates,
+        is_semimarkov::Bool, paretosmooth::Bool)
+
+    # Sample all paths
+    for j in 1:npaths
+        _sample_one_path!(
+            j, i, model,
+            samplepaths, loglik_target, loglik_surrog, ImportanceWeights,
+            params_target, hazards_target, params_surrog, hazards_surrog,
+            tpm_book, hazmat_book, books, fbmats, absorbingstates,
+            is_semimarkov
+        )
+    end
+
+    # Compute ESS and update importance weights
+    _compute_ess_and_weights!(
+        i, samplepaths, loglik_target, loglik_surrog, ImportanceWeights, 
+        subj_ess, subj_pareto_k, is_semimarkov, paretosmooth, npaths
+    )
+end
+
+"""
+    _sample_one_path!(j, i, model, ...)
+
+Sample a single path for subject i, store at index j.
+"""
+function _sample_one_path!(
+        j::Int, i::Int, model::MultistateProcess,
+        samplepaths, loglik_target, loglik_surrog, ImportanceWeights,
+        params_target, hazards_target, params_surrog, hazards_surrog,
+        tpm_book, hazmat_book, books, fbmats, absorbingstates,
+        is_semimarkov::Bool)
+
+    # Draw path from surrogate
+    samplepaths[i][j] = draw_samplepath(i, model, tpm_book, hazmat_book, books[2], fbmats, absorbingstates)
+
+    # Target log-likelihood
+    loglik_target[i][j] = loglik(params_target, samplepaths[i][j], hazards_target, model)
+
+    # Surrogate log-likelihood
+    if is_semimarkov
+        loglik_surrog[i][j] = loglik(params_surrog, samplepaths[i][j], hazards_surrog, model)
+    else
+        loglik_surrog[i][j] = loglik_target[i][j]
+    end
+
+    # Unsmoothed importance weight
+    ImportanceWeights[i][j] = exp(loglik_target[i][j] - loglik_surrog[i][j])
+end
+
+"""
+    _compute_ess_and_weights!(i, samplepaths, loglik_target, loglik_surrog, ImportanceWeights, subj_ess, subj_pareto_k, is_semimarkov, paretosmooth, default_ess)
+
+Compute ESS and optionally apply Pareto smoothing to importance weights.
+"""
+function _compute_ess_and_weights!(
+        i::Int, samplepaths, loglik_target, loglik_surrog, ImportanceWeights,
+        subj_ess, subj_pareto_k, is_semimarkov::Bool, paretosmooth::Bool, default_ess::Int)
+
+    # Handle redundant paths (all same likelihood)
+    if allequal(loglik_surrog[i])
+        samplepaths[i] = [first(samplepaths[i])]
+        loglik_target[i] = [first(loglik_target[i])]
+        loglik_surrog[i] = [first(loglik_surrog[i])]
+        ImportanceWeights[i] = [1.0]
+        subj_ess[i] = default_ess
+        return
+    end
+
+    # Markov models: ESS = number of paths
+    if !is_semimarkov
+        subj_ess[i] = length(samplepaths[i])
+        return
+    end
+
+    # Semi-Markov: compute ESS from importance weights
+    logweights = reshape(copy(loglik_target[i] - loglik_surrog[i]), 1, length(loglik_target[i]), 1)
+
+    # All weights equal (no importance sampling needed)
+    if !any(logweights .!= 0.0)
+        subj_ess[i] = length(samplepaths[i])
+        return
+    end
+
+    if paretosmooth
+        try
+            psiw = psis(logweights; source = "other")
+            copyto!(ImportanceWeights[i], psiw.weights)
+            subj_ess[i] = psiw.ess[1]
+            subj_pareto_k[i] = psiw.pareto_k[1]
+        catch err
+            # Fall back to simple normalization
+            copyto!(ImportanceWeights[i], normalize(exp.(vec(logweights)), 1))
+            subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
+        end
+    else
+        subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
     end
 end
 
@@ -776,19 +848,34 @@ Computes the forward recursion matrices for the FFBS algorithm. Writes into subj
 - `tpm_book`: TPM book
 - `subj_tpm_map`: Subject's TPM mapping  
 - `subj_emat`: Subject's emission matrix
-- `init_state`: Optional initial state index. If nothing, uses subj_dat.statefrom[1].
-                For phase-type, pass the first phase of the initial observed state.
+- `init_state`: Optional initial state specification. Can be:
+  - `nothing`: uses subj_dat.statefrom[1] (default)
+  - `Int`: single state index (point mass)
+  - `Vector{Float64}`: distribution over states (for phase-type with uniform phases)
 """
 function ForwardFiltering!(subj_fbmats, subj_dat, tpm_book, subj_tpm_map, subj_emat; init_state=nothing)
 
     n_times  = size(subj_fbmats, 1)
     n_states = size(subj_fbmats, 2)
 
-    # initialize
-    p0 = zeros(Float64, n_states)
-    initial = isnothing(init_state) ? subj_dat.statefrom[1] : init_state
-    p0[initial] = 1.0
-    subj_fbmats[1, :, :] = p0 * subj_emat[1,:]'
+    # initialize - handle both point mass and distribution
+    if isnothing(init_state)
+        p0 = zeros(Float64, n_states)
+        p0[subj_dat.statefrom[1]] = 1.0
+    elseif init_state isa Integer
+        p0 = zeros(Float64, n_states)
+        p0[init_state] = 1.0
+    else
+        # init_state is a distribution vector
+        p0 = init_state
+    end
+    
+    # First step: include TPM to account for transition probabilities over the interval.
+    # This is essential when init_state is a distribution (e.g., phase-type with panel data)
+    # because we need to know which (start_phase, end_phase) pairs are reachable.
+    # For point mass init_state, the TPM multiplication is still correct (just filters column j).
+    subj_fbmats[1, :, :] = (p0 * subj_emat[1,:]') .* tpm_book[subj_tpm_map[1,1]][subj_tpm_map[1,2]]
+    normalize!(subj_fbmats[1,:,:], 1)
 
     # recurse
     if n_times > 1
@@ -950,37 +1037,90 @@ end
 
 
 """
-    build_phasetype_emat_expanded(model, surrogate::PhaseTypeSurrogate)
+    build_phasetype_emat_expanded(model, surrogate::PhaseTypeSurrogate;
+                                  expanded_data::Union{Nothing, DataFrame} = nothing,
+                                  censoring_patterns::Union{Nothing, Matrix{Float64}} = nothing)
 
 Build emission matrix mapping expanded phases to observed states for FFBS.
 
-For each observation, the emission matrix E[i,j] = 1 if phase j corresponds
-to the observed state at that observation, 0 otherwise.
+For each observation, the emission matrix E[i,j] gives the probability that
+the subject is in phase j given the observation.
+
+# Observation Types
+- obstype 1: Exact observation → phases of stateto have probability 1
+- obstype 2: Panel/right-censored → phases of stateto have probability 1
+- obstype 0: Fully censored → all phases equally likely
+- obstype > 2: Partial censoring → use censoring_patterns matrix
+  - For phase-type data expansion, obstype = 2 + s means "in state s, phase unknown"
+
+# Arguments
+- `model`: MultistateProcess with data
+- `surrogate`: PhaseTypeSurrogate with state/phase mappings
+- `expanded_data`: Optional expanded data (if None, uses model.data)
+- `censoring_patterns`: Optional censoring patterns for obstype > 2
 
 # Returns
 - Matrix of size (n_observations, n_expanded_states)
 """
-function build_phasetype_emat_expanded(model, surrogate::PhaseTypeSurrogate)
-    n_obs = nrow(model.data)
+function build_phasetype_emat_expanded(model, surrogate::PhaseTypeSurrogate;
+                                       expanded_data::Union{Nothing, DataFrame} = nothing,
+                                       censoring_patterns::Union{Nothing, Matrix{Float64}} = nothing)
+    
+    data = isnothing(expanded_data) ? model.data : expanded_data
+    n_obs = nrow(data)
     n_expanded = surrogate.n_expanded_states
+    n_observed = surrogate.n_observed_states
     
     emat = zeros(Float64, n_obs, n_expanded)
     
     for i in 1:n_obs
-        obstype = model.data.obstype[i]
+        obstype = data.obstype[i]
         
         if obstype == 1 || obstype == 2
-            # Exact or right-censored observation
+            # Exact or panel observation
             # Only the phases corresponding to the observed state are possible
-            observed_state = model.data.stateto[i]
-            phases = surrogate.state_to_phases[observed_state]
-            emat[i, phases] .= 1.0
-        elseif obstype == 3
-            # Interval censored - any state in the censored set is possible
-            # For now, allow all non-absorbing phases
-            for s in 1:surrogate.n_observed_states
-                phases = surrogate.state_to_phases[s]
+            observed_state = data.stateto[i]
+            if observed_state > 0 && observed_state <= n_observed
+                phases = surrogate.state_to_phases[observed_state]
                 emat[i, phases] .= 1.0
+            else
+                # Invalid state, allow all phases
+                emat[i, :] .= 1.0
+            end
+        elseif obstype == 0
+            # Fully censored - all phases equally likely
+            emat[i, :] .= 1.0
+        elseif obstype > 2
+            # Partial censoring
+            if !isnothing(censoring_patterns)
+                # Use provided censoring patterns
+                # For phase-type expansion: obstype = 2 + s means state s is known
+                pattern_idx = obstype - 2
+                if pattern_idx <= size(censoring_patterns, 1)
+                    for s in 1:min(n_observed, size(censoring_patterns, 2) - 1)
+                        state_prob = censoring_patterns[pattern_idx, s + 1]
+                        if state_prob > 0
+                            phases = surrogate.state_to_phases[s]
+                            n_phases = length(phases)
+                            # Divide probability mass equally among phases
+                            emat[i, phases] .= state_prob / n_phases
+                        end
+                    end
+                else
+                    # Pattern index out of range, allow all phases
+                    emat[i, :] .= 1.0
+                end
+            else
+                # No censoring patterns provided
+                # For phase-type expansion convention: obstype = 2 + s means in state s
+                censored_state = obstype - 2
+                if censored_state >= 1 && censored_state <= n_observed
+                    phases = surrogate.state_to_phases[censored_state]
+                    emat[i, phases] .= 1.0
+                else
+                    # Invalid censoring code, allow all phases
+                    emat[i, :] .= 1.0
+                end
             end
         else
             # Unknown observation type, allow all phases
@@ -1007,12 +1147,30 @@ Allocate forward-backward matrices for FFBS on expanded phase-type state space.
 - Vector of 3D arrays, one per subject, of size (n_obs, n_expanded, n_expanded)
 """
 function build_fbmats_phasetype(model, surrogate::PhaseTypeSurrogate)
+    return build_fbmats_phasetype_with_indices(model.subjectindices, surrogate)
+end
+
+"""
+    build_fbmats_phasetype_with_indices(subjectindices, surrogate::PhaseTypeSurrogate)
+
+Allocate forward-backward matrices for FFBS on expanded phase-type state space.
+
+This version takes explicit subject indices, useful when working with expanded data.
+
+# Arguments
+- `subjectindices`: Vector of indices per subject (UnitRange or Vector{Int})
+- `surrogate`: PhaseTypeSurrogate
+
+# Returns
+- Vector of 3D arrays, one per subject, of size (n_obs, n_expanded, n_expanded)
+"""
+function build_fbmats_phasetype_with_indices(subjectindices, surrogate::PhaseTypeSurrogate)
     n_expanded = surrogate.n_expanded_states
     
-    fbmats = Vector{Array{Float64, 3}}(undef, length(model.subjectindices))
+    fbmats = Vector{Array{Float64, 3}}(undef, length(subjectindices))
     
-    for i in eachindex(model.subjectindices)
-        subj_inds = model.subjectindices[i]
+    for i in eachindex(subjectindices)
+        subj_inds = subjectindices[i]
         n_obs = length(subj_inds)
         fbmats[i] = zeros(Float64, n_obs, n_expanded, n_expanded)
     end
@@ -1123,14 +1281,48 @@ the sampled path back to observed states.
 4. Collapse the full path from expanded to observed states
 
 # Returns
-- `SamplePath`: Path in observed (not expanded) state space
+- `NamedTuple` with fields:
+  - `collapsed`: SamplePath in observed state space (for target likelihood)
+  - `expanded`: SamplePath in expanded phase state space (for surrogate likelihood)
 """
 function draw_samplepath_phasetype(subj::Int64, model::MultistateProcess, 
                                     tpm_book_ph, hazmat_book_ph, tpm_map, 
                                     fbmats_ph, emat_ph, surrogate::PhaseTypeSurrogate, 
-                                    absorbingstates)
+                                    absorbingstates;
+                                    # Optional expanded data infrastructure for exact observations
+                                    expanded_data::Union{Nothing, DataFrame} = nothing,
+                                    expanded_subjectindices::Union{Nothing, Vector{UnitRange{Int64}}} = nothing,
+                                    original_row_map::Union{Nothing, Vector{Int}} = nothing)
     
-    # Subject data
+    # Determine if we should use expanded data for FFBS
+    # This is needed when data has exact observations (obstype=1) to properly
+    # account for phase uncertainty during sojourn times
+    use_expanded = !isnothing(expanded_data) && !isnothing(expanded_subjectindices)
+    
+    if use_expanded
+        return _draw_samplepath_phasetype_expanded(subj, model, tpm_book_ph, hazmat_book_ph,
+                                                    tpm_map, fbmats_ph, emat_ph, surrogate,
+                                                    absorbingstates, expanded_data,
+                                                    expanded_subjectindices, original_row_map)
+    else
+        return _draw_samplepath_phasetype_original(subj, model, tpm_book_ph, hazmat_book_ph,
+                                                    tpm_map, fbmats_ph, emat_ph, surrogate,
+                                                    absorbingstates)
+    end
+end
+
+"""
+    _draw_samplepath_phasetype_original(...)
+
+Internal implementation for panel/censored data without expansion.
+Uses the original data structure for FFBS.
+"""
+function _draw_samplepath_phasetype_original(subj::Int64, model::MultistateProcess, 
+                                              tpm_book_ph, hazmat_book_ph, tpm_map, 
+                                              fbmats_ph, emat_ph, surrogate::PhaseTypeSurrogate, 
+                                              absorbingstates)
+    
+    # Subject data from original model
     subj_inds = model.subjectindices[subj]
     subj_dat = view(model.data, subj_inds, :)
     subj_tpm_map = view(tpm_map, subj_inds, :)
@@ -1139,25 +1331,47 @@ function draw_samplepath_phasetype(subj::Int64, model::MultistateProcess,
     n_obs = length(subj_inds)
     n_expanded = surrogate.n_expanded_states
     
-    # Initial expanded state: first phase of initial observed state
-    init_expanded = first(surrogate.state_to_phases[subj_dat.statefrom[1]])
+    # Determine initial phase distribution based on first observation type
+    initial_obs_state = subj_dat.statefrom[1]
+    initial_phases = surrogate.state_to_phases[initial_obs_state]
     
-    # Get expanded state endpoints via FFBS if there are censored observations
-    if any(subj_dat.obstype .∉ Ref([1, 2]))
-        # Forward filtering on expanded space (reuse existing function with init_state)
-        ForwardFiltering!(fbmats_ph[subj], subj_dat, tpm_book_ph, subj_tpm_map, subj_emat_ph;
-                          init_state=init_expanded)
-        
-        # Backward sample to get expanded state sequence
-        expanded_states = BackwardSampling_expanded(fbmats_ph[subj], n_expanded)
+    if subj_dat.obstype[1] == 1
+        # Exact observation: entry is always into first phase (Coxian assumption)
+        init_expanded = first(initial_phases)
     else
-        # No censored observations - map observed states to first phase
-        expanded_states = [first(surrogate.state_to_phases[subj_dat.stateto[i]]) for i in 1:n_obs]
+        # Panel/censored: uniform over phases of initial state
+        # Create distribution vector for ForwardFiltering!
+        init_expanded = zeros(Float64, n_expanded)
+        init_expanded[initial_phases] .= 1.0 / length(initial_phases)
+    end
+    
+    # Run FFBS to sample phase endpoints
+    ForwardFiltering!(fbmats_ph[subj], subj_dat, tpm_book_ph, subj_tpm_map, subj_emat_ph;
+                      init_state=init_expanded)
+    
+    # Backward sample to get expanded state sequence
+    expanded_states = BackwardSampling_expanded(fbmats_ph[subj], n_expanded)
+    
+    # For path construction, sample initial phase from backward distribution
+    # (first element of expanded_states is already the sampled initial phase)
+    init_phase_for_path = if subj_dat.obstype[1] == 1
+        first(initial_phases)  # Exact: always first phase
+    else
+        expanded_states[1]  # Panel: use sampled phase (but we need to sample it)
+    end
+    
+    # For panel data, we need to sample the initial phase (at tstart[1])
+    # conditioned on the endpoint phase at tstop[1] (which is expanded_states[1]).
+    # This ensures we only sample start phases that can reach the endpoint.
+    if subj_dat.obstype[1] != 1
+        # Sample initial phase conditioned on the endpoint phase at tstop[1]
+        p0_given_endpoint = normalize(fbmats_ph[subj][1, :, expanded_states[1]], 1)
+        init_phase_for_path = rand(Categorical(p0_given_endpoint))
     end
     
     # Initialize path in expanded space
     times_expanded = [subj_dat.tstart[1]]
-    states_expanded = [init_expanded]
+    states_expanded = [init_phase_for_path]
     sizehint!(times_expanded, n_expanded * 2)
     sizehint!(states_expanded, n_expanded * 2)
     
@@ -1172,24 +1386,18 @@ function draw_samplepath_phasetype(subj::Int64, model::MultistateProcess,
         # Source state in expanded space
         a_expanded = states_expanded[end]
         
+        # Destination phase from FFBS
+        b_expanded = expanded_states[i]
+        
         if subj_dat.obstype[i] == 1
-            # Exact/continuous observation - path is OBSERVED, not sampled
-            # Just record the observed transition at tstop
-            dest_obs_state = subj_dat.stateto[i]
-            
-            if subj_dat.statefrom[i] != dest_obs_state
-                # Observed transition: record it at the observed time
-                # Map to first phase of destination state
-                b_expanded = first(surrogate.state_to_phases[dest_obs_state])
+            # Exact observation: transition time is known, phase is sampled
+            # Record the transition at the observed time with sampled phase
+            if subj_dat.statefrom[i] != subj_dat.stateto[i]
                 push!(times_expanded, subj_dat.tstop[i])
                 push!(states_expanded, b_expanded)
             end
-            # If no transition (statefrom == stateto), nothing to record
         else
-            # Censored/panel observation - use FFBS-sampled destination
-            b_expanded = expanded_states[i]
-            
-            # Sample path between expanded endpoints
+            # Censored/panel observation - sample path between endpoints
             sample_ecctmc!(times_expanded, states_expanded, P_expanded, Q_expanded, 
                           a_expanded, b_expanded, subj_dat.tstart[i], subj_dat.tstop[i])
             
@@ -1208,8 +1416,157 @@ function draw_samplepath_phasetype(subj::Int64, model::MultistateProcess,
     collapsed_path = collapse_phasetype_path(expanded_path, surrogate, absorbingstates)
     
     # Return both collapsed and expanded paths
-    # Collapsed path is used for target likelihood
-    # Expanded path is used for surrogate likelihood
+    return (collapsed=collapsed_path, expanded=expanded_path)
+end
+
+
+"""
+    _draw_samplepath_phasetype_expanded(...)
+
+Internal implementation for exact data using expanded data structure.
+Runs FFBS on the expanded data to properly account for phase uncertainty
+during sojourn times.
+"""
+function _draw_samplepath_phasetype_expanded(subj::Int64, model::MultistateProcess, 
+                                              tpm_book_ph, hazmat_book_ph, tpm_map,
+                                              fbmats_ph, emat_ph, surrogate::PhaseTypeSurrogate,
+                                              absorbingstates, expanded_data::DataFrame,
+                                              expanded_subjectindices::Vector{UnitRange{Int64}},
+                                              original_row_map::Union{Nothing, Vector{Int}})
+    
+    # Get subject data from both original and expanded datasets
+    orig_subj_inds = model.subjectindices[subj]
+    orig_subj_dat = view(model.data, orig_subj_inds, :)
+    
+    exp_subj_inds = expanded_subjectindices[subj]
+    exp_subj_dat = view(expanded_data, exp_subj_inds, :)
+    exp_subj_tpm_map = view(tpm_map, exp_subj_inds, :)
+    exp_subj_emat_ph = view(emat_ph, exp_subj_inds, :)
+    
+    n_orig_obs = length(orig_subj_inds)
+    n_exp_obs = length(exp_subj_inds)
+    n_expanded = surrogate.n_expanded_states
+    
+    # Determine initial phase based on first observation type in ORIGINAL data
+    initial_obs_state = orig_subj_dat.statefrom[1]
+    initial_phases = surrogate.state_to_phases[initial_obs_state]
+    
+    if orig_subj_dat.obstype[1] == 1
+        # Exact observation: entry is always into first phase (Coxian assumption)
+        init_expanded = first(initial_phases)
+        init_phase_for_path = init_expanded
+    else
+        # Panel/censored: uniform over phases of initial state
+        init_expanded = zeros(Float64, n_expanded)
+        init_expanded[initial_phases] .= 1.0 / length(initial_phases)
+        init_phase_for_path = nothing  # Will be sampled after forward pass
+    end
+    
+    # Run FFBS on expanded data to sample phase endpoints
+    ForwardFiltering!(fbmats_ph[subj], exp_subj_dat, tpm_book_ph, exp_subj_tpm_map, exp_subj_emat_ph;
+                      init_state=init_expanded)
+    
+    # Backward sample to get expanded state sequence for all expanded rows
+    exp_expanded_states = BackwardSampling_expanded(fbmats_ph[subj], n_expanded)
+    
+    # Sample initial phase if panel data
+    if isnothing(init_phase_for_path)
+        p0_given_obs = normalize(vec(sum(fbmats_ph[subj][1, :, :], dims=2)), 1)
+        init_phase_for_path = rand(Categorical(p0_given_obs))
+    end
+    
+    # Build mapping from original rows to their corresponding transition rows in expanded data
+    # For each original exact observation, find the expanded row that has the transition (obstype=1)
+    # Non-exact observations map 1:1 (they weren't expanded)
+    orig_to_exp_phase = Vector{Int}(undef, n_orig_obs)
+    
+    exp_offset = 0
+    for i in 1:n_orig_obs
+        if orig_subj_dat.obstype[i] == 1
+            # Exact observation: maps to the second expanded row (the transition row)
+            # The first expanded row is the sojourn, second is the transition
+            orig_to_exp_phase[i] = exp_expanded_states[exp_offset + 2]
+            exp_offset += 2
+        else
+            # Non-exact: maps directly (wasn't expanded)
+            exp_offset += 1
+            orig_to_exp_phase[i] = exp_expanded_states[exp_offset]
+        end
+    end
+    
+    # Now construct the path using original observation structure but sampled phases
+    times_expanded = [orig_subj_dat.tstart[1]]
+    states_expanded = [init_phase_for_path]
+    sizehint!(times_expanded, n_expanded * 2)
+    sizehint!(states_expanded, n_expanded * 2)
+    
+    # For exact observations, we also need the phase at the end of sojourn
+    # to sample the path during the sojourn interval
+    exp_idx = 0
+    for i in 1:n_orig_obs
+        # Source state in expanded space
+        a_expanded = states_expanded[end]
+        
+        if orig_subj_dat.obstype[i] == 1
+            # Exact observation: we need to sample path during sojourn then record transition
+            
+            # Phase at end of sojourn (from first expanded row of this pair)
+            sojourn_end_phase = exp_expanded_states[exp_idx + 1]
+            # Phase after transition (from second expanded row)
+            transition_phase = exp_expanded_states[exp_idx + 2]
+            
+            # Get TPM for sojourn interval [tstart, tstop - ε]
+            sojourn_covar_idx = exp_subj_tpm_map[exp_idx + 1, 1]
+            sojourn_time_idx = exp_subj_tpm_map[exp_idx + 1, 2]
+            P_sojourn = tpm_book_ph[sojourn_covar_idx][sojourn_time_idx]
+            Q_expanded = hazmat_book_ph[sojourn_covar_idx]
+            
+            # Sample path during sojourn (from current phase to sojourn_end_phase)
+            sojourn_tstart = orig_subj_dat.tstart[i]
+            sojourn_tstop = exp_subj_dat.tstop[exp_idx + 1]  # = orig tstop - epsilon
+            
+            sample_ecctmc!(times_expanded, states_expanded, P_sojourn, Q_expanded,
+                          a_expanded, sojourn_end_phase, sojourn_tstart, sojourn_tstop)
+            
+            # Ensure we end at sojourn_end_phase
+            if states_expanded[end] != sojourn_end_phase
+                push!(times_expanded, sojourn_tstop)
+                push!(states_expanded, sojourn_end_phase)
+            end
+            
+            # Record the transition at the original observation time
+            if surrogate.phase_to_state[sojourn_end_phase] != surrogate.phase_to_state[transition_phase]
+                push!(times_expanded, orig_subj_dat.tstop[i])
+                push!(states_expanded, transition_phase)
+            end
+            
+            exp_idx += 2
+        else
+            # Censored/panel observation: sample path as before
+            exp_idx += 1
+            b_expanded = exp_expanded_states[exp_idx]
+            
+            covar_idx = exp_subj_tpm_map[exp_idx, 1]
+            time_idx = exp_subj_tpm_map[exp_idx, 2]
+            P_expanded = tpm_book_ph[covar_idx][time_idx]
+            Q_expanded = hazmat_book_ph[covar_idx]
+            
+            sample_ecctmc!(times_expanded, states_expanded, P_expanded, Q_expanded,
+                          a_expanded, b_expanded, orig_subj_dat.tstart[i], orig_subj_dat.tstop[i])
+            
+            if states_expanded[end] != b_expanded
+                push!(times_expanded, orig_subj_dat.tstop[i])
+                push!(states_expanded, b_expanded)
+            end
+        end
+    end
+    
+    # Create expanded SamplePath for surrogate likelihood
+    expanded_path = SamplePath(subj, copy(times_expanded), copy(states_expanded))
+    
+    # Collapse expanded path to observed states
+    collapsed_path = collapse_phasetype_path(expanded_path, surrogate, absorbingstates)
+    
     return (collapsed=collapsed_path, expanded=expanded_path)
 end
 

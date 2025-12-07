@@ -129,7 +129,7 @@ where P is the transition probability matrix computed via matrix exponentials.
 - Handles both fully observed and censored state observations
 - Gradients computed via ForwardDiff through the matrix exponential
 """
-function compute_subject_gradients(params::AbstractVector, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}, books::Tuple)
+function compute_subject_gradients(params::AbstractVector, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored, PhaseTypeModel}, books::Tuple)
     nsubj = length(model.subjectindices)
     nparams = length(params)
     
@@ -286,7 +286,7 @@ Compute subject-level Hessian contributions for Markov panel data.
 
 Returns Vector{Matrix{Float64}} of length n, each matrix is p × p.
 """
-function compute_subject_hessians(params::AbstractVector, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}, books::Tuple)
+function compute_subject_hessians(params::AbstractVector, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored, PhaseTypeModel}, books::Tuple)
     nsubj = length(model.subjectindices)
     nparams = length(params)
     
@@ -1236,16 +1236,30 @@ function compute_robust_vcov(params::AbstractVector,
                             compute_ij::Bool = true,
                             compute_jk::Bool = false,
                             loo_method::Symbol = :direct,
-                            vcov_threshold::Bool = true)
+                            vcov_threshold::Bool = true,
+                            subject_grads::Union{Nothing, Matrix{Float64}} = nothing,
+                            subject_hessians::Union{Nothing, Vector{Matrix{Float64}}} = nothing)
     nsubj = length(model.subjectindices)
     nparams = length(params)
     
     # We need subject contributions for IJ/JK
     need_subject_contributions = compute_ij || compute_jk
     
-    # Compute Fisher components
-    fisher_result = compute_fisher_components(params, model, samplepaths; 
-                                              compute_subject_contributions=need_subject_contributions)
+    # Use provided subject contributions if available; otherwise compute them
+    if !isnothing(subject_grads) && !isnothing(subject_hessians)
+        # Reuse cached gradients and Hessians
+        fishinf = zeros(Float64, nparams, nparams)
+        for H_i in subject_hessians
+            fishinf .-= H_i
+        end
+        fisher_result = (fishinf = Symmetric(fishinf), 
+                        subject_grads = subject_grads, 
+                        subject_hessians = subject_hessians)
+    else
+        # Compute Fisher components
+        fisher_result = compute_fisher_components(params, model, samplepaths; 
+                                                  compute_subject_contributions=need_subject_contributions)
+    end
     
     # Compute standard vcov
     atol = vcov_threshold ? (log(nsubj) * nparams)^-2 : sqrt(eps(Float64))
@@ -1289,16 +1303,30 @@ function compute_robust_vcov(params::AbstractVector,
                             compute_ij::Bool = true,
                             compute_jk::Bool = false,
                             loo_method::Symbol = :direct,
-                            vcov_threshold::Bool = true)
+                            vcov_threshold::Bool = true,
+                            subject_grads::Union{Nothing, Matrix{Float64}} = nothing,
+                            subject_hessians::Union{Nothing, Vector{Matrix{Float64}}} = nothing)
     nsubj = length(model.subjectindices)
     nparams = length(params)
     
     # We need subject contributions for IJ/JK
     need_subject_contributions = compute_ij || compute_jk
     
-    # Compute Fisher components
-    fisher_result = compute_fisher_components(params, model, books;
-                                              compute_subject_contributions=need_subject_contributions)
+    # Use provided subject contributions if available; otherwise compute them
+    if !isnothing(subject_grads) && !isnothing(subject_hessians)
+        # Reuse cached gradients and Hessians
+        fishinf = zeros(Float64, nparams, nparams)
+        for H_i in subject_hessians
+            fishinf .-= H_i
+        end
+        fisher_result = (fishinf = Symmetric(fishinf), 
+                        subject_grads = subject_grads, 
+                        subject_hessians = subject_hessians)
+    else
+        # Compute Fisher components
+        fisher_result = compute_fisher_components(params, model, books;
+                                                  compute_subject_contributions=need_subject_contributions)
+    end
     
     # Compute standard vcov
     atol = vcov_threshold ? (log(nsubj) * nparams)^-2 : sqrt(eps(Float64))
@@ -1399,16 +1427,28 @@ function compute_robust_vcov(params::AbstractVector,
                             compute_ij::Bool = true,
                             compute_jk::Bool = false,
                             loo_method::Symbol = :direct,
-                            vcov_threshold::Bool = true)
+                            vcov_threshold::Bool = true,
+                            subject_grads::Union{Nothing, Matrix{Float64}} = nothing,
+                            subject_hessians::Union{Nothing, Vector{Matrix{Float64}}} = nothing)
     nsubj = length(model.subjectindices)
     nparams = length(params)
     
     # We need subject contributions for IJ/JK
     need_subject_contributions = compute_ij || compute_jk
     
-    # Compute Fisher components using Louis's identity
-    fisher_result = compute_fisher_components(params, model, samplepaths, ImportanceWeights;
-                                              compute_subject_contributions=need_subject_contributions)
+    # Use provided subject contributions if available; otherwise compute them
+    if !isnothing(subject_grads) && !isnothing(subject_hessians)
+        # Reuse cached gradients and Hessians
+        fisher_result = compute_fisher_components(params, model, samplepaths, ImportanceWeights;
+                                                  compute_subject_contributions=false)
+        fisher_result = (fishinf = fisher_result.fishinf,
+                        subject_grads = subject_grads,
+                        subject_hessians = subject_hessians)
+    else
+        # Compute Fisher components using Louis's identity
+        fisher_result = compute_fisher_components(params, model, samplepaths, ImportanceWeights;
+                                                  compute_subject_contributions=need_subject_contributions)
+    end
     
     # Compute standard vcov (model-based, from Louis's Fisher information)
     atol = vcov_threshold ? (log(nsubj) * nparams)^-2 : sqrt(eps(Float64))

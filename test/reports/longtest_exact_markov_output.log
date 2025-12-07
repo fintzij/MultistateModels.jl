@@ -1,0 +1,43 @@
+
+******************************************************************************
+This program contains Ipopt, a library for large-scale nonlinear optimization.
+ Ipopt is released as open source code under the Eclipse Public License (EPL).
+         For more information visit https://github.com/coin-or/Ipopt
+******************************************************************************
+
+Test Summary:               | Pass  Total   Time
+Exponential - No Covariates |    3      3  14.1s
+Test Summary:                | Pass  Total  Time
+Exponential - With Covariate |    4      4  3.0s
+Test Summary:           | Pass  Total  Time
+Weibull - No Covariates |    5      5  1.9s
+Test Summary:            | Pass  Total  Time
+Weibull - With Covariate |    3      3  2.8s
+Test Summary:            | Pass  Total  Time
+Gompertz - No Covariates |    5      5  2.3s
+Test Summary:             | Pass  Total  Time
+Gompertz - With Covariate |    3      3  2.4s
+Test Summary:          | Pass  Total  Time
+Spline - No Covariates |    4      4  7.6s
+Test Summary:           | Pass  Total  Time
+Spline - With Covariate |    3      3  9.6s
+Test Summary:     | Pass  Total  Time
+Exponential - TVC |    2      2  0.4s
+Test Summary: | Pass  Total  Time
+Weibull - TVC |    2      2  0.4s
+Test Summary:   | Pass  Total  Time
+Subject Weights |    1      1  0.3s
+Test Summary:             | Pass  Total  Time
+Log-likelihood Properties |    3      3  1.2s
+
+=== Exact Data Long Test Suite Complete ===
+
+This test suite validated:
+  - Exponential hazards: no covariate, with covariate
+  - Weibull hazards: no covariate, with covariate
+  - Gompertz hazards: no covariate, with covariate
+  - Spline hazards: no covariate, with covariate
+  - Time-varying covariates: exponential, Weibull
+  - Edge cases: subject weights, likelihood properties
+Model structure: progressive 3-state (1→2→3)
+Sample size: n=1000, simulation trajectories: 10000

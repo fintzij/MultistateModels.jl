@@ -1,0 +1,8 @@
+Test Summary:                       | Pass  Total  Time
+simulate_path long-run distribution |    3      3  0.2s
+Test Summary:                            | Pass  Total   Time
+simulate_path strategy parity (baseline) |    2      2  49.4s
+Test Summary:                 | Pass  Total     Time
+simulate_path family coverage |   60     60  3m12.6s
+simulate_path long test passed: mean=5.56, KS p-value=0.516
+simulate_path family coverage validated for 12 scenarios

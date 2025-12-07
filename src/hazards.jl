@@ -401,7 +401,13 @@ function generate_weibull_hazard(parnames::Vector{Symbol}, linpred_effect::Symbo
                 log_shape, log_scale = pars[1], pars[2]
                 shape = exp(log_shape)
                 linear_pred = $linear_pred_expr
-                return exp(log_scale + log_shape + (shape - 1) * log(t) + linear_pred)
+                
+                log_haz = log_scale + log_shape + linear_pred
+                if shape != 1.0
+                    log_haz += (shape - 1) * log(t)
+                end
+                
+                return exp(log_haz)
             end
         ))
 
@@ -420,7 +426,13 @@ function generate_weibull_hazard(parnames::Vector{Symbol}, linpred_effect::Symbo
                 log_shape, log_scale = pars[1], pars[2]
                 shape = exp(log_shape)
                 linear_pred = $linear_pred_expr
-                return exp(log_scale + log_shape + (shape - 1) * log(t) - shape * linear_pred)
+                
+                log_haz = log_scale + log_shape - shape * linear_pred
+                if shape != 1.0
+                    log_haz += (shape - 1) * log(t)
+                end
+                
+                return exp(log_haz)
             end
         ))
 
@@ -894,7 +906,7 @@ end
 """
     compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame, model_data::DataFrame) where T <: _Hazard
 
-Fill in a matrix of transition intensities for a multistate Markov model.
+Fill in a matrix of transition intensities for a multistate Markov model (in-place version).
 """
 function compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame, model_data::DataFrame) where T <: _Hazard
 
@@ -916,15 +928,101 @@ function compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame
 end
 
 """
+    compute_hazmat(T, n_states, parameters, hazards, tpm_index, model_data)
+
+Construct transition intensity matrix Q for a multistate Markov model (non-mutating version).
+
+Returns a fresh matrix without modifying any pre-allocated storage.
+Compatible with reverse-mode AD (Enzyme, Zygote).
+
+# Arguments
+- `T`: Element type (e.g., Float64 or Dual)
+- `n_states::Int`: Number of states in the model
+- `parameters`: Nested parameters (tuple of vectors)
+- `hazards`: Vector of hazard objects
+- `tpm_index`: DataFrame with time and data indices
+- `model_data`: Model data DataFrame
+"""
+function compute_hazmat(::Type{T}, n_states::Int, parameters, hazards::Vector{<:_Hazard}, 
+                        tpm_index::DataFrame, model_data::DataFrame) where T
+    # Get covariate row once
+    subjdat_row = model_data[tpm_index.datind[1], :]
+    
+    # Build Q matrix functionally using comprehension
+    # Start with zeros, then set off-diagonals
+    Q = zeros(T, n_states, n_states)
+    
+    for h in eachindex(hazards)
+        hazard = hazards[h]
+        covars = extract_covariates_fast(subjdat_row, hazard.covar_names)
+        rate = eval_hazard(hazard, tpm_index.tstart[1], parameters[h], covars)
+        Q = setindex_immutable(Q, rate, hazard.statefrom, hazard.stateto)
+    end
+    
+    # Set diagonal: each element is negative sum of its row (excluding diagonal)
+    for i in 1:n_states
+        row_sum = zero(T)
+        for j in 1:n_states
+            if i != j
+                row_sum += Q[i, j]
+            end
+        end
+        Q = setindex_immutable(Q, -row_sum, i, i)
+    end
+    
+    return Q
+end
+
+"""
+    setindex_immutable(A, val, i, j)
+
+Return a new matrix with A[i,j] = val without mutating A.
+This is the key primitive for reverse-mode AD compatibility.
+"""
+@inline function setindex_immutable(A::AbstractMatrix{T}, val::T, i::Int, j::Int) where T
+    # Create a copy and set the value
+    B = copy(A)
+    B[i, j] = val
+    return B
+end
+
+# More efficient version using ntuple for small matrices (avoids copy overhead)
+@inline function setindex_immutable(A::AbstractMatrix{T}, val, i::Int, j::Int) where T
+    B = copy(A)
+    B[i, j] = convert(T, val)
+    return B
+end
+
+"""
     compute_tmat!(P, Q, tpm_index::DataFrame, cache)
 
-Calculate transition probability matrices for a multistate Markov process. 
+Calculate transition probability matrices for a multistate Markov process (in-place version). 
 """
 function compute_tmat!(P, Q, tpm_index::DataFrame, cache)
 
     @inbounds for t in eachindex(P)
         copyto!(P[t], exponential!(Q * tpm_index.tstop[t], ExpMethodGeneric(), cache))
     end  
+end
+
+"""
+    compute_tmat(Q, dt)
+
+Compute transition probability matrix P = exp(Q * dt) without mutation.
+Compatible with reverse-mode AD.
+
+# Arguments
+- `Q`: Transition intensity matrix
+- `dt`: Time interval
+
+# Returns
+- `P`: Transition probability matrix
+"""
+function compute_tmat(Q::AbstractMatrix{T}, dt::Real) where T
+    # Use ExponentialUtilities.exp_generic for AD-compatible matrix exponential
+    # exp_generic handles arbitrary element types (including Dual numbers for ForwardDiff)
+    Qt = Q * dt
+    return ExponentialUtilities.exp_generic(Qt)
 end
 
 
