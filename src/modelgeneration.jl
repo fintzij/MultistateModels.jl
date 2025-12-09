@@ -63,7 +63,7 @@ function Hazard(
     knots::Union{Vector{Float64}, Float64, Nothing} = nothing,
     boundaryknots::Union{Vector{Float64}, Nothing} = nothing,
     natural_spline = true,
-    extrapolation = "linear",
+    extrapolation = "constant",
     monotone = 0,
     n_phases::Int = 2,
     coxian_structure::Symbol = :unstructured,
@@ -83,8 +83,12 @@ function Hazard(
     
     if family_key == "sp"
         @assert degree >= 0 "spline degree must be non-negative, got $degree"
-        @assert extrapolation in ("linear", "flat") "extrapolation must be \"linear\" or \"flat\", got \"$extrapolation\""
+        @assert extrapolation in ("linear", "constant") "extrapolation must be \"linear\" or \"constant\", got \"$extrapolation\""
         @assert monotone in (-1, 0, 1) "monotone must be -1, 0, or 1, got $monotone"
+        if extrapolation == "constant" && degree < 2
+            @warn "constant extrapolation requires degree >= 2 for D¹=0 constraint. Using linear extrapolation instead."
+            extrapolation = "linear"
+        end
     end
     
     if family_key == "pt"
@@ -107,8 +111,11 @@ function Hazard(
             natural_spline = false
         end
 
-        # change extrapolation to flat if degree = 0
-        extrapolation = degree > 0 ? extrapolation : "flat"
+        # For degree 0 or 1, constant extrapolation isn't meaningful (no D¹=0 constraint)
+        # so fall back to linear extrapolation
+        if degree < 2 && extrapolation == "constant"
+            extrapolation = "linear"
+        end
         natural_spline = degree < 2 ? false : natural_spline
 
         h = SplineHazard(hazard, family_key, statefrom, stateto, degree, knots, boundaryknots, extrapolation, natural_spline, sign(monotone), metadata)
@@ -416,15 +423,29 @@ function _build_spline_hazard(ctx::HazardBuildContext)
     # Build B-spline basis
     B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(allknots))
     
-    # Apply natural spline recombination if requested
-    if (hazard.degree > 1) && hazard.natural_spline
+    # Determine if we need smooth constant extrapolation
+    # "constant" enforces h'=0 at boundaries for C¹ continuity with flat extrapolation
+    use_constant = hazard.extrapolation == "constant"
+    
+    # Apply boundary conditions via basis recombination
+    if use_constant && (hazard.degree >= 2)
+        # constant: enforce D¹=0 (Neumann BC) at both boundaries
+        # This gives C¹ continuity when extending as constant beyond boundaries
+        # The hazard approaches the boundary tangentially (zero slope), ensuring
+        # a smooth transition to the constant extrapolation region.
+        B = RecombinedBSplineBasis(B, Derivative(1))
+    elseif (hazard.degree > 1) && hazard.natural_spline
+        # Natural spline: D²=0 at boundaries only
         B = RecombinedBSplineBasis(B, Natural())
     end
     
     # Determine extrapolation method
+    # "constant" uses Flat() with the Neumann BC basis above for C¹ continuity
+    # "linear" uses Linear() for slope-based extrapolation
     extrap_method = if hazard.extrapolation == "linear"
         BSplineKit.SplineExtrapolations.Linear()
     else
+        # "constant" uses Flat() - the smooth basis above ensures C¹ continuity
         BSplineKit.SplineExtrapolations.Flat()
     end
     
@@ -458,6 +479,7 @@ function _build_spline_hazard(ctx::HazardBuildContext)
         allknots,
         hazard.natural_spline,
         hazard.monotone,
+        hazard.extrapolation,
         ctx.metadata,
         ctx.shared_baseline_key,
     )
@@ -488,43 +510,78 @@ function _generate_spline_hazard_fns(
     parnames::Vector{Symbol},
     linpred_effect::Symbol
 )
-    # Build linear predictor expression for covariates (if any)
-    linear_pred_expr = _build_linear_pred_expr(parnames, nbasis + 1)
+    # Extract covariate names (if any)
+    covar_names = extract_covar_names(parnames)
+    has_covars = !isempty(covar_names)
     
     # Capture spline infrastructure in closures
     # Note: basis and extrap_method are immutable, safe to capture
     
     if linpred_effect == :ph
         # Proportional hazards: h(t|x) = h0(t) * exp(β'x)
-        hazard_fn = let B = basis, ext = extrap_method, mono = monotone, nb = nbasis
+        hazard_fn = let B = basis, ext = extrap_method, mono = monotone, nb = nbasis, has_cov = has_covars
             function(t, pars, covars)
+                # Handle both vector and NamedTuple parameter formats
+                if pars isa AbstractVector
+                    # Legacy vector format: first nbasis elements are spline coefficients
+                    spline_coefs_vec = pars[1:nb]
+                    covar_pars = has_cov ? pars[(nb+1):end] : Float64[]
+                else
+                    # NamedTuple format
+                    spline_coefs_vec = collect(values(pars.baseline))
+                    covar_pars = has_cov ? pars.covariates : NamedTuple()
+                end
+                
                 # Transform parameters to spline coefficients
-                coefs = _spline_ests2coefs(pars[1:nb], B, mono)
+                coefs = _spline_ests2coefs(spline_coefs_vec, B, mono)
                 # Build spline on-the-fly
                 spline = Spline(B, coefs)
                 spline_ext = SplineExtrapolation(spline, ext)
                 # Evaluate baseline hazard
                 h0 = spline_ext(t)
-                # Apply covariate effect (linear predictor starts at nbasis+1)
-                linear_pred = isempty(covars) ? 0.0 : _eval_linear_pred(pars, covars, nb + 1)
+                # Apply covariate effect - only if covariates actually provided
+                n_covars = covars isa AbstractVector ? length(covars) : length(covars)
+                if has_cov && n_covars > 0
+                    linear_pred = pars isa AbstractVector ? 
+                                  dot(collect(covars), covar_pars) : 
+                                  _eval_linear_pred_named(covar_pars, covars)
+                else
+                    linear_pred = 0.0
+                end
                 return h0 * exp(linear_pred)
             end
         end
         
-        cumhaz_fn = let B = basis, ext = extrap_method, mono = monotone, nb = nbasis
+        cumhaz_fn = let B = basis, ext = extrap_method, mono = monotone, nb = nbasis, has_cov = has_covars
             function(lb, ub, pars, covars)
+                # Handle both vector and NamedTuple parameter formats
+                if pars isa AbstractVector
+                    # Legacy vector format
+                    spline_coefs_vec = pars[1:nb]
+                    covar_pars = has_cov ? pars[(nb+1):end] : Float64[]
+                else
+                    # NamedTuple format
+                    spline_coefs_vec = collect(values(pars.baseline))
+                    covar_pars = has_cov ? pars.covariates : NamedTuple()
+                end
+                
                 # Transform parameters to spline coefficients
-                coefs = _spline_ests2coefs(pars[1:nb], B, mono)
+                coefs = _spline_ests2coefs(spline_coefs_vec, B, mono)
                 # Build spline and its integral on-the-fly
                 spline = Spline(B, coefs)
                 spline_ext = SplineExtrapolation(spline, ext)
                 cumhaz_spline = integral(spline_ext.spline)
                 # Handle extrapolation for cumulative hazard
-                # Note: integral() gives the antiderivative of the core spline
-                # For flat extrapolation, we need special handling at boundaries
                 H0 = _eval_cumhaz_with_extrap(spline_ext, cumhaz_spline, lb, ub)
-                # Apply covariate effect
-                linear_pred = isempty(covars) ? 0.0 : _eval_linear_pred(pars, covars, nb + 1)
+                # Apply covariate effect - only if covariates actually provided
+                n_covars_provided = covars isa NamedTuple ? length(covars) : length(covars)
+                if n_covars_provided > 0
+                    linear_pred = pars isa AbstractVector ? 
+                                  dot(collect(covars), covar_pars) : 
+                                  _eval_linear_pred_named(covar_pars, covars)
+                else
+                    linear_pred = 0.0
+                end
                 return H0 * exp(linear_pred)
             end
         end
@@ -635,13 +692,46 @@ function _eval_linear_pred(pars::AbstractVector, covars, start_idx::Int)
 end
 
 """
+    _eval_linear_pred_named(pars_covariates::NamedTuple, covars::NamedTuple)
+
+Evaluate the linear predictor β'x using named parameter and covariate access.
+Assumes parameter names match covariate names (with hazard prefix stripped).
+
+# Example
+```julia
+pars.covariates = (h12_age = 0.3, h12_sex = 0.1)
+covars = (age = 50.0, sex = 1.0)
+result = _eval_linear_pred_named(pars.covariates, covars)  # 0.3*50 + 0.1*1
+```
+"""
+function _eval_linear_pred_named(pars_covariates::NamedTuple, covars::NamedTuple)
+    result = 0.0
+    for (pname, pval) in pairs(pars_covariates)
+        # Extract covariate name by stripping hazard prefix (h12_age → age)
+        cname_str = replace(String(pname), r"^h\d+_" => "")
+        cname = Symbol(cname_str)
+        if haskey(covars, cname)
+            result += pval * getfield(covars, cname)
+        else
+            error("Covariate $cname not found in covars NamedTuple")
+        end
+    end
+    return result
+end
+
+"""
     _eval_cumhaz_with_extrap(spline_ext, cumhaz_spline, lb, ub)
 
 Evaluate cumulative hazard over [lb, ub] with proper extrapolation handling.
 
-For flat extrapolation: hazard is constant beyond boundaries, so cumulative
-hazard grows linearly beyond the spline support.
-For linear extrapolation: uses the derivative at boundaries.
+For "constant" extrapolation: hazard is constant beyond boundaries (with C¹ smooth
+transition via Neumann BC), so cumulative hazard grows linearly.
+
+For "linear" extrapolation: hazard varies linearly beyond boundaries:
+  h(t) = h(t_b) + h'(t_b) * (t - t_b)
+so cumulative hazard is:
+  H(a,b) = h(t_b) * Δt + h'(t_b) * Δt² / 2  (for t > t_hi)
+  H(a,b) = h(t_b) * Δt - h'(t_b) * Δt² / 2  (for t < t_lo)
 """
 function _eval_cumhaz_with_extrap(spline_ext::SplineExtrapolation, cumhaz_spline, lb, ub)
     bounds = BSplineKit.boundaries(spline_ext.spline.basis)
@@ -654,16 +744,21 @@ function _eval_cumhaz_with_extrap(spline_ext::SplineExtrapolation, cumhaz_spline
     
     # Handle extrapolation
     H_total = zero(eltype(coefficients(spline_ext.spline)))
+    is_linear = spline_ext.method isa BSplineKit.SplineExtrapolations.Linear
     
     # Contribution from below lower boundary
     if lb < t_lo
-        h_lo = spline_ext(t_lo)  # Hazard at boundary (uses extrapolation method)
-        if spline_ext.method isa BSplineKit.SplineExtrapolations.Flat
-            # Flat: constant hazard below boundary
-            H_total += h_lo * (min(ub, t_lo) - lb)
+        h_lo = spline_ext.spline(t_lo)  # Hazard at lower boundary
+        dt = min(ub, t_lo) - lb
+        if is_linear
+            # Linear extrapolation: h(t) = h(t_lo) + h'(t_lo) * (t - t_lo) for t < t_lo
+            # ∫[lb, t_lo] h(t) dt = h(t_lo) * dt + h'(t_lo) * ∫[lb, t_lo] (t - t_lo) dt
+            # The integral ∫[lb, t_lo] (t - t_lo) dt = -dt²/2 (since t - t_lo < 0 in this region)
+            dh_lo = ForwardDiff.derivative(t -> spline_ext.spline(t), t_lo)
+            H_total += h_lo * dt - dh_lo * dt^2 / 2
         else
-            # Linear: hazard changes linearly (but still use spline_ext for value)
-            H_total += h_lo * (min(ub, t_lo) - lb)
+            # Constant: hazard stays at boundary value (C¹ continuous for "constant" mode)
+            H_total += h_lo * dt
         end
     end
     
@@ -676,12 +771,16 @@ function _eval_cumhaz_with_extrap(spline_ext::SplineExtrapolation, cumhaz_spline
     
     # Contribution from above upper boundary
     if ub > t_hi
-        h_hi = spline_ext(t_hi)
-        if spline_ext.method isa BSplineKit.SplineExtrapolations.Flat
-            # Flat: constant hazard above boundary
-            H_total += h_hi * (ub - max(lb, t_hi))
+        h_hi = spline_ext.spline(t_hi)  # Hazard at upper boundary
+        dt = ub - max(lb, t_hi)
+        if is_linear
+            # Linear extrapolation: h(t) = h(t_hi) + h'(t_hi) * (t - t_hi) for t > t_hi
+            # ∫[t_hi, ub] h(t) dt = h(t_hi) * dt + h'(t_hi) * dt²/2
+            dh_hi = ForwardDiff.derivative(t -> spline_ext.spline(t), t_hi)
+            H_total += h_hi * dt + dh_hi * dt^2 / 2
         else
-            H_total += h_hi * (ub - max(lb, t_hi))
+            # Constant: hazard stays at boundary value (C¹ continuous for "constant" mode)
+            H_total += h_hi * dt
         end
     end
     
@@ -756,17 +855,18 @@ function build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Sym
     # Build nested parameters structure per hazard
     # Parameters are stored on log scale for baseline, as-is for covariates
     params_nested_pairs = [
-        hazname => build_hazard_params(parameters[idx], hazards[idx].npar_baseline)
+        hazname => build_hazard_params(parameters[idx], hazards[idx].parnames, hazards[idx].npar_baseline, hazards[idx].npar_total)
         for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
     ]
     params_nested = NamedTuple(params_nested_pairs)
     
-    # Use ParameterHandling to flatten/unflatten the nested structure
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
+    # Create ReConstructor for AD-compatible flatten/unflatten
+    reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
+    params_flat = flatten(reconstructor, params_nested)
     
-    # Get natural scale parameters (exp for baseline, as-is for covariates)
+    # Get natural scale parameters (family-aware transformation)
     params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname])
+        hazname => extract_natural_vector(params_nested[hazname], hazards[idx].family)
         for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
     ]
     params_natural = NamedTuple(params_natural_pairs)
@@ -776,7 +876,7 @@ function build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Sym
         flat = params_flat,
         nested = params_nested,
         natural = params_natural,
-        unflatten = unflatten_fn
+        reconstructor = reconstructor  # NEW: Store ReConstructor instead of unflatten_fn
     )
 end
 

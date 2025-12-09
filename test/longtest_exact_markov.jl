@@ -363,15 +363,17 @@ end
 @testset "Gompertz - No Covariates" begin
     Random.seed!(RNG_SEED + 20)
     
-    # Gompertz: h(t) = scale * exp(shape * t)
-    # Parameter order: (shape, scale)
+    # Gompertz: h(t) = rate * exp(shape * t)
+    # Parameter order: (shape, rate)
+    # NOTE: shape is unconstrained (identity transform), rate is log-transformed
     # Use higher rates for more events in the observation window
-    true_shape_12, true_scale_12 = 0.08, 0.10
-    true_shape_23, true_scale_23 = 0.06, 0.08
+    true_shape_12, true_rate_12 = 0.08, 0.10
+    true_shape_23, true_rate_23 = 0.06, 0.08
     
+    # Shape is on natural scale (identity transform), rate is log-transformed
     true_params = (
-        h12 = [log(true_shape_12), log(true_scale_12)],
-        h23 = [log(true_shape_23), log(true_scale_23)]
+        h12 = [true_shape_12, log(true_rate_12)],
+        h23 = [true_shape_23, log(true_rate_23)]
     )
     
     h12 = Hazard(@formula(0 ~ 1), "gom", 1, 2)
@@ -385,11 +387,13 @@ end
     
     @testset "Parameter recovery" begin
         p = get_parameters(fitted; scale=:estimation)
-        @test isapprox(exp(p[1]), true_shape_12; rtol=PARAM_TOL_REL)
-        @test isapprox(exp(p[2]), true_scale_12; rtol=PARAM_TOL_REL)
-        # h23 parameters have higher variance (fewer 2→3 events), use 25% tolerance
-        @test isapprox(exp(p[3]), true_shape_23; rtol=0.25)
-        @test isapprox(exp(p[4]), true_scale_23; rtol=0.25)
+        # shape is on natural scale (identity transform) - compare directly
+        @test isapprox(p[1], true_shape_12; atol=0.03)
+        # rate is log-transformed - use exp()
+        @test isapprox(exp(p[2]), true_rate_12; rtol=PARAM_TOL_REL)
+        # h23 parameters have higher variance (fewer 2→3 events), use higher tolerance
+        @test isapprox(p[3], true_shape_23; atol=0.03)
+        @test isapprox(exp(p[4]), true_rate_23; rtol=0.25)
     end
     
     @testset "Distributional fidelity" begin
@@ -400,16 +404,18 @@ end
 @testset "Gompertz - With Covariate" begin
     Random.seed!(RNG_SEED + 21)
     
-    # Parameter order: (shape, scale, beta)
+    # Parameter order: (shape, rate, beta)
+    # NOTE: shape is unconstrained (identity transform), rate is log-transformed
     # Use higher rates for more events
-    true_shape_12, true_scale_12, true_beta_12 = 0.08, 0.10, 0.3
-    true_shape_23, true_scale_23, true_beta_23 = 0.06, 0.08, -0.2
+    true_shape_12, true_rate_12, true_beta_12 = 0.08, 0.10, 0.3
+    true_shape_23, true_rate_23, true_beta_23 = 0.06, 0.08, -0.2
     
     cov_data = DataFrame(x = randn(2000))
     
+    # Shape is on natural scale (identity transform), rate is log-transformed
     true_params = (
-        h12 = [log(true_shape_12), log(true_scale_12), true_beta_12],
-        h23 = [log(true_shape_23), log(true_scale_23), true_beta_23]
+        h12 = [true_shape_12, log(true_rate_12), true_beta_12],
+        h23 = [true_shape_23, log(true_rate_23), true_beta_23]
     )
     
     h12 = Hazard(@formula(0 ~ x), "gom", 1, 2)
@@ -422,8 +428,10 @@ end
     
     @testset "Parameter recovery" begin
         p = get_parameters(fitted; scale=:estimation)
-        @test isapprox(exp(p[1]), true_shape_12; rtol=PARAM_TOL_REL)
-        @test isapprox(exp(p[2]), true_scale_12; rtol=PARAM_TOL_REL)
+        # shape is on natural scale (identity transform) - compare directly
+        @test isapprox(p[1], true_shape_12; atol=0.03)
+        # rate is log-transformed - use exp()
+        @test isapprox(exp(p[2]), true_rate_12; rtol=PARAM_TOL_REL)
         @test isapprox(p[3], true_beta_12; atol=0.15)
     end
 end
@@ -452,9 +460,9 @@ end
     
     # Fit with splines
     h12_sp = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree=3, knots=[5.0, 10.0, 15.0], 
-                    boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
+                    boundaryknots=[0.0, MAX_TIME], extrapolation="constant")
     h23_sp = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree=3, knots=[5.0, 10.0, 15.0],
-                    boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
+                    boundaryknots=[0.0, MAX_TIME], extrapolation="constant")
     
     model_fit = multistatemodel(h12_sp, h23_sp; data=exact_data)
     fitted = fit(model_fit; verbose=false)
@@ -500,9 +508,9 @@ end
     
     # Fit with splines + covariate
     h12_sp = Hazard(@formula(0 ~ x), "sp", 1, 2; degree=3, knots=[5.0, 10.0, 15.0],
-                    boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
+                    boundaryknots=[0.0, MAX_TIME], extrapolation="constant")
     h23_sp = Hazard(@formula(0 ~ x), "sp", 2, 3; degree=3, knots=[5.0, 10.0, 15.0],
-                    boundaryknots=[0.0, MAX_TIME], extrapolation="flat")
+                    boundaryknots=[0.0, MAX_TIME], extrapolation="constant")
     
     model_fit = multistatemodel(h12_sp, h23_sp; data=exact_data)
     fitted = fit(model_fit; verbose=false)

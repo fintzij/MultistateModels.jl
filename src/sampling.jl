@@ -16,8 +16,8 @@ function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, max_sam
     use_phasetype = !isnothing(phasetype_surrogate)
 
     # make sure spline parameters are assigned correctly
-    # nest the model parameters using nest_params (AD-compatible)
-    pars = nest_params(params_cur, model.parameters)
+    # unflatten parameters using ParameterHandling.jl (AD-compatible)
+    pars = safe_unflatten(params_cur, model)
 
     # update spline hazards with current parameters (no-op for functional splines)
     _update_spline_hazards!(model.hazards, pars)
@@ -129,15 +129,14 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
                 samplepaths[i][j] = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, 
                                                     books[2], fbmats, absorbingstates)
                 
-                # Surrogate log-likelihood under Markov proposal
-                # Use log-scale parameters for hazard evaluation
-                surrogate_pars = get_log_scale_params(surrogate.parameters)
+                # Surrogate log-likelihood under Markov proposal (family-aware)
+                surrogate_pars = get_hazard_params(surrogate.parameters, surrogate.hazards)
                 loglik_surrog[i][j] = loglik(surrogate_pars, samplepaths[i][j], surrogate.hazards, model)
             end
             
             # target log-likelihood (same for both proposal types)
-            # Use nest_params for AD-compatible parameter access (returns log-scale params)
-            target_pars = nest_params(params_cur, model.parameters)
+            # safe_unflatten now returns natural-scale params
+            target_pars = safe_unflatten(params_cur, model)
             loglik_target_cur[i][j] = loglik(target_pars, samplepaths[i][j], model.hazards, model) 
             
             # unnormalized log importance weight
@@ -269,9 +268,9 @@ function draw_paths(model::MultistateProcess;
     # Get or fit surrogate for semi-Markov models
     surrogate = _get_or_fit_surrogate(model, is_semimarkov)
 
-    # get log-scale parameters for hazard evaluation
-    params_target = get_log_scale_params(model.parameters)
-    params_surrog = is_semimarkov ? get_log_scale_params(surrogate.parameters) : params_target
+    # get natural-scale parameters for hazard evaluation (family-aware)
+    params_target = get_hazard_params(model.parameters, model.hazards)
+    params_surrog = is_semimarkov ? get_hazard_params(surrogate.parameters, surrogate.hazards) : params_target
 
     # get hazards
     hazards_target = model.hazards

@@ -46,9 +46,50 @@ fitted = fit(model)
 
 ### Parametric Hazards
 
-- `"exp"` - Exponential (constant hazard)
-- `"wei"` - Weibull
-- `"gom"` - Gompertz
+All parametric hazards follow the **flexsurv** R package parameterizations.
+
+#### Exponential (`"exp"`)
+
+Constant hazard rate:
+- **Hazard**: h(t) = rate
+- **Cumulative hazard**: H(t) = rate × t
+- **Parameters**: rate > 0
+
+```julia
+h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+```
+
+#### Weibull (`"wei"`)
+
+Flexible shape for increasing/decreasing hazards:
+- **Hazard**: h(t) = shape × scale × t^(shape-1)
+- **Cumulative hazard**: H(t) = scale × t^shape
+- **Parameters**: shape > 0, scale > 0
+  - shape < 1: decreasing hazard (infant mortality)
+  - shape = 1: constant hazard (reduces to exponential)
+  - shape > 1: increasing hazard (wear-out)
+
+```julia
+h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+```
+
+#### Gompertz (`"gom"`)
+
+Exponentially changing hazard, commonly used for mortality modeling:
+- **Hazard**: h(t) = rate × exp(shape × t)
+- **Cumulative hazard**: H(t) = (rate/shape) × (exp(shape×t) - 1) for shape ≠ 0
+- **Parameters**: 
+  - shape ∈ ℝ (unconstrained)
+    - shape > 0: exponentially increasing hazard (typical aging)
+    - shape = 0: constant hazard (reduces to exponential)
+    - shape < 0: exponentially decreasing hazard (cure/defective models)
+  - rate > 0: baseline hazard at t=0
+
+```julia
+h12 = Hazard(@formula(0 ~ 1), "gom", 1, 2)
+```
+
+**Note**: The Gompertz `shape` parameter is unconstrained (can be negative, zero, or positive), while `rate` must be positive. This matches the flexsurv parameterization.
 
 ### Spline Hazards
 
@@ -87,7 +128,7 @@ h31 = Hazard(@formula(0 ~ 1), "sp", 3, 1;
 | `knots` | Interior knot locations, or `nothing` for auto | Required |
 | `natural_spline` | Natural boundary conditions | `false` |
 | `monotone` | 0=none, 1=increasing, -1=decreasing | 0 |
-| `extrapolation` | `"flat"` or `"linear"` beyond knots | `"flat"` |
+| `extrapolation` | `"constant"` (smooth) or `"linear"` beyond knots | `"constant"` |
 
 #### Automatic Knot Placement
 

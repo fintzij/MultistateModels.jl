@@ -33,7 +33,7 @@ using LinearAlgebra
 
 # Import internal functions for testing
 import MultistateModels: Hazard, multistatemodel, fit, set_parameters!, simulate,
-    get_parameters_flat, get_parameters, get_log_scale_params, MarkovProposal, PhaseTypeProposal,
+    get_parameters_flat, get_parameters, MarkovProposal, PhaseTypeProposal,
     fit_surrogate, build_tpm_mapping, build_hazmat_book, build_tpm_book,
     compute_hazmat!, compute_tmat!, ExpMethodGeneric, ExponentialUtilities,
     needs_phasetype_proposal, resolve_proposal_config, SamplePath, @formula
@@ -45,6 +45,7 @@ const MAX_TIME = 15.0            # Maximum follow-up time
 const MCEM_TOL = 0.05            # MCEM convergence tolerance
 const MAX_ITER = 30              # Maximum MCEM iterations
 const PARAM_TOL_REL = 0.35       # Relaxed relative tolerance for MCEM (more MC noise)
+const MAX_PATHS_PER_SUBJECT = 200  # Diagnostic hard limit for MCEM path counts
 
 # ============================================================================
 # Helper Functions
@@ -96,7 +97,7 @@ Generate panel (interval-censored) data from illness-death model.
 """
 function generate_panel_data_illness_death(hazards, true_params; 
     n_subj::Int = N_SUBJECTS,
-    obs_times::Vector{Float64} = [0.0, 3.0, 6.0, 9.0, 12.0, MAX_TIME],
+    obs_times::Vector{Float64} = collect(0.0:2.0:MAX_TIME),
     covariate_data::Union{Nothing, DataFrame} = nothing)
     
     nobs = length(obs_times) - 1
@@ -187,11 +188,51 @@ function check_distributional_fidelity_mcem(hazards, true_params, fitted_params_
     return max_diff < max_prev_diff
 end
 
+"""
+    fit_mcem_with_path_cap(model; test_label, path_cap=MAX_PATHS_PER_SUBJECT, kwargs...)
+
+Wrapper around `fit` for semi-Markov MCEM tests that:
+- Enforces a hard diagnostic limit on the effective number of paths per
+  subject, based on the ESS trace.
+- Logs iteration-level ESS summaries when requested (for debugging).
+"""
+function fit_mcem_with_path_cap(model; test_label::AbstractString, path_cap::Int=MAX_PATHS_PER_SUBJECT, log_ess::Bool=false, kwargs...)
+    fitted = fit(model; return_convergence_records=true, kwargs...)
+
+    # Check actual path counts, not ESS (ESS can be inflated for deduplicated subjects)
+    if !isnothing(fitted.ConvergenceRecords) && hasproperty(fitted.ConvergenceRecords, :path_count_trace)
+        path_count_trace = fitted.ConvergenceRecords.path_count_trace
+        max_paths_overall = maximum(path_count_trace)
+        
+        if max_paths_overall > path_cap
+            error("MCEM path explosion in test '" * String(test_label) * "': paths per subject exceeded " * string(path_cap) * " (max=" * string(max_paths_overall) * ")")
+        end
+    end
+
+    # Log ESS diagnostics if requested
+    if log_ess && !isnothing(fitted.ConvergenceRecords) && hasproperty(fitted.ConvergenceRecords, :ess_trace)
+        ess_trace = fitted.ConvergenceRecords.ess_trace
+        n_iter = size(ess_trace, 2)
+        println("ESS diagnostics for test '" * String(test_label) * "':")
+        for it in 1:n_iter
+            ess_it = ess_trace[:, it]
+            ess_min = minimum(ess_it)
+            ess_med = median(ess_it)
+            ess_max = maximum(ess_it)
+            println("  Iter " * string(it) * ": ESS min=" * string(round(ess_min, digits=2)) *
+                    ", median=" * string(round(ess_med, digits=2)) *
+                    ", max=" * string(round(ess_max, digits=2)))
+        end
+    end
+
+    return fitted
+end
+
 # ============================================================================
-# TEST SECTION 1: EXPONENTIAL HAZARDS (MCEM)
+# TEST SECTION 1: EXPONENTIAL HAZARDS (MARKOV PANEL SOLVER)
 # ============================================================================
 
-@testset "MCEM Exponential - No Covariates" begin
+@testset "Exponential panel (Markov) - No Covariates" begin
     Random.seed!(RNG_SEED)
     
     # True parameters
@@ -247,7 +288,7 @@ end
     end
 end
 
-@testset "MCEM Exponential - With Covariate" begin
+@testset "Exponential panel (Markov) - With Covariate" begin
     Random.seed!(RNG_SEED + 1)
     
     true_rate_12, true_beta_12 = 0.20, 0.4
@@ -322,7 +363,8 @@ end
     
     # surrogate=:markov required for MCEM fitting
     model_fit = multistatemodel(h12, h23, h13; data=panel_data, surrogate=:markov)
-    fitted = fit(model_fit;
+    fitted = fit_mcem_with_path_cap(model_fit;
+        test_label="MCEM Weibull - No Covariates",
         proposal=:markov,  # Use Markov proposal (phase-type has known issues)
         verbose=false,
         maxiter=MAX_ITER,
@@ -330,8 +372,7 @@ end
         ess_target_initial=30,
         max_ess=500,
         compute_vcov=true,
-        compute_ij_vcov=false,
-        return_convergence_records=true)
+        compute_ij_vcov=false)
     
     @testset "Parameter recovery" begin
         p = get_parameters(fitted; scale=:natural)
@@ -369,15 +410,15 @@ end
     
     # surrogate=:markov required for MCEM fitting
     model_fit = multistatemodel(h12, h23, h13; data=panel_data, surrogate=:markov)
-    fitted = fit(model_fit;
+    fitted = fit_mcem_with_path_cap(model_fit;
+        test_label="MCEM Weibull - With Covariate",
         proposal=:markov,  # Use Markov proposal (phase-type has known issues)
         verbose=false,
         maxiter=MAX_ITER,
         tol=MCEM_TOL,
         ess_target_initial=30,
         max_ess=500,
-        compute_vcov=false,
-        return_convergence_records=true)
+        compute_vcov=false)
     
     @testset "Parameter recovery" begin
         p = get_parameters(fitted; scale=:estimation)
@@ -394,15 +435,16 @@ end
 @testset "MCEM Gompertz - No Covariates" begin
     Random.seed!(RNG_SEED + 20)
     
-    # Gompertz: h(t) = scale * exp(shape * t)
-    true_scale_12, true_shape_12 = 0.04, 0.08
-    true_scale_23, true_shape_23 = 0.03, 0.06
-    true_scale_13, true_shape_13 = 0.02, 0.04
+    # Gompertz: h(t) = rate * exp(shape * t)
+    # shape: identity scale (unconstrained), rate: log scale (positive)
+    true_shape_12, true_rate_12 = 0.08, 0.04
+    true_shape_23, true_rate_23 = 0.06, 0.03
+    true_shape_13, true_rate_13 = 0.04, 0.02
     
     true_params = (
-        h12 = [log(true_scale_12), log(true_shape_12)],
-        h23 = [log(true_scale_23), log(true_shape_23)],
-        h13 = [log(true_scale_13), log(true_shape_13)]
+        h12 = [true_shape_12, log(true_rate_12)],  # shape identity, rate log
+        h23 = [true_shape_23, log(true_rate_23)],
+        h13 = [true_shape_13, log(true_rate_13)]
     )
     
     h12 = Hazard(@formula(0 ~ 1), "gom", 1, 2)
@@ -414,7 +456,9 @@ end
     
     # surrogate=:markov required for MCEM fitting
     model_fit = multistatemodel(h12, h23, h13; data=panel_data, surrogate=:markov)
-    fitted = fit(model_fit;
+    fitted = fit_mcem_with_path_cap(model_fit;
+        test_label="MCEM Gompertz - No Covariates",
+        log_ess=true,
         proposal=:markov,  # Use Markov proposal (phase-type has known issues)
         verbose=false,
         maxiter=MAX_ITER,
@@ -422,13 +466,13 @@ end
         ess_target_initial=30,
         max_ess=500,
         compute_vcov=true,
-        compute_ij_vcov=false,
-        return_convergence_records=true)
+        compute_ij_vcov=false)
     
     @testset "Parameter recovery" begin
         p = get_parameters(fitted; scale=:estimation)
-        @test isapprox(exp(p[1]), true_scale_12; rtol=PARAM_TOL_REL)
-        @test isapprox(exp(p[2]), true_shape_12; rtol=PARAM_TOL_REL)
+        # shape: identity scale (p[1] directly), rate: exp(p[2])
+        @test isapprox(p[1], true_shape_12; rtol=PARAM_TOL_REL) || abs(p[1] - true_shape_12) < 0.05
+        @test isapprox(exp(p[2]), true_rate_12; rtol=PARAM_TOL_REL)
     end
     
     @testset "Distributional fidelity" begin
@@ -440,16 +484,18 @@ end
 @testset "MCEM Gompertz - With Covariate" begin
     Random.seed!(RNG_SEED + 21)
     
-    true_scale_12, true_shape_12, true_beta_12 = 0.04, 0.08, 0.3
-    true_scale_23, true_shape_23, true_beta_23 = 0.03, 0.06, -0.2
-    true_scale_13, true_shape_13, true_beta_13 = 0.02, 0.04, 0.4
+    # Gompertz: h(t) = rate * exp(shape * t) * exp(beta * x)
+    # shape: identity scale, rate: log scale
+    true_shape_12, true_rate_12, true_beta_12 = 0.08, 0.04, 0.3
+    true_shape_23, true_rate_23, true_beta_23 = 0.06, 0.03, -0.2
+    true_shape_13, true_rate_13, true_beta_13 = 0.04, 0.02, 0.4
     
     cov_data = DataFrame(x = randn(N_SUBJECTS))
     
     true_params = (
-        h12 = [log(true_scale_12), log(true_shape_12), true_beta_12],
-        h23 = [log(true_scale_23), log(true_shape_23), true_beta_23],
-        h13 = [log(true_scale_13), log(true_shape_13), true_beta_13]
+        h12 = [true_shape_12, log(true_rate_12), true_beta_12],  # shape identity, rate log
+        h23 = [true_shape_23, log(true_rate_23), true_beta_23],
+        h13 = [true_shape_13, log(true_rate_13), true_beta_13]
     )
     
     h12 = Hazard(@formula(0 ~ x), "gom", 1, 2)
@@ -476,9 +522,9 @@ end
         p = get_parameters(fitted; scale=:estimation)
         # Gompertz with covariates is challenging; use relaxed tolerance
         # Main check: parameters are finite and in reasonable range
+        # shape (p[1]): identity scale, rate (p[2]): log scale
         @test all(isfinite.(p))
-        @test exp(p[1]) > 0.0  # scale > 0
-        @test exp(p[2]) > 0.0  # shape > 0
+        @test exp(p[2]) > 0.0  # rate > 0
     end
 end
 

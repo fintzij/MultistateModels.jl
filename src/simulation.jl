@@ -589,14 +589,15 @@ function simulate_path(model::MultistateProcess, subj::Int64;
     subj_inds = model.subjectindices[subj]
     subj_dat  = view(model.data, subj_inds, :)
 
-    # Get log-scale parameters for hazard functions
-    params = get_log_scale_params(model.parameters)
+    # Get natural-scale parameters for hazard functions (family-aware)
+    params = get_hazard_params(model.parameters, model.hazards)
 
     # current index
     row = 1 # row in subject's data that is incremented
     ind = subj_inds[row] # index in complete dataset
     subjdat_row = subj_dat[row, :] # current DataFrameRow for covariate extraction
     covars_cache = _materialize_covariates(subjdat_row, model.hazards)
+
 
     # current state
     scur = subj_dat.statefrom[1]

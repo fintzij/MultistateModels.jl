@@ -27,13 +27,13 @@ function run_all_longtests()
     empty!(ALL_RESULTS)
     
     @testset "All Long Tests" begin
-        run_all_exponential_tests()
-        run_all_weibull_tests()
         run_all_gompertz_tests()
-        run_all_phasetype_proposal_tests()  # Phase-type proposals for semi-Markov
+        run_all_weibull_tests()
+        run_all_spline_tests()
+        run_all_exponential_tests()
         run_all_phasetype_hazard_tests()    # Phase-type hazard family (:pt)
         run_all_phasetype_simulation_tests() # Phase-type simulation validation
-        run_all_spline_tests()
+        run_all_phasetype_proposal_tests()  # Phase-type proposals for semi-Markov
     end
     
     # Generate report

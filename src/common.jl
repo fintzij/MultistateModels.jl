@@ -273,6 +273,7 @@ during model construction.
 - `knots::Vector{Float64}`: Knot locations
 - `natural_spline::Bool`: Natural spline constraint
 - `monotone::Int64`: Monotonicity constraint (0, -1, 1)
+- `extrapolation::String`: Extrapolation method ("flat", "linear", or "survextrap")
 - `metadata::HazardMetadata`: Tang/linpred metadata
 - `shared_baseline_key::Union{Nothing,SharedBaselineKey}`
 """
@@ -292,6 +293,7 @@ struct RuntimeSplineHazard <: _SplineHazard
     knots::Vector{Float64}
     natural_spline::Bool
     monotone::Int64
+    extrapolation::String
     metadata::HazardMetadata
     shared_baseline_key::Union{Nothing,SharedBaselineKey}
 end
@@ -422,7 +424,10 @@ Specify a cause-specific baseline hazard.
 - `degree`: Degree of the spline polynomial basis.
 - `knots`: Vector of knot locations.
 - `boundaryknots`: Vector of boundary knot locations
-- `extrapolation`: Either "linear" or "flat"
+- `extrapolation`: Extrapolation method beyond boundary knots:
+    - "constant" (default): Constant hazard beyond boundaries with C¹ continuity (smooth transition).
+      Uses basis recombination to enforce h'=0 at boundaries (Neumann BC). Requires degree >= 2.
+    - "linear": Linear extrapolation using derivative at boundary.
 - `natural_spline`: Restrict the second derivative to zero at the boundaries (natural spline).
 - `monotone`: 
 """

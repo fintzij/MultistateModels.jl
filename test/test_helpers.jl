@@ -101,3 +101,187 @@ end
         @test isapprox(logliks_seq[i][j], logliks_bat[i][j], rtol=1e-12)
     end
 end
+
+# --- Phase 1 Parameter Handling Tests -----------------------------------------
+# Tests for NamedTuple parameter structure with named fields
+
+@testset "build_hazard_params - NamedTuple structure" begin
+    using MultistateModels: build_hazard_params
+    
+    @testset "Weibull baseline only" begin
+        params = build_hazard_params(
+            [log(1.5), log(0.2)],
+            [:h12_shape, :h12_scale],
+            2,
+            2  # npar_total = npar_baseline
+        )
+        
+        @test params isa NamedTuple
+        @test haskey(params, :baseline)
+        @test params.baseline isa NamedTuple
+        @test haskey(params.baseline, :h12_shape)
+        @test haskey(params.baseline, :h12_scale)
+        @test params.baseline.h12_shape ≈ log(1.5)
+        @test params.baseline.h12_scale ≈ log(0.2)
+        @test !haskey(params, :covariates)
+    end
+    
+    @testset "Weibull with covariates" begin
+        params = build_hazard_params(
+            [log(1.5), log(0.2), 0.3, 0.1],
+            [:h12_shape, :h12_scale, :h12_age, :h12_sex],
+            2,
+            4  # npar_total
+        )
+        
+        @test haskey(params, :baseline)
+        @test haskey(params, :covariates)
+        @test params.baseline.h12_shape ≈ log(1.5)
+        @test params.baseline.h12_scale ≈ log(0.2)
+        @test haskey(params.covariates, :h12_age)
+        @test haskey(params.covariates, :h12_sex)
+        @test params.covariates.h12_age ≈ 0.3
+        @test params.covariates.h12_sex ≈ 0.1
+    end
+    
+    @testset "Exponential baseline only" begin
+        params = build_hazard_params(
+            [log(0.5)],
+            [:h13_intercept],
+            1,
+            1  # npar_total
+        )
+        
+        @test params.baseline.h13_intercept ≈ log(0.5)
+        @test !haskey(params, :covariates)
+    end
+    
+    @testset "Error on mismatched lengths" begin
+        @test_throws AssertionError build_hazard_params(
+            [1.0, 2.0],
+            [:h12_shape],  # Wrong length!
+            2,
+            2
+        )
+    end
+    
+    @testset "Error on invalid npar_baseline" begin
+        @test_throws AssertionError build_hazard_params(
+            [1.0, 2.0],
+            [:h12_shape, :h12_scale],
+            3,  # More baseline params than total!
+            2
+        )
+    end
+end
+
+@testset "Parameter extraction helpers" begin
+    using MultistateModels: extract_baseline_values, extract_covariate_values, 
+                            extract_params_vector, extract_natural_vector
+    
+    params_with_covars = (
+        baseline = (h12_shape = log(1.5), h12_scale = log(0.2)),
+        covariates = (h12_age = 0.3, h12_sex = 0.1)
+    )
+    
+    params_no_covars = (
+        baseline = (h13_intercept = log(0.8),),
+    )
+    
+    @testset "extract_baseline_values" begin
+        baseline_vals = extract_baseline_values(params_with_covars)
+        @test baseline_vals ≈ [log(1.5), log(0.2)]
+        @test baseline_vals isa Vector{Float64}
+        
+        baseline_vals_single = extract_baseline_values(params_no_covars)
+        @test baseline_vals_single ≈ [log(0.8)]
+    end
+    
+    @testset "extract_covariate_values" begin
+        covar_vals = extract_covariate_values(params_with_covars)
+        @test covar_vals ≈ [0.3, 0.1]
+        @test covar_vals isa Vector{Float64}
+        
+        covar_vals_empty = extract_covariate_values(params_no_covars)
+        @test isempty(covar_vals_empty)
+        @test covar_vals_empty isa Vector{Float64}
+    end
+    
+    @testset "extract_params_vector" begin
+        all_params = extract_params_vector(params_with_covars)
+        @test all_params ≈ [log(1.5), log(0.2), 0.3, 0.1]
+        
+        baseline_only = extract_params_vector(params_no_covars)
+        @test baseline_only ≈ [log(0.8)]
+    end
+    
+    @testset "extract_natural_vector" begin
+        natural_vals = extract_natural_vector(params_with_covars)
+        @test natural_vals ≈ [1.5, 0.2, 0.3, 0.1]
+        
+        natural_baseline = extract_natural_vector(params_no_covars)
+        @test natural_baseline ≈ [0.8]
+    end
+end
+
+@testset "ParameterHandling.jl with nested NamedTuples" begin
+    using ParameterHandling
+    using MultistateModels: build_hazard_params
+    
+    @testset "Flatten and unflatten with named fields" begin
+        # Build parameter structure with named NamedTuples
+        params = (
+            h12 = build_hazard_params(
+                [log(1.5), log(0.2), 0.3, 0.1],
+                [:h12_shape, :h12_scale, :h12_age, :h12_sex],
+                2,
+                4  # npar_total
+            ),
+            h23 = build_hazard_params(
+                [log(0.8)],
+                [:h23_intercept],
+                1,
+                1  # npar_total
+            )
+        )
+        
+        # Flatten and unflatten
+        flat, unflatten = ParameterHandling.flatten(params)
+        reconstructed = unflatten(flat)
+        
+        # Verify structure preserved
+        @test reconstructed.h12.baseline.h12_shape ≈ log(1.5)
+        @test reconstructed.h12.baseline.h12_scale ≈ log(0.2)
+        @test reconstructed.h12.covariates.h12_age ≈ 0.3
+        @test reconstructed.h12.covariates.h12_sex ≈ 0.1
+        @test reconstructed.h23.baseline.h23_intercept ≈ log(0.8)
+        
+        # Test modification (as in optimization)
+        modified_flat = flat .+ 0.1
+        modified = unflatten(modified_flat)
+        @test modified.h12.baseline.h12_shape ≈ log(1.5) + 0.1
+        @test modified.h12.baseline.h12_scale ≈ log(0.2) + 0.1
+        @test modified.h12.covariates.h12_age ≈ 0.3 + 0.1
+        @test modified.h23.baseline.h23_intercept ≈ log(0.8) + 0.1
+    end
+    
+    @testset "Named access works correctly" begin
+        params = (
+            h12 = (
+                baseline = (h12_shape = log(2.0), h12_scale = log(1.0)),
+                covariates = (h12_trt = 0.5,)
+            ),
+        )
+        
+        # Test that we can access by name
+        @test params.h12.baseline.h12_shape == log(2.0)
+        @test params.h12.baseline.h12_scale == log(1.0)
+        @test params.h12.covariates.h12_trt == 0.5
+        
+        # Flatten/unflatten preserves named access
+        flat, unflatten = ParameterHandling.flatten(params)
+        restored = unflatten(flat)
+        @test restored.h12.baseline.h12_shape == log(2.0)
+        @test restored.h12.covariates.h12_trt == 0.5
+    end
+end

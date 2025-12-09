@@ -36,7 +36,7 @@ using LinearAlgebra
 
 # Import internal functions for testing
 import MultistateModels: Hazard, multistatemodel, fit, set_parameters!, simulate,
-    get_parameters_flat, get_log_scale_params, SamplePath
+    get_parameters_flat, SamplePath
 
 const RNG_SEED = 0xABCDEF01
 const N_SUBJECTS = 1000       # Standard sample size for longtests

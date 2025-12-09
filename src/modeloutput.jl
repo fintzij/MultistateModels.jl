@@ -769,7 +769,7 @@ function summary(model::MultistateModelFitted; compute_se = true, confidence_lev
         # standard error
         varcov = get_vcov(model)
         se = sqrt.(varcov[diagind(varcov)])
-        se_nested = nest_params(se, model.parameters)
+        se_nested = unflatten(model.parameters.reconstructor, se)
         # critical value
         z_critical = quantile(Normal(0.0, 1.0), 1-(1-confidence_level)/2)
 

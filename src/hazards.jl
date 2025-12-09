@@ -157,6 +157,30 @@ const CovariateData = Union{NamedTuple, DataFrameRow}
     return linpred
 end
 
+# Handle nested NamedTuple structure (baseline and covariates fields)
+@inline function _linear_predictor(pars::NamedTuple, covars::CovariateData, hazard::_Hazard)
+    hazard.has_covariates || return zero(Float64)
+    covar_pars = pars.covariates
+    covar_names = hazard.covar_names  # Use the actual covariate names from hazard
+    linpred = zero(Float64)
+    for cname in covar_names
+        val = getproperty(covars, cname)
+        # Find the coefficient - covar_pars keys are like h12_x, we need to match by suffix
+        coeff = zero(Float64)
+        for pname in keys(covar_pars)
+            # Check if pname ends with _cname (e.g., h12_x ends with _x)
+            pname_str = String(pname)
+            cname_str = String(cname)
+            if endswith(pname_str, "_" * cname_str) || endswith(pname_str, cname_str)
+                coeff = getproperty(covar_pars, pname)
+                break
+            end
+        end
+        linpred += coeff * val
+    end
+    return linpred
+end
+
 @inline function _ensure_transform_supported(hazard::_Hazard)
     hazard.metadata.time_transform || return
     # Splines now support time transform
@@ -190,12 +214,20 @@ end
     return TimeTransformCumulKey{LinType,TimeType}(convert(LinType, linpred), convert(TimeType, lb), convert(TimeType, ub))
 end
 
+# Helper to extract baseline parameters as vector for time_transform functions
+# These internal functions work with vectors for numerical operations
+@inline _time_transform_pars(pars::AbstractVector) = pars
+@inline _time_transform_pars(pars::NamedTuple) = extract_params_vector(pars)
+
+# Time transform functions now receive NATURAL scale parameters (exp already applied)
 @inline function _time_transform_hazard(hazard::MarkovHazard, pars::AbstractVector, t::Real, linpred::Real)
     _ = t
+    # pars[1] is the natural-scale rate (already exp'd)
+    rate = pars[1]
     if hazard.metadata.linpred_effect == :aft
-        return exp(pars[1] - linpred)
+        return rate * exp(-linpred)
     else
-        return exp(pars[1] + linpred)
+        return rate * exp(linpred)
     end
 end
 
@@ -205,21 +237,23 @@ end
 end
 
 @inline function _time_transform_hazard_weibull(pars::AbstractVector, linpred::Real, effect::Symbol, t::Real)
-    log_shape, log_scale = pars[1], pars[2]
-    shape = exp(log_shape)
-    scale = exp(log_scale)
-    base = log(scale) + log(shape) + (shape - 1) * log(t)
+    # pars are on NATURAL scale (shape and scale already positive)
+    shape, scale = pars[1], pars[2]
+    # h(t) = shape * scale * t^(shape-1)
+    haz = shape * scale
+    if shape != 1.0
+        haz *= t^(shape - 1)
+    end
     if effect == :aft
-        return exp(base - shape * linpred)
+        return haz * exp(-shape * linpred)
     else
-        return exp(base + linpred)
+        return haz * exp(linpred)
     end
 end
 
 @inline function _time_transform_cumhaz_weibull(pars::AbstractVector, linpred::Real, effect::Symbol, lb::Real, ub::Real)
-    log_shape, log_scale = pars[1], pars[2]
-    shape = exp(log_shape)
-    scale = exp(log_scale)
+    # pars are on NATURAL scale
+    shape, scale = pars[1], pars[2]
     base = scale * (ub^shape - lb^shape)
     if effect == :aft
         return base * exp(-shape * linpred)
@@ -228,41 +262,58 @@ end
     end
 end
 
-@inline function _gompertz_baseline_cumhaz(shape::Float64, scale::Float64, lb::Real, ub::Real)
+"""
+    _gompertz_baseline_cumhaz(shape, rate, lb, ub)
+
+Compute the baseline cumulative hazard for Gompertz over interval [lb, ub].
+
+Uses the flexsurv parameterization:
+- H(lb, ub) = (rate/shape) × (exp(shape×ub) - exp(shape×lb)) for shape ≠ 0
+- H(lb, ub) = rate × (ub - lb) as shape → 0 (exponential limit)
+
+Numerically stable: handles shape near zero by switching to exponential formula.
+"""
+@inline function _gompertz_baseline_cumhaz(shape::Float64, rate::Float64, lb::Real, ub::Real)
+    # flexsurv parameterization: H(t) = (rate/shape) * (exp(shape*t) - 1)
+    # For interval [lb, ub]: H(lb, ub) = (rate/shape) * (exp(shape*ub) - exp(shape*lb))
     if abs(shape) < 1e-10
-        return scale * (ub - lb)
+        # When shape -> 0, reduces to exponential: H = rate * (ub - lb)
+        return rate * (ub - lb)
     else
-        return scale * (exp(shape * ub) - exp(shape * lb))
+        return (rate / shape) * (exp(shape * ub) - exp(shape * lb))
     end
 end
 
 @inline function _time_transform_hazard_gompertz(pars::AbstractVector, linpred::Real, effect::Symbol, t::Real)
-    log_shape, log_scale = pars[1], pars[2]
-    shape = exp(log_shape)
-    scale = exp(log_scale)
+    # pars are on NATURAL scale
+    # flexsurv parameterization: h(t) = rate * exp(shape * t)
+    # pars[1] = shape (can be positive, negative, or zero)
+    # pars[2] = rate (positive)
+    shape, rate = pars[1], pars[2]
     if effect == :aft
         time_scale = exp(-linpred)
         scaled_shape = shape * time_scale
-        return exp(log(scale) + log(shape) + log(time_scale) + scaled_shape * t)
+        return rate * exp(scaled_shape * t) * time_scale
     else
-        return exp(log_scale + log_shape + shape * t + linpred)
+        return rate * exp(shape * t + linpred)
     end
 end
 
 @inline function _time_transform_cumhaz_gompertz(pars::AbstractVector, linpred::Real, effect::Symbol, lb::Real, ub::Real)
-    log_shape, log_scale = pars[1], pars[2]
-    shape = exp(log_shape)
-    scale = exp(log_scale)
+    # pars are on NATURAL scale
+    # flexsurv parameterization: H(t) = (rate/shape) * (exp(shape*t) - 1)
+    shape, rate = pars[1], pars[2]
     if effect == :aft
         time_scale = exp(-linpred)
         scaled_shape = shape * time_scale
+        scaled_rate = rate * time_scale
         if abs(scaled_shape) < 1e-10
-            return scale * time_scale * (ub - lb)
+            return scaled_rate * (ub - lb)
         else
-            return scale * (exp(scaled_shape * ub) - exp(scaled_shape * lb))
+            return (scaled_rate / scaled_shape) * (exp(scaled_shape * ub) - exp(scaled_shape * lb))
         end
     else
-        base = _gompertz_baseline_cumhaz(shape, scale, lb, ub)
+        base = _gompertz_baseline_cumhaz(shape, rate, lb, ub)
         return base * exp(linpred)
     end
 end
@@ -345,39 +396,92 @@ function _build_linear_pred_expr(parnames::Vector{Symbol}, first_covar_index::In
 end
 
 """
+    _build_linear_pred_expr_named(parnames::Vector{Symbol})
+
+Build linear predictor expression that accesses covariate coefficients by name.
+
+Generates: covars.age * pars.covariates.h13_age + covars.sex * pars.covariates.h13_sex + ...
+
+Note: - Covariate VALUES (covars.XXX) use names WITHOUT hazard prefix (from data)
+      - Covariate COEFFICIENTS (pars.covariates.XXX) use parameter names WITH prefix
+      - `parnames` contains the full parameter names (e.g., :h13_trt, :h13_age)
+"""
+function _build_linear_pred_expr_named(parnames::Vector{Symbol})
+    # Get covariate names without prefix
+    covar_names = extract_covar_names(parnames)
+    
+    if isempty(covar_names)
+        return :(0.0)  # Return zero literal instead of zero(eltype(pars)) which fails for NamedTuples
+    end
+    
+    # Build mapping from covariate name (no prefix) to parameter name (with prefix)
+    covar_to_par = Dict{Symbol,Symbol}()
+    for pname in parnames
+        pname_str = String(pname)
+        # Skip baseline parameters
+        if occursin("Intercept", pname_str) || occursin("shape", pname_str) || 
+           occursin("scale", pname_str) || occursin(r"^h\d+_sp\d+$", pname_str)
+            continue
+        end
+        # Get covariate name (without prefix)
+        covar_name = Symbol(replace(pname_str, r"^h\d+_" => ""))
+        covar_to_par[covar_name] = pname
+    end
+    
+    # Build sum of covars.name * pars.covariates.parname
+    terms = Any[]
+    for cname in covar_names
+        parname = covar_to_par[cname]
+        push!(terms, :(covars.$(cname) * pars.covariates.$(parname)))
+    end
+    
+    return length(terms) == 1 ? terms[1] : Expr(:call, :+, terms...)
+end
+
+"""
     generate_exponential_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
 
 Generate runtime functions for exponential hazards with optional PH/AFT covariate
 effects controlled by `linpred_effect`.
+
+PARAMETER CONVENTION: Receives natural-scale baseline parameters (exp already applied).
+- `pars.baseline.xxx` is the natural-scale rate (positive)
+- Covariate coefficients are on natural scale (unconstrained)
+- Formula: h(t|x) = rate * exp(β'x) for PH, h(t|x) = rate * exp(-β'x) for AFT
 """
 function generate_exponential_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
-    linear_pred_expr = _build_linear_pred_expr(parnames, 2)
+    linear_pred_expr = _build_linear_pred_expr_named(parnames)
+    
+    # Extract baseline parameter name (should be :h*_intercept or :h*_Intercept)
+    baseline_parname = parnames[1]
+    
     if linpred_effect == :ph
         hazard_fn = @RuntimeGeneratedFunction(:(
             function(t, pars, covars)
                 linear_pred = $linear_pred_expr
-                return exp(pars[1] + linear_pred)
+                # pars.baseline is on NATURAL scale (no exp needed)
+                return pars.baseline.$(baseline_parname) * exp(linear_pred)
             end
         ))
 
         cumhaz_fn = @RuntimeGeneratedFunction(:(
             function(lb, ub, pars, covars)
                 linear_pred = $linear_pred_expr
-                return exp(pars[1] + linear_pred) * (ub - lb)
+                return pars.baseline.$(baseline_parname) * exp(linear_pred) * (ub - lb)
             end
         ))
     elseif linpred_effect == :aft
         hazard_fn = @RuntimeGeneratedFunction(:(
             function(t, pars, covars)
                 linear_pred = $linear_pred_expr
-                return exp(pars[1] - linear_pred)
+                return pars.baseline.$(baseline_parname) * exp(-linear_pred)
             end
         ))
 
         cumhaz_fn = @RuntimeGeneratedFunction(:(
             function(lb, ub, pars, covars)
                 linear_pred = $linear_pred_expr
-                return exp(pars[1] - linear_pred) * (ub - lb)
+                return pars.baseline.$(baseline_parname) * exp(-linear_pred) * (ub - lb)
             end
         ))
     else
@@ -390,32 +494,42 @@ end
 """
     generate_weibull_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
 
-Generate runtime functions for Weibull hazards, supporting PH or AFT covariate
-effects.
+Generate runtime functions for Weibull hazards, supporting PH or AFT covariate effects.
+
+PARAMETER CONVENTION: Receives natural-scale baseline parameters.
+- `pars.baseline.shape` is the natural-scale shape parameter (positive)
+- `pars.baseline.scale` is the natural-scale scale parameter (positive)
+- Formula: h(t) = shape * scale * t^(shape-1) for baseline Weibull
 """
 function generate_weibull_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
-    linear_pred_expr = _build_linear_pred_expr(parnames, 3)
+    linear_pred_expr = _build_linear_pred_expr_named(parnames)
+    
+    # Extract baseline parameter names (should be :h*_shape and :h*_scale)
+    shape_parname = parnames[1]
+    scale_parname = parnames[2]
+    
     if linpred_effect == :ph
         hazard_fn = @RuntimeGeneratedFunction(:(
             function(t, pars, covars)
-                log_shape, log_scale = pars[1], pars[2]
-                shape = exp(log_shape)
+                # pars.baseline is on NATURAL scale (no exp needed)
+                shape = pars.baseline.$(shape_parname)
+                scale = pars.baseline.$(scale_parname)
                 linear_pred = $linear_pred_expr
                 
-                log_haz = log_scale + log_shape + linear_pred
+                # h(t) = shape * scale * t^(shape-1) * exp(linear_pred)
+                haz = shape * scale * exp(linear_pred)
                 if shape != 1.0
-                    log_haz += (shape - 1) * log(t)
+                    haz *= t^(shape - 1)
                 end
                 
-                return exp(log_haz)
+                return haz
             end
         ))
 
         cumhaz_fn = @RuntimeGeneratedFunction(:(
             function(lb, ub, pars, covars)
-                log_shape, log_scale = pars[1], pars[2]
-                shape = exp(log_shape)
-                scale = exp(log_scale)
+                shape = pars.baseline.$(shape_parname)
+                scale = pars.baseline.$(scale_parname)
                 linear_pred = $linear_pred_expr
                 return scale * exp(linear_pred) * (ub^shape - lb^shape)
             end
@@ -423,24 +537,25 @@ function generate_weibull_hazard(parnames::Vector{Symbol}, linpred_effect::Symbo
     elseif linpred_effect == :aft
         hazard_fn = @RuntimeGeneratedFunction(:(
             function(t, pars, covars)
-                log_shape, log_scale = pars[1], pars[2]
-                shape = exp(log_shape)
+                shape = pars.baseline.$(shape_parname)
+                scale = pars.baseline.$(scale_parname)
                 linear_pred = $linear_pred_expr
                 
-                log_haz = log_scale + log_shape - shape * linear_pred
+                # AFT: h(t|x) = h_0(t * exp(-linear_pred)) * exp(-linear_pred)
+                # = shape * scale * t^(shape-1) * exp(-shape * linear_pred)
+                haz = shape * scale * exp(-shape * linear_pred)
                 if shape != 1.0
-                    log_haz += (shape - 1) * log(t)
+                    haz *= t^(shape - 1)
                 end
                 
-                return exp(log_haz)
+                return haz
             end
         ))
 
         cumhaz_fn = @RuntimeGeneratedFunction(:(
             function(lb, ub, pars, covars)
-                log_shape, log_scale = pars[1], pars[2]
-                shape = exp(log_shape)
-                scale = exp(log_scale)
+                shape = pars.baseline.$(shape_parname)
+                scale = pars.baseline.$(scale_parname)
                 linear_pred = $linear_pred_expr
                 return scale * exp(-shape * linear_pred) * (ub^shape - lb^shape)
             end
@@ -456,28 +571,75 @@ end
     generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
 
 Generate runtime functions for Gompertz hazards with PH/AFT covariate handling.
+
+# Parameterization
+
+Matches the **flexsurv** R package parameterization:
+
+- **Hazard**: h(t) = rate × exp(shape × t)
+- **Cumulative hazard**: H(t) = (rate/shape) × (exp(shape×t) - 1) for shape ≠ 0
+- **Survival**: S(t) = exp(-H(t))
+
+# Parameters
+
+- `shape` (unconstrained): Controls how hazard changes over time
+  - shape > 0: hazard increases exponentially (typical aging/wear-out)
+  - shape = 0: constant hazard (reduces to exponential with rate parameter)
+  - shape < 0: hazard decreases over time (defective/cure models)
+- `rate` (positive): Baseline hazard rate at t=0
+
+# Storage Convention
+
+- **Estimation scale**: `[shape, log(rate)]` — shape is unconstrained, rate is log-transformed
+- **Natural scale**: `[shape, rate]` — shape unchanged, rate exponentiated
+
+# Covariate Effects
+
+- `:ph` (proportional hazards): h(t|x) = rate × exp(shape×t + β'x)
+- `:aft` (accelerated failure time): h(t|x) = rate × exp(shape×t×exp(-β'x)) × exp(-β'x)
+
+# Default Initialization
+
+When created via `multistatemodel()`, Gompertz hazards are initialized with:
+- shape = 0 (so hazard starts as constant/exponential)
+- rate = crude transition rate from data
+
+This ensures sensible starting values for optimization.
+
+# Reference
+
+Jackson, C. (2016). flexsurv: A Platform for Parametric Survival Modeling in R.
+Journal of Statistical Software, 70(8), 1-33.
 """
 function generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
-    linear_pred_expr = _build_linear_pred_expr(parnames, 3)
+    linear_pred_expr = _build_linear_pred_expr_named(parnames)
+    
+    # Extract baseline parameter names (should be :h*_shape and :h*_rate)
+    shape_parname = parnames[1]
+    rate_parname = parnames[2]
+    
     if linpred_effect == :ph
         hazard_fn = @RuntimeGeneratedFunction(:(
             function(t, pars, covars)
-                log_shape, log_scale = pars[1], pars[2]
-                shape = exp(log_shape)
+                # pars.baseline is on NATURAL scale
+                # flexsurv parameterization: h(t) = rate * exp(shape * t)
+                shape = pars.baseline.$(shape_parname)
+                rate = pars.baseline.$(rate_parname)
                 linear_pred = $linear_pred_expr
-                return exp(log_scale + log_shape + shape * t + linear_pred)
+                return rate * exp(shape * t + linear_pred)
             end
         ))
 
         cumhaz_fn = @RuntimeGeneratedFunction(:(
             function(lb, ub, pars, covars)
-                log_shape, log_scale = pars[1], pars[2]
-                shape = exp(log_shape)
-                scale = exp(log_scale)
+                # flexsurv parameterization: H(t) = (rate/shape) * (exp(shape*t) - 1)
+                shape = pars.baseline.$(shape_parname)
+                rate = pars.baseline.$(rate_parname)
                 if abs(shape) < 1e-10
-                    baseline_cumhaz = scale * (ub - lb)
+                    # Reduces to exponential: H = rate * (ub - lb)
+                    baseline_cumhaz = rate * (ub - lb)
                 else
-                    baseline_cumhaz = scale * (exp(shape * ub) - exp(shape * lb))
+                    baseline_cumhaz = (rate / shape) * (exp(shape * ub) - exp(shape * lb))
                 end
                 linear_pred = $linear_pred_expr
                 return baseline_cumhaz * exp(linear_pred)
@@ -486,26 +648,29 @@ function generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symb
     elseif linpred_effect == :aft
         hazard_fn = @RuntimeGeneratedFunction(:(
             function(t, pars, covars)
-                log_shape, log_scale = pars[1], pars[2]
-                shape = exp(log_shape)
+                # flexsurv parameterization: h(t) = rate * exp(shape * t)
+                shape = pars.baseline.$(shape_parname)
+                rate = pars.baseline.$(rate_parname)
                 linear_pred = $linear_pred_expr
                 time_scale = exp(-linear_pred)
-                return exp(log_scale + log_shape + shape * (t * time_scale) - linear_pred)
+                # AFT: h(t|x) = h_0(t * exp(-linear_pred)) * exp(-linear_pred)
+                return rate * exp(shape * t * time_scale) * time_scale
             end
         ))
 
         cumhaz_fn = @RuntimeGeneratedFunction(:(
             function(lb, ub, pars, covars)
-                log_shape, log_scale = pars[1], pars[2]
-                shape = exp(log_shape)
-                scale = exp(log_scale)
+                # flexsurv parameterization with AFT time scaling
+                shape = pars.baseline.$(shape_parname)
+                rate = pars.baseline.$(rate_parname)
                 linear_pred = $linear_pred_expr
                 time_scale = exp(-linear_pred)
                 scaled_shape = shape * time_scale
+                scaled_rate = rate * time_scale
                 if abs(scaled_shape) < 1e-10
-                    baseline_cumhaz = scale * time_scale * (ub - lb)
+                    baseline_cumhaz = scaled_rate * (ub - lb)
                 else
-                    baseline_cumhaz = scale * (exp(scaled_shape * ub) - exp(scaled_shape * lb))
+                    baseline_cumhaz = (scaled_rate / scaled_shape) * (exp(scaled_shape * ub) - exp(scaled_shape * lb))
                 end
                 return baseline_cumhaz
             end
@@ -529,7 +694,7 @@ Returns hazard rate at time t (time parameter ignored for Markov processes).
 
 Covariates can be passed as NamedTuple (cached) or DataFrameRow (direct view).
 """
-function (hazard::MarkovHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,CovariateData}=Float64[])
+function (hazard::MarkovHazard)(t::Real, pars::Union{AbstractVector, NamedTuple}, covars::Union{AbstractVector,CovariateData}=Float64[])
     return hazard.hazard_fn(t, pars, covars)
 end
 
@@ -541,7 +706,7 @@ Returns hazard rate at time t.
 
 Covariates can be passed as NamedTuple (cached) or DataFrameRow (direct view).
 """
-function (hazard::SemiMarkovHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,CovariateData}=Float64[])
+function (hazard::SemiMarkovHazard)(t::Real, pars::Union{AbstractVector, NamedTuple}, covars::Union{AbstractVector,CovariateData}=Float64[])
     return hazard.hazard_fn(t, pars, covars)
 end
 
@@ -553,7 +718,7 @@ Returns hazard rate at time t.
 
 Covariates can be passed as NamedTuple (cached) or DataFrameRow (direct view).
 """
-function (hazard::_SplineHazard)(t::Real, pars::AbstractVector, covars::Union{AbstractVector,CovariateData}=Float64[])
+function (hazard::_SplineHazard)(t::Real, pars::Union{AbstractVector, NamedTuple}, covars::Union{AbstractVector,CovariateData}=Float64[])
     return hazard.hazard_fn(t, pars, covars)
 end
 
@@ -566,7 +731,7 @@ Covariates can be passed as NamedTuple (cached) or DataFrameRow (direct view).
 """
 function cumulative_hazard(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, 
                           lb::Real, ub::Real, 
-                          pars::AbstractVector, 
+                          pars::Union{AbstractVector, NamedTuple}, 
                           covars::Union{AbstractVector,CovariateData}=Float64[])
     return hazard.cumhaz_fn(lb, ub, pars, covars)
 end
@@ -597,7 +762,7 @@ This is the primary interface for hazard evaluation. It handles:
 # Returns
 - `Float64`: Hazard rate on natural scale
 """
-@inline function eval_hazard(hazard::_Hazard, t::Real, pars::AbstractVector, covars::CovariateData;
+@inline function eval_hazard(hazard::_Hazard, t::Real, pars::Union{AbstractVector, NamedTuple}, covars::CovariateData;
                              apply_transform::Bool = false,
                              cache_context::Union{Nothing,TimeTransformContext}=nothing,
                              hazard_slot::Union{Nothing,Int}=nothing)
@@ -606,15 +771,16 @@ This is the primary interface for hazard evaluation. It handles:
 
     _ensure_transform_supported(hazard)
     linpred = _linear_predictor(pars, covars, hazard)
+    pars_vec = _time_transform_pars(pars)
 
     if cache_context === nothing || hazard_slot === nothing
-        return _time_transform_hazard(hazard, pars, t, linpred)
+        return _time_transform_hazard(hazard, pars_vec, t, linpred)
     end
 
     cache = _shared_or_local_cache(cache_context, hazard_slot, hazard)
     key = _hazard_cache_key(cache, linpred, t)
     return get!(cache.hazard_values, key) do
-        _time_transform_hazard(hazard, pars, t, linpred)
+        _time_transform_hazard(hazard, pars_vec, t, linpred)
     end
 end
 
@@ -638,7 +804,7 @@ This is the primary interface for cumulative hazard evaluation.
 # Returns
 - `Float64`: Cumulative hazard on natural scale
 """
-@inline function eval_cumhaz(hazard::_Hazard, lb::Real, ub::Real, pars::AbstractVector, covars::CovariateData;
+@inline function eval_cumhaz(hazard::_Hazard, lb::Real, ub::Real, pars::Union{AbstractVector, NamedTuple}, covars::CovariateData;
                              apply_transform::Bool = false,
                              cache_context::Union{Nothing,TimeTransformContext}=nothing,
                              hazard_slot::Union{Nothing,Int}=nothing)
@@ -647,20 +813,21 @@ This is the primary interface for cumulative hazard evaluation.
 
     _ensure_transform_supported(hazard)
     linpred = _linear_predictor(pars, covars, hazard)
+    pars_vec = _time_transform_pars(pars)
 
     if cache_context === nothing || hazard_slot === nothing
-        return _time_transform_cumhaz(hazard, pars, lb, ub, linpred)
+        return _time_transform_cumhaz(hazard, pars_vec, lb, ub, linpred)
     end
 
     cache = _shared_or_local_cache(cache_context, hazard_slot, hazard)
     key = _cumul_cache_key(cache, linpred, lb, ub)
     return get!(cache.cumulhaz_values, key) do
-        _time_transform_cumhaz(hazard, pars, lb, ub, linpred)
+        _time_transform_cumhaz(hazard, pars_vec, lb, ub, linpred)
     end
 end
 
 # Convenience methods that extract covariates from DataFrameRow
-@inline function eval_hazard(hazard::_Hazard, t::Real, pars::AbstractVector, subjdat::DataFrameRow;
+@inline function eval_hazard(hazard::_Hazard, t::Real, pars::Union{AbstractVector, NamedTuple}, subjdat::DataFrameRow;
                              apply_transform::Bool = false,
                              cache_context::Union{Nothing,TimeTransformContext}=nothing,
                              hazard_slot::Union{Nothing,Int}=nothing)
@@ -671,7 +838,7 @@ end
                        hazard_slot=hazard_slot)
 end
 
-@inline function eval_cumhaz(hazard::_Hazard, lb::Real, ub::Real, pars::AbstractVector, subjdat::DataFrameRow;
+@inline function eval_cumhaz(hazard::_Hazard, lb::Real, ub::Real, pars::Union{AbstractVector, NamedTuple}, subjdat::DataFrameRow;
                              apply_transform::Bool = false,
                              cache_context::Union{Nothing,TimeTransformContext}=nothing,
                              hazard_slot::Union{Nothing,Int}=nothing)
@@ -726,21 +893,27 @@ end
     total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardTransient, _hazards; give_log = true) 
 
 Return the log-total cumulative hazard out of a transient state over the interval [lb, ub].
+
+PARAMETER CONVENTION: Expects natural-scale parameters (from safe_unflatten or get_hazard_params).
 """
 function total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardTransient, _hazards;
                         give_log = true,
                         apply_transform::Bool = false,
                         cache_context::Union{Nothing,TimeTransformContext}=nothing) 
 
+    # Parameters should already be on natural scale (from safe_unflatten or get_hazard_params)
+    # Use directly without additional transformation
+    
     # log total cumulative hazard
     tot_haz = 0.0
 
     for x in _totalhazard.components
+        hazard = _hazards[x]
         tot_haz += eval_cumhaz(
-            _hazards[x],
+            hazard,
             lb,
             ub,
-            parameters[x],
+            parameters[hazard.hazname],
             subjdat_row;
             apply_transform = apply_transform,
             cache_context = cache_context,
@@ -755,15 +928,18 @@ function total_cumulhaz(lb, ub, parameters, covars_cache::AbstractVector{<:Named
                         give_log = true,
                         apply_transform::Bool = false,
                         cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    
+    # Parameters should already be on natural scale
     tot_haz = 0.0
 
     for x in _totalhazard.components
+        hazard = _hazards[x]
         covars = _covariate_entry(covars_cache, x)
         tot_haz += eval_cumhaz(
-            _hazards[x],
+            hazard,
             lb,
             ub,
-            parameters[x],
+            parameters[hazard.hazname],
             covars;
             apply_transform = apply_transform,
             cache_context = cache_context,
@@ -856,9 +1032,10 @@ function _next_state_probs!(ns_probs::AbstractVector{Float64}, trans_inds::Abstr
 
     # Compute log-hazards for softmax
     vals = map(totalhazards[scur].components) do x
+        hazard = hazards[x]
         covars = _covariate_entry(covars_cache, x)
-        haz = eval_hazard(hazards[x], t, parameters[x], covars;
-                          apply_transform = apply_transform && hazards[x].metadata.time_transform,
+        haz = eval_hazard(hazard, t, parameters[hazard.hazname], covars;
+                          apply_transform = apply_transform && hazard.metadata.time_transform,
                           cache_context = cache_context,
                           hazard_slot = x)
         log(haz)  # softmax expects log scale
@@ -920,7 +1097,7 @@ function compute_hazmat!(Q, parameters, hazards::Vector{T}, tpm_index::DataFrame
         # Use extract_covariates_fast with pre-cached covar_names
         covars = extract_covariates_fast(subjdat_row, hazard.covar_names)
         Q[hazard.statefrom, hazard.stateto] = 
-            eval_hazard(hazard, tpm_index.tstart[1], parameters[h], covars)
+            eval_hazard(hazard, tpm_index.tstart[1], parameters[hazard.hazname], covars)
     end
 
     # set diagonal elements equal to the sum of off-diags
@@ -955,7 +1132,7 @@ function compute_hazmat(::Type{T}, n_states::Int, parameters, hazards::Vector{<:
     for h in eachindex(hazards)
         hazard = hazards[h]
         covars = extract_covariates_fast(subjdat_row, hazard.covar_names)
-        rate = eval_hazard(hazard, tpm_index.tstart[1], parameters[h], covars)
+        rate = eval_hazard(hazard, tpm_index.tstart[1], parameters[hazard.hazname], covars)
         Q = setindex_immutable(Q, rate, hazard.statefrom, hazard.stateto)
     end
     
@@ -1078,15 +1255,16 @@ function cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
     for h in eachindex(hazards)
         # identify origin state
         statefrom = transients[trans_inds[h]]
+        hazard = hazards[h]
 
         # compute incidences
         for r in 1:n_intervals
             subjdat_row = subj_dat[interval_inds[r], :]
-            covars = extract_covariates_fast(subjdat_row, hazards[h].covar_names)
+            covars = extract_covariates_fast(subjdat_row, hazard.covar_names)
             incidences[r,h] = 
                 survprobs[r,trans_inds[h]] * 
                 quadgk(t -> (
-                        eval_hazard(hazards[h], t, parameters[h], covars) * 
+                        eval_hazard(hazard, t, parameters[hazard.hazname], covars) * 
                         survprob(subj_times[r], t, parameters, subjdat_row, totalhazards[statefrom], hazards; give_log = false)), 
                         subj_times[r], subj_times[r + 1])[1]
         end        

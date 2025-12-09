@@ -71,7 +71,7 @@ using LinearAlgebra
                 1, model, tpm_book_ph, hazmat_book_ph, books[2], 
                 fbmats_ph, emat_ph, surrogate, absorbingstates)
             
-            params = MultistateModels.get_log_scale_params(model.parameters)
+            params = MultistateModels.get_hazard_params(model.parameters)
             ll_target = MultistateModels.loglik(params, path_result.collapsed, model.hazards, model)
             ll_surrog = MultistateModels.loglik_phasetype_expanded(path_result.expanded, surrogate)
             push!(log_weights, ll_target - ll_surrog)
@@ -273,7 +273,7 @@ using LinearAlgebra
                 1, model, tpm_book_ph, hazmat_book_ph, books[2],
                 fbmats_ph, emat_ph, surrogate, absorbingstates)
             
-            params = MultistateModels.get_log_scale_params(model.parameters)
+            params = MultistateModels.get_hazard_params(model.parameters)
             ll_target = MultistateModels.loglik(params, result.collapsed, model.hazards, model)
             ll_surrog = MultistateModels.loglik_phasetype_expanded(result.expanded, surrogate)
             push!(log_weights, ll_target - ll_surrog)

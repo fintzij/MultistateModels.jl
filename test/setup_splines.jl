@@ -19,7 +19,7 @@ dat = DataFrame(
 # Create multistate model object with various spline configurations
 h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; 
              degree=3, knots=collect(0.2:0.2:0.8), 
-             extrapolation="flat", natural_spline=true)
+             extrapolation="constant", natural_spline=true)
 
 h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3; 
              degree=1, knots=[0.25, 0.5, 0.75])
@@ -29,7 +29,7 @@ h21 = Hazard(@formula(0 ~ 1 + x), "sp", 2, 1;
 
 h31 = Hazard(@formula(0 ~ 1 + x), "sp", 3, 1; 
              degree=1, knots=[0.25, 0.5, 0.75], 
-             extrapolation="flat")
+             extrapolation="linear")
 
 h32 = Hazard(@formula(0 ~ 1), "sp", 3, 2; 
              degree=1, extrapolation="linear")
@@ -37,11 +37,17 @@ h32 = Hazard(@formula(0 ~ 1), "sp", 3, 2;
 hazards = (h12, h13, h21, h31, h32)
 splinemod = multistatemodel(h12, h13, h21, h31, h32; data=dat)
 
-# Initialize with random parameters
+# Initialize with random parameters  
+# Use positive values on log scale that produce reasonable hazards
 Random.seed!(12345)
 for (h, haz) in enumerate(splinemod.hazards)
     npar = haz.npar_total
-    new_pars = rand(Normal(0, 0.5), npar)
+    # Use small positive values on log scale for baseline params
+    # and small values for covariate coefficients
+    new_pars = vcat(
+        rand(Uniform(-0.5, 0.5), haz.npar_baseline),  # Baseline coefficients
+        rand(Normal(0, 0.3), npar - haz.npar_baseline)  # Covariate coefficients
+    )
     set_parameters!(splinemod, h, new_pars)
 end
 

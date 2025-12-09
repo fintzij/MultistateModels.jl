@@ -13,13 +13,45 @@ using Test
 # files and simply `include` them here so `Pkg.test()` automatically runs
 # everything. When adding a new suite, document it in test/testcoverage.md.
 #
-# Test execution is controlled by MSM_TEST_LEVEL environment variable:
+# Test execution is controlled by environment variables:
+#
+# MSM_TEST_LEVEL:
 #   "quick" (default) - Unit tests only (~1 minute)
 #   "full"            - Unit tests + long statistical validation tests (~15-20 min)
 #
-# Example: MSM_TEST_LEVEL=full julia --project=. -e 'using Pkg; Pkg.test()'
+# Individual longtest toggles (only apply when MSM_TEST_LEVEL=full):
+#   MSM_LONGTEST_EXACT_DATA=true/false       - Exact data MLE (Exp/Wei/Gom/Spline/TVC)
+#   MSM_LONGTEST_MCEM_PARAMETRIC=true/false  - Panel data MCEM (Exp/Wei/Gom)
+#   MSM_LONGTEST_MCEM_SPLINES=true/false     - Panel data MCEM with spline hazards
+#   MSM_LONGTEST_MCEM_TVC=true/false         - Panel data MCEM with time-varying covariates
+#   MSM_LONGTEST_SIM_DIST=true/false         - Simulation distributional fidelity
+#   MSM_LONGTEST_SIM_TVC=true/false          - Simulation with time-varying covariates
+#   MSM_LONGTEST_ROBUST_EXACT=true/false     - Large-n exact data (tight tolerances)
+#   MSM_LONGTEST_MARKOV_PHASETYPE_VALIDATION=true/false - Markov/PhaseType validation
+#   MSM_LONGTEST_PHASETYPE_EXACT=true/false  - Phase-type hazard models (exact data)
+#   MSM_LONGTEST_PHASETYPE_PANEL=true/false  - Phase-type hazard models (panel data)
+#
+# Example: Run only the exact data longtest:
+#   MSM_TEST_LEVEL=full MSM_LONGTEST_ONLY=exact_data julia -e 'using Pkg; Pkg.test()'
+#
+# MSM_LONGTEST_ONLY options: exact_data, mcem_parametric, mcem_splines, mcem_tvc,
+#                            sim_dist, sim_tvc, robust_exact, markov_phasetype_validation,
+#                            phasetype_exact, phasetype_panel
 
 const TEST_LEVEL = get(ENV, "MSM_TEST_LEVEL", "quick")
+
+# Helper to check if a specific longtest should run
+function should_run_longtest(name::String)
+    # If MSM_LONGTEST_ONLY is set, only run that specific test
+    only_test = get(ENV, "MSM_LONGTEST_ONLY", "")
+    if !isempty(only_test)
+        return lowercase(only_test) == lowercase(name)
+    end
+    
+    # Otherwise check individual toggle (default: true)
+    env_key = "MSM_LONGTEST_" * uppercase(replace(name, "_" => "_"))
+    return lowercase(get(ENV, env_key, "true")) == "true"
+end
 
 # Deterministic RNG so regression failures are reproducible in CI.
 Random.seed!(52787)
@@ -62,44 +94,70 @@ end
 if TEST_LEVEL == "full"
     @info "Running full test suite including long statistical tests..."
     
-    @testset "Long Tests - Exact Markov" begin
-        include("longtest_exact_markov.jl")
+    # Check if any specific test is requested
+    only_test = get(ENV, "MSM_LONGTEST_ONLY", "")
+    if !isempty(only_test)
+        @info "Running only: $only_test"
     end
     
-    @testset "Long Tests - MCEM" begin
-        include("longtest_mcem.jl")
+    if should_run_longtest("exact_data")
+        @testset "Long Tests - Exact Data" begin
+            include("longtest_exact_markov.jl")
+        end
     end
     
-    @testset "Long Tests - MCEM Splines" begin
-        include("longtest_mcem_splines.jl")
+    if should_run_longtest("mcem_parametric")
+        @testset "Long Tests - Panel Data MCEM (Parametric Hazards)" begin
+            include("longtest_mcem.jl")
+        end
     end
     
-    @testset "Long Tests - MCEM TVC" begin
-        include("longtest_mcem_tvc.jl")
+    if should_run_longtest("mcem_splines")
+        @testset "Long Tests - Panel Data MCEM (Spline Hazards)" begin
+            include("longtest_mcem_splines.jl")
+        end
     end
     
-    @testset "Long Tests - Simulation Distribution" begin
-        include("longtest_simulation_distribution.jl")
+    if should_run_longtest("mcem_tvc")
+        @testset "Long Tests - Panel Data MCEM (Time-Varying Covariates)" begin
+            include("longtest_mcem_tvc.jl")
+        end
     end
     
-    @testset "Long Tests - Simulation TVC" begin
-        include("longtest_simulation_tvc.jl")
+    if should_run_longtest("sim_dist")
+        @testset "Long Tests - Simulation Distributional Fidelity" begin
+            include("longtest_simulation_distribution.jl")
+        end
     end
     
-    @testset "Long Tests - Robust Parametric" begin
-        include("longtest_robust_parametric.jl")
+    if should_run_longtest("sim_tvc")
+        @testset "Long Tests - Simulation (Time-Varying Covariates)" begin
+            include("longtest_simulation_tvc.jl")
+        end
     end
     
-    @testset "Long Tests - Robust Markov/PhaseType" begin
-        include("longtest_robust_markov_phasetype.jl")
+    if should_run_longtest("robust_exact")
+        @testset "Long Tests - Robust Exact Data (Tight Tolerances)" begin
+            include("longtest_robust_parametric.jl")
+        end
     end
     
-    @testset "Long Tests - Phase-Type Hazards (Exact Data)" begin
-        include("longtest_phasetype_exact.jl")
+    if should_run_longtest("markov_phasetype_validation")
+        @testset "Long Tests - Markov/PhaseType Validation" begin
+            include("longtest_robust_markov_phasetype.jl")
+        end
     end
     
-    @testset "Long Tests - Phase-Type Hazards (Panel/Mixed Data)" begin
-        include("longtest_phasetype_panel.jl")
+    if should_run_longtest("phasetype_exact")
+        @testset "Long Tests - Phase-Type Hazard Models (Exact Data)" begin
+            include("longtest_phasetype_exact.jl")
+        end
+    end
+    
+    if should_run_longtest("phasetype_panel")
+        @testset "Long Tests - Phase-Type Hazard Models (Panel Data)" begin
+            include("longtest_phasetype_panel.jl")
+        end
     end
 else
     @info "Running quick tests only. Set MSM_TEST_LEVEL=full for complete suite."

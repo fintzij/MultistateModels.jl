@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.8.22">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>algorithm_integrity_analysis</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="algorithm_integrity_analysis_files/libs/clipboard/clipboard.min.js"></script>
+<script src="algorithm_integrity_analysis_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="algorithm_integrity_analysis_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="algorithm_integrity_analysis_files/libs/quarto-html/axe/axe-check.js" type="module"></script>
+<script src="algorithm_integrity_analysis_files/libs/quarto-html/popper.min.js"></script>
+<script src="algorithm_integrity_analysis_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="algorithm_integrity_analysis_files/libs/quarto-html/anchor.min.js"></script>
+<link href="algorithm_integrity_analysis_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="algorithm_integrity_analysis_files/libs/quarto-html/quarto-syntax-highlighting-cd7454b418030687c631a6a7286fbe16.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="algorithm_integrity_analysis_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="algorithm_integrity_analysis_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="algorithm_integrity_analysis_files/libs/bootstrap/bootstrap-d6a003b94517c951b2d65075d42fb01b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent quarto-light">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+
+
+
+<section id="mcem-algorithm-integrity-analysis" class="level1">
+<h1>MCEM Algorithm Integrity Analysis</h1>
+<p><strong>Date</strong>: December 7, 2025<br>
+<strong>Issue</strong>: Gompertz MCEM path explosion (600+ paths, ESS ≈ 610)<br>
+<strong>Status</strong>: Deep investigation of parameter/weight handling</p>
+<hr>
+<section id="mcem-iteration-flow-line-by-line-trace" class="level2">
+<h2 class="anchored" data-anchor-id="mcem-iteration-flow-line-by-line-trace">MCEM Iteration Flow (Line-by-Line Trace)</h2>
+<section id="initial-setup-before-iteration-loop-starts" class="level3">
+<h3 class="anchored" data-anchor-id="initial-setup-before-iteration-loop-starts">Initial Setup (before iteration loop starts)</h3>
+<p><strong>Location</strong>: <code>src/modelfitting.jl</code> lines 1060-1172</p>
+<ol type="1">
+<li><p><strong>Line 1065</strong>: Get surrogate parameters (Markov proposal)</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>surrogate_pars <span class="op">=</span> <span class="fu">get_log_scale_params</span>(surrogate.parameters)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li>Extracts log-scale parameters from fitted Markov surrogate</li>
+<li>These are FIXED throughout MCEM (never updated)</li>
+</ul></li>
+<li><p><strong>Lines 1137-1172</strong>: Initial path sampling</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">DrawSamplePaths!</span>(samplepaths, loglik_target_cur, loglik_surrog, <span class="op">...</span>, params_cur, <span class="op">...</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li><code>params_cur</code> = initial parameter values (log-scale for baseline)</li>
+<li>Samples paths from Markov surrogate</li>
+<li>Computes <code>loglik_target_cur[i]</code> = log p(path | θ_cur, data) for target model</li>
+<li>Computes <code>loglik_surrog[i]</code> = log q(path | φ) for surrogate</li>
+<li>Computes importance weights and ESS using PSIS</li>
+<li><strong>CRITICAL</strong>: Uses <code>append!</code> to add paths to arrays (never clears)</li>
+</ul></li>
+</ol>
+<hr>
+</section>
+</section>
+<section id="single-mcem-iteration-iteration-k-k1" class="level2">
+<h2 class="anchored" data-anchor-id="single-mcem-iteration-iteration-k-k1">Single MCEM Iteration (Iteration k → k+1)</h2>
+<section id="step-1-m-step-optimization" class="level3">
+<h3 class="anchored" data-anchor-id="step-1-m-step-optimization">Step 1: M-Step Optimization</h3>
+<p><strong>Location</strong>: <code>src/modelfitting.jl</code> lines 1213-1221</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Line 1215-1218: Solve optimization problem</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>params_prop_optim <span class="op">=</span> <span class="fu">solve</span>(<span class="fu">remake</span>(prob, u0 <span class="op">=</span> <span class="fu">Vector</span>(params_cur), </span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>                                 p <span class="op">=</span> <span class="fu">SMPanelData</span>(model, samplepaths, ImportanceWeights)), </span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>                          _solver; print_level <span class="op">=</span> <span class="fl">0</span>)</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>params_prop <span class="op">=</span> params_prop_optim.u</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What happens here</strong>: - Optimizer maximizes weighted log-likelihood: <code>Σ_subjects Σ_paths w[i][j] * loglik[i][j]</code> - <code>ImportanceWeights</code> from previous iteration used as weights - Returns <code>params_prop</code> = NEW parameters (log-scale for baseline) - <strong>KEY QUESTION</strong>: Are we using old weights with old likelihoods to optimize for new parameters?</p>
+</section>
+<section id="step-2-evaluate-likelihood-at-new-parameters" class="level3">
+<h3 class="anchored" data-anchor-id="step-2-evaluate-likelihood-at-new-parameters">Step 2: Evaluate Likelihood at New Parameters</h3>
+<p><strong>Location</strong>: <code>src/modelfitting.jl</code> line 1223</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">loglik!</span>(params_prop, loglik_target_prop, <span class="fu">SMPanelData</span>(model, samplepaths, ImportanceWeights))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What happens here</strong>: - Evaluates target log-likelihood for ALL existing paths at NEW parameters <code>params_prop</code> - Overwrites <code>loglik_target_prop[i][j]</code> for all subjects i, paths j - <strong>CRITICAL INSIGHT</strong>: Paths were sampled using OLD parameters θ_cur, but we’re computing likelihood at NEW parameters θ_prop - This is CORRECT for importance sampling: paths from q(·|θ_cur) used to approximate E under p(·|θ_prop)</p>
+</section>
+<section id="step-3-compute-marginal-log-likelihoods" class="level3">
+<h3 class="anchored" data-anchor-id="step-3-compute-marginal-log-likelihoods">Step 3: Compute Marginal Log-Likelihoods</h3>
+<p><strong>Location</strong>: <code>src/modelfitting.jl</code> lines 1226-1227</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>mll_cur  <span class="op">=</span> <span class="fu">mcem_mll</span>(loglik_target_cur , ImportanceWeights, model.SubjectWeights)</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>mll_prop <span class="op">=</span> <span class="fu">mcem_mll</span>(loglik_target_prop, ImportanceWeights, model.SubjectWeights)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What happens here</strong>: - <code>mll_cur</code> = weighted sum using OLD target logliks + CURRENT weights - <code>mll_prop</code> = weighted sum using NEW target logliks + CURRENT weights - <strong>WAIT</strong>: Are the weights correct for the NEW likelihoods?</p>
+</section>
+<section id="step-4-accept-new-parameters" class="level3">
+<h3 class="anchored" data-anchor-id="step-4-accept-new-parameters">Step 4: Accept New Parameters</h3>
+<p><strong>Location</strong>: <code>src/modelfitting.jl</code> lines 1326-1330</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>params_cur        <span class="op">=</span> <span class="fu">deepcopy</span>(params_prop)</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>mll_cur           <span class="op">=</span> <span class="fu">deepcopy</span>(mll_prop)</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>loglik_target_cur <span class="op">=</span> <span class="fu">deepcopy</span>(loglik_target_prop)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What happens here</strong>: - Accept new parameters - Update current target log-likelihoods to those at new parameters - <strong>CRITICAL</strong>: <code>loglik_surrog</code> is NEVER updated (stays same, since surrogate doesn’t change)</p>
+</section>
+<section id="step-5-recompute-importance-weights" class="level3">
+<h3 class="anchored" data-anchor-id="step-5-recompute-importance-weights">Step 5: Recompute Importance Weights</h3>
+<p><strong>Location</strong>: <code>src/modelfitting.jl</code> line 1333</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ComputeImportanceWeightsESS!</span>(loglik_target_cur, loglik_surrog, _logImportanceWeights, </span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>                              ImportanceWeights, ess_cur, ess_target, psis_pareto_k)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What happens here</strong> (<code>src/sampling.jl</code> lines 939-978):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> i <span class="kw">in</span> <span class="fu">eachindex</span>(loglik_surrog)</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Line 942: Recompute log unnormalized weights</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>    _logImportanceWeights[i] <span class="op">=</span> loglik_target[i] <span class="op">.-</span> loglik_surrog[i]</span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Lines 951-973: Apply PSIS and normalize</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>    psiw <span class="op">=</span> ParetoSmooth.<span class="fu">psis</span>(<span class="fu">reshape</span>(<span class="fu">copy</span>(_logImportanceWeights[i]), <span class="op">...</span>))</span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">copyto!</span>(ImportanceWeights[i], psiw.weights)</span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>    ess_cur[i] <span class="op">=</span> psiw.ess[<span class="fl">1</span>]</span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>CRITICAL INSIGHTS</strong>: 1. <strong>Weights ARE recomputed</strong> after parameters change 2. <code>loglik_target[i]</code> = likelihoods at NEW parameters (from Step 2) 3. <code>loglik_surrog[i]</code> = likelihoods at surrogate parameters (UNCHANGED from initial sampling) 4. New importance weights = exp(loglik_target_NEW - loglik_surrog_OLD) 5. <strong>This is CORRECT</strong>: importance weights should reflect ratio of target(θ_new) / surrogate(φ)</p>
+</section>
+<section id="step-6-adaptive-ess-increase" class="level3">
+<h3 class="anchored" data-anchor-id="step-6-adaptive-ess-increase">Step 6: Adaptive ESS Increase</h3>
+<p><strong>Location</strong>: <code>src/modelfitting.jl</code> lines 1360-1416</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Line 1376-1394: If ascent_lb &lt; 0 and ESS needs to increase</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> ascent_lb <span class="op">&lt;</span> <span class="fl">0</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>    ess_target <span class="op">=</span> <span class="fu">min</span>(max_ess, ess_factor <span class="op">*</span> ess_target)</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>    <span class="co"># OUR FIX: Clear all path arrays</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> i <span class="kw">in</span> <span class="fu">eachindex</span>(model.subjectindices)</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(samplepaths[i])</span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(loglik_surrog[i])</span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(loglik_target_cur[i])</span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(loglik_target_prop[i])</span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(_logImportanceWeights[i])</span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(ImportanceWeights[i])</span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>        ess_cur[i] <span class="op">=</span> <span class="fl">0.0</span></span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>    <span class="cf">end</span></span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span>
+<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a><span class="co"># Lines 1396-1416: Draw more paths to meet new ESS target</span></span>
+<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a><span class="fu">DrawSamplePaths!</span>(samplepaths, loglik_target_cur, loglik_surrog, <span class="op">...</span>, params_cur, <span class="op">...</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What happens here</strong>: - If convergence uncertain (ascent_lb &lt; 0), increase ESS target - <strong>WITH FIX</strong>: Clear all arrays before resampling - <strong>WITHOUT FIX</strong>: Would append to existing arrays, causing accumulation - Resample paths using CURRENT parameters <code>params_cur</code> (which are now <code>params_prop</code> from M-step)</p>
+<hr>
+</section>
+</section>
+<section id="identified-issues" class="level2">
+<h2 class="anchored" data-anchor-id="identified-issues">IDENTIFIED ISSUES</h2>
+<section id="issue-1-path-array-accumulation-fixed" class="level3">
+<h3 class="anchored" data-anchor-id="issue-1-path-array-accumulation-fixed">Issue 1: Path Array Accumulation (FIXED)</h3>
+<p><strong>Problem</strong>: Without clearing arrays, paths accumulate across iterations.</p>
+<p><strong>Example Timeline</strong>: - Iteration 1: Sample 50 paths, ESS = 30 - Iteration 2: Parameters change, ESS target → 60, sample 60 MORE paths → 110 total - Iteration 3: Parameters change, ESS target → 120, sample 120 MORE paths → 230 total - For subjects with uniform weights, ESS ≈ number of paths → explosion</p>
+<p><strong>Fix Status</strong>: FIXED in lines 1376-1394</p>
+</section>
+<section id="issue-2-importance-weight-logic-needs-verification" class="level3">
+<h3 class="anchored" data-anchor-id="issue-2-importance-weight-logic-needs-verification">Issue 2: Importance Weight Logic (NEEDS VERIFICATION)</h3>
+<p><strong>Question</strong>: When we resample with increased ESS target, are weights computed correctly?</p>
+<p><strong>Current Logic</strong>: 1. Paths sampled at iteration k use parameters θ_k 2. At end of iteration k, we have: - <code>loglik_target_cur</code> = log p(paths | θ_k, data) - <code>loglik_surrog</code> = log q(paths | φ) - Weights = exp(loglik_target_cur - loglik_surrog)</p>
+<ol start="3" type="1">
+<li>In M-step of iteration k+1:
+<ul>
+<li>Optimize using weights from step 2 → get θ_{k+1}</li>
+<li>Compute <code>loglik_target_prop</code> = log p(SAME paths | θ_{k+1}, data)</li>
+<li>Recompute weights = exp(loglik_target_prop - loglik_surrog)</li>
+</ul></li>
+</ol>
+<p><strong>CONCERN</strong>: Are we double-counting or mixing weights from different parameter values?</p>
+<p><strong>Answer</strong>: NO, because: - Weights used in M-step are correct for iteration k - After M-step, weights are IMMEDIATELY recomputed using new likelihoods - Before next M-step, weights reflect current parameters</p>
+</section>
+<section id="issue-3-ess-computation-after-parameter-change" class="level3">
+<h3 class="anchored" data-anchor-id="issue-3-ess-computation-after-parameter-change">Issue 3: ESS Computation After Parameter Change</h3>
+<p><strong>Question</strong>: When parameters change but paths don’t, what happens to ESS?</p>
+<p><strong>Scenario</strong>: - Start iteration k: 50 paths, all with equal surrogate likelihood - If target model at θ_k assigns equal likelihood to all paths: - Importance weights all equal → ESS ≈ 50 - After M-step, parameters change to θ_{k+1} - If target model at θ_{k+1} STILL assigns equal likelihood: - Weights recomputed, still all equal → ESS STILL ≈ 50 - <strong>This could happen with Gompertz if parameter changes are small</strong></p>
+<p><strong>Is this a bug?</strong>: NO - it’s a sign that: - Either the data doesn’t distinguish between parameter values - Or the paths don’t cover the important regions of path space</p>
+</section>
+<section id="issue-4-path-sampling-after-ess-increase-potential-bug" class="level3">
+<h3 class="anchored" data-anchor-id="issue-4-path-sampling-after-ess-increase-potential-bug">Issue 4: Path Sampling After ESS Increase (POTENTIAL BUG)</h3>
+<p><strong>Question</strong>: When we clear arrays and resample, are we using correct parameters?</p>
+<p><strong>Current Code</strong> (lines 1396-1416):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">DrawSamplePaths!</span>(samplepaths, loglik_target_cur, loglik_surrog, <span class="op">...</span>, params_cur, <span class="op">...</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>CRITICAL CHECK</strong>: What are <code>params_cur</code> at this point? - Line 1328: <code>params_cur = deepcopy(params_prop)</code> - So <code>params_cur</code> = NEW parameters from M-step - This means: <strong>resample paths using NEW parameters to compute target likelihoods</strong></p>
+<p><strong>Is this correct?</strong>: - <strong>YES</strong> for importance sampling: we want paths that are informative for current parameters - Surrogate parameters φ never change (Markov proposal is fixed) - Target likelihoods computed at current best estimate θ_cur</p>
+<hr>
+</section>
+</section>
+<section id="next-steps" class="level2">
+<h2 class="anchored" data-anchor-id="next-steps">NEXT STEPS</h2>
+<ol type="1">
+<li>✅ Verify that <code>ComputeImportanceWeightsESS!</code> is called AFTER parameter updates
+<ul>
+<li><strong>CONFIRMED</strong>: Line 1333, after params_cur updated</li>
+</ul></li>
+<li>✅ Verify that importance weight formula is correct
+<ul>
+<li><strong>CONFIRMED</strong>: w_ij = p(path_ij | θ_new) / q(path_ij | φ)</li>
+</ul></li>
+<li>⏳ Investigate why Gompertz has uniform weights
+<ul>
+<li>Could be numerical issue with Gompertz likelihood evaluation</li>
+<li>Could be pathological parameter values during iterations</li>
+</ul></li>
+<li>⏳ Check if there’s an issue with HOW <code>DrawSamplePaths!</code> uses parameters
+<ul>
+<li>Does it correctly pass parameters to likelihood evaluation?</li>
+<li>Are there any caching issues?</li>
+</ul></li>
+<li>⏳ Verify the fix actually resolves the issue
+<ul>
+<li>Need to run tests with diagnostic output</li>
+</ul></li>
+</ol>
+<hr>
+</section>
+<section id="critical-bug-discovered" class="level2">
+<h2 class="anchored" data-anchor-id="critical-bug-discovered">CRITICAL BUG DISCOVERED</h2>
+<section id="location-srcsampling.jl-lines-139-142" class="level3">
+<h3 class="anchored" data-anchor-id="location-srcsampling.jl-lines-139-142">Location: <code>src/sampling.jl</code> lines 139-142</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Use nest_params for AD-compatible parameter access (returns log-scale params)</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>target_pars <span class="op">=</span> <span class="fu">nest_params</span>(params_cur, model.parameters)</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>loglik_target_cur[i][j] <span class="op">=</span> <span class="fu">loglik</span>(target_pars, samplepaths[i][j], model.hazards, model) </span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="the-problem" class="level3">
+<h3 class="anchored" data-anchor-id="the-problem">The Problem</h3>
+<p>When <code>DrawSamplePaths!</code> is called to sample NEW paths, it computes: - <code>loglik_target_cur[i][j]</code> using <code>params_cur</code></p>
+<p><strong>BUT</strong> after parameter update in MCEM iteration, we have:</p>
+<ol type="1">
+<li><p><strong>Line 1223</strong> of <code>modelfitting.jl</code>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">loglik!</span>(params_prop, loglik_target_prop, <span class="fu">SMPanelData</span>(model, samplepaths, ImportanceWeights))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li>This computes likelihoods for ALL EXISTING paths at NEW parameters</li>
+<li>Stores in <code>loglik_target_prop</code></li>
+</ul></li>
+<li><p><strong>Line 1328</strong> of <code>modelfitting.jl</code>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>loglik_target_cur <span class="op">=</span> <span class="fu">deepcopy</span>(loglik_target_prop)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li>Copies NEW parameter likelihoods to <code>loglik_target_cur</code></li>
+</ul></li>
+<li><p><strong>Line 1396-1416</strong>: When ESS target increases and we resample:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">DrawSamplePaths!</span>(samplepaths, loglik_target_cur, loglik_surrog, <span class="op">...</span>, params_cur, <span class="op">...</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div></li>
+</ol>
+</section>
+<section id="the-confusion" class="level3">
+<h3 class="anchored" data-anchor-id="the-confusion">The Confusion</h3>
+<p>At this point: - <code>loglik_target_cur</code> arrays contain likelihoods from <strong>after clearing</strong> (our fix empties them) - BUT the variable NAME suggests “current” parameters - The function computes new paths at <code>params_cur</code> and stores in <code>loglik_target_cur</code></p>
+</section>
+<section id="is-this-actually-a-bug" class="level3">
+<h3 class="anchored" data-anchor-id="is-this-actually-a-bug">Is This Actually a Bug?</h3>
+<p><strong>Let me trace more carefully</strong>:</p>
+<p>After our fix clears arrays (lines 1376-1394):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">empty!</span>(loglik_target_cur[i])</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="fu">empty!</span>(loglik_target_prop[i])</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>ess_cur[i] <span class="op">=</span> <span class="fl">0.0</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Then <code>DrawSamplePaths!</code> (line 1396-1416): - Samples new paths - Computes <code>loglik_target_cur[i][j] = loglik(params_cur, path_ij)</code> - Computes <code>loglik_surrog[i][j] = loglik(surrogate_params, path_ij)</code> - Computes weights = exp(loglik_target_cur - loglik_surrog)</p>
+<p>Then <code>ComputeImportanceWeightsESS!</code> is called at <strong>next iteration</strong> (line 1333): - Recomputes weights using EXISTING <code>loglik_target_cur</code> and <code>loglik_surrog</code></p>
+<p><strong>WAIT</strong> - let me check the order more carefully…</p>
+<hr>
+</section>
+</section>
+<section id="complete-iteration-sequence-verified" class="level2">
+<h2 class="anchored" data-anchor-id="complete-iteration-sequence-verified">COMPLETE ITERATION SEQUENCE (VERIFIED)</h2>
+<p>Let me walk through EXACTLY what happens in a single MCEM iteration, step by step, with concrete examples.</p>
+<section id="notation" class="level3">
+<h3 class="anchored" data-anchor-id="notation">Notation</h3>
+<ul>
+<li><code>i</code> = subject index (1 to n_subjects)</li>
+<li><code>j</code> = path index for subject i (1 to number of paths for that subject)</li>
+<li><code>θ</code> = target model parameters (what we’re trying to estimate)</li>
+<li><code>φ</code> = surrogate model parameters (fixed Markov exponential, never changes)</li>
+</ul>
+</section>
+<section id="data-structures" class="level3">
+<h3 class="anchored" data-anchor-id="data-structures">Data Structures</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="co"># For each subject i, we have VECTORS of paths and likelihoods:</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>samplepaths[i] <span class="op">=</span> [path_i1, path_i2, <span class="op">...</span>, path_iN]  <span class="co"># N paths for subject i</span></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>loglik_target_cur[i] <span class="op">=</span> [ll_i1, ll_i2, <span class="op">...</span>, ll_iN]  <span class="co"># target likelihoods</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>loglik_surrog[i] <span class="op">=</span> [lls_i1, lls_i2, <span class="op">...</span>, lls_iN]  <span class="co"># surrogate likelihoods</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>ImportanceWeights[i] <span class="op">=</span> [w_i1, w_i2, <span class="op">...</span>, w_iN]     <span class="co"># normalized weights</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="iteration-k-start" class="level3">
+<h3 class="anchored" data-anchor-id="iteration-k-start">Iteration k: START</h3>
+<p><strong>State when we enter the while loop</strong>: - <code>params_cur</code> = θₖ₋₁ (parameters from previous iteration, or initial values if k=1) - <code>loglik_target_cur[i][j]</code> = log p(path_ij | θₖ₋₁, data) - <code>loglik_surrog[i][j]</code> = log q(path_ij | φ) [computed once, NEVER changes] - <code>ImportanceWeights[i][j]</code> = exp(loglik_target_cur[i][j] - loglik_surrog[i][j]) / Σⱼ exp(…) - <code>ess_cur[i]</code> = effective sample size for subject i</p>
+</section>
+<section id="step-1-m-step-optimization-line-1215-1221" class="level3">
+<h3 class="anchored" data-anchor-id="step-1-m-step-optimization-line-1215-1221">Step 1: M-Step Optimization (Line 1215-1221)</h3>
+<p><strong>Code</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>params_prop_optim <span class="op">=</span> <span class="fu">solve</span>(<span class="fu">remake</span>(prob, u0 <span class="op">=</span> <span class="fu">Vector</span>(params_cur), </span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>                                 p <span class="op">=</span> <span class="fu">SMPanelData</span>(model, samplepaths, ImportanceWeights)))</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>params_prop <span class="op">=</span> params_prop_optim.u</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What the optimizer sees</strong>: - Current parameters: θₖ₋₁ - Sample paths: {path_ij} for all subjects i, paths j - Likelihoods: loglik_target_cur[i][j] = log p(path_ij | θₖ₋₁, data) - Weights: ImportanceWeights[i][j] (from previous iteration)</p>
+<p><strong>What the optimizer does</strong>: Finds θₖ that maximizes the weighted log-likelihood:</p>
+<pre><code>Q(θₖ | θₖ₋₁) = Σᵢ Σⱼ ImportanceWeights[i][j] × log p(path_ij | θₖ, data)</code></pre>
+<p><strong>Key point</strong>: The optimizer computes log p(path_ij | θₖ, data) internally during optimization, trying different values of θₖ until it finds the maximum.</p>
+<p><strong>Output</strong>: - <code>params_prop</code> = θₖ (candidate new parameters)</p>
+</section>
+<section id="step-2-evaluate-likelihoods-at-new-parameters-line-1223" class="level3">
+<h3 class="anchored" data-anchor-id="step-2-evaluate-likelihoods-at-new-parameters-line-1223">Step 2: Evaluate Likelihoods at New Parameters (Line 1223)</h3>
+<p><strong>Code</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb19"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="fu">loglik!</span>(params_prop, loglik_target_prop, <span class="fu">SMPanelData</span>(model, samplepaths, ImportanceWeights))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What happens</strong>: Takes the SAME paths from before and recomputes their likelihoods at the NEW parameters:</p>
+<pre><code>For each subject i:
+  For each path j:
+    loglik_target_prop[i][j] = log p(path_ij | θₖ, data)</code></pre>
+<p><strong>Example</strong> (subject 1 has 3 paths): - BEFORE: loglik_target_cur[1] = [-12.5, -13.1, -12.8] (at θₖ₋₁) - AFTER: loglik_target_prop[1] = [-11.2, -12.3, -11.5] (at θₖ) - Note: paths themselves haven’t changed, just the likelihoods</p>
+<p><strong>Key point</strong>: - <code>loglik_target_cur</code> still contains old likelihoods (at θₖ₋₁) - <code>loglik_target_prop</code> now contains new likelihoods (at θₖ) - This lets us compare Q(θₖ | θₖ₋₁) vs Q(θₖ₋₁ | θₖ₋₁)</p>
+</section>
+<section id="step-3-compute-marginal-log-likelihoods-lines-1226-1227" class="level3">
+<h3 class="anchored" data-anchor-id="step-3-compute-marginal-log-likelihoods-lines-1226-1227">Step 3: Compute Marginal Log-Likelihoods (Lines 1226-1227)</h3>
+<p><strong>Code</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb21"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>mll_cur  <span class="op">=</span> <span class="fu">mcem_mll</span>(loglik_target_cur , ImportanceWeights, model.SubjectWeights)</span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a>mll_prop <span class="op">=</span> <span class="fu">mcem_mll</span>(loglik_target_prop, ImportanceWeights, model.SubjectWeights)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What happens</strong>: Computes weighted averages:</p>
+<pre><code>mll_cur  = Σᵢ SubjectWeight[i] × Σⱼ ImportanceWeights[i][j] × loglik_target_cur[i][j]
+mll_prop = Σᵢ SubjectWeight[i] × Σⱼ ImportanceWeights[i][j] × loglik_target_prop[i][j]</code></pre>
+<p><strong>Concrete example</strong> (subject 1, 3 paths):</p>
+<pre><code>loglik_target_cur[1] = [-12.5, -13.1, -12.8]  (at θₖ₋₁)
+loglik_target_prop[1] = [-11.2, -12.3, -11.5]  (at θₖ)
+ImportanceWeights[1] = [0.4, 0.3, 0.3]
+
+mll_cur_subj1  = 0.4×(-12.5) + 0.3×(-13.1) + 0.3×(-12.8) = -12.77
+mll_prop_subj1 = 0.4×(-11.2) + 0.3×(-12.3) + 0.3×(-11.5) = -11.62
+
+Improvement = -11.62 - (-12.77) = +1.15  (log-likelihood increased!)</code></pre>
+<p><strong>Key point</strong>: We’re comparing the expected log-likelihood under the SAME importance weights, but at different parameter values. If mll_prop &gt; mll_cur, the new parameters are better.</p>
+</section>
+<section id="step-4-accept-new-parameters-line-1328-1330" class="level3">
+<h3 class="anchored" data-anchor-id="step-4-accept-new-parameters-line-1328-1330">Step 4: Accept New Parameters (Line 1328-1330)</h3>
+<p><strong>Code</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb24"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a>params_cur        <span class="op">=</span> <span class="fu">deepcopy</span>(params_prop)</span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>mll_cur           <span class="op">=</span> <span class="fu">deepcopy</span>(mll_prop)</span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a>loglik_target_cur <span class="op">=</span> <span class="fu">deepcopy</span>(loglik_target_prop)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What happens</strong>: Update our “current” state to reflect the accepted parameters:</p>
+<pre><code>θₖ₋₁ → θₖ  (params_cur now equals params_prop)</code></pre>
+<p><strong>Concrete state change</strong>: - BEFORE: loglik_target_cur[1] = [-12.5, -13.1, -12.8] (at θₖ₋₁) - AFTER: loglik_target_cur[1] = [-11.2, -12.3, -11.5] (at θₖ)</p>
+<p><strong>Key point</strong>: We’ve accepted the new parameters, and <code>loglik_target_cur</code> now contains likelihoods at θₖ (not θₖ₋₁ anymore). But we haven’t updated the WEIGHTS yet!</p>
+</section>
+<section id="step-5-recompute-importance-weights-line-1333-critical" class="level3">
+<h3 class="anchored" data-anchor-id="step-5-recompute-importance-weights-line-1333-critical">Step 5: RECOMPUTE IMPORTANCE WEIGHTS (Line 1333) ⚠️ CRITICAL</h3>
+<p><strong>Code</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb26"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ComputeImportanceWeightsESS!</span>(loglik_target_cur, loglik_surrog, _logImportanceWeights, </span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>                              ImportanceWeights, ess_cur, ess_target, psis_pareto_k)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What happens inside this function</strong> (<code>sampling.jl</code> lines 942-973):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb27"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> i <span class="kw">in</span> <span class="fu">eachindex</span>(loglik_surrog)</span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Step 5a: Compute unnormalized log importance weights</span></span>
+<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a>    _logImportanceWeights[i] <span class="op">=</span> loglik_target_cur[i] <span class="op">.-</span> loglik_surrog[i]</span>
+<span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb27-5"><a href="#cb27-5" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Step 5b: Apply Pareto-smoothed importance sampling (PSIS)</span></span>
+<span id="cb27-6"><a href="#cb27-6" aria-hidden="true" tabindex="-1"></a>    psiw <span class="op">=</span> ParetoSmooth.<span class="fu">psis</span>(<span class="fu">reshape</span>(<span class="fu">copy</span>(_logImportanceWeights[i]), <span class="op">...</span>))</span>
+<span id="cb27-7"><a href="#cb27-7" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb27-8"><a href="#cb27-8" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Step 5c: Store normalized weights and ESS</span></span>
+<span id="cb27-9"><a href="#cb27-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">copyto!</span>(ImportanceWeights[i], psiw.weights)</span>
+<span id="cb27-10"><a href="#cb27-10" aria-hidden="true" tabindex="-1"></a>    ess_cur[i] <span class="op">=</span> psiw.ess[<span class="fl">1</span>]</span>
+<span id="cb27-11"><a href="#cb27-11" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Concrete example</strong> (subject 1, continuing from before):</p>
+<pre><code># After Step 4:
+loglik_target_cur[1] = [-11.2, -12.3, -11.5]  (at θₖ, NEW)
+loglik_surrog[1]     = [-13.0, -13.0, -13.0]  (at φ, NEVER CHANGES)
+
+# Step 5a: Compute log importance weights
+_logImportanceWeights[1][1] = -11.2 - (-13.0) = 1.8
+_logImportanceWeights[1][2] = -12.3 - (-13.0) = 0.7  
+_logImportanceWeights[1][3] = -11.5 - (-13.0) = 1.5
+
+# Step 5b: Exponentiate (before normalization)
+raw_weights = [exp(1.8), exp(0.7), exp(1.5)] = [6.05, 2.01, 4.48]
+
+# Step 5c: Normalize (after PSIS smoothing)
+ImportanceWeights[1] = [6.05, 2.01, 4.48] / (6.05+2.01+4.48)
+                     = [0.48, 0.16, 0.36]
+
+# Compute ESS
+ESS = 1 / (0.48² + 0.16² + 0.36²) = 1 / 0.359 = 2.78</code></pre>
+<p><strong>CRITICAL INSIGHT</strong>: The importance weights are NOW based on: - Target likelihoods at NEW parameters θₖ - Surrogate likelihoods at FIXED parameters φ (never changes) - Formula: w_ij ∝ p(path_ij | θₖ, data) / q(path_ij | φ)</p>
+<p><strong>This is CORRECT</strong> because: - At the start of next iteration (k+1), we’ll use these weights for M-step - The M-step will maximize Σ w_ij × log p(path_ij | θₖ₊₁, data) - Where w_ij represents how important path_ij is under current model θₖ</p>
+</section>
+<section id="step-6-check-convergence-and-possibly-resample-lines-1360-1416" class="level3">
+<h3 class="anchored" data-anchor-id="step-6-check-convergence-and-possibly-resample-lines-1360-1416">Step 6: Check Convergence and Possibly Resample (Lines 1360-1416)</h3>
+<p><strong>Check 1: Did we converge?</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb29"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> ascent_ub <span class="op">&lt;</span> tol</span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a>    is_converged <span class="op">=</span> <span class="cn">true</span></span>
+<span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">break</span>  <span class="co"># Exit the MCEM loop</span></span>
+<span id="cb29-4"><a href="#cb29-4" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Check 2: Is convergence uncertain? Need more paths?</strong></p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb30"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> ascent_lb <span class="op">&lt;</span> <span class="fl">0</span></span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Lower bound of improvement is negative = uncertain if we improved</span></span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Solution: increase ESS target to get more paths</span></span>
+<span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a>    ess_target <span class="op">=</span> <span class="fu">ceil</span>(ess_increase <span class="op">*</span> ess_target)  <span class="co"># e.g., 30 → 60 → 120</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>WITHOUT OUR FIX</strong> (the bug):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb31"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Would just call DrawSamplePaths! which uses append!()</span></span>
+<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a>    <span class="co"># This ADDS new paths to existing ones</span></span>
+<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Example timeline:</span></span>
+<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Iteration 1: Have 50 paths, ESS = 30</span></span>
+<span id="cb31-6"><a href="#cb31-6" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Iteration 2: ESS target → 60, APPEND 60 more → 110 total paths</span></span>
+<span id="cb31-7"><a href="#cb31-7" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Iteration 3: ESS target → 120, APPEND 120 more → 230 total paths</span></span>
+<span id="cb31-8"><a href="#cb31-8" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Iteration 4: ESS target → 240, APPEND 240 more → 470 total paths</span></span>
+<span id="cb31-9"><a href="#cb31-9" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Result: PATH EXPLOSION to 600+</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>WITH OUR FIX</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb32"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Clear all arrays first!</span></span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> i <span class="kw">in</span> <span class="fu">eachindex</span>(model.subjectindices)</span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(samplepaths[i])</span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(loglik_surrog[i])</span>
+<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(loglik_target_cur[i])</span>
+<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(loglik_target_prop[i])</span>
+<span id="cb32-7"><a href="#cb32-7" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(_logImportanceWeights[i])</span>
+<span id="cb32-8"><a href="#cb32-8" aria-hidden="true" tabindex="-1"></a>        <span class="fu">empty!</span>(ImportanceWeights[i])</span>
+<span id="cb32-9"><a href="#cb32-9" aria-hidden="true" tabindex="-1"></a>        ess_cur[i] <span class="op">=</span> <span class="fl">0.0</span></span>
+<span id="cb32-10"><a href="#cb32-10" aria-hidden="true" tabindex="-1"></a>    <span class="cf">end</span></span>
+<span id="cb32-11"><a href="#cb32-11" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb32-12"><a href="#cb32-12" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Example timeline:</span></span>
+<span id="cb32-13"><a href="#cb32-13" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Iteration 1: Have 50 paths, ESS = 30</span></span>
+<span id="cb32-14"><a href="#cb32-14" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Iteration 2: CLEAR, then sample 60 NEW paths → 60 total</span></span>
+<span id="cb32-15"><a href="#cb32-15" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Iteration 3: CLEAR, then sample 120 NEW paths → 120 total</span></span>
+<span id="cb32-16"><a href="#cb32-16" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Iteration 4: CLEAR, then sample 240 NEW paths → 240 total</span></span>
+<span id="cb32-17"><a href="#cb32-17" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Result: Path count = ESS target (or less if weights non-uniform)</span></span>
+<span id="cb32-18"><a href="#cb32-18" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Then resample</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb33"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="fu">DrawSamplePaths!</span>(model; <span class="op">...</span>, params_cur <span class="op">=</span> params_cur, <span class="op">...</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What <code>DrawSamplePaths!</code> does</strong> (<code>sampling.jl</code> lines 110-142):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb34"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="co"># For each subject i:</span></span>
+<span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a><span class="cf">while</span> ess_cur[i] <span class="op">&lt;</span> ess_target</span>
+<span id="cb34-3"><a href="#cb34-3" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Sample new paths from surrogate (Markov proposal)</span></span>
+<span id="cb34-4"><a href="#cb34-4" aria-hidden="true" tabindex="-1"></a>    path_ij <span class="op">=</span> <span class="fu">draw_samplepath</span>(i, model, tpm_book_surrogate, <span class="op">...</span>)</span>
+<span id="cb34-5"><a href="#cb34-5" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb34-6"><a href="#cb34-6" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Compute surrogate log-likelihood (at fixed φ)</span></span>
+<span id="cb34-7"><a href="#cb34-7" aria-hidden="true" tabindex="-1"></a>    surrogate_pars <span class="op">=</span> <span class="fu">get_log_scale_params</span>(surrogate.parameters)</span>
+<span id="cb34-8"><a href="#cb34-8" aria-hidden="true" tabindex="-1"></a>    loglik_surrog[i][j] <span class="op">=</span> <span class="fu">loglik</span>(surrogate_pars, path_ij, surrogate.hazards, model)</span>
+<span id="cb34-9"><a href="#cb34-9" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb34-10"><a href="#cb34-10" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Compute target log-likelihood (at current θₖ)</span></span>
+<span id="cb34-11"><a href="#cb34-11" aria-hidden="true" tabindex="-1"></a>    target_pars <span class="op">=</span> <span class="fu">nest_params</span>(params_cur, model.parameters)</span>
+<span id="cb34-12"><a href="#cb34-12" aria-hidden="true" tabindex="-1"></a>    loglik_target_cur[i][j] <span class="op">=</span> <span class="fu">loglik</span>(target_pars, path_ij, model.hazards, model)</span>
+<span id="cb34-13"><a href="#cb34-13" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb34-14"><a href="#cb34-14" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Compute importance weight</span></span>
+<span id="cb34-15"><a href="#cb34-15" aria-hidden="true" tabindex="-1"></a>    _logImportanceWeights[i][j] <span class="op">=</span> loglik_target_cur[i][j] <span class="op">-</span> loglik_surrog[i][j]</span>
+<span id="cb34-16"><a href="#cb34-16" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb34-17"><a href="#cb34-17" aria-hidden="true" tabindex="-1"></a>    <span class="co"># After sampling enough paths, apply PSIS and compute ESS</span></span>
+<span id="cb34-18"><a href="#cb34-18" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Keep sampling until ess_cur[i] &gt;= ess_target</span></span>
+<span id="cb34-19"><a href="#cb34-19" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Key points</strong>: 1. <code>params_cur</code> at this point equals θₖ (the accepted parameters from Step 4) 2. New paths sampled from surrogate (which uses fixed parameters φ) 3. Likelihoods computed at CURRENT parameters θₖ 4. This is CORRECT: we want paths that are informative for our current best estimate</p>
+</section>
+<section id="iteration-k-end" class="level3">
+<h3 class="anchored" data-anchor-id="iteration-k-end">Iteration k: END</h3>
+<p><strong>State at end of iteration k</strong> (becomes starting state for k+1): - <code>params_cur</code> = θₖ (accepted parameters from M-step) - <code>loglik_target_cur[i][j]</code> = log p(path_ij | θₖ, data) - <code>loglik_surrog[i][j]</code> = log q(path_ij | φ) [NEVER CHANGES] - <code>ImportanceWeights[i][j]</code> = normalized weights based on θₖ vs φ - <code>ess_cur[i]</code> = effective sample size for subject i</p>
+<p><strong>Loop continues to iteration k+1, where the cycle repeats with these as the starting values…</strong></p>
+<hr>
+</section>
+</section>
+<section id="concrete-numerical-example-full-iteration" class="level2">
+<h2 class="anchored" data-anchor-id="concrete-numerical-example-full-iteration">CONCRETE NUMERICAL EXAMPLE: Full Iteration</h2>
+<p>Let’s trace ONE subject through ONE iteration with actual numbers.</p>
+<section id="setup" class="level3">
+<h3 class="anchored" data-anchor-id="setup">Setup</h3>
+<ul>
+<li>Subject 1 has 3 sampled paths</li>
+<li>Previous iteration parameters: θ₀ = [log_shape=0.5, log_scale=-2.0]</li>
+<li>Surrogate parameters: φ = [log_rate=-2.5] (exponential)</li>
+</ul>
+</section>
+<section id="start-of-iteration-1" class="level3">
+<h3 class="anchored" data-anchor-id="start-of-iteration-1">START of Iteration 1</h3>
+<p><strong>Paths and likelihoods</strong>:</p>
+<pre><code>samplepaths[1] = [path_1, path_2, path_3]
+
+loglik_target_cur[1] = [-12.5, -13.1, -12.8]  (at θ₀)
+loglik_surrog[1]     = [-13.0, -13.0, -13.0]  (at φ, all equal for Markov)
+
+_logImportanceWeights[1] = [-12.5-(-13.0), -13.1-(-13.0), -12.8-(-13.0)]
+                         = [0.5, -0.1, 0.2]
+
+ImportanceWeights[1] = normalize([exp(0.5), exp(-0.1), exp(0.2)])
+                     = normalize([1.65, 0.90, 1.22])
+                     = [0.44, 0.24, 0.32]
+
+ess_cur[1] = 1 / (0.44² + 0.24² + 0.32²) = 2.85</code></pre>
+</section>
+<section id="step-1-m-step" class="level3">
+<h3 class="anchored" data-anchor-id="step-1-m-step">Step 1: M-Step</h3>
+<p>Optimizer maximizes:</p>
+<pre><code>Q(θ | θ₀) = 0.44 × log p(path_1 | θ, data) 
+          + 0.24 × log p(path_2 | θ, data)
+          + 0.32 × log p(path_3 | θ, data)</code></pre>
+<p>Result: θ₁ = [log_shape=0.48, log_scale=-1.95]</p>
+</section>
+<section id="step-2-evaluate-at-new-parameters" class="level3">
+<h3 class="anchored" data-anchor-id="step-2-evaluate-at-new-parameters">Step 2: Evaluate at New Parameters</h3>
+<pre><code>loglik_target_prop[1] = [-11.8, -12.9, -12.0]  (at θ₁)</code></pre>
+</section>
+<section id="step-3-compute-mll" class="level3">
+<h3 class="anchored" data-anchor-id="step-3-compute-mll">Step 3: Compute MLL</h3>
+<pre><code>mll_cur  = 0.44×(-12.5) + 0.24×(-13.1) + 0.32×(-12.8) = -12.74
+mll_prop = 0.44×(-11.8) + 0.24×(-12.9) + 0.32×(-12.0) = -12.04
+
+Improvement = -12.04 - (-12.74) = +0.70  ✓ (log-lik increased)</code></pre>
+</section>
+<section id="step-4-accept-new-parameters-1" class="level3">
+<h3 class="anchored" data-anchor-id="step-4-accept-new-parameters-1">Step 4: Accept New Parameters</h3>
+<pre><code>params_cur = θ₁
+loglik_target_cur[1] = [-11.8, -12.9, -12.0]  (copied from loglik_target_prop)</code></pre>
+</section>
+<section id="step-5-recompute-weights" class="level3">
+<h3 class="anchored" data-anchor-id="step-5-recompute-weights">Step 5: Recompute Weights</h3>
+<pre><code>_logImportanceWeights[1] = [-11.8-(-13.0), -12.9-(-13.0), -12.0-(-13.0)]
+                         = [1.2, 0.1, 1.0]
+
+ImportanceWeights[1] = normalize([exp(1.2), exp(0.1), exp(1.0)])
+                     = normalize([3.32, 1.11, 2.72])
+                     = [0.47, 0.16, 0.37]
+
+ess_cur[1] = 1 / (0.47² + 0.16² + 0.37²) = 2.76</code></pre>
+</section>
+<section id="step-6-check-if-need-more-paths" class="level3">
+<h3 class="anchored" data-anchor-id="step-6-check-if-need-more-paths">Step 6: Check if Need More Paths</h3>
+<pre><code>ess_target = 30 (for example)
+ess_cur[1] = 2.76 &lt;&lt; 30
+
+→ ascent_lb probably &lt; 0 (uncertain convergence)
+→ Need more paths!
+→ ess_target increased to 60
+
+WITH FIX:
+  empty!(samplepaths[1])
+  empty!(loglik_target_cur[1])
+  empty!(loglik_surrog[1])
+  etc.
+  
+  Then DrawSamplePaths! samples 60 new paths at θ₁
+  
+WITHOUT FIX:
+  DrawSamplePaths! would APPEND 60 paths to existing 3
+  → 63 total paths (starting the accumulation)</code></pre>
+</section>
+<section id="end-of-iteration-1" class="level3">
+<h3 class="anchored" data-anchor-id="end-of-iteration-1">END of Iteration 1</h3>
+<p><strong>State</strong> (with fix):</p>
+<pre><code>samplepaths[1] = [new_path_1, ..., new_path_60]  (60 fresh paths)
+loglik_target_cur[1] = [ll_1, ..., ll_60]  (all at θ₁)
+loglik_surrog[1] = [lls_1, ..., lls_60]  (all at φ)
+ImportanceWeights[1] = [w_1, ..., w_60]  (normalized)
+ess_cur[1] ≈ 60 (or less if weights non-uniform)</code></pre>
+<p><strong>Iteration 2 would start with these 60 paths and repeat the cycle…</strong></p>
+<hr>
+</section>
+</section>
+<section id="algorithm-integrity-verdict" class="level2">
+<h2 class="anchored" data-anchor-id="algorithm-integrity-verdict">ALGORITHM INTEGRITY VERDICT</h2>
+<section id="correct-weight-recomputation" class="level3">
+<h3 class="anchored" data-anchor-id="correct-weight-recomputation">✅ CORRECT: Weight Recomputation</h3>
+<ul>
+<li>Weights ARE recomputed after every parameter update (Line 1333)</li>
+<li>Recomputation uses likelihoods at NEW parameters</li>
+<li>This is CORRECT importance sampling: w = f(x|θ_new) / g(x|φ)</li>
+</ul>
+</section>
+<section id="correct-parameter-handling" class="level3">
+<h3 class="anchored" data-anchor-id="correct-parameter-handling">✅ CORRECT: Parameter Handling</h3>
+<ul>
+<li>Parameters stored on log scale consistently</li>
+<li>Transformed to natural scale only within hazard functions</li>
+<li>No corruption during MCEM iterations</li>
+</ul>
+</section>
+<section id="correct-likelihood-evaluation" class="level3">
+<h3 class="anchored" data-anchor-id="correct-likelihood-evaluation">✅ CORRECT: Likelihood Evaluation</h3>
+<ul>
+<li><code>loglik_target_cur</code> always contains likelihoods at current accepted parameters</li>
+<li><code>loglik_surrog</code> never changes (correct, surrogate is fixed)</li>
+<li>Paths sampled at current parameters when ESS increases</li>
+</ul>
+</section>
+<section id="bug-path-array-accumulation" class="level3">
+<h3 class="anchored" data-anchor-id="bug-path-array-accumulation">❌ BUG: Path Array Accumulation</h3>
+<p><strong>Problem</strong>: Before our fix, arrays were never cleared when ESS target increased.</p>
+<p><strong>Timeline WITHOUT fix</strong>: - Iteration 1: Sample 50 paths at θ₁, ESS = 30 - Iteration 2: θ₂ accepted, ESS target → 60 - <code>DrawSamplePaths!</code> APPENDS 60 more paths → 110 total - But surrogate likelihoods ALL SAME (Markov exponential) - Target likelihoods computed at θ₂ for all 110 paths - If target likelihoods also similar → weights ≈ uniform → ESS ≈ 110 - Iteration 3: θ₃ accepted, ESS target → 120 - APPENDS 120 more → 230 total - ESS → 230 for uniform weights - Continue until 600+…</p>
+<p><strong>Timeline WITH fix</strong>: - Iteration 1: Sample 50 paths at θ₁, ESS = 30 - Iteration 2: θ₂ accepted, ESS target → 60 - <strong>CLEAR all arrays first</strong> - Sample 60 NEW paths at θ₂ - ESS = 60 (or less if weights non-uniform) - Iteration 3: θ₃ accepted, ESS target → 120 - <strong>CLEAR all arrays first</strong><br>
+- Sample 120 NEW paths at θ₃ - ESS = 120 (or less)</p>
+</section>
+<section id="remaining-concern-why-uniform-weights-in-gompertz" class="level3">
+<h3 class="anchored" data-anchor-id="remaining-concern-why-uniform-weights-in-gompertz">⚠️ REMAINING CONCERN: Why Uniform Weights in Gompertz?</h3>
+<p><strong>Question</strong>: Why do Gompertz scenarios produce uniform importance weights?</p>
+<p><strong>Possible reasons</strong>: 1. <strong>Surrogate is too good</strong>: Markov exponential approximates Gompertz well for this data - If exp(λt) ≈ λexp(αt) for small t or specific α, likelihoods similar</p>
+<ol start="2" type="1">
+<li><strong>Parameter values</strong>: During MCEM iterations, Gompertz parameters may reach values where hazard shape is nearly exponential
+<ul>
+<li>If shape parameter α ≈ 0, Gompertz → exponential</li>
+</ul></li>
+<li><strong>Data uninformative</strong>: Panel data with wide observation intervals may not distinguish between hazard shapes
+<ul>
+<li>If observations at [0,2,4,6,8,10,12,14], sojourn times poorly estimated</li>
+</ul></li>
+<li><strong>Numerical precision</strong>: If log-likelihoods differ by &lt; 10⁻¹⁰, weights appear uniform</li>
+</ol>
+<p><strong>This is NOT a bug</strong>: It’s a sign that: - Either the importance sampler is working well (surrogate matches target) - Or the data doesn’t provide strong information to distinguish paths - The path accumulation bug made this worse by accumulating to 600+ paths</p>
+<hr>
+</section>
+</section>
+<section id="final-summary" class="level2">
+<h2 class="anchored" data-anchor-id="final-summary">FINAL SUMMARY</h2>
+<section id="bug-status" class="level3">
+<h3 class="anchored" data-anchor-id="bug-status">Bug Status</h3>
+<ol type="1">
+<li><strong>Path Accumulation Bug</strong>: ✅ FIXED (lines 1376-1394 in <code>src/modelfitting.jl</code>)</li>
+<li><strong>Parameter Handling</strong>: ✅ NO BUG - verified correct throughout</li>
+<li><strong>Weight Recomputation</strong>: ✅ NO BUG - verified correct at line 1333</li>
+</ol>
+</section>
+<section id="algorithm-integrity-verified" class="level3">
+<h3 class="anchored" data-anchor-id="algorithm-integrity-verified">Algorithm Integrity: VERIFIED ✅</h3>
+<p>The MCEM algorithm logic is <strong>correct</strong>: - Parameters properly updated in M-step - Likelihoods recomputed at new parameters - Importance weights correctly updated after parameter changes - ESS adaptively increased when convergence uncertain</p>
+</section>
+<section id="root-cause-of-path-explosion" class="level3">
+<h3 class="anchored" data-anchor-id="root-cause-of-path-explosion">Root Cause of Path Explosion</h3>
+<p><strong>Primary cause</strong>: Path arrays never cleared before resampling when ESS target increased.</p>
+<p><strong>Exacerbating factors</strong> (not bugs, but explain severity): 1. Gompertz scenarios produce near-uniform importance weights 2. Uniform weights → ESS ≈ number of paths 3. Without clearing, paths accumulate: 50 → 110 → 230 → 470 → 600+ 4. Diagnostic warnings triggered at 600+ paths</p>
+</section>
+<section id="why-gompertz-specifically" class="level3">
+<h3 class="anchored" data-anchor-id="why-gompertz-specifically">Why Gompertz Specifically?</h3>
+<p><strong>Hypothesis</strong>: Markov exponential surrogate approximates Gompertz well for the test data configuration.</p>
+<p><strong>Evidence</strong>: - Surrogate log-likelihoods nearly identical across paths (same exponential sojourn dist) - Target log-likelihoods also similar (Gompertz ≈ exponential for certain parameters) - Result: importance weights ≈ uniform → ESS ≈ path count</p>
+<p><strong>This is NOT pathological</strong>: - It means importance sampler is efficient (small variance in weights) - BUT combined with path accumulation bug → explosion - After fix: uniform weights OK, just keep 120 paths instead of 600+</p>
+</section>
+<section id="verification-plan" class="level3">
+<h3 class="anchored" data-anchor-id="verification-plan">Verification Plan</h3>
+<p>The fix should be verified by: 1. Running <code>test/longtest_mcem.jl</code> with diagnostic wrapper 2. Confirming Gompertz test passes without exceeding 200 path cap 3. Monitoring ESS diagnostics: min/median/max should stay reasonable 4. Checking that path counts don’t exceed 2× ESS target</p>
+</section>
+<section id="code-quality-assessment" class="level3">
+<h3 class="anchored" data-anchor-id="code-quality-assessment">Code Quality Assessment</h3>
+<p><strong>Strengths</strong>: - Proper separation of concerns (sampling vs.&nbsp;weight computation) - AD-compatible parameter handling throughout - Defensive weight normalization (handles edge cases) - PSIS for robust weight estimation</p>
+<p><strong>Weakness identified</strong>: - Array management pattern using <code>append!</code> without clearing - Assumption that ESS target wouldn’t increase frequently enough to matter - No safeguards against unbounded path accumulation</p>
+<p><strong>Recommendation</strong>: - Add assertion: <code>@assert length(samplepaths[i]) ≤ 2 * ess_target</code> after resampling - Consider adding max_paths_per_subject as user-configurable parameter - Document that uniform weights are expected with good importance samplers</p>
+<hr>
+</section>
+</section>
+<section id="critical-insight-the-real-problem" class="level2">
+<h2 class="anchored" data-anchor-id="critical-insight-the-real-problem">CRITICAL INSIGHT: The Real Problem</h2>
+<p>You’re absolutely right - clearing arrays is inefficient and shouldn’t be necessary!</p>
+<section id="the-data-flow-problem" class="level3">
+<h3 class="anchored" data-anchor-id="the-data-flow-problem">The Data Flow Problem</h3>
+<p><strong>What happens when we call likelihood evaluation</strong>:</p>
+<ol type="1">
+<li><p><strong>In M-step</strong> (line 1215):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb43"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a><span class="fu">solve</span>(<span class="fu">remake</span>(prob, u0 <span class="op">=</span> params_cur, p <span class="op">=</span> <span class="fu">SMPanelData</span>(model, samplepaths, ImportanceWeights)))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li>Creates a NEW <code>SMPanelData</code> object</li>
+<li>This struct contains: <code>model</code>, <code>samplepaths</code>, <code>ImportanceWeights</code></li>
+<li><strong>These are REFERENCES to the arrays, not copies</strong></li>
+</ul></li>
+<li><p><strong>In likelihood evaluation</strong> (<code>loglik_semi_markov_batched!</code> lines 1420-1429):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb44"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Flatten paths for batched processing</span></span>
+<span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a>n_total_paths <span class="op">=</span> <span class="fu">sum</span>(<span class="fu">length</span>(ps) <span class="cf">for</span> ps <span class="kw">in</span> data.paths)</span>
+<span id="cb44-3"><a href="#cb44-3" aria-hidden="true" tabindex="-1"></a>flat_paths <span class="op">=</span> <span class="fu">Vector</span><span class="dt">{SamplePath}</span>(<span class="cn">undef</span>, n_total_paths)</span>
+<span id="cb44-4"><a href="#cb44-4" aria-hidden="true" tabindex="-1"></a><span class="op">...</span></span>
+<span id="cb44-5"><a href="#cb44-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Pre-cache all path DataFrames</span></span>
+<span id="cb44-6"><a href="#cb44-6" aria-hidden="true" tabindex="-1"></a>cached_paths <span class="op">=</span> <span class="fu">cache_path_data</span>(flat_paths, data.model)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li>Computes <code>n_total_paths</code> from CURRENT state of <code>data.paths</code></li>
+<li>Creates <code>flat_paths</code> array of that size</li>
+<li>Calls <code>cache_path_data</code> which converts paths to DataFrames</li>
+</ul></li>
+</ol>
+</section>
+<section id="the-bug-scenario-without-our-fix" class="level3">
+<h3 class="anchored" data-anchor-id="the-bug-scenario-without-our-fix">The Bug Scenario (WITHOUT our “fix”)</h3>
+<p><strong>Iteration 1</strong>: - Have 50 paths per subject - <code>SMPanelData</code> created with these 50 paths - Likelihood evaluated correctly</p>
+<p><strong>Iteration 2</strong> (ascent_lb &lt; 0, ESS target increases): - <code>DrawSamplePaths!</code> APPENDS 60 more paths → 110 total - BUT the <code>SMPanelData</code> object created in iteration 1 is STALE - Next M-step creates NEW <code>SMPanelData</code> with 110 paths - Likelihood computation sees 110 paths and processes them</p>
+<p><strong>Wait, that should work…</strong></p>
+<p>Let me check if there’s caching at a different level. Is there a global cache or are paths being reused incorrectly?</p>
+<p>Actually, I think the issue is more subtle. Let me check <code>ComputeImportanceWeightsESS!</code> again:</p>
+<hr>
+</section>
+</section>
+<section id="the-real-bug-found" class="level2">
+<h2 class="anchored" data-anchor-id="the-real-bug-found">THE REAL BUG FOUND! 🎯</h2>
+<section id="location-srcsampling.jl-lines-951-953" class="level3">
+<h3 class="anchored" data-anchor-id="location-srcsampling.jl-lines-951-953">Location: <code>src/sampling.jl</code> lines 951-953</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb45"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="fu">all</span>(<span class="fu">isapprox</span>.(_logImportanceWeights[i], <span class="fl">0.0</span>; atol <span class="op">=</span> <span class="fu">sqrt</span>(<span class="fu">eps</span>())))</span>
+<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a>    <span class="fu">fill!</span>(ImportanceWeights[i], <span class="fl">1</span><span class="op">/</span><span class="fu">length</span>(ImportanceWeights[i]))</span>
+<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a>    ess_cur[i] <span class="op">=</span> ess_target  <span class="co"># ← </span><span class="al">BUG</span><span class="co">: Should be length(ImportanceWeights[i])</span></span>
+<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a>    psis_pareto_k[i] <span class="op">=</span> <span class="fl">0.0</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="the-problem-1" class="level3">
+<h3 class="anchored" data-anchor-id="the-problem-1">The Problem</h3>
+<p>When log importance weights are all ≈ 0 (target ≈ surrogate), the code: 1. Correctly sets all weights to be uniform: <code>1/N</code> where N = number of paths 2. <strong>INCORRECTLY</strong> sets <code>ess_cur[i] = ess_target</code> instead of actual path count</p>
+<p><strong>For uniform weights, ESS = N (number of paths), NOT ess_target!</strong></p>
+</section>
+<section id="why-this-causes-path-explosion" class="level3">
+<h3 class="anchored" data-anchor-id="why-this-causes-path-explosion">Why This Causes Path Explosion</h3>
+<p><strong>Scenario</strong>: Subject has uniform importance weights</p>
+<p><strong>Iteration 1</strong>: - Target ESS = 30 - Sample 50 paths (to ensure PSIS works) - All weights uniform → <code>ess_cur[i] = 30</code> (WRONG! should be 50) - Check: <code>ess_cur[i] &lt; ess_target</code> → <code>30 &lt; 30</code> → FALSE - Stop sampling (incorrectly think we have enough)</p>
+<p><strong>Iteration 2</strong> (ascent_lb &lt; 0): - ESS target increases to 60 - Check existing ESS: <code>ess_cur[i] = 30</code> (from line 953 in iteration 1) - Check: <code>ess_cur[i] &lt; ess_target</code> → <code>30 &lt; 60</code> → TRUE - <code>DrawSamplePaths!</code> APPENDS more paths to reach ESS of 60 - But we already had 50 paths! Now we have 50 + (enough to reach 60)</p>
+<p><strong>Wait, that’s not quite right either…</strong></p>
+<p>Let me look at the loop in <code>DrawSamplePaths!</code> more carefully:</p>
+</section>
+<section id="comparison-of-two-functions" class="level3">
+<h3 class="anchored" data-anchor-id="comparison-of-two-functions">Comparison of Two Functions</h3>
+<p><strong>In <code>DrawSamplePaths!</code></strong> (lines 160-161):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb46"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="fu">all</span>(<span class="fu">iszero</span>.(_logImportanceWeights[i]))</span>
+<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a>    <span class="fu">fill!</span>(ImportanceWeights[i], <span class="fl">1</span><span class="op">/</span><span class="fu">length</span>(ImportanceWeights[i]))</span>
+<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a>    ess_cur[i] <span class="op">=</span> <span class="fu">length</span>(ImportanceWeights[i])  <span class="co"># ← CORRECT!</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>In <code>ComputeImportanceWeightsESS!</code></strong> (lines 951-953):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb47"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="fu">all</span>(<span class="fu">isapprox</span>.(_logImportanceWeights[i], <span class="fl">0.0</span>; atol <span class="op">=</span> <span class="fu">sqrt</span>(<span class="fu">eps</span>())))</span>
+<span id="cb47-2"><a href="#cb47-2" aria-hidden="true" tabindex="-1"></a>    <span class="fu">fill!</span>(ImportanceWeights[i], <span class="fl">1</span><span class="op">/</span><span class="fu">length</span>(ImportanceWeights[i]))</span>
+<span id="cb47-3"><a href="#cb47-3" aria-hidden="true" tabindex="-1"></a>    ess_cur[i] <span class="op">=</span> ess_target  <span class="co"># ← WRONG! Should be length(ImportanceWeights[i])</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="the-bug-inconsistent-ess-assignment" class="level3">
+<h3 class="anchored" data-anchor-id="the-bug-inconsistent-ess-assignment">THE BUG: Inconsistent ESS Assignment</h3>
+<p>These two functions handle the same case (uniform weights) but assign <strong>different ESS values</strong>!</p>
+<ul>
+<li><code>DrawSamplePaths!</code>: Correctly sets ESS = actual path count</li>
+<li><code>ComputeImportanceWeightsESS!</code>: <strong>Incorrectly</strong> sets ESS = target (not actual)</li>
+</ul>
+</section>
+<section id="why-this-causes-path-explosion-1" class="level3">
+<h3 class="anchored" data-anchor-id="why-this-causes-path-explosion-1">Why This Causes Path Explosion</h3>
+<p><strong>Timeline with uniform weights (e.g., Gompertz scenarios)</strong>:</p>
+<p><strong>Iteration 1</strong>: 1. <code>DrawSamplePaths!</code> samples 50 paths (initial) 2. All weights uniform → sets <code>ess_cur[i] = 50</code> ✓ 3. End of iteration: <code>ComputeImportanceWeightsESS!</code> called (line 1333) 4. Weights still uniform → <strong>overwrites</strong> <code>ess_cur[i] = 30</code> (ess_target) ✗ 5. <strong>Now we think we only have ESS of 30, but actually have 50 paths!</strong></p>
+<p><strong>Iteration 2</strong> (ascent_lb &lt; 0, ESS target → 60): 1. Check: <code>ess_cur[i] &lt; ess_target</code> → <code>30 &lt; 60</code> → TRUE (but we actually have 50 paths!) 2. <code>DrawSamplePaths!</code> enters while loop: <code>keep_sampling = true</code> 3. Checks <code>length(samplepaths[i])</code> = 50 paths 4. Adds <code>n_add</code> more paths (calculation depends on logic) 5. After adding, recomputes weights - still uniform 6. Sets <code>ess_cur[i] = 50 + n_add</code> ✓ 7. Loop continues until <code>ess_cur[i] &gt;= 60</code> 8. End result: ~60-70 paths total</p>
+<p><strong>Iteration 3</strong> (ascent_lb &lt; 0, ESS target → 120): 1. End of iteration 2: <code>ComputeImportanceWeightsESS!</code> overwrites <code>ess_cur[i] = 60</code> ✗ 2. But we actually have ~70 paths! 3. <code>DrawSamplePaths!</code> thinks it needs more, APPENDS to reach 120 4. Now have 70 + 50 = 120 paths</p>
+<p><strong>Continue this pattern…</strong> - Iteration 4: 120 paths, ESS recorded as 120, target → 240 - <code>ComputeImportanceWeightsESS!</code> might correctly compute ESS ≈ 120 - But then APPENDS 120 more → 240 paths - Iteration 5: 240 paths → APPENDS 240 more → 480 paths - Iteration 6: 480 paths → APPENDS 120+ more → 600+ paths!</p>
+</section>
+<section id="root-cause-summary" class="level3">
+<h3 class="anchored" data-anchor-id="root-cause-summary">Root Cause Summary</h3>
+<p><strong>The bug is NOT the appending itself</strong> - appending is necessary when ESS truly &lt; target.</p>
+<p><strong>The bug IS</strong>: 1. <code>ComputeImportanceWeightsESS!</code> incorrectly reports ESS for uniform weights 2. This makes the algorithm think it needs more paths than it does 3. Each iteration APPENDs paths instead of recognizing ESS is already sufficient 4. With uniform weights common in Gompertz, accumulation is inevitable</p>
+</section>
+<section id="the-correct-fix" class="level3">
+<h3 class="anchored" data-anchor-id="the-correct-fix">The Correct Fix</h3>
+<p><strong>Option 1</strong>: Fix <code>ComputeImportanceWeightsESS!</code> line 952:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb48"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb48-1"><a href="#cb48-1" aria-hidden="true" tabindex="-1"></a><span class="co"># BEFORE:</span></span>
+<span id="cb48-2"><a href="#cb48-2" aria-hidden="true" tabindex="-1"></a>ess_cur[i] <span class="op">=</span> ess_target</span>
+<span id="cb48-3"><a href="#cb48-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb48-4"><a href="#cb48-4" aria-hidden="true" tabindex="-1"></a><span class="co"># AFTER:</span></span>
+<span id="cb48-5"><a href="#cb48-5" aria-hidden="true" tabindex="-1"></a>ess_cur[i] <span class="op">=</span> <span class="fu">Float64</span>(<span class="fu">length</span>(ImportanceWeights[i]))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Option 2</strong> (what we did): Clear arrays when ESS target increases - This works but is inefficient - Resamples from scratch instead of just stopping when enough paths</p>
+<p><strong>Option 3</strong>: Both fixes - Fix the ESS computation AND clear arrays - Most robust but still inefficient</p>
+</section>
+<section id="correct-fix-implemented" class="level3">
+<h3 class="anchored" data-anchor-id="correct-fix-implemented">CORRECT FIX IMPLEMENTED</h3>
+<p><strong>Changed line 952 in <code>src/sampling.jl</code></strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb49"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a><span class="co"># BEFORE:</span></span>
+<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a>ess_cur[i] <span class="op">=</span> ess_target</span>
+<span id="cb49-3"><a href="#cb49-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb49-4"><a href="#cb49-4" aria-hidden="true" tabindex="-1"></a><span class="co"># AFTER:</span></span>
+<span id="cb49-5"><a href="#cb49-5" aria-hidden="true" tabindex="-1"></a>ess_cur[i] <span class="op">=</span> <span class="fu">Float64</span>(<span class="fu">length</span>(ImportanceWeights[i]))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Removed clearing code from <code>src/modelfitting.jl</code></strong> lines 1376-1394: - No longer needed - paths won’t accumulate - More efficient - reuses existing paths when ESS sufficient</p>
+</section>
+<section id="why-this-fix-works" class="level3">
+<h3 class="anchored" data-anchor-id="why-this-fix-works">Why This Fix Works</h3>
+<p><strong>With uniform importance weights</strong>: - Path count = N - All weights = 1/N - ESS = 1 / Σ(1/N)² = 1 / (N × 1/N²) = N ✓ - Algorithm correctly recognizes ESS = N - Only samples more if N &lt; ess_target - No path explosion!</p>
+<hr>
+</section>
+</section>
+<section id="detailed-data-structure-analysis" class="level2">
+<h2 class="anchored" data-anchor-id="detailed-data-structure-analysis">DETAILED DATA STRUCTURE ANALYSIS</h2>
+<section id="core-data-structures" class="level3">
+<h3 class="anchored" data-anchor-id="core-data-structures">Core Data Structures</h3>
+<section id="samplepath-immutable-struct" class="level4">
+<h4 class="anchored" data-anchor-id="samplepath-immutable-struct">1. <code>SamplePath</code> (immutable struct)</h4>
+<p><strong>Location</strong>: <code>src/common.jl</code> lines 885-889</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb50"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> SamplePath</span>
+<span id="cb50-2"><a href="#cb50-2" aria-hidden="true" tabindex="-1"></a>    subj<span class="op">::</span><span class="dt">Int64              </span><span class="co"># Subject ID</span></span>
+<span id="cb50-3"><a href="#cb50-3" aria-hidden="true" tabindex="-1"></a>    times<span class="op">::</span><span class="dt">Vector{Float64}   </span><span class="co"># Jump times [t0, t1, t2, ..., tN]</span></span>
+<span id="cb50-4"><a href="#cb50-4" aria-hidden="true" tabindex="-1"></a>    states<span class="op">::</span><span class="dt">Vector{Int64}    </span><span class="co"># State sequence [s0, s1, s2, ..., sN]</span></span>
+<span id="cb50-5"><a href="#cb50-5" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Key properties</strong>: - Immutable - once created, never modified - Represents a complete trajectory through state space - <code>times[1]</code> = observation start, <code>times[end]</code> = observation end - <code>states[i]</code> = state occupied at <code>times[i]</code> - Does NOT contain covariates (those are in model.data)</p>
+</section>
+<section id="storage-arrays-mutable-modified-throughout-mcem" class="level4">
+<h4 class="anchored" data-anchor-id="storage-arrays-mutable-modified-throughout-mcem">2. Storage Arrays (mutable, modified throughout MCEM)</h4>
+<p><strong>Location</strong>: <code>src/modelfitting.jl</code> lines 1100-1137</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb51"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a><span class="co"># For each subject i:</span></span>
+<span id="cb51-2"><a href="#cb51-2" aria-hidden="true" tabindex="-1"></a>samplepaths[i] <span class="op">=</span> <span class="fu">Vector</span><span class="dt">{SamplePath}</span>()         <span class="co"># Paths for subject i</span></span>
+<span id="cb51-3"><a href="#cb51-3" aria-hidden="true" tabindex="-1"></a>loglik_target_cur[i] <span class="op">=</span> <span class="fu">Vector</span><span class="dt">{Float64}</span>()      <span class="co"># Target log-likelihoods</span></span>
+<span id="cb51-4"><a href="#cb51-4" aria-hidden="true" tabindex="-1"></a>loglik_surrog[i] <span class="op">=</span> <span class="fu">Vector</span><span class="dt">{Float64}</span>()          <span class="co"># Surrogate log-likelihoods</span></span>
+<span id="cb51-5"><a href="#cb51-5" aria-hidden="true" tabindex="-1"></a>ImportanceWeights[i] <span class="op">=</span> <span class="fu">Vector</span><span class="dt">{Float64}</span>()      <span class="co"># Normalized weights</span></span>
+<span id="cb51-6"><a href="#cb51-6" aria-hidden="true" tabindex="-1"></a>_logImportanceWeights[i] <span class="op">=</span> <span class="fu">Vector</span><span class="dt">{Float64}</span>()  <span class="co"># Log unnormalized weights</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What gets modified</strong>: - In <code>DrawSamplePaths!</code>: <code>append!()</code> adds new paths and likelihoods - In <code>ComputeImportanceWeightsESS!</code>: Weights recomputed in-place - In MCEM loop after M-step: <code>loglik_target_cur</code> and <code>loglik_target_prop</code> overwritten</p>
+</section>
+<section id="smpaneldata-immutable-container" class="level4">
+<h4 class="anchored" data-anchor-id="smpaneldata-immutable-container">3. <code>SMPanelData</code> (immutable container)</h4>
+<p><strong>Location</strong>: <code>src/common.jl</code> lines 957-962</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb52"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> SMPanelData</span>
+<span id="cb52-2"><a href="#cb52-2" aria-hidden="true" tabindex="-1"></a>    model<span class="op">::</span><span class="dt">MultistateProcess         </span><span class="co"># Model with data, hazards, parameters</span></span>
+<span id="cb52-3"><a href="#cb52-3" aria-hidden="true" tabindex="-1"></a>    paths<span class="op">::</span><span class="dt">Vector{Vector{SamplePath}} </span><span class="co"># Reference to samplepaths array</span></span>
+<span id="cb52-4"><a href="#cb52-4" aria-hidden="true" tabindex="-1"></a>    ImportanceWeights<span class="op">::</span><span class="dt">Vector{Vector{Float64}}  </span><span class="co"># Reference to weights array</span></span>
+<span id="cb52-5"><a href="#cb52-5" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Key insight</strong>: This struct contains REFERENCES, not copies! - When you modify <code>samplepaths[i]</code>, ALL <code>SMPanelData</code> objects see the change - New <code>SMPanelData</code> created each M-step, but references same underlying arrays</p>
+</section>
+<section id="original-subject-data-never-modified" class="level4">
+<h4 class="anchored" data-anchor-id="original-subject-data-never-modified">4. Original Subject Data (never modified)</h4>
+<p><strong>Location</strong>: <code>model.data</code> DataFrame with columns:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb53"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="op">:</span>id            <span class="co"># Subject identifier</span></span>
+<span id="cb53-2"><a href="#cb53-2" aria-hidden="true" tabindex="-1"></a><span class="op">:</span>tstart        <span class="co"># Interval start time</span></span>
+<span id="cb53-3"><a href="#cb53-3" aria-hidden="true" tabindex="-1"></a><span class="op">:</span>tstop         <span class="co"># Interval stop time</span></span>
+<span id="cb53-4"><a href="#cb53-4" aria-hidden="true" tabindex="-1"></a><span class="op">:</span>statefrom     <span class="co"># State at tstart (or missing if unknown)</span></span>
+<span id="cb53-5"><a href="#cb53-5" aria-hidden="true" tabindex="-1"></a><span class="op">:</span>stateto       <span class="co"># State at tstop (or missing if unknown)</span></span>
+<span id="cb53-6"><a href="#cb53-6" aria-hidden="true" tabindex="-1"></a><span class="op">:</span>obstype       <span class="co"># 1=exact, 2=right-censored, 3=panel/interval-censored</span></span>
+<span id="cb53-7"><a href="#cb53-7" aria-hidden="true" tabindex="-1"></a><span class="op">:</span>covar1        <span class="co"># Covariate 1 (time-varying, constant within intervals)</span></span>
+<span id="cb53-8"><a href="#cb53-8" aria-hidden="true" tabindex="-1"></a><span class="op">:</span>covar2        <span class="co"># Covariate 2</span></span>
+<span id="cb53-9"><a href="#cb53-9" aria-hidden="true" tabindex="-1"></a><span class="op">...</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Key properties</strong>: - NEVER modified during MCEM - Contains subject-specific covariate trajectories - Indexed by <code>model.subjectindices[i]</code> for subject i - Covariates can be time-varying (different values in different rows for same subject)</p>
+</section>
+</section>
+<section id="data-flow-for-likelihood-evaluation" class="level3">
+<h3 class="anchored" data-anchor-id="data-flow-for-likelihood-evaluation">Data Flow for Likelihood Evaluation</h3>
+<section id="step-1-path-sampling-drawsamplepaths" class="level4">
+<h4 class="anchored" data-anchor-id="step-1-path-sampling-drawsamplepaths">Step 1: Path Sampling (<code>DrawSamplePaths!</code>)</h4>
+<p><strong>Input</strong>: Subject’s observation data from <code>model.data</code> <strong>Process</strong>: Forward-filtering backward-sampling (FFBS) from Markov surrogate <strong>Output</strong>: New <code>SamplePath</code> objects stored in <code>samplepaths[i]</code></p>
+<p><strong>Example for subject 1</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb54"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Subject 1's data (2 panel observations)</span></span>
+<span id="cb54-2"><a href="#cb54-2" aria-hidden="true" tabindex="-1"></a>model.data[subjectindices[<span class="fl">1</span>], <span class="op">:</span>] <span class="op">=</span> </span>
+<span id="cb54-3"><a href="#cb54-3" aria-hidden="true" tabindex="-1"></a>│ id │ tstart │ tstop │ statefrom │ stateto │ covar1 │</span>
+<span id="cb54-4"><a href="#cb54-4" aria-hidden="true" tabindex="-1"></a>│  <span class="fl">1</span> │   <span class="fl">0.0</span>  │  <span class="fl">5.0</span>  │  <span class="cn">missing</span>  │ <span class="cn">missing</span> │  <span class="fl">1.2</span>   │</span>
+<span id="cb54-5"><a href="#cb54-5" aria-hidden="true" tabindex="-1"></a>│  <span class="fl">1</span> │   <span class="fl">5.0</span>  │ <span class="fl">10.0</span>  │  <span class="cn">missing</span>  │ <span class="cn">missing</span> │  <span class="fl">0.8</span>   │</span>
+<span id="cb54-6"><a href="#cb54-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb54-7"><a href="#cb54-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Sampled path (transitions 1→2→3):</span></span>
+<span id="cb54-8"><a href="#cb54-8" aria-hidden="true" tabindex="-1"></a>path <span class="op">=</span> <span class="fu">SamplePath</span>(</span>
+<span id="cb54-9"><a href="#cb54-9" aria-hidden="true" tabindex="-1"></a>    subj <span class="op">=</span> <span class="fl">1</span>,</span>
+<span id="cb54-10"><a href="#cb54-10" aria-hidden="true" tabindex="-1"></a>    times <span class="op">=</span> [<span class="fl">0.0</span>, <span class="fl">2.3</span>, <span class="fl">7.1</span>, <span class="fl">10.0</span>],  <span class="co"># Jump times</span></span>
+<span id="cb54-11"><a href="#cb54-11" aria-hidden="true" tabindex="-1"></a>    states <span class="op">=</span> [<span class="fl">1</span>, <span class="fl">2</span>, <span class="fl">2</span>, <span class="fl">3</span>]             <span class="co"># States at those times</span></span>
+<span id="cb54-12"><a href="#cb54-12" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="step-2-convert-path-to-dataframe-make_subjdat" class="level4">
+<h4 class="anchored" data-anchor-id="step-2-convert-path-to-dataframe-make_subjdat">Step 2: Convert Path to DataFrame (<code>make_subjdat</code>)</h4>
+<p><strong>Location</strong>: <code>src/helpers.jl</code> lines 1038-1088 <strong>Called in</strong>: Likelihood evaluation functions</p>
+<p><strong>Process</strong>: 1. Merge path jump times with covariate change times 2. For each interval, lookup covariates from <code>model.data</code> 3. Compute sojourn times (time since entering current state) 4. Create DataFrame with likelihood evaluation intervals</p>
+<p><strong>Continuing example</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb55"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a>subjdat_df <span class="op">=</span> <span class="fu">make_subjdat</span>(path, <span class="fu">view</span>(model.data, subjectindices[<span class="fl">1</span>], <span class="op">:</span>))</span>
+<span id="cb55-2"><a href="#cb55-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb55-3"><a href="#cb55-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Result:</span></span>
+<span id="cb55-4"><a href="#cb55-4" aria-hidden="true" tabindex="-1"></a>│ tstart │ tstop │ increment │ sojourn │ statefrom │ stateto │ covar1 │</span>
+<span id="cb55-5"><a href="#cb55-5" aria-hidden="true" tabindex="-1"></a>│  <span class="fl">0.0</span>   │  <span class="fl">2.3</span>  │   <span class="fl">2.3</span>     │   <span class="fl">0.0</span>   │    <span class="fl">1</span>      │    <span class="fl">2</span>    │  <span class="fl">1.2</span>   │</span>
+<span id="cb55-6"><a href="#cb55-6" aria-hidden="true" tabindex="-1"></a>│  <span class="fl">2.3</span>   │  <span class="fl">5.0</span>  │   <span class="fl">2.7</span>     │   <span class="fl">0.0</span>   │    <span class="fl">2</span>      │    <span class="fl">2</span>    │  <span class="fl">1.2</span>   │</span>
+<span id="cb55-7"><a href="#cb55-7" aria-hidden="true" tabindex="-1"></a>│  <span class="fl">5.0</span>   │  <span class="fl">7.1</span>  │   <span class="fl">2.1</span>     │   <span class="fl">2.7</span>   │    <span class="fl">2</span>      │    <span class="fl">2</span>    │  <span class="fl">0.8</span>   │  <span class="op">←</span> covar changed at t<span class="op">=</span><span class="fl">5</span></span>
+<span id="cb55-8"><a href="#cb55-8" aria-hidden="true" tabindex="-1"></a>│  <span class="fl">7.1</span>   │ <span class="fl">10.0</span>  │   <span class="fl">2.9</span>     │   <span class="fl">0.0</span>   │    <span class="fl">2</span>      │    <span class="fl">3</span>    │  <span class="fl">0.8</span>   │</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Key insight</strong>: Covariates are looked up from original <code>model.data</code> based on times in the path!</p>
+</section>
+<section id="step-3-likelihood-evaluation" class="level4">
+<h4 class="anchored" data-anchor-id="step-3-likelihood-evaluation">Step 3: Likelihood Evaluation</h4>
+<p><strong>Input</strong>: - <code>params</code> (parameters at which to evaluate) - <code>subjdat_df</code> (from Step 2) - <code>model.hazards</code> (hazard function objects)</p>
+<p><strong>Process</strong>: For each row in <code>subjdat_df</code>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb56"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Survival probability over interval</span></span>
+<span id="cb56-2"><a href="#cb56-2" aria-hidden="true" tabindex="-1"></a>ll <span class="op">+=</span> <span class="fu">survprob</span>(sojourn, sojourn <span class="op">+</span> increment, params, row_covariates, totalhazard)</span>
+<span id="cb56-3"><a href="#cb56-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb56-4"><a href="#cb56-4" aria-hidden="true" tabindex="-1"></a><span class="co"># If transition occurred, add hazard</span></span>
+<span id="cb56-5"><a href="#cb56-5" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> statefrom <span class="op">!=</span> stateto</span>
+<span id="cb56-6"><a href="#cb56-6" aria-hidden="true" tabindex="-1"></a>    ll <span class="op">+=</span> <span class="fu">log</span>(<span class="fu">hazard</span>(sojourn <span class="op">+</span> increment, params, row_covariates))</span>
+<span id="cb56-7"><a href="#cb56-7" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Output</strong>: Single scalar <code>loglik_target_cur[i][j]</code> for path j of subject i</p>
+</section>
+</section>
+<section id="what-gets-updated-during-mcem" class="level3">
+<h3 class="anchored" data-anchor-id="what-gets-updated-during-mcem">What Gets Updated During MCEM?</h3>
+<section id="always-updated-every-iteration-after-m-step" class="level4">
+<h4 class="anchored" data-anchor-id="always-updated-every-iteration-after-m-step">✅ ALWAYS Updated (every iteration after M-step):</h4>
+<ol type="1">
+<li><strong>Parameters</strong> (<code>params_cur</code>):
+<ul>
+<li>Line 1328: <code>params_cur = deepcopy(params_prop)</code></li>
+<li>These are passed to hazard evaluation</li>
+</ul></li>
+<li><strong>Target log-likelihoods</strong> (<code>loglik_target_cur</code>, <code>loglik_target_prop</code>):
+<ul>
+<li>Line 1223: <code>loglik!(params_prop, loglik_target_prop, ...)</code></li>
+<li>Recomputes likelihoods for all paths at NEW parameters</li>
+<li>Line 1330: <code>loglik_target_cur = deepcopy(loglik_target_prop)</code></li>
+</ul></li>
+<li><strong>Importance weights</strong> (<code>ImportanceWeights</code>):
+<ul>
+<li>Line 1333: <code>ComputeImportanceWeightsESS!(...)</code></li>
+<li>Recomputes weights using NEW target likelihoods</li>
+</ul></li>
+</ol>
+</section>
+<section id="never-updated-fixed-throughout-mcem" class="level4">
+<h4 class="anchored" data-anchor-id="never-updated-fixed-throughout-mcem">❌ NEVER Updated (fixed throughout MCEM):</h4>
+<ol type="1">
+<li><strong>Original subject data</strong> (<code>model.data</code>):
+<ul>
+<li>Contains observations and covariates</li>
+<li>Never modified - always referenced by SamplePath objects</li>
+</ul></li>
+<li><strong>Surrogate parameters</strong> (<code>surrogate.parameters</code>):
+<ul>
+<li>Markov exponential proposal</li>
+<li>Fitted once at MCEM start, never updated</li>
+</ul></li>
+<li><strong>Surrogate log-likelihoods</strong> (<code>loglik_surrog</code>):
+<ul>
+<li>Computed when paths sampled</li>
+<li>Never recomputed (surrogate doesn’t change)</li>
+</ul></li>
+</ol>
+</section>
+<section id="conditionally-updated-only-when-ess-insufficient" class="level4">
+<h4 class="anchored" data-anchor-id="conditionally-updated-only-when-ess-insufficient">⚠️ CONDITIONALLY Updated (only when ESS insufficient):</h4>
+<ol type="1">
+<li><strong>Sample paths</strong> (<code>samplepaths[i]</code>):
+<ul>
+<li>Line 1396-1416: <code>DrawSamplePaths!(...)</code> if <code>ess_cur[i] &lt; ess_target</code></li>
+<li>Appends new paths (does NOT clear old ones - this was the bug!)</li>
+</ul></li>
+</ol>
+</section>
+</section>
+<section id="do-inputs-to-path-loglik-need-updates-during-mcem" class="level3">
+<h3 class="anchored" data-anchor-id="do-inputs-to-path-loglik-need-updates-during-mcem">Do Inputs to Path LogLik Need Updates During MCEM?</h3>
+<p><strong>SHORT ANSWER: Only parameters need to be updated. Covariates come from model.data which never changes.</strong></p>
+<p><strong>DETAILED</strong>:</p>
+<ol type="1">
+<li><strong>Parameters</strong>: YES - updated every iteration
+<ul>
+<li>Old parameters: Used in iteration k</li>
+<li>New parameters: Computed by M-step, used in iteration k+1</li>
+<li>Passed to <code>loglik!()</code> which recomputes likelihoods</li>
+</ul></li>
+<li><strong>SamplePath objects</strong>: NO - these are immutable
+<ul>
+<li>Once created, never modified</li>
+<li>Only NEW paths added to arrays</li>
+</ul></li>
+<li><strong>Covariates</strong>: NO - always pulled fresh from <code>model.data</code>
+<ul>
+<li>Each call to <code>make_subjdat()</code> looks up covariates by time</li>
+<li><code>model.data</code> never changes during MCEM</li>
+<li>Even if paths change, covariates always correct</li>
+</ul></li>
+<li><strong>Subject data rows</strong>: NO - never modified
+<ul>
+<li>DataFrames created on-the-fly by <code>make_subjdat()</code></li>
+<li>Not cached (except in batched likelihood for efficiency)</li>
+<li>Always consistent with current paths and model.data</li>
+</ul></li>
+</ol>
+</section>
+<section id="caching-in-batched-likelihood" class="level3">
+<h3 class="anchored" data-anchor-id="caching-in-batched-likelihood">Caching in Batched Likelihood</h3>
+<p><strong>For efficiency</strong>, <code>loglik_semi_markov_batched!</code> pre-computes DataFrames:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb57"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Line 1429: Pre-cache all path DataFrames</span></span>
+<span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a>cached_paths <span class="op">=</span> <span class="fu">cache_path_data</span>(flat_paths, data.model)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>This creates</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb58"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> CachedPathData</span>
+<span id="cb58-2"><a href="#cb58-2" aria-hidden="true" tabindex="-1"></a>    subj<span class="op">::</span><span class="dt">Int</span></span>
+<span id="cb58-3"><a href="#cb58-3" aria-hidden="true" tabindex="-1"></a>    df<span class="op">::</span><span class="dt">DataFrame  </span><span class="co"># Result of make_subjdat(path, subj_dat)</span></span>
+<span id="cb58-4"><a href="#cb58-4" aria-hidden="true" tabindex="-1"></a>    linpreds<span class="op">::</span><span class="dt">Dict{Int,Vector{Float64}}  </span><span class="co"># Pre-computed Xβ</span></span>
+<span id="cb58-5"><a href="#cb58-5" aria-hidden="true" tabindex="-1"></a><span class="kw">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>IMPORTANT</strong>: This caching is LOCAL to each likelihood call! - Created fresh each time <code>loglik!()</code> is called - Uses current <code>data.paths</code> (which may have grown) - Uses current <code>data.model</code> (with updated parameters if needed) - NOT persisted across MCEM iterations</p>
+</section>
+<section id="summary-what-could-go-wrong" class="level3">
+<h3 class="anchored" data-anchor-id="summary-what-could-go-wrong">Summary: What Could Go Wrong?</h3>
+<p>✅ <strong>Not a problem</strong>: Parameters updated correctly throughout MCEM</p>
+<p>✅ <strong>Not a problem</strong>: Covariates always looked up correctly from <code>model.data</code></p>
+<p>✅ <strong>Not a problem</strong>: Surrogate likelihoods stay fixed (correct for importance sampling)</p>
+<p>✅ <strong>Not a problem</strong>: DataFrames created fresh each likelihood call</p>
+<p>❌ <strong>THE BUG</strong>: <code>ComputeImportanceWeightsESS!</code> incorrectly reporting ESS - Line 952: <code>ess_cur[i] = ess_target</code> (should be <code>length(ImportanceWeights[i])</code>) - Caused algorithm to think it needed more paths than it did - Led to path accumulation: 50 → 110 → 230 → 600+ - <strong>FIXED</strong> by setting ESS = actual path count for uniform weights</p>
+<hr>
+</section>
+</section>
+<section id="confirmation-subjdat-and-cache-updated-correctly" class="level2">
+<h2 class="anchored" data-anchor-id="confirmation-subjdat-and-cache-updated-correctly">CONFIRMATION: subjdat and Cache Updated Correctly</h2>
+<p><strong>YES - Everything is created fresh each likelihood call. Here’s the exact flow:</strong></p>
+<section id="when-new-paths-added-e.g.-ess-target-increases" class="level3">
+<h3 class="anchored" data-anchor-id="when-new-paths-added-e.g.-ess-target-increases">When New Paths Added (e.g., ESS target increases)</h3>
+<p><strong>Step 1: New paths appended</strong> (line 1396-1416 in <code>modelfitting.jl</code>):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb59"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a><span class="fu">DrawSamplePaths!</span>(model; params_cur <span class="op">=</span> params_cur, <span class="op">...</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li>Creates new <code>SamplePath</code> objects</li>
+<li>Appends to <code>samplepaths[i]</code> arrays</li>
+<li>Computes <code>loglik_target_cur[i][j]</code> for each new path j</li>
+</ul>
+</section>
+<section id="step-2-likelihood-evaluation-called-line-1223-in-modelfitting.jl" class="level3">
+<h3 class="anchored" data-anchor-id="step-2-likelihood-evaluation-called-line-1223-in-modelfitting.jl">Step 2: Likelihood evaluation called** (line 1223 in <code>modelfitting.jl</code>):</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb60"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb60-1"><a href="#cb60-1" aria-hidden="true" tabindex="-1"></a><span class="fu">loglik!</span>(params_prop, loglik_target_prop, <span class="fu">SMPanelData</span>(model, samplepaths, ImportanceWeights))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>What happens inside <code>loglik_semi_markov!</code></strong> (lines 1324-1378):</p>
+<p><strong>Cache creation</strong> (line 1345):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb61"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a>subject_covars <span class="op">=</span> <span class="fu">build_subject_covar_cache</span>(data.model)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<ul>
+<li>Builds NEW cache from <code>data.model</code> (the original data)</li>
+<li>For each subject, extracts covariate columns and tstart times</li>
+<li>This is FRESH every call - sees current <code>model.data</code> (which never changes)</li>
+</ul>
+<p><strong>Loop over ALL paths</strong> (lines 1368-1378):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb62"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb62-1"><a href="#cb62-1" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> i <span class="kw">in</span> <span class="fu">eachindex</span>(data.paths)          <span class="co"># ALL subjects</span></span>
+<span id="cb62-2"><a href="#cb62-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> j <span class="kw">in</span> <span class="fu">eachindex</span>(data.paths[i])   <span class="co"># ALL paths for subject i (including new ones!)</span></span>
+<span id="cb62-3"><a href="#cb62-3" aria-hidden="true" tabindex="-1"></a>        path <span class="op">=</span> data.paths[i][j]</span>
+<span id="cb62-4"><a href="#cb62-4" aria-hidden="true" tabindex="-1"></a>        subj_cache <span class="op">=</span> subject_covars[path.subj]  <span class="co"># Get subject's covariate data</span></span>
+<span id="cb62-5"><a href="#cb62-5" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb62-6"><a href="#cb62-6" aria-hidden="true" tabindex="-1"></a>        logliks[i][j] <span class="op">=</span> <span class="fu">_compute_path_loglik_fused</span>(</span>
+<span id="cb62-7"><a href="#cb62-7" aria-hidden="true" tabindex="-1"></a>            path, pars, hazards, totalhazards, tmat,</span>
+<span id="cb62-8"><a href="#cb62-8" aria-hidden="true" tabindex="-1"></a>            subj_cache, covar_names_per_hazard, tt_context, T</span>
+<span id="cb62-9"><a href="#cb62-9" aria-hidden="true" tabindex="-1"></a>        )</span>
+<span id="cb62-10"><a href="#cb62-10" aria-hidden="true" tabindex="-1"></a>    <span class="cf">end</span></span>
+<span id="cb62-11"><a href="#cb62-11" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Inside <code>_compute_path_loglik_fused</code></strong> (lines 1803-1870): - Takes <code>path</code> (the SamplePath object with times and states) - Takes <code>subj_cache</code> (covariate data for this subject) - Directly computes intervals without creating DataFrame: ```julia for i in 1:n_transitions increment = path.times[i+1] - path.times[i] statefrom = path.states[i] stateto = path.states[i+1]</p>
+<pre><code>  # Extract covariates at this time
+  covars = extract_covariates_lightweight(subj_cache, row_idx, covar_names)
+  
+  # Compute cumulative hazard and hazard
+  ll -= cumhaz(...)
+  if transition: ll += log(hazard(...))</code></pre>
+<p>end ```</p>
+</section>
+<section id="key-points-confirming-correctness" class="level3">
+<h3 class="anchored" data-anchor-id="key-points-confirming-correctness">Key Points Confirming Correctness</h3>
+<ol type="1">
+<li><strong>Cache is LOCAL to each likelihood call</strong>:
+<ul>
+<li>Line 1345: <code>subject_covars = build_subject_covar_cache(data.model)</code></li>
+<li>Created fresh every time <code>loglik!()</code> is called</li>
+<li>Not persisted across calls</li>
+</ul></li>
+<li><strong>Loops over ALL paths in <code>data.paths</code></strong>:
+<ul>
+<li>Line 1368-1369: <code>for i in eachindex(data.paths)</code> → <code>for j in eachindex(data.paths[i])</code></li>
+<li>If new paths were appended, they’re included automatically</li>
+<li>No need to “update” anything - it sees the current state</li>
+</ul></li>
+<li><strong>Covariates looked up from original data</strong>:
+<ul>
+<li><code>subj_cache</code> created from <code>data.model</code> (original data, never modified)</li>
+<li>Covariates extracted based on path times</li>
+<li>Correct even if paths change</li>
+</ul></li>
+<li><strong>No stale state</strong>:
+<ul>
+<li>No global variables</li>
+<li>No cached DataFrames persisted between iterations</li>
+<li>Each call sees current <code>samplepaths</code>, current <code>model.data</code>, current <code>parameters</code></li>
+</ul></li>
+</ol>
+</section>
+<section id="example-timeline" class="level3">
+<h3 class="anchored" data-anchor-id="example-timeline">Example Timeline</h3>
+<p><strong>After iteration 2 M-step</strong> (suppose 50 paths currently):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb64"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb64-1"><a href="#cb64-1" aria-hidden="true" tabindex="-1"></a>samplepaths[<span class="fl">1</span>] <span class="op">=</span> [path_1, path_2, <span class="op">...</span>, path_50]</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>ESS target increases, DrawSamplePaths! adds 10 more</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb65"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a>samplepaths[<span class="fl">1</span>] <span class="op">=</span> [path_1, <span class="op">...</span>, path_50, path_51, <span class="op">...</span>, path_60]  <span class="co"># append! added 10</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Next loglik! call</strong> (line 1223):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb66"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb66-1"><a href="#cb66-1" aria-hidden="true" tabindex="-1"></a><span class="fu">loglik!</span>(params_prop, loglik_target_prop, <span class="fu">SMPanelData</span>(model, samplepaths, ImportanceWeights))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Inside loglik_semi_markov!</strong>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb67"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a>subject_covars <span class="op">=</span> <span class="fu">build_subject_covar_cache</span>(data.model)  <span class="co"># Fresh cache from original data</span></span>
+<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-3"><a href="#cb67-3" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> j <span class="kw">in</span> <span class="fu">eachindex</span>(data.paths[<span class="fl">1</span>])  <span class="co"># j goes from 1 to 60 (sees all 60 paths!)</span></span>
+<span id="cb67-4"><a href="#cb67-4" aria-hidden="true" tabindex="-1"></a>    path <span class="op">=</span> data.paths[<span class="fl">1</span>][j]</span>
+<span id="cb67-5"><a href="#cb67-5" aria-hidden="true" tabindex="-1"></a>    logliks[<span class="fl">1</span>][j] <span class="op">=</span> <span class="fu">_compute_path_loglik_fused</span>(path, <span class="op">...</span>)  <span class="co"># Computes for all 60</span></span>
+<span id="cb67-6"><a href="#cb67-6" aria-hidden="true" tabindex="-1"></a><span class="cf">end</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Result</strong>: All 60 paths get correct likelihoods computed with correct covariates!</p>
+</section>
+<section id="why-this-design-works" class="level3">
+<h3 class="anchored" data-anchor-id="why-this-design-works">Why This Design Works</h3>
+<p>The key insight is that <strong>references</strong> are used instead of copies: - <code>SMPanelData</code> contains references to <code>samplepaths</code> and <code>model</code> - When <code>samplepaths</code> grows via <code>append!</code>, ALL <code>SMPanelData</code> objects see the new size - When likelihood is evaluated, it loops over whatever is currently in the arrays - No explicit “update” needed - it’s automatic via shared references</p>
+</section>
+<section id="conclusion" class="level3">
+<h3 class="anchored" data-anchor-id="conclusion">Conclusion</h3>
+<p>✅ <strong>CONFIRMED</strong>: subjdat (or equivalent interval data) is created correctly for ALL paths, including new ones ✅ <strong>CONFIRMED</strong>: Cache (<code>subject_covars</code>) is built fresh each likelihood call from original <code>model.data</code> ✅ <strong>CONFIRMED</strong>: No stale state - everything is computed on-demand from current arrays</p>
+<p>The bug was NOT in data structure management - it was purely in the ESS computation logic incorrectly setting <code>ess_cur[i] = ess_target</code> instead of the actual path count.</p>
+</section>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+        const codeEl = trigger.previousElementSibling.cloneNode(true);
+        for (const childEl of codeEl.children) {
+          if (isCodeAnnotation(childEl)) {
+            childEl.remove();
+          }
+        }
+        return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

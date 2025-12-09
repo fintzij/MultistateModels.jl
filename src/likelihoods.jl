@@ -30,12 +30,20 @@ Uses multiple dispatch to handle different parameter container types.
 - `Tuple`: Nested parameters indexed by hazard number (returned as-is)
 - `NamedTuple`: Parameters keyed by hazard name (converted to values tuple)
 - `AbstractVector{<:AbstractVector}`: Already nested format (returned as-is)
-- `AbstractVector`: Flat parameter vector (nested via `nest_params`)
+- `AbstractVector`: Flat parameter vector (unflattened via ParameterHandling.jl)
+
+# Note on AD Compatibility
+Uses safe_unflatten() to handle both Float64 and ForwardDiff.Dual types correctly.
 """
 prepare_parameters(p::Tuple, ::MultistateProcess) = p
-prepare_parameters(p::NamedTuple, ::MultistateProcess) = values(p)
+prepare_parameters(p::NamedTuple, ::MultistateProcess) = p
 prepare_parameters(p::AbstractVector{<:AbstractVector}, ::MultistateProcess) = p
-prepare_parameters(p::AbstractVector, model::MultistateProcess) = nest_params(p, model.parameters)
+
+function prepare_parameters(p::AbstractVector{<:Real}, model::MultistateProcess)
+    # Return NamedTuple indexed by hazard name (not Tuple of values)
+    # Downstream code accesses parameters[hazard.hazname]
+    return safe_unflatten(p, model)
+end
 
 # =============================================================================
 # Exactly observed sample paths
@@ -126,7 +134,7 @@ current model definition. Accepts various parameter container types (see `prepar
 and reuses `loglik_path` for the heavy lifting.
 
 # Arguments
-- `parameters`: Tuple, NamedTuple, nest_params, or flat AbstractVector
+- `parameters`: Tuple, NamedTuple, or flat AbstractVector (will be unflattened internally)
 - `path::SamplePath`: The sample path to evaluate
 - `hazards::Vector{<:_Hazard}`: Hazard functions
 - `model::MultistateProcess`: Model containing unflatten function and structure
@@ -698,19 +706,17 @@ See also: [`loglik_exact`](@ref), [`ExactDataAD`](@ref)
 """
 function loglik_AD(parameters, data::ExactDataAD; neg = true)
 
-    # nest parameters using nest_params (AD-compatible)
-    pars = nest_params(parameters, data.model.parameters)
+    # unflatten parameters using ParameterHandling.jl (AD-compatible)
+    pars = safe_unflatten(parameters, data.model)
 
     # snag the hazards
     hazards = data.model.hazards
 
-    # remake spline parameters and calculate risk periods
-    # Note: parameters are already on log scale (from optimizer flat vector)
+    # Remake spline parameters if needed
+    # Note: For RuntimeSplineHazard, remake_splines! is a no-op
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            # pars[i] is already log-scale, pass directly
-            log_pars = Vector{Float64}(collect(pars[i]))
-            remake_splines!(hazards[i], log_pars)
+            remake_splines!(hazards[i], nothing)
             set_riskperiod!(hazards[i])
         end
     end
@@ -733,8 +739,8 @@ Return sum of (negative) log likelihood for a Markov model fit to panel and/or e
 """
 function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj = false)
 
-    # nest the model parameters using nest_params (AD-compatible)
-    pars = nest_params(parameters, data.model.parameters)
+    # unflatten parameters using ParameterHandling.jl (AD-compatible)
+    pars = safe_unflatten(parameters, data.model)
 
     # build containers for transition intensity and prob mtcs
     hazmat_book = build_hazmat_book(eltype(parameters), data.model.tmat, data.books[1])
@@ -826,7 +832,9 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
                                         
                     if statefrom_i != stateto_i # if there is a transition, add log hazard
                         trans_idx = data.model.tmat[statefrom_i, stateto_i]
-                        haz_value = eval_hazard(hazards[trans_idx], dt, pars[trans_idx], row_data)
+                        hazard = hazards[trans_idx]
+                        hazard_pars = pars[hazard.hazname]
+                        haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
                         obs_ll += log(haz_value)
                     end
                     
@@ -900,7 +908,9 @@ function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj 
                             # hazard
                             for s in dest_states
                                 trans_idx = tmat_cache[r, s]
-                                haz_value = eval_hazard(hazards[trans_idx], dt, pars[trans_idx], row_data)
+                                hazard = hazards[trans_idx]
+                                hazard_pars = pars[hazard.hazname]
+                                haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
                                 q[r, s] += log(haz_value)
                             end
                         end
@@ -979,8 +989,8 @@ but enables Enzyme gradient computation which may be faster overall for large mo
 Scalar (negative) log-likelihood value.
 """
 function loglik_markov_functional(parameters, data::MPanelData; neg = true)
-    # Nest parameters (AD-compatible)
-    pars = nest_params(parameters, data.model.parameters)
+    # Unflatten parameters using ParameterHandling.jl (AD-compatible)
+    pars = safe_unflatten(parameters, data.model)
     
     # Model components
     hazards = data.model.hazards
@@ -1032,7 +1042,9 @@ function loglik_markov_functional(parameters, data::MPanelData; neg = true)
                     
                     if statefrom_i != stateto_i
                         trans_idx = tmat[statefrom_i, stateto_i]
-                        haz_value = eval_hazard(hazards[trans_idx], dt, pars[trans_idx], row_data)
+                        hazard = hazards[trans_idx]
+                        hazard_pars = pars[hazard.hazname]
+                        haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
                         obs_ll += log(haz_value)
                     end
                     
@@ -1092,7 +1104,9 @@ function _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, ::Type{T
             
             if statefrom != stateto
                 trans_idx = tmat[statefrom, stateto]
-                haz_value = eval_hazard(hazards[trans_idx], dt, pars[trans_idx], row_data)
+                hazard = hazards[trans_idx]
+                hazard_pars = pars[hazard.hazname]
+                haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
                 log_prob = log_surv + log(haz_value)
             else
                 log_prob = log_surv
@@ -1185,8 +1199,8 @@ Scalar (negative) log-likelihood value.
 """
 function loglik_semi_markov(parameters, data::SMPanelData; neg=true, use_sampling_weight=true, parallel=false)
 
-    # Nest the model parameters using nest_params (AD-compatible)
-    pars = nest_params(parameters, data.model.parameters)
+    # Unflatten parameters using ParameterHandling.jl (AD-compatible)
+    pars = safe_unflatten(parameters, data.model)
 
     # Get hazards and model components
     hazards = data.model.hazards
@@ -1321,8 +1335,8 @@ ODE solvers would be invoked instead of analytic cumulative hazard formulas.
 """
 function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
 
-    # nest the model parameters using nest_params (AD-compatible)
-    pars = nest_params(parameters, data.model.parameters)
+    # unflatten parameters using ParameterHandling.jl (AD-compatible)
+    pars = safe_unflatten(parameters, data.model)
 
     # snag the hazards and model components
     hazards = data.model.hazards
@@ -1330,13 +1344,11 @@ function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
     tmat = data.model.tmat
     n_hazards = length(hazards)
 
-    # remake spline parameters and calculate risk periods
-    # Note: parameters are already on log scale (from optimizer flat vector)
+    # Remake spline parameters if needed
+    # Note: For RuntimeSplineHazard, remake_splines! is a no-op
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            # pars[i] is already log-scale, pass directly
-            log_pars = Vector{Float64}(collect(pars[i]))
-            remake_splines!(hazards[i], log_pars)
+            remake_splines!(hazards[i], nothing)
             set_riskperiod!(hazards[i])
         end
     end
@@ -1392,20 +1404,18 @@ Arguments:
 - `data`: SMPanelData containing the model and paths
 """
 function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}}, data::SMPanelData)
-    # Nest parameters using nest_params (AD-compatible)
-    pars = nest_params(parameters, data.model.parameters)
+    # Unflatten parameters using ParameterHandling.jl (AD-compatible)
+    pars = safe_unflatten(parameters, data.model)
     
     # Get hazards
     hazards = data.model.hazards
     n_hazards = length(hazards)
     
-    # Remake spline parameters and calculate risk periods
-    # Note: parameters are already on log scale (from optimizer flat vector)
+    # Remake spline parameters if needed
+    # Note: For RuntimeSplineHazard, remake_splines! is a no-op
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            # pars[i] is already log-scale, pass directly
-            log_pars = Vector{Float64}(collect(pars[i]))
-            remake_splines!(hazards[i], log_pars)
+            remake_splines!(hazards[i], nothing)
             set_riskperiod!(hazards[i])
         end
     end
@@ -1453,7 +1463,7 @@ function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}
         end
         
         hazard = hazards[h]
-        hazard_pars = pars[h]
+        hazard_pars = pars[hazard.hazname]
         use_transform = hazard.metadata.time_transform
         
         for i in 1:n_intervals
@@ -1676,8 +1686,8 @@ the sequential path). Use parallel for objective evaluation during line search.
 - If `return_ll_subj=true`: Vector of per-path weighted log-likelihoods
 """
 function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false, parallel=false)
-    # Nest parameters using nest_params - preserves dual number types (AD-compatible)
-    pars = nest_params(parameters, data.model.parameters)
+    # Unflatten parameters using ParameterHandling.jl - preserves dual number types (AD-compatible)
+    pars = safe_unflatten(parameters, data.model)
     
     # Get model components
     hazards = data.model.hazards
@@ -1687,14 +1697,13 @@ function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=fals
     n_paths = length(data.paths)
     
     # Remake spline parameters if needed
-    # Note: parameters are already on log scale (from optimizer flat vector)
-    # Use concrete Float64 for spline remaking (splines don't need AD through their basis)
+    # Note: For RuntimeSplineHazard (the current implementation), remake_splines! is a no-op
+    # since splines are constructed on-the-fly during evaluation. We still call it for 
+    # future-proofing if other spline implementations need parameter updates.
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            # pars[i] is already log-scale, extract values (drop Dual wrapper for spline basis)
-            # Use recursive unwrapping for nested Duals (Hessian computation uses nested duals)
-            log_pars = Float64.(_unwrap_to_float.(collect(pars[i])))
-            remake_splines!(hazards[i], log_pars)
+            # RuntimeSplineHazard.remake_splines! is a no-op, but call for extensibility
+            remake_splines!(hazards[i], nothing)
             set_riskperiod!(hazards[i])
         end
     end
@@ -1802,7 +1811,7 @@ See also: `loglik_exact`, `loglik_semi_markov`, `eval_cumhaz`
 """
 function _compute_path_loglik_fused(
     path::SamplePath, 
-    pars,  # Parameters as nested structure (from nest_params, nest_params or Tuple)
+    pars,  # Parameters as nested structure (from unflatten or Tuple)
     hazards::Vector{<:_Hazard},
     totalhazards::Vector{<:_TotalHazard}, 
     tmat::Matrix{Int64},
@@ -1842,7 +1851,7 @@ function _compute_path_loglik_fused(
                 # Accumulate cumulative hazards for all exit hazards
                 for h in tothaz.components
                     hazard = hazards[h]
-                    hazard_pars = pars[h]
+                    hazard_pars = pars[hazard.hazname]
                     
                     # Extract covariates
                     covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[h])
@@ -1861,7 +1870,7 @@ function _compute_path_loglik_fused(
                 if statefrom != stateto
                     trans_h = tmat[statefrom, stateto]
                     hazard = hazards[trans_h]
-                    hazard_pars = pars[trans_h]
+                    hazard_pars = pars[hazard.hazname]
                     covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[trans_h])
                     
                     haz_value = eval_hazard(
@@ -1887,7 +1896,7 @@ function _compute_path_loglik_fused(
             if tothaz isa _TotalHazardTransient
                 for h in tothaz.components
                     hazard = hazards[h]
-                    hazard_pars = pars[h]
+                    hazard_pars = pars[hazard.hazname]
                     covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[h])
                     
                     cumhaz = eval_cumhaz(
@@ -1902,7 +1911,7 @@ function _compute_path_loglik_fused(
                 if interval.statefrom != interval.stateto
                     trans_h = tmat[interval.statefrom, interval.stateto]
                     hazard = hazards[trans_h]
-                    hazard_pars = pars[trans_h]
+                    hazard_pars = pars[hazard.hazname]
                     covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[trans_h])
                     
                     haz_value = eval_hazard(

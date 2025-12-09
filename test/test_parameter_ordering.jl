@@ -15,7 +15,7 @@ using DataFrames
 using Random
 using Statistics
 using MultistateModels
-using MultistateModels: get_parameters_flat, set_parameters!, get_log_scale_params
+using MultistateModels: get_parameters_flat, set_parameters!, get_estimation_scale_params
 using StatsModels: @formula
 
 @testset "Parameter Ordering" begin
@@ -239,11 +239,14 @@ end
     end
     
     # =========================================================================
-    # TEST 7: Gompertz simulation uses correct shape and scale
+    # TEST 7: Gompertz simulation uses correct shape and rate
+    # NOTE: Gompertz uses flexsurv parameterization where:
+    #   - shape is UNCONSTRAINED (identity transform on estimation scale)
+    #   - rate is POSITIVE (log-transformed on estimation scale)
     # =========================================================================
     @testset "Gompertz simulation" begin
         shape = 0.3
-        scale = 0.05
+        rate = 0.05
         
         h12 = Hazard(@formula(0 ~ 1), "gom", 1, 2)
         
@@ -259,15 +262,17 @@ end
         )
         
         model = multistatemodel(h12; data=template)
-        set_parameters!(model, (h12=[log(shape), log(scale)],))
+        # Shape is on natural scale (identity transform), rate is log-transformed
+        set_parameters!(model, (h12=[shape, log(rate)],))
         
         sim = simulate(model; paths=false, data=true, nsim=1)
         times = sim[1].tstop .- sim[1].tstart
         observed_mean = mean(times)
         
-        # Expected mean: ∫₀^∞ S(t) dt where S(t) = exp(-scale*(exp(shape*t)-1))
+        # Expected mean: ∫₀^∞ S(t) dt where S(t) = exp(-H(t))
+        # flexsurv parameterization: H(t) = (rate/shape) * (exp(shape*t) - 1)
         using QuadGK
-        surv(t) = exp(-scale * (exp(shape * t) - 1))
+        surv(t) = exp(-(rate / shape) * (exp(shape * t) - 1))
         expected_mean, _ = quadgk(surv, 0, 100)
         
         relative_error = abs(observed_mean - expected_mean) / expected_mean
@@ -434,9 +439,13 @@ end
         
         # Compare get_parameters_flat to internal storage
         flat = get_parameters_flat(fitted)
-        internal = get_log_scale_params(fitted.parameters)
+        internal = get_estimation_scale_params(fitted.parameters)
         
-        @test flat[1] ≈ internal[1][1]
+        # internal is now a NamedTuple by hazard name
+        # Get the first hazard's baseline parameters
+        first_hazard = first(values(internal))
+        first_baseline_vals = collect(values(first_hazard.baseline))
+        @test flat[1] ≈ first_baseline_vals[1]
     end
     
     # =========================================================================

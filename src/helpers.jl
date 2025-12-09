@@ -1,3 +1,451 @@
+# ============================================================================
+# ReConstructor: AD-compatible parameter flattening/unflattening
+# Based on ModelWrappers.jl pattern - manual implementation to avoid dependencies
+# ============================================================================
+
+"""
+Abstract type for flatten mode selection.
+"""
+abstract type FlattenTypes end
+
+"""
+    FlattenContinuous <: FlattenTypes
+
+Flatten only continuous parameters (default behavior).
+"""
+struct FlattenContinuous <: FlattenTypes end
+
+"""
+    FlattenAll <: FlattenTypes
+
+Flatten all parameters including integers.
+"""
+struct FlattenAll <: FlattenTypes end
+
+"""
+Abstract type for unflatten mode selection.
+"""
+abstract type UnflattenTypes end
+
+"""
+    UnflattenStrict <: UnflattenTypes
+
+Type-stable unflatten that converts to original types.
+Use for standard evaluation (non-AD contexts).
+"""
+struct UnflattenStrict <: UnflattenTypes end
+
+"""
+    UnflattenFlexible <: UnflattenTypes
+
+Type-polymorphic unflatten that preserves input types.
+Use for automatic differentiation to preserve Dual types.
+"""
+struct UnflattenFlexible <: UnflattenTypes end
+
+"""
+    FlattenDefault{F<:FlattenTypes, U<:UnflattenTypes}
+
+Default settings for flatten/unflatten operations.
+
+# Fields
+- `flattentype::F`: Controls which parameters to flatten
+- `unflattentype::U`: Controls type handling during unflatten
+"""
+struct FlattenDefault{F<:FlattenTypes, U<:UnflattenTypes}
+    flattentype::F
+    unflattentype::U
+end
+
+# Convenience constructors
+FlattenDefault() = FlattenDefault(FlattenContinuous(), UnflattenStrict())
+FlattenDefault(unflattentype::UnflattenTypes) = FlattenDefault(FlattenContinuous(), unflattentype)
+
+"""
+    ReConstructor{F,S,T,U,V}
+
+Pre-computed flatten/unflatten closures with buffers for efficient parameter operations.
+
+Stores four function variants:
+- `flatten_strict`: Type-stable flatten (returns Vector{Float64})
+- `flatten_flexible`: AD-compatible flatten (returns Vector{T})
+- `unflatten_strict`: Type-stable unflatten (converts to original types)
+- `unflatten_flexible`: Type-polymorphic unflatten (preserves Dual types for AD)
+
+# Usage
+```julia
+# Create reconstructor
+rc = ReConstructor(params)
+
+# Standard usage (fast)
+flat = flatten(rc, params)
+reconstructed = unflatten(rc, flat)
+
+# AD usage (preserves Dual types)
+flat_dual = flattenAD(rc, params_dual)
+reconstructed_dual = unflattenAD(rc, flat_dual)
+```
+"""
+struct ReConstructor{F,S,T,U,V}
+    default::FlattenDefault
+    flatten_strict::F
+    flatten_flexible::S
+    unflatten_strict::T
+    unflatten_flexible::U
+    _buffer::V  # Pre-allocated buffer for intermediate operations
+end
+
+# ============================================================================
+# Construction functions for different types
+# ============================================================================
+
+"""
+    construct_flatten(output::Type{T}, flattentype::FlattenTypes, 
+                     unflattentype::UnflattenTypes, x::Real)
+
+Build flatten/unflatten closures for Real numbers.
+
+Returns tuple of (flatten_function, unflatten_function).
+"""
+function construct_flatten(
+    output::Type{T},
+    flattentype::FlattenTypes,
+    unflattentype::UnflattenTypes,
+    x::Real
+) where {T<:Real}
+    
+    # Flatten: Real → Vector{T}
+    function flatten_to_Real(val::S) where {S<:Real}
+        return T[val]
+    end
+    
+    # Unflatten variants - use different names to avoid method overwriting
+    if unflattentype isa UnflattenStrict
+        # Strict: convert to original type (type-stable, breaks AD)
+        unflatten_to_Real_strict(v::AbstractVector{S}) where {S<:Real} = convert(typeof(x), only(v))
+        return flatten_to_Real, unflatten_to_Real_strict
+    else  # UnflattenFlexible
+        # Flexible: preserve input type (allows Dual types for AD)
+        unflatten_to_Real_flexible(v::AbstractVector{S}) where {S<:Real} = only(v)
+        return flatten_to_Real, unflatten_to_Real_flexible
+    end
+end
+
+"""
+    construct_flatten(output::Type{T}, flattentype::FlattenTypes,
+                     unflattentype::UnflattenTypes, x::AbstractVector{<:Real})
+
+Build flatten/unflatten closures for Vector of Real numbers.
+
+Handles both FlattenContinuous and FlattenAll modes.
+"""
+function construct_flatten(
+    output::Type{T},
+    flattentype::FlattenTypes,
+    unflattentype::UnflattenTypes,
+    x::AbstractVector{<:Real}
+) where {T<:Real}
+    
+    n = length(x)
+    
+    # Check if all elements are continuous (Float) or if we have integers
+    is_continuous = all(xi -> xi isa AbstractFloat, x)
+    
+    # For FlattenContinuous mode with integer vectors, skip flattening
+    if flattentype isa FlattenContinuous && !is_continuous
+        # Return identity functions - don't flatten integer vectors
+        flatten_Vector_skip(val) = T[]
+        unflatten_Vector_skip(v) = x  # Return original vector
+        return flatten_Vector_skip, unflatten_Vector_skip
+    end
+    
+    # Flatten: Vector → concatenated Vector{T}
+    function flatten_Vector(val::AbstractVector{S}) where {S<:Real}
+        return convert(Vector{T}, val)
+    end
+    
+    # Unflatten variants
+    if unflattentype isa UnflattenStrict
+        # Strict: convert to original element type (type-stable)
+        function unflatten_Vector_strict(v::AbstractVector{S}) where {S<:Real}
+            return convert(typeof(x), v[1:n])
+        end
+        return flatten_Vector, unflatten_Vector_strict
+    else  # UnflattenFlexible
+        # Flexible: preserve input element types (allows Dual for AD)
+        function unflatten_Vector_flexible(v::AbstractVector{S}) where {S<:Real}
+            # Use view to avoid allocation, return as vector of input type
+            return collect(v[1:n])
+        end
+        return flatten_Vector, unflatten_Vector_flexible
+    end
+end
+
+"""
+    construct_flatten(output::Type{T}, flattentype::FlattenTypes,
+                     unflattentype::UnflattenTypes, x::Tuple)
+
+Build flatten/unflatten closures for Tuples (recursive construction).
+
+This is the core of the recursive algorithm:
+1. Build constructors for each element recursively
+2. Flatten once to determine sizes
+3. Compute cumulative sizes for indexing
+4. Return composed closures that handle the full structure
+"""
+function construct_flatten(
+    output::Type{T},
+    flattentype::FlattenTypes,
+    unflattentype::UnflattenTypes,
+    x::Tuple
+) where {T<:Real}
+    
+    # Step 1: Recursively build constructors for each element
+    x_constructors = map(xᵢ -> construct_flatten(T, flattentype, unflattentype, xᵢ), x)
+    _flatten = first.(x_constructors)
+    _unflatten = last.(x_constructors)
+    
+    # Step 2: Flatten once to determine sizes
+    x_vecs = map((flat, xᵢ) -> flat(xᵢ), _flatten, x)
+    lengths = map(length, x_vecs)
+    cumulative_sizes = cumsum(lengths)
+    
+    # Step 3: Build composed flatten function
+    function flatten_Tuple(val::Tuple)
+        mapped = map((flat, xᵢ) -> flat(xᵢ), _flatten, val)
+        return isempty(mapped) ? T[] : reduce(vcat, mapped)
+    end
+    
+    # Step 4: Build composed unflatten with proper indexing
+    function unflatten_Tuple(v::AbstractVector{S}) where {S<:Real}
+        return map(_unflatten, lengths, cumulative_sizes) do unflat, len, cumsize
+            start_idx = cumsize - len + 1
+            if len == 0
+                # Empty vector case (e.g., integer vectors in FlattenContinuous mode)
+                return unflat(S[])
+            else
+                return unflat(view(v, start_idx:cumsize))
+            end
+        end
+    end
+    
+    return flatten_Tuple, unflatten_Tuple
+end
+
+"""
+    construct_flatten(output::Type{T}, flattentype::FlattenTypes,
+                     unflattentype::UnflattenTypes, x::NamedTuple)
+
+Build flatten/unflatten closures for NamedTuples (recursive construction).
+
+Key difference for AD compatibility:
+- Strict mode: `typeof(x)(tuple)` - requires concrete types, breaks with Dual
+- Flexible mode: `NamedTuple{names}(tuple)` - accepts any types, preserves Dual
+"""
+function construct_flatten(
+    output::Type{T},
+    flattentype::FlattenTypes,
+    unflattentype::UnflattenTypes,
+    x::NamedTuple
+) where {T<:Real}
+    
+    names = keys(x)
+    values_tuple = values(x)
+    
+    # Build constructor for the underlying tuple (recursive)
+    flatten_tuple, unflatten_tuple = construct_flatten(T, flattentype, unflattentype, values_tuple)
+    
+    # Flatten: just use tuple flatten
+    flatten_NamedTuple(val::NamedTuple) = flatten_tuple(values(val))
+    
+    # Unflatten: reconstruct NamedTuple with appropriate type handling
+    if unflattentype isa UnflattenStrict
+        # Strict: Use typed constructor (type-stable, requires concrete types)
+        function unflatten_NamedTuple_strict(v::AbstractVector{S}) where {S<:Real}
+            v_tuple = unflatten_tuple(v)
+            return typeof(x)(v_tuple)  # Requires concrete types - breaks with Dual
+        end
+        return flatten_NamedTuple, unflatten_NamedTuple_strict
+    else  # UnflattenFlexible
+        # Flexible: Use generic constructor (preserves any types including Dual)
+        function unflatten_NamedTuple_flexible(v::AbstractVector{S}) where {S<:Real}
+            v_tuple = unflatten_tuple(v)
+            return NamedTuple{names}(v_tuple)  # Generic - works with Dual!
+        end
+        return flatten_NamedTuple, unflatten_NamedTuple_flexible
+    end
+end
+
+# ============================================================================
+# ReConstructor builder and user API
+# ============================================================================
+
+"""
+    ReConstructor(x; flattentype=FlattenContinuous(), unflattentype=UnflattenStrict())
+
+Build a ReConstructor for the given parameter structure.
+
+# Arguments
+- `x`: Parameter structure (NamedTuple, Tuple, Vector, or Real)
+- `flattentype`: FlattenContinuous() or FlattenAll()
+- `unflattentype`: UnflattenStrict() or UnflattenFlexible()
+
+# Returns
+ReConstructor with pre-computed flatten/unflatten closures
+
+# Example
+```julia
+params = (baseline = (shape = 1.5, scale = 0.2), covariates = (age = 0.3,))
+rc = ReConstructor(params, unflattentype=UnflattenFlexible())
+
+# Standard usage
+flat = flatten(rc, params)
+
+# AD usage (preserves Dual types)
+using ForwardDiff
+f(p) = sum(unflattenAD(rc, p).baseline)
+grad = ForwardDiff.gradient(f, flat)
+```
+"""
+function ReConstructor(
+    x;
+    flattentype::FlattenTypes = FlattenContinuous(),
+    unflattentype::UnflattenTypes = UnflattenStrict()
+)
+    default = FlattenDefault(flattentype, unflattentype)
+    
+    # Build strict constructors (for standard usage)
+    flatten_strict_fn, unflatten_strict_fn = construct_flatten(Float64, flattentype, UnflattenStrict(), x)
+    
+    # Build flexible constructors (for AD usage)
+    flatten_flexible_fn, unflatten_flexible_fn = construct_flatten(Float64, flattentype, UnflattenFlexible(), x)
+    
+    # Pre-allocate buffer for intermediate operations
+    flat_example = flatten_strict_fn(x)
+    buffer = similar(flat_example)
+    
+    return ReConstructor(
+        default,
+        flatten_strict_fn,
+        flatten_flexible_fn,
+        unflatten_strict_fn,
+        unflatten_flexible_fn,
+        buffer
+    )
+end
+
+"""
+    flatten(rc::ReConstructor, x)
+
+Flatten parameter structure to vector (type-stable, returns Vector{Float64}).
+
+Use for standard parameter operations.
+"""
+flatten(rc::ReConstructor, x) = rc.flatten_strict(x)
+
+"""
+    unflatten(rc::ReConstructor, v::AbstractVector)
+
+Unflatten vector to parameter structure (type-stable).
+
+Use for standard parameter operations.
+"""
+unflatten(rc::ReConstructor, v::AbstractVector) = rc.unflatten_strict(v)
+
+"""
+    flattenAD(rc::ReConstructor, x)
+
+Flatten parameter structure to vector (type-polymorphic).
+
+Use when working with AD types (preserves Dual numbers).
+"""
+flattenAD(rc::ReConstructor, x) = rc.flatten_flexible(x)
+
+"""
+    unflattenAD(rc::ReConstructor, v::AbstractVector)
+
+Unflatten vector to parameter structure (type-polymorphic).
+
+Use for automatic differentiation - preserves Dual types.
+"""
+unflattenAD(rc::ReConstructor, v::AbstractVector) = rc.unflatten_flexible(v)
+
+# ============================================================================
+# Parameter unflattening with AD compatibility
+# ============================================================================
+
+"""
+    unflatten_parameters(flat_params::AbstractVector, model::MultistateProcess)
+
+Unflatten parameter vector and transform to natural scale for hazard evaluation.
+
+This function:
+1. Unflattens the flat parameter vector to nested NamedTuple structure
+2. Transforms baseline parameters from estimation scale (log) to natural scale (exp)
+
+The returned parameters are on NATURAL SCALE and ready for direct use in hazard functions.
+Hazard functions no longer need to apply exp() internally.
+
+# Arguments
+- `flat_params`: Flat parameter vector on estimation scale (Float64 or Dual)
+- `model`: MultistateProcess model containing ReConstructor
+
+# Returns
+NamedTuple of nested parameters on NATURAL SCALE:
+- Baseline parameters: exp() applied (positive values)
+- Covariate coefficients: unchanged (already unconstrained)
+
+# Note
+Uses AD-compatible transformation that preserves ForwardDiff.Dual types.
+
+# Example
+```julia
+# flat_params = [log(0.5), 0.3]  # log-rate and covariate coefficient
+# Returns: (h12 = (baseline = (h12_Intercept = 0.5,), covariates = (h12_x = 0.3,)),)
+#          ↑ exp(log(0.5)) = 0.5 on natural scale
+```
+"""
+function unflatten_parameters(flat_params::AbstractVector{T}, model::MultistateProcess) where {T<:Real}
+    # Unflatten to estimation-scale nested structure
+    if T === Float64
+        params_estimation = unflatten(model.parameters.reconstructor, flat_params)
+    else
+        # For Dual or other types, use AD-compatible unflatten
+        params_estimation = unflattenAD(model.parameters.reconstructor, flat_params)
+    end
+    
+    # Transform baseline parameters to natural scale (exp applied where needed)
+    # Pass hazards so we know which parameters need transformation
+    return to_natural_scale(params_estimation, model.hazards, T)
+end
+
+# Backward compatibility alias
+const safe_unflatten = unflatten_parameters
+
+"""
+    unflatten_to_estimation_scale(flat_params, model)
+
+Unflatten parameters WITHOUT applying natural-scale transformation.
+Returns parameters on ESTIMATION SCALE (log for baseline, as-is for covariates).
+
+This is used by spline remake code which needs log-scale coefficients.
+Unlike `unflatten_parameters`, this does NOT apply exp() to baseline parameters.
+
+# Arguments
+- `flat_params`: Flat parameter vector on estimation scale
+- `model`: MultistateProcess model containing ReConstructor
+
+# Returns
+NamedTuple of nested parameters on ESTIMATION SCALE (log for baseline)
+"""
+function unflatten_to_estimation_scale(flat_params::AbstractVector{T}, model::MultistateProcess) where {T<:Real}
+    if T === Float64
+        return unflatten(model.parameters.reconstructor, flat_params)
+    else
+        return unflattenAD(model.parameters.reconstructor, flat_params)
+    end
+end
+
 """
     rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::MultistateProcess)
 
@@ -13,16 +461,19 @@ Parameters are stored on log scale for baseline, as-is for covariates.
 """
 function rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::MultistateProcess)
     params_nested_pairs = [
-        hazname => build_hazard_params(new_param_vectors[idx], model.hazards[idx].npar_baseline)
+        hazname => build_hazard_params(new_param_vectors[idx], model.hazards[idx].parnames, model.hazards[idx].npar_baseline, model.hazards[idx].npar_total)
         for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
     ]
     
     params_nested = NamedTuple(params_nested_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
     
-    # Get natural scale parameters as flattened vectors per hazard
+    # Create ReConstructor for AD-compatible flatten/unflatten
+    reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
+    params_flat = flatten(reconstructor, params_nested)
+    
+    # Get natural scale parameters as flattened vectors per hazard (family-aware transformation)
     params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname])
+        hazname => extract_natural_vector(params_nested[hazname], model.hazards[idx].family)
         for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
     ]
     params_natural = NamedTuple(params_natural_pairs)
@@ -31,7 +482,7 @@ function rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::M
         flat = params_flat,
         nested = params_nested,
         natural = params_natural,
-        unflatten = unflatten_fn
+        reconstructor = reconstructor  # NEW: Store ReConstructor instead of unflatten_fn
     )
 end
 
@@ -245,146 +696,479 @@ PHASE 2: Parameter Update with ParameterHandling.jl
 =============================================================================# 
 
 """
-    build_hazard_params(log_scale_params::Vector{Float64}, npar_baseline::Int)
+    build_hazard_params(log_scale_params, parnames, npar_baseline, npar_total)
 
-Create a NamedTuple with baseline and covariate parameters.
+Create a NamedTuple with baseline and covariate parameters using named fields.
 
 Parameters are stored on log scale for baseline, as-is for covariates.
 No transformations are applied - hazard functions expect log scale.
 
+This function is type-generic to support ForwardDiff.Dual during automatic differentiation.
+
 # Arguments
 - `log_scale_params`: Full parameter vector - log scale for baseline, as-is for covariates
+- `parnames`: Vector of parameter names (e.g., [:h12_shape, :h12_scale, :h12_age])
 - `npar_baseline`: Number of baseline parameters
+- `npar_total`: Total number of parameters
 
 # Returns
-- `NamedTuple`: `(baseline = [...], covariates = [...])` or just `(baseline = [...],)` if no covariates
+- `NamedTuple`: `(baseline = (h12_shape=..., h12_scale=...), covariates = (h12_age=...,))` 
+  or just `(baseline = (h12_shape=..., h12_scale=...),)` if no covariates
+
+# Examples
+```julia
+# Weibull with covariates
+params = build_hazard_params([log(1.5), log(0.2), 0.3, 0.1], 
+                             [:h12_shape, :h12_scale, :h12_age, :h12_sex], 2, 4)
+# Returns: (baseline = (h12_shape = 0.405, h12_scale = -1.609), 
+#           covariates = (h12_age = 0.3, h12_sex = 0.1))
+
+# Exponential without covariates  
+params = build_hazard_params([log(0.5)], [:h12_intercept], 1, 1)
+# Returns: (baseline = (h12_intercept = -0.693),)
+```
 
 # Note
 All parameters are stored on log scale for baseline (as expected by hazard functions).
 Covariate coefficients are stored as-is (unconstrained).
 """
-function build_hazard_params(log_scale_params::Vector{Float64}, npar_baseline::Int)
-    # Store baseline on log scale (hazard functions expect this)
-    baseline = log_scale_params[1:npar_baseline]
+function build_hazard_params(log_scale_params::AbstractVector{<:Real}, parnames::Vector{Symbol}, npar_baseline::Int, npar_total::Int)
+    @assert length(log_scale_params) == npar_total "Parameter vector length mismatch"
+    @assert length(parnames) == npar_total "Parameter names length must match parameter vector length"
+    @assert npar_baseline <= npar_total "Baseline parameters cannot exceed total parameters"
     
-    npar_total = length(log_scale_params)
+    # Extract baseline parameter names and values
+    baseline_names = parnames[1:npar_baseline]
+    baseline_values = log_scale_params[1:npar_baseline]
+    
+    # Create NamedTuple for baseline with named fields
+    baseline = NamedTuple{Tuple(baseline_names)}(baseline_values)
+    
+    # Handle covariates if present
     if npar_total > npar_baseline
-        # Has covariates - leave them as-is
-        covariates = log_scale_params[(npar_baseline+1):end]
+        covar_names = parnames[(npar_baseline+1):npar_total]
+        covar_values = log_scale_params[(npar_baseline+1):npar_total]
+        covariates = NamedTuple{Tuple(covar_names)}(covar_values)
         return (baseline = baseline, covariates = covariates)
     else
-        # No covariates
         return (baseline = baseline,)
     end
+end
+
+"""
+    extract_baseline_values(hazard_params::NamedTuple)
+
+Extract baseline parameter values as a vector from NamedTuple structure.
+
+# Arguments
+- `hazard_params`: NamedTuple with `baseline` field containing named parameters
+
+# Returns
+- Vector of baseline parameter values in order
+"""
+function extract_baseline_values(hazard_params::NamedTuple)
+    return collect(values(hazard_params.baseline))
+end
+
+"""
+    extract_covariate_values(hazard_params::NamedTuple)
+
+Extract covariate coefficient values as a vector from NamedTuple structure.
+
+# Arguments
+- `hazard_params`: NamedTuple with optional `covariates` field
+
+# Returns
+- Vector of covariate coefficient values, or empty vector if no covariates
+"""
+function extract_covariate_values(hazard_params::NamedTuple)
+    return haskey(hazard_params, :covariates) ? 
+           collect(values(hazard_params.covariates)) : Float64[]
 end
 
 """
     extract_params_vector(hazard_params)
 
 Extract the full parameter vector from a hazard's NamedTuple params structure.
-Returns log-scale for baseline + as-is for covariates (the scale expected by hazard functions).
+Returns values in the scale they are stored (natural scale after transformation).
+
+# Arguments
+- `hazard_params`: NamedTuple with `baseline` (named NamedTuple) and optionally `covariates` (named NamedTuple)
+
+# Returns
+- Vector of all parameter values in order (baseline values first, then covariate values)
+
+# Note
+After the unflatten transformation, baseline values are on natural scale (exp applied).
+Covariate coefficients are unchanged (unconstrained).
 """
 function extract_params_vector(hazard_params::NamedTuple)
+    baseline_vals = collect(values(hazard_params.baseline))
     if haskey(hazard_params, :covariates)
-        return vcat(hazard_params.baseline, hazard_params.covariates)
+        covar_vals = collect(values(hazard_params.covariates))
+        return vcat(baseline_vals, covar_vals)
     else
-        return hazard_params.baseline
+        return baseline_vals
     end
 end
 
 """
-    extract_natural_vector(hazard_params, npar_baseline::Int)
+    extract_natural_vector(hazard_params, family::String)
 
 Extract the natural-scale parameter vector from a hazard's NamedTuple params structure.
-Applies exp() to baseline parameters, leaves covariates as-is.
+Applies appropriate transformation based on hazard family.
+
+For Gompertz: shape is unconstrained (identity), rate is positive (exp)
+For other families: all baseline parameters are positive (exp)
+
+# Arguments
+- `hazard_params`: NamedTuple with `baseline` (named NamedTuple) and optionally `covariates` (named NamedTuple)
+- `family`: Hazard family ("exp", "wei", "gom", "sp")
+
+# Returns
+- Vector with natural-scale baseline values followed by covariate coefficients (as-is)
 """
-function extract_natural_vector(hazard_params::NamedTuple)
-    baseline_natural = exp.(hazard_params.baseline)
+function extract_natural_vector(hazard_params::NamedTuple, family::String)
+    baseline_vals = collect(values(hazard_params.baseline))
+    
+    if family == "gom"
+        # Gompertz: shape is unconstrained (first), rate is positive (second)
+        baseline_natural = [i == 1 ? baseline_vals[i] : exp(baseline_vals[i]) for i in eachindex(baseline_vals)]
+    else
+        # All other families: all baseline params are positive
+        baseline_natural = exp.(baseline_vals)
+    end
     
     if haskey(hazard_params, :covariates)
-        return vcat(baseline_natural, hazard_params.covariates)
+        covar_vals = collect(values(hazard_params.covariates))
+        return vcat(baseline_natural, covar_vals)
+    else
+        return baseline_natural
+    end
+end
+
+# Backward-compatible version without family (assumes all positive)
+function extract_natural_vector(hazard_params::NamedTuple)
+    baseline_vals = collect(values(hazard_params.baseline))
+    baseline_natural = exp.(baseline_vals)
+    
+    if haskey(hazard_params, :covariates)
+        covar_vals = collect(values(hazard_params.covariates))
+        return vcat(baseline_natural, covar_vals)
     else
         return baseline_natural
     end
 end
 
 """
-    get_log_scale_params(parameters)
+    get_estimation_scale_params(parameters)
 
-Extract log-scale parameters from a parameters structure.
-This is the correct scale for passing to hazard functions.
+Extract estimation-scale parameters from a parameters structure.
+Returns parameters on LOG scale for baseline, as-is for covariates.
 
-Hazard functions expect log-scale parameters (baseline rates, shapes, scales)
-because they apply exp() internally. Covariate coefficients are passed as-is.
-The `natural` field contains natural-scale values (after exp transform for baseline),
-which should NOT be passed to hazard functions directly.
+This function extracts the `nested` field from model.parameters, which stores
+parameters on estimation scale (the scale used by optimizers).
 
 # Arguments
-- `parameters`: A NamedTuple with `nested` field containing per-hazard NamedTuples
+- `parameters`: A NamedTuple with `nested` field, or already-extracted nested parameters
 
 # Returns
-- `Tuple`: Log-scale baseline + unconstrained covariate parameters indexed by hazard number
+- `NamedTuple`: Estimation-scale parameters indexed by hazard name
+
+# Note
+For hazard evaluation, use `get_hazard_params()` instead, which returns natural scale.
+This function is primarily for:
+- Storing/outputting parameter values
+- Initialization routines
+- Converting back from natural scale
 
 # Example
 ```julia
-# Get log-scale params for hazard evaluation
-log_pars = get_log_scale_params(model.parameters)
-# Pass to likelihood
-ll = loglik(log_pars, path, model.hazards, model)
+# Get estimation-scale params (for storage/output)
+est_pars = get_estimation_scale_params(model.parameters)
+# est_pars[:h12].baseline contains log-scale values
 ```
 """
-function get_log_scale_params(parameters)
-    # Extract log-scale values: baseline and covariates as stored
-    return map(extract_params_vector, values(parameters.nested))
+function get_estimation_scale_params(parameters)
+    # If parameters has a 'nested' field, extract it; otherwise assume already extracted
+    if hasfield(typeof(parameters), :nested)
+        return parameters.nested
+    else
+        # Already nested parameters (e.g., passed directly from simulation internals)
+        return parameters
+    end
 end
 
 """
-    nest_params(flat_params::AbstractVector, parameters)
+    get_hazard_params(parameters, hazards)
 
-Convert a flat parameter vector to a tuple of views using parameters structure.
-This is the **preferred AD-compatible method** for converting flat optimizer 
-parameters to nested form for hazard evaluation.
+Extract natural-scale parameters ready for hazard function evaluation.
+Family-aware version that correctly transforms parameters based on hazard type.
+
+For Gompertz: shape is kept as-is (unconstrained), rate is exp-transformed
+For other families: all baseline parameters are exp-transformed
+
+This is the primary function for getting parameters for hazard evaluation.
+The returned NamedTuple can be passed directly to hazard functions.
 
 # Arguments
-- `flat_params::AbstractVector`: Flat parameter vector (from optimizer or model.parameters.flat)
-- `parameters`: The model's parameters NamedTuple containing `natural` field
+- `parameters`: A NamedTuple with `nested` field, or already-extracted nested parameters
+- `hazards`: Vector of hazard objects (used to determine transformation per family)
 
-# Returns  
-- `Tuple`: Tuple of views into flat_params, indexed by hazard number (1-based)
-
-# AD Compatibility
-This function works with ForwardDiff.Dual numbers because it creates views 
-without type conversion. The flat vector contains log-scale baseline params,
-so these views can be passed directly to hazard functions.
-
-# Why not just use unflatten?
-While ParameterHandling.jl's unflatten is useful, it returns a structured 
-NamedTuple. For AD-compatible hazard evaluation, we need simple views into 
-the flat vector. This function provides that without allocations and preserves 
-Dual number types.
+# Returns
+- `NamedTuple`: Natural-scale parameters indexed by hazard name
 
 # Example
 ```julia
-# In AD-compatible likelihood computation:
-pars = nest_params(flat_params, model.parameters)
-haz_params = pars[1]  # Parameters for first hazard (log scale for baseline)
+# Get natural-scale params for hazard evaluation
+haz_pars = get_hazard_params(model.parameters, model.hazards)
+# haz_pars[:h12].baseline contains natural-scale values
+# Pass to hazard: eval_hazard(hazard, t, haz_pars[:h12], covars)
 ```
-
-See also: [`get_log_scale_params`](@ref)
 """
-function nest_params(flat_params::AbstractVector, parameters)
-    # Compute sizes and offsets from parameters structure
-    sizes = [length(v) for v in values(parameters.natural)]
-    n_hazards = length(sizes)
-    
-    # Build views without intermediate allocations
-    offset = 0
-    return ntuple(n_hazards) do i
-        start_idx = offset + 1
-        end_idx = offset + sizes[i]
-        offset = end_idx
-        view(flat_params, start_idx:end_idx)
+function get_hazard_params(parameters, hazards)
+    # Get estimation-scale params first
+    est_params = get_estimation_scale_params(parameters)
+    # Transform to natural scale for hazard evaluation (family-aware)
+    return to_natural_scale(est_params, hazards, Float64)
+end
+
+# Backward-compatible version without hazards (deprecated - assumes all positive)
+# This version applies exp() to ALL baseline parameters, which is incorrect for Gompertz
+function get_hazard_params(parameters)
+    # Get estimation-scale params first
+    est_params = get_estimation_scale_params(parameters)
+    # Transform to natural scale for hazard evaluation (legacy: all exp)
+    return to_natural_scale(est_params, Float64)
+end
+
+# ============================================================================
+# Parameter Scale Transformations
+# ============================================================================
+#
+# PARAMETER SCALE CONVENTION:
+#
+# Estimation Scale (what optimizers see):
+#   - Baseline parameters (intercept, shape, scale): log scale (unconstrained)
+#   - Covariate coefficients: as-is (already unconstrained)
+#
+# Natural/Model Scale (what hazard functions use):
+#   - Baseline parameters: natural scale (exp applied, positive)
+#   - Covariate coefficients: as-is
+#
+# The transformation happens at the boundary:
+#   - to_natural_scale: Called in unflatten_parameters (estimation → natural)
+#   - to_estimation_scale: Called when storing/outputting parameters
+#
+# This design:
+#   1. Avoids repeated exp() calls in hazard function hot loops
+#   2. Makes hazard functions simpler (no internal transformations)
+#   3. Centralizes transformation logic for extensibility (SODEN, etc.)
+#
+# ============================================================================
+
+"""
+    transform_baseline_to_natural(baseline::NamedTuple, family::String, ::Type{T}) where T
+
+Transform baseline parameters from estimation scale to natural scale.
+Applies exp() to parameters that are constrained positive, identity to unconstrained.
+
+For Gompertz: shape is unconstrained (identity), scale/rate is positive (exp)
+For Weibull/Exponential: all baseline parameters are positive (exp)
+
+# Arguments
+- `baseline`: NamedTuple of baseline parameters on estimation scale
+- `family`: Hazard family ("exp", "wei", "gom", "sp")
+- `T`: Element type (Float64 or ForwardDiff.Dual)
+
+# Returns
+NamedTuple with same keys but values transformed appropriately
+"""
+@inline function transform_baseline_to_natural(baseline::NamedTuple, family::String, ::Type{T}) where T
+    if family == "sp"
+        # Splines: parameters stay on log scale - hazard function applies exp() internally
+        # via _spline_ests2coefs, so no transformation here
+        return baseline
+    elseif family == "gom"
+        # Gompertz: shape is unconstrained (first param), rate is positive (second param)
+        # Parameter order: [shape, scale/rate]
+        ks = keys(baseline)
+        vs = values(baseline)
+        # First param (shape): identity transform
+        # Second param (scale/rate): exp transform
+        transformed_values = ntuple(i -> i == 1 ? vs[i] : exp(vs[i]), length(vs))
+        return NamedTuple{ks}(transformed_values)
+    else
+        # All other families: all baseline parameters are positive (exp)
+        transformed_values = map(v -> exp(v), values(baseline))
+        return NamedTuple{keys(baseline)}(transformed_values)
     end
+end
+
+# Backward-compatible version without family (assumes all positive)
+@inline function transform_baseline_to_natural(baseline::NamedTuple, ::Type{T}) where T
+    transformed_values = map(v -> exp(v), values(baseline))
+    return NamedTuple{keys(baseline)}(transformed_values)
+end
+
+"""
+    transform_baseline_to_estimation(baseline::NamedTuple, family::String)
+
+Transform baseline parameters from natural scale to estimation scale.
+Applies log() to positive-constrained parameters, identity to unconstrained.
+
+For Gompertz: shape is unconstrained (identity), scale/rate is positive (log)
+For Weibull/Exponential: all baseline parameters are positive (log)
+
+# Arguments
+- `baseline`: NamedTuple of baseline parameters on natural scale
+- `family`: Hazard family ("exp", "wei", "gom", "sp")
+
+# Returns
+NamedTuple with same keys but values transformed appropriately
+"""
+@inline function transform_baseline_to_estimation(baseline::NamedTuple, family::String)
+    if family == "sp"
+        # Splines: parameters are already on log/estimation scale - hazard function 
+        # applies exp() internally, so no transformation here
+        return baseline
+    elseif family == "gom"
+        # Gompertz: shape is unconstrained (first param), rate is positive (second param)
+        ks = keys(baseline)
+        vs = values(baseline)
+        # First param (shape): identity transform
+        # Second param (scale/rate): log transform
+        transformed_values = ntuple(i -> i == 1 ? vs[i] : log(vs[i]), length(vs))
+        return NamedTuple{ks}(transformed_values)
+    else
+        # All other families: all baseline parameters are positive (log)
+        transformed_values = map(v -> log(v), values(baseline))
+        return NamedTuple{keys(baseline)}(transformed_values)
+    end
+end
+
+# Backward-compatible version without family (assumes all positive)
+@inline function transform_baseline_to_estimation(baseline::NamedTuple)
+    transformed_values = map(v -> log(v), values(baseline))
+    return NamedTuple{keys(baseline)}(transformed_values)
+end
+
+"""
+    to_natural_scale(params_nested::NamedTuple, hazards, ::Type{T}) where T
+
+Transform nested parameters from estimation scale to natural scale.
+Applies exp() to positive-constrained baseline parameters, identity to unconstrained.
+
+# Arguments
+- `params_nested`: NamedTuple of per-hazard parameter NamedTuples (estimation scale)
+- `hazards`: Vector of hazard objects (used to determine transformation per family)
+- `T`: Element type for AD compatibility
+
+# Returns
+NamedTuple of per-hazard parameter NamedTuples on natural scale
+
+# Example
+```julia
+# Estimation scale: (h12 = (baseline = (h12_Intercept = -0.5,), covariates = (h12_x = 0.3,)))
+# Natural scale:    (h12 = (baseline = (h12_Intercept = 0.606,), covariates = (h12_x = 0.3,)))
+```
+"""
+function to_natural_scale(params_nested::NamedTuple, hazards, ::Type{T}) where T
+    hazard_keys = keys(params_nested)
+    transformed_hazards = map(enumerate(hazard_keys)) do (idx, hazname)
+        hazard_params = params_nested[hazname]
+        hazard = hazards[idx]
+        family = hazard.family
+        
+        # Transform baseline to natural scale (family-aware)
+        baseline_natural = transform_baseline_to_natural(hazard_params.baseline, family, T)
+        
+        # Keep covariates unchanged
+        if haskey(hazard_params, :covariates)
+            hazname => (baseline = baseline_natural, covariates = hazard_params.covariates)
+        else
+            hazname => (baseline = baseline_natural,)
+        end
+    end
+    
+    return NamedTuple(transformed_hazards)
+end
+
+# Backward-compatible version without hazards (assumes all positive)
+function to_natural_scale(params_nested::NamedTuple, ::Type{T}) where T
+    transformed_hazards = map(keys(params_nested)) do hazname
+        hazard_params = params_nested[hazname]
+        
+        # Transform baseline to natural scale (legacy: all exp)
+        baseline_natural = transform_baseline_to_natural(hazard_params.baseline, T)
+        
+        # Keep covariates unchanged
+        if haskey(hazard_params, :covariates)
+            hazname => (baseline = baseline_natural, covariates = hazard_params.covariates)
+        else
+            hazname => (baseline = baseline_natural,)
+        end
+    end
+    
+    return NamedTuple(transformed_hazards)
+end
+
+"""
+    to_estimation_scale(params_nested::NamedTuple)
+
+Transform nested parameters from natural scale to estimation scale.
+Applies log() to all baseline parameters, leaves covariate coefficients unchanged.
+
+# Arguments
+- `params_nested`: NamedTuple of per-hazard parameter NamedTuples (natural scale)
+
+# Returns
+NamedTuple of per-hazard parameter NamedTuples on estimation scale
+
+# Example
+```julia
+# Natural scale:    (h12 = (baseline = (h12_Intercept = 0.606,), covariates = (h12_x = 0.3,)))
+# Estimation scale: (h12 = (baseline = (h12_Intercept = -0.5,), covariates = (h12_x = 0.3,)))
+```
+"""
+function to_estimation_scale(params_nested::NamedTuple, hazards)
+    hazard_keys = keys(params_nested)
+    transformed_hazards = map(enumerate(hazard_keys)) do (idx, hazname)
+        hazard_params = params_nested[hazname]
+        hazard = hazards[idx]
+        family = hazard.family
+        
+        # Transform baseline to estimation scale (family-aware)
+        baseline_estimation = transform_baseline_to_estimation(hazard_params.baseline, family)
+        
+        # Keep covariates unchanged
+        if haskey(hazard_params, :covariates)
+            hazname => (baseline = baseline_estimation, covariates = hazard_params.covariates)
+        else
+            hazname => (baseline = baseline_estimation,)
+        end
+    end
+    
+    return NamedTuple(transformed_hazards)
+end
+
+# Backward-compatible version without hazards (assumes all positive/log)
+function to_estimation_scale(params_nested::NamedTuple)
+    transformed_hazards = map(keys(params_nested)) do hazname
+        hazard_params = params_nested[hazname]
+        
+        # Transform baseline to estimation scale (legacy: all log)
+        baseline_estimation = transform_baseline_to_estimation(hazard_params.baseline)
+        
+        # Keep covariates unchanged
+        if haskey(hazard_params, :covariates)
+            hazname => (baseline = baseline_estimation, covariates = hazard_params.covariates)
+        else
+            hazname => (baseline = baseline_estimation,)
+        end
+    end
+    
+    return NamedTuple(transformed_hazards)
 end
 
 """
@@ -403,10 +1187,10 @@ Spline hazards are remade with the new parameters.
 """
 function set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVector)
     # Unflatten to get nested structure
-    params_nested = model.parameters.unflatten(flat_params)
+    params_nested = unflatten(model.parameters.reconstructor, flat_params)
     
-    # Get new unflatten function
-    new_flat, new_unflatten = ParameterHandling.flatten(params_nested)
+    # Get new flat version (reconstructor stays the same)
+    new_flat = flatten(model.parameters.reconstructor, params_nested)
     
     # Update spline hazards if needed - extract log-scale params properly
     for i in eachindex(model.hazards)
@@ -418,19 +1202,19 @@ function set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVec
         end
     end
     
-    # Compute natural scale parameters
+    # Compute natural scale parameters (family-aware transformation)
     params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname])
+        hazname => extract_natural_vector(params_nested[hazname], model.hazards[idx].family)
         for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
     ]
     params_natural = NamedTuple(params_natural_pairs)
     
-    # Update parameters
+    # Update parameters (reconstructor stays the same)
     model.parameters = (
         flat = Vector{Float64}(flat_params),
         nested = params_nested,
         natural = params_natural,
-        unflatten = new_unflatten
+        reconstructor = model.parameters.reconstructor
     )
     
     return nothing
@@ -549,7 +1333,8 @@ params_nested = unflatten(flat_params)
 - [`get_parameters_nested`](@ref) - Get nested parameters
 """
 function get_unflatten_fn(model::MultistateProcess)
-    return model.parameters.unflatten
+    # Return a function that unflattens Float64 vectors
+    return p -> unflatten(model.parameters.reconstructor, p)
 end
 
 """

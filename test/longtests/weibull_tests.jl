@@ -36,8 +36,8 @@ function run_wei_nocov_exact()
 
     msm_sim = multistatemodel(h12, h23; data=dat)
     set_parameters!(msm_sim,
-        (h12 = [log(λ_12_true), log(α_12_true)],
-         h23 = [log(λ_23_true), log(α_23_true)]))
+        (h12 = [log(α_12_true), log(λ_12_true)],
+         h23 = [log(α_23_true), log(λ_23_true)]))
 
     # Simulate exact data
     paths = simulate(msm_sim; paths=true, data=false)[1]
@@ -51,10 +51,10 @@ function run_wei_nocov_exact()
 
     # Extract estimates
     params = get_parameters(fitted)
-    λ_12_est = exp(params[:h12][1])
-    α_12_est = exp(params[:h12][2])
-    λ_23_est = exp(params[:h23][1])
-    α_23_est = exp(params[:h23][2])
+    α_12_est = exp(params[:h12][1])
+    λ_12_est = exp(params[:h12][2])
+    α_23_est = exp(params[:h23][1])
+    λ_23_est = exp(params[:h23][2])
 
     # Compute relative errors
     rel_errs = Dict(
@@ -148,8 +148,8 @@ function run_wei_nocov_panel()
 
     msm_sim = multistatemodel(h12, h23; data=dat)
     set_parameters!(msm_sim,
-        (h12 = [log(λ_12_true), log(α_12_true)],
-         h23 = [log(λ_23_true), log(α_23_true)]))
+        (h12 = [log(α_12_true), log(λ_12_true)],
+         h23 = [log(α_23_true), log(λ_23_true)]))
 
     # Simulate exact data and convert to panel
     paths = simulate(msm_sim; paths=true, data=false)[1]
@@ -167,10 +167,10 @@ function run_wei_nocov_panel()
 
     # Extract estimates
     params = get_parameters(fitted)
-    λ_12_est = exp(params[:h12][1])
-    α_12_est = exp(params[:h12][2])
-    λ_23_est = exp(params[:h23][1])
-    α_23_est = exp(params[:h23][2])
+    α_12_est = exp(params[:h12][1])
+    λ_12_est = exp(params[:h12][2])
+    α_23_est = exp(params[:h23][1])
+    λ_23_est = exp(params[:h23][2])
 
     # Compute relative errors
     rel_errs = Dict(
@@ -271,8 +271,8 @@ function run_wei_ph_tfc_exact()
 
     msm_sim = multistatemodel(h12, h23; data=dat)
     set_parameters!(msm_sim,
-        (h12 = [log(λ_12_true), log(α_12_true), β_12_true],
-         h23 = [log(λ_23_true), log(α_23_true), β_23_true]))
+        (h12 = [log(α_12_true), log(λ_12_true)], β_12_true],
+         h23 = [log(α_23_true), log(λ_23_true)], β_23_true]))
 
     # Simulate exact data
     paths = simulate(msm_sim; paths=true, data=false)[1]
@@ -286,11 +286,11 @@ function run_wei_ph_tfc_exact()
 
     # Extract estimates
     params = get_parameters(fitted)
-    λ_12_est = exp(params[:h12][1])
-    α_12_est = exp(params[:h12][2])
+    α_12_est = exp(params[:h12][1])
+    λ_12_est = exp(params[:h12][2])
     β_12_est = params[:h12][3]
-    λ_23_est = exp(params[:h23][1])
-    α_23_est = exp(params[:h23][2])
+    α_23_est = exp(params[:h23][1])
+    λ_23_est = exp(params[:h23][2])
     β_23_est = params[:h23][3]
 
     # Compute relative errors
@@ -391,8 +391,8 @@ function run_wei_ph_tfc_panel()
 
     msm_sim = multistatemodel(h12, h23; data=dat)
     set_parameters!(msm_sim,
-        (h12 = [log(λ_12_true), log(α_12_true), β_12_true],
-         h23 = [log(λ_23_true), log(α_23_true), β_23_true]))
+        (h12 = [log(α_12_true), log(λ_12_true)], β_12_true],
+         h23 = [log(α_23_true), log(λ_23_true)], β_23_true]))
 
     # Simulate and convert to panel
     paths = simulate(msm_sim; paths=true, data=false)[1]
@@ -410,11 +410,11 @@ function run_wei_ph_tfc_panel()
 
     # Extract estimates
     params = get_parameters(fitted)
-    λ_12_est = exp(params[:h12][1])
-    α_12_est = exp(params[:h12][2])
+    α_12_est = exp(params[:h12][1])
+    λ_12_est = exp(params[:h12][2])
     β_12_est = params[:h12][3]
-    λ_23_est = exp(params[:h23][1])
-    α_23_est = exp(params[:h23][2])
+    α_23_est = exp(params[:h23][1])
+    λ_23_est = exp(params[:h23][2])
     β_23_est = params[:h23][3]
 
     # Compute relative errors
@@ -515,8 +515,8 @@ function run_wei_aft_tfc_exact()
 
     msm_sim = multistatemodel(h12, h23; data=dat)
     set_parameters!(msm_sim,
-        (h12 = [log(λ_12_true), log(α_12_true), β_12_true],
-         h23 = [log(λ_23_true), log(α_23_true), β_23_true]))
+        (h12 = [log(α_12_true), log(λ_12_true)], β_12_true],
+         h23 = [log(α_23_true), log(λ_23_true)], β_23_true]))
 
     # Simulate exact data
     paths = simulate(msm_sim; paths=true, data=false)[1]
@@ -530,11 +530,11 @@ function run_wei_aft_tfc_exact()
 
     # Extract estimates
     params = get_parameters(fitted)
-    λ_12_est = exp(params[:h12][1])
-    α_12_est = exp(params[:h12][2])
+    α_12_est = exp(params[:h12][1])
+    λ_12_est = exp(params[:h12][2])
     β_12_est = params[:h12][3]
-    λ_23_est = exp(params[:h23][1])
-    α_23_est = exp(params[:h23][2])
+    α_23_est = exp(params[:h23][1])
+    λ_23_est = exp(params[:h23][2])
     β_23_est = params[:h23][3]
 
     # Compute relative errors
@@ -635,8 +635,8 @@ function run_wei_aft_tfc_panel()
 
     msm_sim = multistatemodel(h12, h23; data=dat)
     set_parameters!(msm_sim,
-        (h12 = [log(λ_12_true), log(α_12_true), β_12_true],
-         h23 = [log(λ_23_true), log(α_23_true), β_23_true]))
+        (h12 = [log(α_12_true), log(λ_12_true)], β_12_true],
+         h23 = [log(α_23_true), log(λ_23_true)], β_23_true]))
 
     # Simulate and convert to panel
     paths = simulate(msm_sim; paths=true, data=false)[1]
@@ -654,11 +654,11 @@ function run_wei_aft_tfc_panel()
 
     # Extract estimates
     params = get_parameters(fitted)
-    λ_12_est = exp(params[:h12][1])
-    α_12_est = exp(params[:h12][2])
+    α_12_est = exp(params[:h12][1])
+    λ_12_est = exp(params[:h12][2])
     β_12_est = params[:h12][3]
-    λ_23_est = exp(params[:h23][1])
-    α_23_est = exp(params[:h23][2])
+    α_23_est = exp(params[:h23][1])
+    λ_23_est = exp(params[:h23][2])
     β_23_est = params[:h23][3]
 
     # Compute relative errors
@@ -760,8 +760,8 @@ function run_wei_ph_tvc_exact()
 
     msm_sim = multistatemodel(h12, h23; data=dat)
     set_parameters!(msm_sim,
-        (h12 = [log(λ_12_true), log(α_12_true), β_12_true],
-         h23 = [log(λ_23_true), log(α_23_true), β_23_true]))
+        (h12 = [log(α_12_true), log(λ_12_true)], β_12_true],
+         h23 = [log(α_23_true), log(λ_23_true)], β_23_true]))
 
     # Simulate exact data
     paths = simulate(msm_sim; paths=true, data=false)[1]
@@ -775,11 +775,11 @@ function run_wei_ph_tvc_exact()
 
     # Extract estimates
     params = get_parameters(fitted)
-    λ_12_est = exp(params[:h12][1])
-    α_12_est = exp(params[:h12][2])
+    α_12_est = exp(params[:h12][1])
+    λ_12_est = exp(params[:h12][2])
     β_12_est = params[:h12][3]
-    λ_23_est = exp(params[:h23][1])
-    α_23_est = exp(params[:h23][2])
+    α_23_est = exp(params[:h23][1])
+    λ_23_est = exp(params[:h23][2])
     β_23_est = params[:h23][3]
 
     # Compute relative errors
@@ -880,8 +880,8 @@ function run_wei_ph_tvc_panel()
 
     msm_sim = multistatemodel(h12, h23; data=dat)
     set_parameters!(msm_sim,
-        (h12 = [log(λ_12_true), log(α_12_true), β_12_true],
-         h23 = [log(λ_23_true), log(α_23_true), β_23_true]))
+        (h12 = [log(α_12_true), log(λ_12_true)], β_12_true],
+         h23 = [log(α_23_true), log(λ_23_true)], β_23_true]))
 
     # Simulate and convert to panel
     paths = simulate(msm_sim; paths=true, data=false)[1]
@@ -899,11 +899,11 @@ function run_wei_ph_tvc_panel()
 
     # Extract estimates
     params = get_parameters(fitted)
-    λ_12_est = exp(params[:h12][1])
-    α_12_est = exp(params[:h12][2])
+    α_12_est = exp(params[:h12][1])
+    λ_12_est = exp(params[:h12][2])
     β_12_est = params[:h12][3]
-    λ_23_est = exp(params[:h23][1])
-    α_23_est = exp(params[:h23][2])
+    α_23_est = exp(params[:h23][1])
+    λ_23_est = exp(params[:h23][2])
     β_23_est = params[:h23][3]
 
     # Compute relative errors
@@ -1004,8 +1004,8 @@ function run_wei_aft_tvc_exact()
 
     msm_sim = multistatemodel(h12, h23; data=dat)
     set_parameters!(msm_sim,
-        (h12 = [log(λ_12_true), log(α_12_true), β_12_true],
-         h23 = [log(λ_23_true), log(α_23_true), β_23_true]))
+        (h12 = [log(α_12_true), log(λ_12_true)], β_12_true],
+         h23 = [log(α_23_true), log(λ_23_true)], β_23_true]))
 
     # Simulate exact data
     paths = simulate(msm_sim; paths=true, data=false)[1]
@@ -1019,11 +1019,11 @@ function run_wei_aft_tvc_exact()
 
     # Extract estimates
     params = get_parameters(fitted)
-    λ_12_est = exp(params[:h12][1])
-    α_12_est = exp(params[:h12][2])
+    α_12_est = exp(params[:h12][1])
+    λ_12_est = exp(params[:h12][2])
     β_12_est = params[:h12][3]
-    λ_23_est = exp(params[:h23][1])
-    α_23_est = exp(params[:h23][2])
+    α_23_est = exp(params[:h23][1])
+    λ_23_est = exp(params[:h23][2])
     β_23_est = params[:h23][3]
 
     # Compute relative errors
@@ -1124,8 +1124,8 @@ function run_wei_aft_tvc_panel()
 
     msm_sim = multistatemodel(h12, h23; data=dat)
     set_parameters!(msm_sim,
-        (h12 = [log(λ_12_true), log(α_12_true), β_12_true],
-         h23 = [log(λ_23_true), log(α_23_true), β_23_true]))
+        (h12 = [log(α_12_true), log(λ_12_true)], β_12_true],
+         h23 = [log(α_23_true), log(λ_23_true)], β_23_true]))
 
     # Simulate and convert to panel
     paths = simulate(msm_sim; paths=true, data=false)[1]
@@ -1143,11 +1143,11 @@ function run_wei_aft_tvc_panel()
 
     # Extract estimates
     params = get_parameters(fitted)
-    λ_12_est = exp(params[:h12][1])
-    α_12_est = exp(params[:h12][2])
+    α_12_est = exp(params[:h12][1])
+    λ_12_est = exp(params[:h12][2])
     β_12_est = params[:h12][3]
-    λ_23_est = exp(params[:h23][1])
-    α_23_est = exp(params[:h23][2])
+    α_23_est = exp(params[:h23][1])
+    λ_23_est = exp(params[:h23][2])
     β_23_est = params[:h23][3]
 
     # Compute relative errors

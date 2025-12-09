@@ -267,9 +267,13 @@ during optimization. This function applies a round-trip transformation
 (ests → coefs → ests) with zero-clamping to clean up near-zero values.
 """
 function rectify_coefs!(ests, model)
-    nested = nest_params(ests, model.parameters)
+    nested = unflatten(model.parameters.reconstructor, ests)
 
-    for i in eachindex(model.hazards)
+    # Get hazard names in sorted order
+    haznames_sorted = [hazname for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])]
+    
+    # Process each hazard
+    for (i, hazname) in enumerate(haznames_sorted)
         haz = model.hazards[i]
         if isa(haz, RuntimeSplineHazard)
             # New functional design - use basis stored in the hazard functions
@@ -277,9 +281,12 @@ function rectify_coefs!(ests, model)
             nbasis = haz.npar_baseline
             basis = _rebuild_spline_basis(haz)
             
+            # Extract baseline parameters from nested structure
+            hazard_params = nested[hazname]
+            baseline_values = collect(values(hazard_params.baseline))
+            
             # Round-trip transformation to clean up numerical zeros
-            baseline_ests = nested[i][1:nbasis]
-            coefs = _spline_ests2coefs(baseline_ests, basis, haz.monotone)
+            coefs = _spline_ests2coefs(baseline_values, basis, haz.monotone)
             
             # Clamp numerical zeros in coefficients
             coefs[findall(isapprox.(coefs, 0.0; atol = sqrt(eps())))] .= zero(eltype(coefs))
@@ -287,11 +294,10 @@ function rectify_coefs!(ests, model)
             # Transform back
             rectified_baseline = _spline_coefs2ests(coefs, basis, haz.monotone; clamp_zeros=true)
             
-            # Combine with covariate parameters
-            rectified = vcat(rectified_baseline, nested[i][nbasis+1:end])
-            
-            # Copy back to ests (nested[i] is a view into ests)
-            nested[i] .= rectified
+            # Update ests vector directly (need to find position in flat vector)
+            # Compute offset for this hazard's parameters in flat vector
+            offset = sum(model.hazards[j].npar_total for j in 1:(i-1); init=0)
+            ests[offset+1:offset+nbasis] .= rectified_baseline
         end
     end
 end
@@ -300,10 +306,20 @@ end
     _rebuild_spline_basis(hazard::RuntimeSplineHazard)
 
 Rebuild the BSpline basis from a RuntimeSplineHazard for coefficient transformations.
+
+Handles natural splines and constant extrapolation boundary conditions:
+- constant: enforces D¹=0 (Neumann BC) at boundaries for smooth constant extrapolation
+- natural_spline: enforces D²=0 (natural spline) at boundaries
 """
 function _rebuild_spline_basis(hazard::RuntimeSplineHazard)
     B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(hazard.knots))
-    if (hazard.degree > 1) && hazard.natural_spline
+    
+    # Apply boundary conditions based on extrapolation method
+    if hazard.extrapolation == "constant" && hazard.degree >= 2
+        # constant: D¹=0 at both boundaries for C¹ continuity
+        B = RecombinedBSplineBasis(B, Derivative(1))
+    elseif (hazard.degree > 1) && hazard.natural_spline
+        # Natural spline: D²=0 at boundaries
         B = RecombinedBSplineBasis(B, Natural())
     end
     return B
@@ -345,7 +361,8 @@ This helper reduces code duplication across likelihood, sampling, and fitting co
 function _update_spline_hazards!(hazards::Vector{<:_Hazard}, pars)
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars[i])
+            # Note: For RuntimeSplineHazard, remake_splines! is a no-op
+            remake_splines!(hazards[i], nothing)
             set_riskperiod!(hazards[i])
         end
     end
@@ -539,14 +556,23 @@ function _rebuild_model_with_knots!(model::MultistateProcess,
         # New complete knot sequence
         new_knots = unique(sort([lb; new_interior; ub]))
         
-        # Rebuild the spline basis
+        # Rebuild the spline basis with appropriate boundary conditions
         B = BSplineBasis(BSplineOrder(haz.degree + 1), copy(new_knots))
-        if (haz.degree > 1) && haz.natural_spline
+        if haz.extrapolation == "constant" && haz.degree >= 2
+            # constant: D¹=0 at both boundaries for C¹ continuity
+            B = RecombinedBSplineBasis(B, Derivative(1))
+        elseif (haz.degree > 1) && haz.natural_spline
+            # Natural spline: D²=0 at boundaries
             B = RecombinedBSplineBasis(B, Natural())
         end
         
-        # Default to flat extrapolation (safe choice)
-        extrap_method = BSplineKit.SplineExtrapolations.Flat()
+        # Use the stored extrapolation method
+        extrap_method = if haz.extrapolation == "linear"
+            BSplineKit.SplineExtrapolations.Linear()
+        else
+            # "constant" uses Flat() - the smooth basis above ensures C¹ continuity
+            BSplineKit.SplineExtrapolations.Flat()
+        end
         
         nbasis = length(B)
         
@@ -582,6 +608,7 @@ function _rebuild_model_with_knots!(model::MultistateProcess,
             new_knots,     # Updated knots
             haz.natural_spline,
             haz.monotone,
+            haz.extrapolation,
             haz.metadata,
             haz.shared_baseline_key
         )

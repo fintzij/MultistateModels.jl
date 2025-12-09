@@ -66,7 +66,16 @@ using LinearAlgebra
         # Test round-trip: flatten → unflatten
         restored = unflatten(flat)
         for key in keys(nested)
-            @test isapprox(nested[key].baseline, restored[key].baseline; atol=1e-10)
+            # Compare baseline parameter values (now NamedTuples with named fields)
+            for parname in keys(nested[key].baseline)
+                @test isapprox(nested[key].baseline[parname], restored[key].baseline[parname]; atol=1e-10)
+            end
+            # Compare covariate parameters if present
+            if haskey(nested[key], :covariates)
+                for parname in keys(nested[key].covariates)
+                    @test isapprox(nested[key].covariates[parname], restored[key].covariates[parname]; atol=1e-10)
+                end
+            end
         end
     end
     

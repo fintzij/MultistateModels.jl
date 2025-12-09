@@ -19,7 +19,7 @@ function set_crude_init!(model::MultistateProcess; constraints = nothing)
 
         for i in eachindex(model.hazards)
             if isa(model.hazards[i], _SplineHazard)
-                log_params = get_log_scale_params(model.parameters)
+                log_params = get_estimation_scale_params(model.parameters)
                 remake_splines!(model.hazards[i], log_params[i])
                 set_riskperiod!(model.hazards[i])
             end
@@ -65,7 +65,7 @@ function initialize_parameters(model::MultistateProcess; constraints = nothing, 
             set_parameters!(model, NamedTuple{(hazard.hazname,)}((set_par_to,)))
 
             if isa(hazard, _SplineHazard)
-                log_params = get_log_scale_params(model.parameters)
+                log_params = get_estimation_scale_params(model.parameters)
                 remake_splines!(hazard, log_params[i])
                 set_riskperiod!(hazard)
             end
@@ -111,7 +111,7 @@ function initialize_parameters!(model::MultistateProcess; constraints = nothing,
             set_parameters!(model, NamedTuple{(hazard.hazname,)}((set_par_to,)))
 
             if isa(hazard, _SplineHazard)
-                log_params = get_log_scale_params(model.parameters)
+                log_params = get_estimation_scale_params(model.parameters)
                 remake_splines!(hazard, log_params[i])
                 set_riskperiod!(hazard)
             end
@@ -233,9 +233,11 @@ function init_par(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, cr
         return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
         
     elseif family == "gom"
-        # Gompertz: [log_shape, log_scale] or [log_shape, log_scale, β1, β2, ...]
-        # Initialize shape=1 (log_shape=0) to start as exponential
-        baseline = [0.0, crude_log_rate]  # log(shape=1), log_scale
+        # Gompertz: [shape, log_rate] or [shape, log_rate, β1, β2, ...]
+        # shape is unconstrained (can be positive, negative, or zero)
+        # rate is positive, stored on log scale
+        # Initialize shape=0 so hazard starts as exponential: h(t) = rate * exp(0*t) = rate
+        baseline = [0.0, crude_log_rate]  # shape=0 (not log-transformed), log_rate
         return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
         
     elseif family == "sp"

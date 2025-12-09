@@ -1025,8 +1025,9 @@ function _build_progression_hazard(observed_state::Int, phase_index::Int, n_phas
     parname = Symbol("$(hazname)_lambda")
     
     # Simple exponential hazard function (no covariates)
-    hazard_fn = (t, pars, covars) -> exp(pars[1])
-    cumhaz_fn = (lb, ub, pars, covars) -> exp(pars[1]) * (ub - lb)
+    # pars is a NamedTuple: (baseline = (lambda = ...,),)
+    hazard_fn = (t, pars, covars) -> exp(only(values(pars.baseline)))
+    cumhaz_fn = (lb, ub, pars, covars) -> exp(only(values(pars.baseline))) * (ub - lb)
     
     metadata = HazardMetadata(
         linpred_effect = :ph,
@@ -1119,8 +1120,9 @@ Generate hazard and cumulative hazard functions for exit transitions.
 """
 function _generate_exit_hazard_fns(parnames::Vector{Symbol}, linpred_effect::Symbol, has_covars::Bool)
     if !has_covars
-        hazard_fn = (t, pars, covars) -> exp(pars[1])
-        cumhaz_fn = (lb, ub, pars, covars) -> exp(pars[1]) * (ub - lb)
+        # pars is a NamedTuple: (baseline = (param_name = ...,),)
+        hazard_fn = (t, pars, covars) -> exp(only(values(pars.baseline)))
+        cumhaz_fn = (lb, ub, pars, covars) -> exp(only(values(pars.baseline))) * (ub - lb)
     else
         # Use generate_exponential_hazard from hazards.jl
         hazard_fn, cumhaz_fn = generate_exponential_hazard(parnames, linpred_effect)
@@ -1233,8 +1235,8 @@ function _adjust_hazard_states(haz::RuntimeSplineHazard, new_statefrom::Int, new
         haz.hazname, new_statefrom, new_stateto, haz.family,
         haz.parnames, haz.npar_baseline, haz.npar_total,
         haz.hazard_fn, haz.cumhaz_fn, haz.has_covariates,
-        haz.covar_names, haz.metadata, haz.shared_baseline_key,
-        haz.basis, haz.knots, haz.degree, haz.monotone
+        haz.covar_names, haz.degree, haz.knots, haz.natural_spline,
+        haz.monotone, haz.extrapolation, haz.metadata, haz.shared_baseline_key
     )
 end
 
@@ -1538,17 +1540,18 @@ function _build_expanded_parameters(params_list::Vector{Vector{Float64}},
                                      hazards::Vector{<:_Hazard})
     # Build nested parameters structure per hazard
     params_nested_pairs = [
-        hazname => build_hazard_params(params_list[idx], hazards[idx].npar_baseline)
+        hazname => build_hazard_params(params_list[idx], hazards[idx].parnames, hazards[idx].npar_baseline, length(params_list[idx]))
         for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
     ]
     params_nested = NamedTuple(params_nested_pairs)
     
-    # Use ParameterHandling to flatten/unflatten
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
+    # Create ReConstructor for AD-compatible flatten/unflatten
+    reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
+    params_flat = flatten(reconstructor, params_nested)
     
-    # Get natural scale parameters
+    # Get natural scale parameters (family-aware transformation)
     params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname])
+        hazname => extract_natural_vector(params_nested[hazname], hazards[idx].family)
         for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
     ]
     params_natural = NamedTuple(params_natural_pairs)
@@ -1557,7 +1560,7 @@ function _build_expanded_parameters(params_list::Vector{Vector{Float64}},
         flat = params_flat,
         nested = params_nested,
         natural = params_natural,
-        unflatten = unflatten_fn
+        reconstructor = reconstructor
     )
 end
 
@@ -1598,13 +1601,14 @@ function _build_original_parameters(hazards::Vector{<:HazardFunction}, data::Dat
         for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
     ]
     params_nested = NamedTuple(params_nested_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
+    reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
+    params_flat = flatten(reconstructor, params_nested)
     
     return (
         flat = params_flat,
         nested = params_nested,
         natural = params_nested,  # Placeholder
-        unflatten = unflatten_fn
+        reconstructor = reconstructor
     )
 end
 
@@ -3719,7 +3723,8 @@ function phasetype_parameters_to_Q(fitted_model, surrogate::PhaseTypeSurrogate)
     # Fill in Q matrix from fitted hazard rates
     for (idx, haz) in enumerate(hazards)
         # Get intercept parameter (baseline rate on natural scale)
-        rate = exp(pars[idx][1])  # Parameters stored on log scale
+        # pars[idx] is a NamedTuple: (baseline = (param_name = ...,),)
+        rate = exp(only(values(pars[idx].baseline)))  # Parameters stored on log scale
         Q[haz.statefrom, haz.stateto] = rate
     end
     
@@ -3938,15 +3943,36 @@ function _sync_phasetype_parameters_to_original!(model::PhaseTypeModel)
     end
     
     # Rebuild original parameters structure
+    # For each hazard, construct parnames vector by extracting from existing parameters
     params_nested_pairs = [
-        hazname => build_hazard_params(params_list[idx], npar_baseline_list[idx])
-        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+        let 
+            hazname_sym = first(pair)
+            idx = last(pair)
+            # Get parameter names from existing nested structure if available, 
+            # otherwise construct from hazname and npar counts
+            if haskey(model.parameters.nested, hazname_sym)
+                existing_params = model.parameters.nested[hazname_sym]
+                parnames = vcat(
+                    collect(keys(existing_params.baseline)),
+                    haskey(existing_params, :covariates) ? collect(keys(existing_params.covariates)) : Symbol[]
+                )
+            else
+                # Fallback: construct generic names (shouldn't happen in practice)
+                npar_baseline = npar_baseline_list[idx]
+                npar_total = length(params_list[idx])
+                parnames = [Symbol(hazname_sym, "_p", i) for i in 1:npar_total]
+            end
+            hazname_sym => build_hazard_params(params_list[idx], parnames, npar_baseline_list[idx], length(params_list[idx]))
+        end
+        for pair in sort(collect(hazkeys), by = x -> x[2])
     ]
     params_nested = NamedTuple(params_nested_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
+    reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
+    params_flat = flatten(reconstructor, params_nested)
     
+    # Get natural scale parameters (family-aware transformation)
     params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname])
+        hazname => extract_natural_vector(params_nested[hazname], original_hazards[idx].family)
         for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
     ]
     params_natural = NamedTuple(params_natural_pairs)
@@ -3956,7 +3982,7 @@ function _sync_phasetype_parameters_to_original!(model::PhaseTypeModel)
         flat = params_flat,
         nested = params_nested,
         natural = params_natural,
-        unflatten = unflatten_fn
+        reconstructor = reconstructor
     )
 end
 
@@ -4223,7 +4249,7 @@ This is the inverse of flatten() and is used by the fitting machinery
 to convert optimizer output back to structured parameters.
 """
 function get_unflatten_fn(model::PhaseTypeModel)
-    return model.parameters.unflatten
+    return p -> unflatten(model.parameters.reconstructor, p)
 end
 
 """
@@ -4386,15 +4412,34 @@ function _rebuild_original_params_from_values!(model::PhaseTypeModel,
     end
     
     # Rebuild parameters structure
+    # For each hazard, construct parnames vector
     params_nested_pairs = [
-        hazname => build_hazard_params(newvalues[idx], npar_baseline_list[idx])
-        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+        let
+            hazname_sym = first(pair)
+            idx = last(pair)
+            # Get parameter names from existing structure
+            if haskey(model.original_parameters.nested, hazname_sym)
+                existing_params = model.original_parameters.nested[hazname_sym]
+                parnames = vcat(
+                    collect(keys(existing_params.baseline)),
+                    haskey(existing_params, :covariates) ? collect(keys(existing_params.covariates)) : Symbol[]
+                )
+            else
+                # Fallback: construct from hazname
+                npar_total = length(newvalues[idx])
+                parnames = [Symbol(hazname_sym, "_p", i) for i in 1:npar_total]
+            end
+            hazname_sym => build_hazard_params(newvalues[idx], parnames, npar_baseline_list[idx], length(newvalues[idx]))
+        end
+        for pair in sort(collect(hazkeys), by = x -> x[2])
     ]
     params_nested = NamedTuple(params_nested_pairs)
-    params_flat, unflatten_fn = ParameterHandling.flatten(params_nested)
+    reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
+    params_flat = flatten(reconstructor, params_nested)
     
+    # Get natural scale parameters (family-aware transformation)
     params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname])
+        hazname => extract_natural_vector(params_nested[hazname], original_hazards[idx].family)
         for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
     ]
     params_natural = NamedTuple(params_natural_pairs)
@@ -4404,6 +4449,6 @@ function _rebuild_original_params_from_values!(model::PhaseTypeModel,
         flat = params_flat,
         nested = params_nested,
         natural = params_natural,
-        unflatten = unflatten_fn
+        reconstructor = reconstructor
     )
 end

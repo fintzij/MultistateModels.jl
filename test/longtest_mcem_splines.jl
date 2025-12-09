@@ -22,7 +22,7 @@ using Statistics
 
 # Import internal functions for testing
 import MultistateModels: Hazard, multistatemodel, fit, set_parameters!, simulate,
-    get_parameters_flat, get_log_scale_params, cumulative_hazard
+    get_parameters_flat, cumulative_hazard
 
 const RNG_SEED = 0xABCD5678
 const N_SUBJECTS = 1000      # Standard sample size for longtests
@@ -70,7 +70,7 @@ const HAZARD_TOL_FACTOR = 3.0  # Spline hazard should be within factor of 3 of t
                     degree=1, 
                     knots=Float64[],  # No interior knots
                     boundaryknots=[0.0, 5.0],
-                    extrapolation="flat")
+                    extrapolation="linear")
     
     model_spline = multistatemodel(h12_sp; data=panel_data, surrogate=:markov)
     
@@ -142,7 +142,7 @@ end
                     degree=1,  # Linear spline
                     knots=[change_time],  # Interior knot at change point
                     boundaryknots=[0.0, 5.0],
-                    extrapolation="flat")
+                    extrapolation="linear")
     
     model_spline = multistatemodel(h12_sp; data=panel_data, surrogate=:markov)
     
@@ -219,7 +219,7 @@ end
                     knots=[2.5],  # One interior knot for flexibility
                     boundaryknots=[0.0, 5.0],
                     natural_spline=false,  # Regular B-spline (more stable for MCEM)
-                    extrapolation="flat")
+                    extrapolation="constant")
     
     model_spline = multistatemodel(h12_sp; data=panel_data, surrogate=:markov)
     
@@ -294,7 +294,7 @@ end
                     degree=1,
                     knots=Float64[],
                     boundaryknots=[0.0, 5.0],
-                    extrapolation="flat")
+                    extrapolation="linear")
     
     model_spline = multistatemodel(h12_sp; data=panel_data, surrogate=:markov)
     
@@ -370,7 +370,7 @@ end
                     knots=[2.0],  # One interior knot
                     boundaryknots=[0.0, 5.0],
                     monotone=1,  # Increasing
-                    extrapolation="flat")
+                    extrapolation="constant")
     
     model_spline = multistatemodel(h12_sp; data=panel_data, surrogate=:markov)
     

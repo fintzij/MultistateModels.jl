@@ -208,7 +208,7 @@ using QuadGK
         test_pars = randn(npar) * 0.4
         set_parameters!(model, 1, test_pars)
         
-        params = MultistateModels.get_log_scale_params(model.parameters)
+        params = MultistateModels.get_hazard_params(model.parameters)
         pars = params[1]
         subjdat_row = model.data[1, :]
         covars = MultistateModels.extract_covariates_fast(subjdat_row, haz.covar_names)
@@ -419,10 +419,13 @@ using QuadGK
         # Rectification should produce valid parameters
         @test all(isfinite.(ests_after))
         
-        # Update model with rectified parameters
-        pars_nested = MultistateModels.nest_params(ests_after, model.parameters)
-        for h in eachindex(model.hazards)
-            set_parameters!(model, h, collect(pars_nested[h]))
+        # Update model with rectified parameters using safe_unflatten
+        pars_nested = MultistateModels.safe_unflatten(ests_after, model)
+        for (hazname, hazidx) in model.hazkeys
+            hazard_pars = pars_nested[hazname]
+            # Extract full parameter vector (baseline + covariates)
+            pars_vec = MultistateModels.extract_params_vector(hazard_pars)
+            set_parameters!(model, hazidx, pars_vec)
         end
         
         # Verify cumulative hazard matches numerical integration after rectification
@@ -517,20 +520,20 @@ using QuadGK
         H_quad, _ = quadgk(t -> MultistateModels.eval_hazard(haz_linear, t, pars, covars), lb, ub; rtol=1e-10)
         @test isapprox(H_impl, H_quad; rtol=1e-3)
         
-        # Spline with flat extrapolation - verify cumhaz at boundaries
-        h_flat = Hazard(@formula(0 ~ 1), "sp", 1, 2; 
+        # Spline with constant extrapolation - verify cumhaz at boundaries
+        h_const = Hazard(@formula(0 ~ 1), "sp", 1, 2; 
                         degree=3, knots=[0.3, 0.5, 0.7],
-                        extrapolation="flat")
+                        extrapolation="constant")
         
-        model_flat = multistatemodel(h_flat; data=large_dat)
-        haz_flat = model_flat.hazards[1]
-        pars_flat = get_parameters(model_flat, 1, scale=:log)
+        model_const = multistatemodel(h_const; data=large_dat)
+        haz_const = model_const.hazards[1]
+        pars_const = get_parameters(model_const, 1, scale=:log)
         
         # Verify cumhaz beyond knot boundaries matches QuadGK
         # Note: rtol=1e-3 because spline cumhaz uses internal integration that differs from QuadGK
-        H_impl_flat = MultistateModels.eval_cumhaz(haz_flat, 0.0, 0.5, pars_flat, covars)
-        H_quad_flat, _ = quadgk(t -> MultistateModels.eval_hazard(haz_flat, t, pars_flat, covars), 0.0, 0.5; rtol=1e-10)
-        @test isapprox(H_impl_flat, H_quad_flat; rtol=1e-3)
+        H_impl_const = MultistateModels.eval_cumhaz(haz_const, 0.0, 0.5, pars_const, covars)
+        H_quad_const, _ = quadgk(t -> MultistateModels.eval_hazard(haz_const, t, pars_const, covars), 0.0, 0.5; rtol=1e-10)
+        @test isapprox(H_impl_const, H_quad_const; rtol=1e-3)
         
         # Spline with linear extrapolation - verify cumhaz  
         h_extrap = Hazard(@formula(0 ~ 1), "sp", 1, 2; 

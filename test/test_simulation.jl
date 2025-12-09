@@ -98,7 +98,7 @@ end
         fixture = toy_expwei_model()
         model = fixture.model
 
-        result = draw_paths(model, 3; paretosmooth = false, return_logliks = true)
+        result = draw_paths(model; npaths=3, paretosmooth = false, return_logliks = true)
 
         @test length(result.samplepaths) == length(model.subjectindices)
         @test all(abs(sum(weights) - 1) < 1e-8 for weights in result.ImportanceWeightsNormalized)

@@ -27,7 +27,7 @@ using Statistics
 using LinearAlgebra
 
 import MultistateModels: Hazard, multistatemodel, fit, set_parameters!, simulate,
-    get_parameters_flat, get_parameters, get_log_scale_params, SamplePath, @formula,
+    get_parameters_flat, get_parameters, SamplePath, @formula,
     fit_surrogate, build_tpm_mapping, build_phasetype_surrogate, PhaseTypeConfig,
     build_phasetype_emat_expanded, build_phasetype_tpm_book, build_fbmats_phasetype,
     compute_phasetype_marginal_loglik, draw_samplepath_phasetype, loglik,
@@ -227,7 +227,8 @@ end
             1, model, tpm_book_ph, hazmat_book_ph, books[2],
             fbmats_ph, emat_ph, surrogate, absorbingstates)
         
-        params = get_log_scale_params(model.parameters)
+        # Use flat params - loglik will unflatten with exp transform for baseline params
+        params = get_parameters_flat(model)
         ll_target = loglik(params, path_result.collapsed, model.hazards, model)
         ll_surrog = loglik_phasetype_expanded(path_result.expanded, surrogate)
         
@@ -287,7 +288,8 @@ end
             1, model, tpm_book_ph, hazmat_book_ph, books[2],
             fbmats_ph, emat_ph, surrogate, absorbingstates)
         
-        params = get_log_scale_params(model.parameters)
+        # Use flat params - loglik will unflatten with exp transform for baseline params
+        params = get_parameters_flat(model)
         ll_target = loglik(params, result.collapsed, model.hazards, model)
         ll_surrog = loglik_phasetype_expanded(result.expanded, surrogate)
         push!(log_weights, ll_target - ll_surrog)

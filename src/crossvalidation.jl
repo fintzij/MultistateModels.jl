@@ -93,7 +93,7 @@ function compute_subject_gradients(params::AbstractVector, model::MultistateMode
         
         # closure for subject i's log-likelihood
         function ll_subj_i(pars)
-            pars_nested = nest_params(pars, model.parameters)
+            pars_nested = safe_unflatten(pars, model)
             subj_inds = model.subjectindices[path.subj]
             subj_dat = view(model.data, subj_inds, :)
             subjdat_df = make_subjdat(path, subj_dat)
@@ -266,7 +266,7 @@ function compute_subject_hessians(params::AbstractVector, model::MultistateModel
         
         # closure for subject i's log-likelihood
         function ll_subj_i(pars)
-            pars_nested = nest_params(pars, model.parameters)
+            pars_nested = safe_unflatten(pars, model)
             subj_inds = model.subjectindices[path.subj]
             subj_dat = view(model.data, subj_inds, :)
             subjdat_df = make_subjdat(path, subj_dat)
@@ -339,14 +339,14 @@ function loglik_weighted_with_params(θw::AbstractVector{T}, npaths::Int, nparam
     θ = @view θw[1:nparams]
     w = @view θw[nparams+1:end]
     
-    # nest parameters
-    pars_nested = nest_params(θ, model.parameters)
+    # unflatten parameters using ParameterHandling.jl
+    pars_nested = safe_unflatten(θ, model)
     hazards = model.hazards
     
-    # remake spline parameters if needed
+    # remake spline parameters if needed (no-op for RuntimeSplineHazard)
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars_nested[i])
+            remake_splines!(hazards[i], nothing)
             set_riskperiod!(hazards[i])
         end
     end
@@ -388,14 +388,14 @@ function loglik_paths_subject(pars::AbstractVector{T}, subject_paths::Vector{Sam
     npaths = length(subject_paths)
     lls = Vector{T}(undef, npaths)
     
-    # nest parameters
-    pars_nested = nest_params(pars, model.parameters)
+    # unflatten parameters using ParameterHandling.jl
+    pars_nested = safe_unflatten(pars, model)
     hazards = model.hazards
     
-    # remake spline parameters if needed
+    # remake spline parameters if needed (no-op for RuntimeSplineHazard)
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars_nested[i])
+            remake_splines!(hazards[i], nothing)
             set_riskperiod!(hazards[i])
         end
     end
@@ -440,14 +440,14 @@ function loglik_weighted_subject(pars::AbstractVector{T}, subject_paths::Vector{
     npaths = length(subject_paths)
     ll_weighted = zero(T)
     
-    # nest parameters
-    pars_nested = nest_params(pars, model.parameters)
+    # unflatten parameters using ParameterHandling.jl
+    pars_nested = safe_unflatten(pars, model)
     hazards = model.hazards
     
-    # remake spline parameters if needed
+    # remake spline parameters if needed (no-op for RuntimeSplineHazard)
     for i in eachindex(hazards)
         if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], pars_nested[i])
+            remake_splines!(hazards[i], nothing)
             set_riskperiod!(hazards[i])
         end
     end

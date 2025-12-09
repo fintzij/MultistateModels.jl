@@ -235,11 +235,11 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
 
     # Build parameters structure for fitted parameters
     # Use the unflatten function from the model to convert flat params back to nested
-    params_nested = model.parameters.unflatten(sol.u)
+    params_nested = unflatten(model.parameters.reconstructor, sol.u)
     
-    # Compute natural scale parameters
+    # Compute natural scale parameters (family-aware transformation)
     params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname])
+        hazname => extract_natural_vector(params_nested[hazname], model.hazards[idx].family)
         for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
     ]
     params_natural = NamedTuple(params_natural_pairs)
@@ -248,7 +248,7 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
         flat = Vector{Float64}(sol.u),
         nested = params_nested,
         natural = params_natural,
-        unflatten = model.parameters.unflatten
+        reconstructor = model.parameters.reconstructor  # Keep same reconstructor
     )
 
     # Split sol.u into per-hazard log-scale vectors for spline remaking
@@ -445,11 +445,11 @@ function fit(model::PhaseTypeModel;
     end
 
     # Update model with fitted parameters
-    params_nested = model.parameters.unflatten(sol.u)
+    params_nested = unflatten(model.parameters.reconstructor, sol.u)
     
-    # Compute natural scale for expanded parameters
+    # Compute natural scale for expanded parameters (family-aware transformation)
     params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname])
+        hazname => extract_natural_vector(params_nested[hazname], model.hazards[idx].family)
         for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
     ]
     params_natural = NamedTuple(params_natural_pairs)
@@ -459,7 +459,7 @@ function fit(model::PhaseTypeModel;
         flat = Vector{Float64}(sol.u),
         nested = params_nested,
         natural = params_natural,
-        unflatten = model.parameters.unflatten
+        reconstructor = model.parameters.reconstructor  # Keep same reconstructor
     )
 
     # Sync back to user-facing parameters
@@ -479,7 +479,7 @@ function fit(model::PhaseTypeModel;
         flat = Vector{Float64}(sol.u),
         nested = params_nested,
         natural = params_natural,
-        unflatten = model.parameters.unflatten
+        reconstructor = model.parameters.reconstructor  # Keep same reconstructor
     )
 
     # Compute robust variance if requested
@@ -742,11 +742,11 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
 
     # Build parameters structure for fitted parameters
     # Use the unflatten function from the model to convert flat params back to nested
-    params_nested = model.parameters.unflatten(sol.u)
+    params_nested = unflatten(model.parameters.reconstructor, sol.u)
     
-    # Compute natural scale parameters
+    # Compute natural scale parameters (family-aware transformation)
     params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname])
+        hazname => extract_natural_vector(params_nested[hazname], model.hazards[idx].family)
         for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
     ]
     params_natural = NamedTuple(params_natural_pairs)
@@ -755,7 +755,7 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
         flat = Vector{Float64}(sol.u),
         nested = params_nested,
         natural = params_natural,
-        unflatten = model.parameters.unflatten
+        reconstructor = model.parameters.reconstructor  # Keep same reconstructor
     )
 
     # wrap results
@@ -1010,6 +1010,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     # containers for traces
     mll_trace = Vector{Float64}() # marginal loglikelihood
     ess_trace = ElasticArray{Float64, 2}(undef, nsubj, 0) # effective sample size (one per subject)
+    path_count_trace = ElasticArray{Int, 2}(undef, nsubj, 0) # actual path counts (one per subject)
     # Phase 3: Use ParameterHandling.jl flat parameter length
     parameters_trace = ElasticArray{Float64, 2}(undef, length(get_parameters_flat(model)), 0) # parameter estimates
 
@@ -1061,8 +1062,8 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
      cache = ExponentialUtilities.alloc_mem(similar(hazmat_book_surrogate[1]), ExpMethodGeneric())
 
     # Solve Kolmogorov equations for TPMs
-    # Get log-scale surrogate parameters for hazard evaluation
-    surrogate_pars = get_log_scale_params(surrogate.parameters)
+    # Get natural-scale surrogate parameters for hazard evaluation (family-aware)
+    surrogate_pars = get_hazard_params(surrogate.parameters, surrogate.hazards)
     for t in eachindex(books[1])
         # compute the transition intensity matrix
         compute_hazmat!(hazmat_book_surrogate[t], surrogate_pars, surrogate.hazards, books[1][t], model.data)
@@ -1356,6 +1357,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         append!(parameters_trace, params_cur)
         push!(mll_trace, mll_cur)
         append!(ess_trace, ess_cur)
+        append!(path_count_trace, length.(samplepaths))
 
         # check for convergence
         if ascent_ub < tol
@@ -1379,8 +1381,9 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             ess_target = ceil(ess_increase * ess_target)
             if verbose  println("Target ESS is increased to $ess_target, because ascent lower bound < 0.\n") end
 
-            # no need to sample paths for subjects with a single possible path
-            ess_cur[findall(length.(ImportanceWeights) .== 1)] .= ess_target
+            # Note: No need to clear arrays - DrawSamplePaths! will append only if ess_cur[i] < ess_target
+            # The bug was in ComputeImportanceWeightsESS! incorrectly setting ess_cur[i] = ess_target
+            # instead of the actual path count for uniform weights. This has been fixed.
         end
 
         # ensure that ess per person is sufficient
@@ -1632,7 +1635,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     end
 
     # return convergence records
-    ConvergenceRecords = return_convergence_records ? (mll_trace=mll_trace, ess_trace=ess_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
+    ConvergenceRecords = return_convergence_records ? (mll_trace=mll_trace, ess_trace=ess_trace, path_count_trace=path_count_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
 
     # return sampled paths and importance weights
     ProposedPaths = return_proposed_paths ? (paths=samplepaths, weights=ImportanceWeights) : nothing
