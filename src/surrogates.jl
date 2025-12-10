@@ -196,7 +196,7 @@ function _fit_markov_surrogate(model;
     # If parameters provided directly, use them
     if !isnothing(surrogate_parameters)
         set_parameters!(surrogate_model, surrogate_parameters)
-        markov_surrogate = MarkovSurrogate(surrogate_model.hazards, surrogate_model.parameters)
+        markov_surrogate = MarkovSurrogate(surrogate_model.hazards, surrogate_model.parameters; fitted=true)
         if verbose
             println("Markov surrogate built with provided parameters.\n")
         end
@@ -206,7 +206,7 @@ function _fit_markov_surrogate(model;
     if method === :heuristic
         # Heuristic: use crude rates
         set_crude_init!(surrogate_model)
-        markov_surrogate = MarkovSurrogate(surrogate_model.hazards, surrogate_model.parameters)
+        markov_surrogate = MarkovSurrogate(surrogate_model.hazards, surrogate_model.parameters; fitted=true)
         if verbose
             println("Markov surrogate built with crude rate heuristic.\n")
         end
@@ -238,7 +238,7 @@ function _fit_markov_surrogate(model;
         surrogate_fitted = fit(surrogate_model; constraints = surrogate_constraints, 
                                compute_vcov = false, verbose = false)
         
-        markov_surrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters)
+        markov_surrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters; fitted=true)
         
         if verbose
             println("Markov surrogate MLE complete.\n")
@@ -381,10 +381,40 @@ end
 
 
 """
+    is_surrogate_fitted(model::MultistateProcess) -> Bool
+
+Check if the model's Markov surrogate has been fitted.
+
+Returns `true` if the model has a surrogate and it has been fitted via MLE or
+with user-provided parameters. Returns `false` if there is no surrogate or
+if the surrogate has only default (placeholder) parameters.
+
+# Example
+```julia
+model = multistatemodel(h12; data=data, surrogate=:markov)  # fitted by default
+is_surrogate_fitted(model)  # true
+
+model2 = multistatemodel(h12; data=data, surrogate=:markov, fit_surrogate=false)
+is_surrogate_fitted(model2)  # false
+```
+
+See also: [`set_surrogate!`](@ref), [`MarkovSurrogate`](@ref)
+"""
+function is_surrogate_fitted(model::MultistateProcess)
+    isnothing(model.markovsurrogate) && return false
+    return model.markovsurrogate.fitted
+end
+
+
+"""
     set_surrogate!(model; type=:markov, method=:mle, ...)
 
-Build and optionally fit a Markov or phase-type surrogate for a multistate model,
+Build and fit a Markov or phase-type surrogate for a multistate model,
 populating the model's `markovsurrogate` field in-place.
+
+This function always fits the surrogate (via MLE or heuristic), marking it
+as `fitted=true`. For models created with `surrogate=:markov` and `fit_surrogate=true`
+(the default), the surrogate is already fitted and calling this function will refit it.
 
 # Arguments
 - `model`: A mutable multistate model (MultistateModel, MultistateSemiMarkovModel, etc.)
@@ -413,9 +443,12 @@ set_surrogate!(model; method=:heuristic)
 
 # Use phase-type surrogate
 set_surrogate!(model; type=:phasetype, n_phases=3)
+
+# Check if surrogate is fitted
+is_surrogate_fitted(model)  # true
 ```
 
-See also: [`fit_surrogate`](@ref), [`multistatemodel`](@ref)
+See also: [`is_surrogate_fitted`](@ref), [`fit_surrogate`](@ref), [`multistatemodel`](@ref)
 """
 function set_surrogate!(model::MultistateProcess; 
     type::Symbol = :markov,

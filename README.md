@@ -12,3 +12,20 @@ You can install the development version of `MultistateModels` from
 using Pkg
 Pkg.add(url="https://github.com/fintzij/MultistateModels.jl.git")
 ```
+
+## Testing
+
+Run the test suite:
+
+```julia
+using Pkg
+Pkg.test("MultistateModels")
+```
+
+By default, quick unit tests run (~2 min). For the full suite including statistical validation tests:
+
+```bash
+MSM_TEST_LEVEL=full julia --project=. -e 'using Pkg; Pkg.test()'
+```
+
+See `MultistateModelsTests/README.md` for detailed test configuration options.

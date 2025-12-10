@@ -19,22 +19,22 @@ has covariates; when you omit it, the constructor automatically supplies the
 intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yourself.
 
 # Positional arguments
-- `family`: "exp", "wei", "gom", "sp", or "pt" (string or symbol, case-insensitive).
-  - "exp": Exponential (constant hazard)
-  - "wei": Weibull
-  - "gom": Gompertz
-  - "sp": Spline (flexible baseline hazard)
-  - "pt": Phase-type (Coxian) - flexible sojourn distribution via latent phases
+- `family`: `:exp`, `:wei`, `:gom`, `:sp`, or `:pt` (symbol or string, case-insensitive).
+  - `:exp`: Exponential (constant hazard)
+  - `:wei`: Weibull
+  - `:gom`: Gompertz
+  - `:sp`: Spline (flexible baseline hazard)
+  - `:pt`: Phase-type (Coxian) - flexible sojourn distribution via latent phases
 - `statefrom` / `stateto`: integers describing the transition.
 - `hazard` *(optional)*: a `StatsModels.FormulaTerm` describing covariates that act
     multiplicatively on the baseline hazard. Skip this argument for intercept-only hazards.
 
 # Keyword arguments
 - `degree`, `knots`, `boundaryknots`, `natural_spline`, `extrapolation`, `monotone`:
-    spline controls used only when `family == "sp"`. See the BSplineKit docs for details.
+    spline controls used only when `family == :sp`. See the BSplineKit docs for details.
 - `monotone`: `0` (default) leaves the spline unconstrained, `1` enforces an increasing
     hazard, and `-1` enforces a decreasing hazard.
-- `n_phases::Int`: Number of Coxian phases (only for `family == "pt"`, default: 2).
+- `n_phases::Int`: Number of Coxian phases (only for `family == :pt`, default: 2).
     Must be ≥ 1. With n phases, the baseline has 2n-1 parameters (n-1 progression rates,
     n exit rates). n_phases=1 is equivalent to exponential.
 - `time_transform::Bool`: enable Tang-style shared-trajectory caching for this transition.
@@ -43,11 +43,11 @@ intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yoursel
 
 # Examples
 ```julia
-julia> Hazard("exp", 1, 2)                      # intercept only
-julia> Hazard(@formula(0 ~ age + trt), "wei", 1, 3)
-julia> Hazard(:pt, 1, 2; n_phases=3)            # 3-phase Coxian
+julia> Hazard(:exp, 1, 2)                        # intercept only
+julia> Hazard(@formula(0 ~ age + trt), :wei, 1, 3)
+julia> Hazard(:pt, 1, 2; n_phases=3)             # 3-phase Coxian
 julia> Hazard(@formula(0 ~ age), :pt, 1, 2; n_phases=2)  # with covariates
-julia> @hazard begin                             # macro front-end uses the same rules
+julia> @hazard begin                              # macro front-end uses the same rules
                      family = :gom
                      transition = 2 => 4
                      formula = @formula(0 ~ stage)
@@ -75,23 +75,24 @@ function Hazard(
     @assert stateto > 0 "stateto must be a positive integer, got $stateto"
     @assert statefrom != stateto "statefrom and stateto must differ (got $statefrom → $stateto)"
     
-    family_str = family isa String ? family : String(family)
-    family_key = lowercase(family_str)
+    # Normalize family to Symbol (accept both String and Symbol for backward compatibility)
+    family_key = family isa Symbol ? family : Symbol(lowercase(String(family)))
     
-    valid_families = ("exp", "wei", "gom", "sp", "pt")
-    @assert family_key in valid_families "family must be one of $valid_families, got \"$family_key\""
+    valid_families = (:exp, :wei, :gom, :sp, :pt)
+    @assert family_key in valid_families "family must be one of $valid_families, got :$family_key"
     
-    if family_key == "sp"
+    if family_key == :sp
         @assert degree >= 0 "spline degree must be non-negative, got $degree"
-        @assert extrapolation in ("linear", "constant") "extrapolation must be \"linear\" or \"constant\", got \"$extrapolation\""
+        @assert extrapolation in ("linear", "constant", "flat") "extrapolation must be \"linear\", \"constant\", or \"flat\", got \"$extrapolation\""
         @assert monotone in (-1, 0, 1) "monotone must be -1, 0, or 1, got $monotone"
+        # For degree < 2, constant extrapolation (C1 boundary) is impossible.
+        # Default to flat extrapolation (C0 boundary) which is usually desired.
         if extrapolation == "constant" && degree < 2
-            @warn "constant extrapolation requires degree >= 2 for D¹=0 constraint. Using linear extrapolation instead."
-            extrapolation = "linear"
+            extrapolation = "flat"
         end
     end
     
-    if family_key == "pt"
+    if family_key == :pt
         @assert n_phases >= 1 "n_phases must be ≥ 1, got $n_phases"
         @assert coxian_structure in (:unstructured, :allequal, :prop_to_prog) "coxian_structure must be :unstructured, :allequal, or :prop_to_prog, got :$coxian_structure"
     end
@@ -100,10 +101,10 @@ function Hazard(
     
     metadata = HazardMetadata(time_transform = time_transform, linpred_effect = linpred_effect)
 
-    if family_key == "pt"
+    if family_key == :pt
         # Phase-type (Coxian) hazard
         h = PhaseTypeHazardSpec(hazard, family_key, statefrom, stateto, n_phases, coxian_structure, metadata)
-    elseif family_key != "sp"
+    elseif family_key != :sp
         h = ParametricHazard(hazard, family_key, statefrom, stateto, metadata)
     else 
         if natural_spline & (monotone != 0)
@@ -111,10 +112,10 @@ function Hazard(
             natural_spline = false
         end
 
-        # For degree 0 or 1, constant extrapolation isn't meaningful (no D¹=0 constraint)
-        # so fall back to linear extrapolation
+        # For degree < 2, constant extrapolation (C1 boundary) is impossible.
+        # Fall back to flat extrapolation which is usually desired.
         if degree < 2 && extrapolation == "constant"
-            extrapolation = "linear"
+            extrapolation = "flat"
         end
         natural_spline = degree < 2 ? false : natural_spline
 
@@ -129,8 +130,8 @@ function Hazard(
     statefrom::Integer,
     stateto::Integer;
     kwargs...)
-    family_str = family isa String ? family : String(family)
-    return Hazard(_DEFAULT_HAZARD_FORMULA, family_str, Int(statefrom), Int(stateto); kwargs...)
+    # Pass through to main constructor which handles String/Symbol normalization
+    return Hazard(_DEFAULT_HAZARD_FORMULA, family, Int(statefrom), Int(stateto); kwargs...)
 end
 
 """
@@ -204,7 +205,7 @@ end
 struct HazardBuildContext
     hazard::HazardFunction
     hazname::Symbol
-    family::String
+    family::Symbol
     metadata::HazardMetadata
     rhs_names::Vector{String}
     shared_baseline_key::Union{Nothing,SharedBaselineKey}
@@ -215,10 +216,11 @@ end
 _ncovar(ctx::HazardBuildContext) = max(length(ctx.rhs_names) - 1, 0)
 _has_covariates(ctx::HazardBuildContext) = length(ctx.rhs_names) > 1
 
-const _HAZARD_BUILDERS = Dict{String,Function}()
+const _HAZARD_BUILDERS = Dict{Symbol,Function}()
 
-function register_hazard_family!(name::AbstractString, builder::Function)
-    _HAZARD_BUILDERS[lowercase(String(name))] = builder
+function register_hazard_family!(name::Union{AbstractString,Symbol}, builder::Function)
+    key = name isa Symbol ? name : Symbol(lowercase(String(name)))
+    _HAZARD_BUILDERS[key] = builder
     return builder
 end
 
@@ -240,7 +242,8 @@ function _prepare_hazard_context(hazard::HazardFunction,
     hazschema = apply_schema(hazard.hazard, schema)
     modelcols(hazschema, data) # validate design matrix construction
     rhs_names = _hazard_rhs_names(hazschema)
-    runtime_family = surrogate ? "exp" : lowercase(hazard.family)
+    # Normalize family to Symbol (hazard.family is now Symbol)
+    runtime_family = surrogate ? :exp : hazard.family
     hazname = _hazard_name(hazard)
     shared_key = shared_baseline_key(hazard, runtime_family)
     return HazardBuildContext(
@@ -787,10 +790,10 @@ function _eval_cumhaz_with_extrap(spline_ext::SplineExtrapolation, cumhaz_spline
     return H_total
 end
 
-register_hazard_family!("exp", _build_exponential_hazard)
-register_hazard_family!("wei", _build_weibull_hazard)
-register_hazard_family!("gom", _build_gompertz_hazard)
-register_hazard_family!("sp", _build_spline_hazard)
+register_hazard_family!(:exp, _build_exponential_hazard)
+register_hazard_family!(:wei, _build_weibull_hazard)
+register_hazard_family!(:gom, _build_gompertz_hazard)
+register_hazard_family!(:sp, _build_spline_hazard)
 
 
 # mutable structs
@@ -1056,9 +1059,10 @@ will insert the intercept-only design automatically as described in `Hazard`'s d
 - `surrogate::Symbol = :none`: surrogate model for importance sampling in MCEM.
   - `:none` (default): no surrogate created (for Markov models or exact data)
   - `:markov`: create a Markov surrogate (required for semi-Markov MCEM fitting)
-- `optimize_surrogate::Bool = false`: if `surrogate = :markov`, fit the surrogate via MLE at model creation time.
-  If `false`, surrogate will be fitted when `fit()` is called (default behavior).
-- `surrogate_constraints`: optional constraints for surrogate optimization (only used if `optimize_surrogate = true`).
+- `fit_surrogate::Bool = true`: if `surrogate = :markov`, fit the surrogate via MLE at model creation time.
+  If `false`, surrogate parameters remain at default values and will be fitted when `fit()` is called.
+  Setting to `true` (default) is recommended as it avoids redundant fitting during initialization.
+- `surrogate_constraints`: optional constraints for surrogate optimization (only used if `fit_surrogate = true`).
 - `SubjectWeights`: optional per-subject weights (length = number of subjects). Mutually exclusive with `ObservationWeights`.
 - `ObservationWeights`: optional per-observation weights (length = number of rows in data). Mutually exclusive with `SubjectWeights`.
 - `CensoringPatterns`: optional matrix describing which states are compatible with each censoring code. Values in [0,1].
@@ -1078,24 +1082,31 @@ cons = make_constraints(
 )
 model = multistatemodel(h12, h21; data = df, constraints = cons)
 
-# Semi-Markov model - surrogate will be created and fitted when fit() is called
+# Semi-Markov model - surrogate created and fitted at model creation time (default)
 model = multistatemodel(h12_wei, h21_wei; data = df, surrogate = :markov)
 
-# Semi-Markov model - pre-fit surrogate at model creation time
-model = multistatemodel(h12_wei, h21_wei; data = df, surrogate = :markov, optimize_surrogate = true)
+# Semi-Markov model - defer surrogate fitting to fit() call
+model = multistatemodel(h12_wei, h21_wei; data = df, surrogate = :markov, fit_surrogate = false)
 ```
 """
 function multistatemodel(hazards::HazardFunction...; 
                         data::DataFrame, 
                         constraints = nothing,
                         surrogate::Symbol = :none,
-                        optimize_surrogate::Bool = false,
+                        fit_surrogate::Bool = true,
+                        optimize_surrogate::Union{Bool, Nothing} = nothing,  # deprecated
                         surrogate_constraints = nothing,
                         SubjectWeights::Union{Nothing,Vector{Float64}} = nothing, 
                         ObservationWeights::Union{Nothing,Vector{Float64}} = nothing,
                         CensoringPatterns::Union{Nothing,Matrix{<:Real}} = nothing, 
                         EmissionMatrix::Union{Nothing,Matrix{Float64}} = nothing,
                         verbose = false) 
+
+    # Handle deprecated optimize_surrogate keyword
+    if !isnothing(optimize_surrogate)
+        @warn "optimize_surrogate is deprecated. Use fit_surrogate instead." maxlog=1
+        fit_surrogate = optimize_surrogate
+    end
 
     # Validate surrogate option
     if surrogate ∉ (:none, :markov)
@@ -1146,10 +1157,10 @@ function multistatemodel(hazards::HazardFunction...;
     _hazards, parameters, hazkeys = build_hazards(hazards...; data = data, surrogate = false)
     _totalhazards = build_totalhazards(_hazards, tmat)
 
-    # Build surrogate if requested
+    # Build surrogate if requested (initially unfitted)
     if surrogate === :markov
         surrogate_haz, surrogate_pars_ph, _ = build_hazards(hazards...; data = data, surrogate = true)
-        markov_surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars_ph)
+        markov_surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars_ph; fitted=false)
     else
         markov_surrogate = nothing
     end
@@ -1173,13 +1184,15 @@ function multistatemodel(hazards::HazardFunction...;
 
     model = _assemble_model(mode, process, components, markov_surrogate, modelcall)
     
-    # Optionally fit surrogate at model creation time
-    if optimize_surrogate && surrogate === :markov
+    # Fit surrogate at model creation time (default: true)
+    if fit_surrogate && surrogate === :markov
         if verbose
             println("Fitting Markov surrogate at model creation time...")
         end
-        surrogate_fitted = fit_surrogate(model; surrogate_constraints = surrogate_constraints, verbose = verbose)
-        model.markovsurrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters)
+        fitted_surrogate = _fit_markov_surrogate(model; 
+            surrogate_constraints = surrogate_constraints, 
+            verbose = verbose)
+        model.markovsurrogate = fitted_surrogate
     end
     
     return model

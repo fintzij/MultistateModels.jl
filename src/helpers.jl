@@ -813,7 +813,7 @@ function extract_params_vector(hazard_params::NamedTuple)
 end
 
 """
-    extract_natural_vector(hazard_params, family::String)
+    extract_natural_vector(hazard_params, family::Symbol)
 
 Extract the natural-scale parameter vector from a hazard's NamedTuple params structure.
 Applies appropriate transformation based on hazard family.
@@ -823,15 +823,15 @@ For other families: all baseline parameters are positive (exp)
 
 # Arguments
 - `hazard_params`: NamedTuple with `baseline` (named NamedTuple) and optionally `covariates` (named NamedTuple)
-- `family`: Hazard family ("exp", "wei", "gom", "sp")
+- `family`: Hazard family (`:exp`, `:wei`, `:gom`, `:sp`)
 
 # Returns
 - Vector with natural-scale baseline values followed by covariate coefficients (as-is)
 """
-function extract_natural_vector(hazard_params::NamedTuple, family::String)
+function extract_natural_vector(hazard_params::NamedTuple, family::Symbol)
     baseline_vals = collect(values(hazard_params.baseline))
     
-    if family == "gom"
+    if family == :gom
         # Gompertz: shape is unconstrained (first), rate is positive (second)
         baseline_natural = [i == 1 ? baseline_vals[i] : exp(baseline_vals[i]) for i in eachindex(baseline_vals)]
     else
@@ -968,7 +968,7 @@ end
 # ============================================================================
 
 """
-    transform_baseline_to_natural(baseline::NamedTuple, family::String, ::Type{T}) where T
+    transform_baseline_to_natural(baseline::NamedTuple, family::Symbol, ::Type{T}) where T
 
 Transform baseline parameters from estimation scale to natural scale.
 Applies exp() to parameters that are constrained positive, identity to unconstrained.
@@ -978,18 +978,18 @@ For Weibull/Exponential: all baseline parameters are positive (exp)
 
 # Arguments
 - `baseline`: NamedTuple of baseline parameters on estimation scale
-- `family`: Hazard family ("exp", "wei", "gom", "sp")
+- `family`: Hazard family (`:exp`, `:wei`, `:gom`, `:sp`)
 - `T`: Element type (Float64 or ForwardDiff.Dual)
 
 # Returns
 NamedTuple with same keys but values transformed appropriately
 """
-@inline function transform_baseline_to_natural(baseline::NamedTuple, family::String, ::Type{T}) where T
-    if family == "sp"
+@inline function transform_baseline_to_natural(baseline::NamedTuple, family::Symbol, ::Type{T}) where T
+    if family == :sp
         # Splines: parameters stay on log scale - hazard function applies exp() internally
         # via _spline_ests2coefs, so no transformation here
         return baseline
-    elseif family == "gom"
+    elseif family == :gom
         # Gompertz: shape is unconstrained (first param), rate is positive (second param)
         # Parameter order: [shape, scale/rate]
         ks = keys(baseline)
@@ -1012,7 +1012,7 @@ end
 end
 
 """
-    transform_baseline_to_estimation(baseline::NamedTuple, family::String)
+    transform_baseline_to_estimation(baseline::NamedTuple, family::Symbol)
 
 Transform baseline parameters from natural scale to estimation scale.
 Applies log() to positive-constrained parameters, identity to unconstrained.
@@ -1022,17 +1022,17 @@ For Weibull/Exponential: all baseline parameters are positive (log)
 
 # Arguments
 - `baseline`: NamedTuple of baseline parameters on natural scale
-- `family`: Hazard family ("exp", "wei", "gom", "sp")
+- `family`: Hazard family (`:exp`, `:wei`, `:gom`, `:sp`)
 
 # Returns
 NamedTuple with same keys but values transformed appropriately
 """
-@inline function transform_baseline_to_estimation(baseline::NamedTuple, family::String)
-    if family == "sp"
+@inline function transform_baseline_to_estimation(baseline::NamedTuple, family::Symbol)
+    if family == :sp
         # Splines: parameters are already on log/estimation scale - hazard function 
         # applies exp() internally, so no transformation here
         return baseline
-    elseif family == "gom"
+    elseif family == :gom
         # Gompertz: shape is unconstrained (first param), rate is positive (second param)
         ks = keys(baseline)
         vs = values(baseline)
@@ -1224,88 +1224,15 @@ end
 PHASE 3: Parameter Getter Functions
 =============================================================================# 
 
-"""
-    get_parameters_flat(model::MultistateProcess)
-
-Get model parameters as a flat vector suitable for optimization.
-
-This is the representation that optimization algorithms expect - a single
-flat Vector{Float64} with all parameters concatenated.
-
-# Returns
-- `Vector{Float64}`: Flat parameter vector (log scale for baseline, as-is for covariates)
-
-# Example
-```julia
-flat_params = get_parameters_flat(model)
-# Use in optimizer
-result = optimize(flat_params) do p
-    # unflatten and update model
-    objective_function(p, model)
-end
-```
-
-# See also
-- [`get_parameters_nested`](@ref) - Get parameters as nested NamedTuple
-- [`get_parameters_natural`](@ref) - Get parameters on natural scale as NamedTuple
-- [`get_unflatten_fn`](@ref) - Get function to unflatten parameters
-"""
+# Internal helpers - prefer get_parameters(model; scale=:flat/:nested/:natural) for new code
 function get_parameters_flat(model::MultistateProcess)
     return model.parameters.flat
 end
 
-"""
-    get_parameters_nested(model::MultistateProcess)
-
-Get model parameters as a nested NamedTuple.
-
-Parameters are organized by hazard name. Baseline parameters are on log scale
-(as used by hazard functions), covariate coefficients are on natural scale.
-
-# Returns
-- `NamedTuple`: Parameters by hazard name with structure `(baseline = [...], covariates = [...])`
-
-# Example
-```julia
-params_nested = get_parameters_nested(model)
-# Access specific hazard
-h12_params = params_nested.h12  # (baseline = [log(2.0)], covariates = [0.5])
-```
-
-# See also
-- [`get_parameters_flat`](@ref) - Get parameters as flat vector for optimization
-- [`get_parameters_natural`](@ref) - Get parameters on natural scale
-"""
 function get_parameters_nested(model::MultistateProcess)
     return model.parameters.nested
 end
 
-# Alias for backward compatibility
-const get_parameters_transformed = get_parameters_nested
-
-"""
-    get_parameters_natural(model::MultistateProcess)
-
-Get model parameters on natural scale as a NamedTuple.
-
-All positive constraints are inverted (exp applied to log scale parameters).
-This is the "human-readable" representation where baseline rates, shapes, 
-and scales are on their natural positive scale.
-
-# Returns
-- `NamedTuple`: Parameters by hazard name on natural scale
-
-# Example
-```julia
-params_nat = get_parameters_natural(model)
-# Access specific hazard - values are on natural scale
-h12_baseline = params_nat.h12[1]  # e.g., 2.0 (not log(2.0))
-```
-
-# See also
-- [`get_parameters_flat`](@ref) - Get parameters as flat vector
-- [`get_parameters_nested`](@ref) - Get nested parameters
-"""
 function get_parameters_natural(model::MultistateProcess)
     return model.parameters.natural
 end

@@ -34,8 +34,8 @@ data = DataFrame(
 )
 
 # Define hazards
-h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
-h21 = Hazard(@formula(0 ~ 1), "wei", 2, 1)
+h12 = Hazard(@formula(0 ~ 1), :wei, 1, 2)
+h21 = Hazard(@formula(0 ~ 1), :wei, 2, 1)
 
 # Create and fit model
 model = multistatemodel(h12, h21; data=data)
@@ -48,7 +48,7 @@ fitted = fit(model)
 
 All parametric hazards follow the **flexsurv** R package parameterizations.
 
-#### Exponential (`"exp"`)
+#### Exponential (`:exp`)
 
 Constant hazard rate:
 - **Hazard**: h(t) = rate
@@ -56,10 +56,10 @@ Constant hazard rate:
 - **Parameters**: rate > 0
 
 ```julia
-h12 = Hazard(@formula(0 ~ 1), "exp", 1, 2)
+h12 = Hazard(@formula(0 ~ 1), :exp, 1, 2)
 ```
 
-#### Weibull (`"wei"`)
+#### Weibull (`:wei`)
 
 Flexible shape for increasing/decreasing hazards:
 - **Hazard**: h(t) = shape × scale × t^(shape-1)
@@ -70,10 +70,10 @@ Flexible shape for increasing/decreasing hazards:
   - shape > 1: increasing hazard (wear-out)
 
 ```julia
-h12 = Hazard(@formula(0 ~ 1), "wei", 1, 2)
+h12 = Hazard(@formula(0 ~ 1), :wei, 1, 2)
 ```
 
-#### Gompertz (`"gom"`)
+#### Gompertz (`:gom`)
 
 Exponentially changing hazard, commonly used for mortality modeling:
 - **Hazard**: h(t) = rate × exp(shape × t)
@@ -86,35 +86,35 @@ Exponentially changing hazard, commonly used for mortality modeling:
   - rate > 0: baseline hazard at t=0
 
 ```julia
-h12 = Hazard(@formula(0 ~ 1), "gom", 1, 2)
+h12 = Hazard(@formula(0 ~ 1), :gom, 1, 2)
 ```
 
 **Note**: The Gompertz `shape` parameter is unconstrained (can be negative, zero, or positive), while `rate` must be positive. This matches the flexsurv parameterization.
 
 ### Spline Hazards
 
-Spline hazards (`"sp"`) provide flexible baseline hazard modeling using B-splines:
+Spline hazards (`:sp`) provide flexible baseline hazard modeling using B-splines:
 
 ```julia
 # Cubic natural spline with user-specified knots
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2;
+h12 = Hazard(@formula(0 ~ 1), :sp, 1, 2;
              degree=3,
              knots=[0.5, 1.0, 1.5],
              natural_spline=true)
 
 # Automatic knot placement based on data
-h21 = Hazard(@formula(0 ~ 1 + x), "sp", 2, 1;
+h21 = Hazard(@formula(0 ~ 1 + x), :sp, 2, 1;
              degree=3,
              knots=nothing)  # Knots placed at sojourn quantiles
 
 # Monotone increasing hazard (for disease progression)
-h13 = Hazard(@formula(0 ~ 1), "sp", 1, 3;
+h13 = Hazard(@formula(0 ~ 1), :sp, 1, 3;
              degree=3,
              knots=[0.5, 1.0],
              monotone=1)
 
 # Monotone decreasing hazard (for recovery)
-h31 = Hazard(@formula(0 ~ 1), "sp", 3, 1;
+h31 = Hazard(@formula(0 ~ 1), :sp, 3, 1;
              degree=3,
              knots=[0.5, 1.0],
              monotone=-1)
@@ -139,7 +139,7 @@ When `knots=nothing`, interior knots are automatically placed at quantiles of so
 For improved computational efficiency during likelihood evaluation, spline hazards support time transformation caching:
 
 ```julia
-h12 = Hazard(@formula(0 ~ 1 + x), "sp", 1, 2;
+h12 = Hazard(@formula(0 ~ 1 + x), :sp, 1, 2;
              degree=3,
              knots=[0.5, 1.0],
              time_transform=true)  # Enable caching
@@ -153,10 +153,10 @@ Covariates are specified using `@formula` syntax:
 
 ```julia
 # Proportional hazards (default)
-h12 = Hazard(@formula(0 ~ 1 + age + sex), "wei", 1, 2)
+h12 = Hazard(@formula(0 ~ 1 + age + sex), :wei, 1, 2)
 
 # Accelerated failure time
-h21 = Hazard(@formula(0 ~ 1 + treatment), "wei", 2, 1;
+h21 = Hazard(@formula(0 ~ 1 + treatment), :wei, 2, 1;
              linpred_effect=:aft)
 ```
 

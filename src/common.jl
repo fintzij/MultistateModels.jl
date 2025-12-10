@@ -183,7 +183,7 @@ Supports exponential family hazards with optional covariates.
 - `hazname::Symbol`: Name identifier (e.g., :h12)
 - `statefrom::Int64`: Origin state
 - `stateto::Int64`: Destination state  
-- `family::String`: Distribution family ("exp")
+- `family::Symbol`: Distribution family (`:exp`)
 - `parnames::Vector{Symbol}`: Parameter names
 - `npar_baseline::Int64`: Number of baseline parameters (without covariates)
 - `npar_total::Int64`: Total number of parameters (baseline + covariates)
@@ -198,7 +198,7 @@ struct MarkovHazard <: _MarkovHazard
     hazname::Symbol
     statefrom::Int64
     stateto::Int64
-    family::String
+    family::Symbol
     parnames::Vector{Symbol}
     npar_baseline::Int64
     npar_total::Int64
@@ -220,7 +220,7 @@ Supports Weibull and Gompertz families with optional covariates.
 - `hazname::Symbol`: Name identifier (e.g., :h12)
 - `statefrom::Int64`: Origin state
 - `stateto::Int64`: Destination state
-- `family::String`: Distribution family ("wei", "gom")
+- `family::Symbol`: Distribution family (`:wei`, `:gom`)
 - `parnames::Vector{Symbol}`: Parameter names
 - `npar_baseline::Int64`: Number of baseline parameters (shape + scale)
 - `npar_total::Int64`: Total number of parameters (baseline + covariates)
@@ -235,7 +235,7 @@ struct SemiMarkovHazard <: _SemiMarkovHazard
     hazname::Symbol
     statefrom::Int64
     stateto::Int64
-    family::String
+    family::Symbol
     parnames::Vector{Symbol}
     npar_baseline::Int64
     npar_total::Int64
@@ -261,7 +261,7 @@ during model construction.
 - `hazname::Symbol`: Name identifier (e.g., :h12)
 - `statefrom::Int64`: Origin state
 - `stateto::Int64`: Destination state
-- `family::String`: Always "sp" for splines
+- `family::Symbol`: Always `:sp` for splines
 - `parnames::Vector{Symbol}`: Parameter names
 - `npar_baseline::Int64`: Number of spline coefficients
 - `npar_total::Int64`: Total number of parameters (spline + covariates)
@@ -281,7 +281,7 @@ struct RuntimeSplineHazard <: _SplineHazard
     hazname::Symbol
     statefrom::Int64
     stateto::Int64
-    family::String
+    family::Symbol
     parnames::Vector{Symbol}
     npar_baseline::Int64
     npar_total::Int64
@@ -323,7 +323,7 @@ The expanded hazard from phase i has rate:
 - `hazname::Symbol`: Name identifier (e.g., :h12)
 - `statefrom::Int64`: Observed origin state
 - `stateto::Int64`: Observed destination state
-- `family::String`: Always "pt"
+- `family::Symbol`: Always `:pt`
 - `parnames::Vector{Symbol}`: Parameter names [λ₁...λₙ₋₁, μ₁...μₙ, covariates...]
 - `npar_baseline::Int`: Baseline parameters (2n - 1)
 - `npar_total::Int`: Total parameters (baseline + covariates)
@@ -347,7 +347,7 @@ struct PhaseTypeCoxianHazard <: _MarkovHazard
     hazname::Symbol
     statefrom::Int64                 # observed state from
     stateto::Int64                   # observed state to
-    family::String                   # "pt"
+    family::Symbol                   # :pt
     parnames::Vector{Symbol}         # [λ₁, ..., λₙ₋₁, μ₁, ..., μₙ, covariates...]
     npar_baseline::Int64             # 2n - 1
     npar_total::Int64                # baseline + covariates
@@ -392,32 +392,32 @@ abstract type MultistateMarkovProcess <: MultistateProcess end
 abstract type MultistateSemiMarkovProcess <: MultistateProcess end
 
 """
-    ParametricHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64)
+    ParametricHazard(haz::StatsModels.FormulaTerm, family::Symbol, statefrom::Int64, stateto::Int64)
 
 Specify a cause-specific baseline hazard. 
 
 # Arguments
 - `hazard`: regression formula for the (log) hazard, parsed using StatsModels.jl.
-- `family`: parameterization for the baseline hazard, one of "exp" for exponential, "wei" for Weibull, "gom" for Gompert. 
+- `family`: parameterization for the baseline hazard, one of `:exp` for exponential, `:wei` for Weibull, `:gom` for Gompertz. 
 - `statefrom`: state number for the origin state.
 - `stateto`: state number for the destination state.
 """
 struct ParametricHazard <: HazardFunction
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
-    family::String     # one of "exp", "wei", "gom"
+    family::Symbol     # one of :exp, :wei, :gom
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
     metadata::HazardMetadata
 end
 
 """
-    SplineHazard(haz::StatsModels.FormulaTerm, family::string, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing}, degree::Int64, knots::Union{Vector{Float64},Float64,Nothing}, boundaryknots::Union{Vector{Float64},Nothing}, extrapolation::String, natural_spline::Bool)
+    SplineHazard(haz::StatsModels.FormulaTerm, family::Symbol, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing}, degree::Int64, knots::Union{Vector{Float64},Float64,Nothing}, boundaryknots::Union{Vector{Float64},Nothing}, extrapolation::String, natural_spline::Bool)
 
 Specify a cause-specific baseline hazard. 
 
 # Arguments
 - `hazard`: regression formula for the (log) hazard, parsed using StatsModels.jl.
-- `family`: "sp" for splines for the baseline hazard.
+- `family`: `:sp` for splines for the baseline hazard.
 - `statefrom`: state number for the origin state.
 - `stateto`: state number for the destination state.
 - `df`: Degrees of freedom.
@@ -433,7 +433,7 @@ Specify a cause-specific baseline hazard.
 """
 struct SplineHazard <: HazardFunction
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
-    family::String     # "sp" for splines
+    family::Symbol     # :sp for splines
     statefrom::Int64   # starting state number
     stateto::Int64     # destination state number
     degree::Int64
@@ -465,7 +465,7 @@ Total baseline parameters: 2n - 1
 
 # Fields
 - `hazard`: StatsModels.jl formula for covariates
-- `family`: Always "pt"
+- `family`: Always `:pt`
 - `statefrom`: Origin state number
 - `stateto`: Destination state number  
 - `n_phases`: Number of Coxian phases (≥ 1)
@@ -490,17 +490,17 @@ See also: [`PhaseTypeCoxianHazard`](@ref), [`PhaseTypeModel`](@ref)
 """
 struct PhaseTypeHazardSpec <: HazardFunction
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
-    family::String                     # "pt"
+    family::Symbol                     # :pt
     statefrom::Int64
     stateto::Int64
     n_phases::Int                      # number of Coxian phases (≥1)
     structure::Symbol                  # :unstructured, :allequal, or :prop_to_prog
     metadata::HazardMetadata
     
-    function PhaseTypeHazardSpec(hazard::StatsModels.FormulaTerm, family::String,
+    function PhaseTypeHazardSpec(hazard::StatsModels.FormulaTerm, family::Symbol,
                                   statefrom::Int64, stateto::Int64, n_phases::Int,
                                   structure::Symbol, metadata::HazardMetadata)
-        family == "pt" || throw(ArgumentError("PhaseTypeHazardSpec family must be \"pt\""))
+        family == :pt || throw(ArgumentError("PhaseTypeHazardSpec family must be :pt"))
         n_phases >= 1 || throw(ArgumentError("n_phases must be ≥ 1, got $n_phases"))
         structure in (:unstructured, :allequal, :prop_to_prog) ||
             throw(ArgumentError("structure must be :unstructured, :allequal, or :prop_to_prog, got :$structure"))
@@ -516,22 +516,22 @@ end
 @inline _hashable_tuple(x::AbstractVector) = Tuple(x)
 @inline _hashable_tuple(x) = x
 
-baseline_signature(::HazardFunction, ::AbstractString) = nothing
+baseline_signature(::HazardFunction, ::Symbol) = nothing
 
-function baseline_signature(h::ParametricHazard, runtime_family::AbstractString)
-    parts = (:parametric, Symbol(runtime_family))
+function baseline_signature(h::ParametricHazard, runtime_family::Symbol)
+    parts = (:parametric, runtime_family)
     return UInt64(hash(parts))
 end
 
-function baseline_signature(h::SplineHazard, runtime_family::AbstractString)
-    if runtime_family != "sp"
-        return UInt64(hash((:parametric, Symbol(runtime_family))))
+function baseline_signature(h::SplineHazard, runtime_family::Symbol)
+    if runtime_family != :sp
+        return UInt64(hash((:parametric, runtime_family)))
     end
     knots_repr = _hashable_tuple(h.knots)
     boundary_repr = _hashable_tuple(h.boundaryknots)
     parts = (
         :spline,
-        Symbol(runtime_family),
+        runtime_family,
         h.degree,
         knots_repr,
         boundary_repr,
@@ -542,28 +542,28 @@ function baseline_signature(h::SplineHazard, runtime_family::AbstractString)
     return UInt64(hash(parts))
 end
 
-shared_baseline_key(::HazardFunction, ::AbstractString) = nothing
+shared_baseline_key(::HazardFunction, ::Symbol) = nothing
 
-function shared_baseline_key(h::ParametricHazard, runtime_family::AbstractString)
+function shared_baseline_key(h::ParametricHazard, runtime_family::Symbol)
     h.metadata.time_transform || return nothing
     sig = baseline_signature(h, runtime_family)
     sig === nothing && return nothing
     return SharedBaselineKey(h.statefrom, sig)
 end
 
-function shared_baseline_key(h::SplineHazard, runtime_family::AbstractString)
+function shared_baseline_key(h::SplineHazard, runtime_family::Symbol)
     h.metadata.time_transform || return nothing
     sig = baseline_signature(h, runtime_family)
     sig === nothing && return nothing
     return SharedBaselineKey(h.statefrom, sig)
 end
 
-function baseline_signature(h::PhaseTypeHazardSpec, runtime_family::AbstractString)
-    parts = (:phasetype, Symbol(runtime_family), h.n_phases)
+function baseline_signature(h::PhaseTypeHazardSpec, runtime_family::Symbol)
+    parts = (:phasetype, runtime_family, h.n_phases)
     return UInt64(hash(parts))
 end
 
-function shared_baseline_key(h::PhaseTypeHazardSpec, runtime_family::AbstractString)
+function shared_baseline_key(h::PhaseTypeHazardSpec, runtime_family::Symbol)
     h.metadata.time_transform || return nothing
     sig = baseline_signature(h, runtime_family)
     sig === nothing && return nothing
@@ -612,14 +612,43 @@ struct _TotalHazardTransient <: _TotalHazard
 end
 
 """
-    MarkovSurrogate(hazards::Vector{_MarkovHazard}, parameters::NamedTuple)
+    MarkovSurrogate(hazards::Vector{_MarkovHazard}, parameters::NamedTuple; fitted::Bool=false)
 
 Markov surrogate for importance sampling proposals in MCEM.
 Uses ParameterHandling.jl for parameter management.
+
+# Fields
+- `hazards::Vector{_MarkovHazard}`: Exponential hazard functions for each transition
+- `parameters::NamedTuple`: Parameter structure (flat, nested, natural, unflatten)
+- `fitted::Bool`: Whether the surrogate parameters have been fitted via MLE.
+  If `false`, parameters are default/placeholder values and the surrogate should be
+  fitted before use in MCEM or importance sampling.
+
+# Construction
+```julia
+# Unfitted surrogate (needs fitting before use)
+surrogate = MarkovSurrogate(hazards, params)  # fitted=false by default
+
+# Fitted surrogate
+surrogate = MarkovSurrogate(hazards, params; fitted=true)
+```
+
+See also: [`set_surrogate!`](@ref)
 """
 struct MarkovSurrogate
     hazards::Vector{_MarkovHazard}
     parameters::NamedTuple
+    fitted::Bool
+    
+    # Inner constructor that accepts any vector of hazards (converts to _MarkovHazard)
+    function MarkovSurrogate(hazards::Vector{<:_Hazard}, parameters::NamedTuple; fitted::Bool=false)
+        # Verify all hazards are Markov-compatible
+        for h in hazards
+            h isa _MarkovHazard || throw(ArgumentError(
+                "MarkovSurrogate requires all hazards to be Markov (exponential). Got $(typeof(h))."))
+        end
+        new(convert(Vector{_MarkovHazard}, hazards), parameters, fitted)
+    end
 end
 
 """

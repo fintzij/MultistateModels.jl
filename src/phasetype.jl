@@ -221,8 +221,8 @@ function needs_phasetype_proposal(hazards::Vector)
         # Check family field for exponential
         if hasproperty(h, :family)
             family = h.family
-            # Handle both String and Symbol representations
-            if family != "exp" && family != :exp
+            # Family is now always a Symbol
+            if family != :exp
                 return true
             end
         elseif !isa(h, _MarkovHazard)
@@ -1632,13 +1632,13 @@ Count the total number of parameters for a hazard specification.
 """
 function _count_hazard_parameters(h::HazardFunction, data::DataFrame)
     ncovar = _count_covariates(h.hazard, data)
-    family = lowercase(h.family)
+    family = h.family isa Symbol ? h.family : Symbol(lowercase(String(h.family)))
     
-    if family == "exp"
+    if family == :exp
         return 1 + ncovar
-    elseif family in ("wei", "gom")
+    elseif family in (:wei, :gom)
         return 2 + ncovar
-    elseif family == "sp"
+    elseif family == :sp
         # Splines have variable number of basis functions
         # This is an approximation; actual count determined during build
         return 5 + ncovar
@@ -4067,50 +4067,194 @@ function _calculate_crude_phasetype(model::PhaseTypeModel)
     return crude_mat
 end
 
+# =============================================================================
+# Phase-Type Initialization
+# =============================================================================
+
 """
-    initialize_parameters!(model::PhaseTypeModel; constraints = nothing, 
-                          surrogate_constraints = nothing, 
-                          surrogate_parameters = nothing, 
-                          crude = false)
+    _make_collapsed_markov_model(model::PhaseTypeModel)
 
-Initialize phase-type model parameters.
+Create a simple Markov model on the original (collapsed) state space.
 
-Phase-type models are Markov on the expanded space, so initialization
-can use crude rates directly without needing a surrogate.
+This is used to generate paths for initializing phase-type models. The collapsed
+model uses exponential hazards for each transition in the original state space.
+
+# Returns
+- `MultistateMarkovModel` or `MultistateMarkovModelCensored` on original states
+"""
+function _make_collapsed_markov_model(model::PhaseTypeModel)
+    # Build exponential hazards for each transition in original_tmat
+    collapsed_hazards = HazardFunction[]
+    
+    for hazspec in model.hazards_spec
+        # Create exponential version of this hazard (same formula for covariates)
+        exp_haz = Hazard(hazspec.formula, :exp, hazspec.statefrom, hazspec.stateto)
+        push!(collapsed_hazards, exp_haz)
+    end
+    
+    # Create Markov model on original data
+    collapsed_model = multistatemodel(collapsed_hazards...; 
+                                       data = model.original_data,
+                                       SubjectWeights = model.SubjectWeights,
+                                       CensoringPatterns = nothing)
+    
+    return collapsed_model
+end
+
+"""
+    _transfer_phasetype_parameters!(target_model::PhaseTypeModel, source_fitted)
+
+Transfer parameters from a fitted phase-type model to another phase-type model.
 
 # Arguments
-- `model::PhaseTypeModel`: The model to initialize
-- `constraints`: Optional parameter constraints
-- `surrogate_constraints`: Ignored for phase-type (already Markov)
-- `surrogate_parameters`: Ignored for phase-type
-- `crude::Bool = false`: If true, use crude rates; otherwise also crude (PT is Markov)
+- `target_model::PhaseTypeModel`: Model to receive parameters
+- `source_fitted`: Fitted PhaseTypeModel to copy from
+"""
+function _transfer_phasetype_parameters!(target_model::PhaseTypeModel, source_fitted)
+    # Get flat parameters from source (on expanded space)
+    source_params = get_parameters_flat(source_fitted)
+    
+    # Copy to target
+    copyto!(target_model.parameters.flat, source_params)
+end
+
+"""
+    _init_phasetype_from_surrogate_paths!(model::PhaseTypeModel, npaths; constraints)
+
+Initialize phase-type model by fitting collapsed Markov, simulating paths, and fitting to exact data.
+
+# Algorithm
+1. Create and fit a collapsed Markov model on original state space
+2. Simulate paths from the fitted Markov model
+3. Convert paths to exact-observation data with interpolated covariates
+4. Create phase-type model with exact data
+5. Initialize with crude rates and fit
+6. Transfer parameters to original model
+
+# Arguments
+- `model::PhaseTypeModel`: Model to initialize
+- `npaths::Int`: Number of paths per subject (used to determine simulation count)
+- `constraints`: Parameter constraints for exact-data fitting
+"""
+function _init_phasetype_from_surrogate_paths!(model::PhaseTypeModel,
+                                                npaths::Int;
+                                                constraints = nothing)
+    # Step 1: Create collapsed Markov model on original state space
+    collapsed_model = _make_collapsed_markov_model(model)
+    
+    # Step 2: Initialize and fit collapsed model
+    set_crude_init!(collapsed_model)
+    collapsed_fitted = fit(collapsed_model; compute_vcov = false, 
+                           compute_ij_vcov = false, verbose = false)
+    
+    # Step 3: Simulate paths from fitted collapsed model
+    # simulate returns Vector{Vector{SamplePath}} when paths=true
+    sim_result = simulate(collapsed_fitted; nsim = 1, paths = true, data = false)
+    
+    # sim_result is Vector{Vector{SamplePath}}, one per simulation
+    simulated_paths = sim_result[1]  # First (only) simulation
+    
+    # Step 4: Convert to exact data
+    exact_data = paths_to_dataset(simulated_paths)
+    
+    # Check if we have any transitions
+    if nrow(exact_data) == 0
+        @warn "No transitions in simulated paths; using crude initialization"
+        set_crude_init!(model; constraints = constraints)
+        return
+    end
+    
+    # Step 5: Interpolate covariates from original data
+    _interpolate_covariates!(exact_data, model.original_data)
+    
+    # Step 6: Create phase-type model with exact data
+    exact_pt_model = multistatemodel(model.hazards_spec...; 
+                                      data = exact_data,
+                                      SubjectWeights = nothing)
+    
+    # Step 7: Initialize with crude rates (phase-type is Markov on expanded space)
+    set_crude_init!(exact_pt_model)
+    
+    # Step 8: Fit phase-type model to exact data
+    exact_fitted = fit(exact_pt_model; constraints = constraints,
+                       compute_vcov = false, compute_ij_vcov = false,
+                       verbose = false)
+    
+    # Step 9: Transfer parameters to original model
+    _transfer_phasetype_parameters!(model, exact_fitted)
+end
+
+"""
+    initialize_parameters!(model::PhaseTypeModel; method=:auto, npaths=10, ...)
+
+Initialize phase-type model parameters using the specified method.
+
+# Arguments
+- `model::PhaseTypeModel`: The model to initialize (modified in place)
+- `constraints`: Parameter constraints for fitting
+- `surrogate_constraints`: Ignored for phase-type models
+- `surrogate_parameters`: Ignored for phase-type models
+- `method::Symbol = :auto`: Initialization method
+  - `:auto` or `:surrogate` - Fit collapsed Markov, simulate paths, fit PT to exact data
+  - `:crude` - Use crude rates on expanded space
+- `npaths::Int = 10`: Number of paths per subject for :surrogate method
+
+# Examples
+```julia
+# Auto-select method (uses :surrogate for PhaseType)
+initialize_parameters!(model)
+
+# Force crude initialization
+initialize_parameters!(model; method = :crude)
+```
+
+See also: [`initialize_parameters`](@ref), [`set_crude_init!`](@ref)
 """
 function initialize_parameters!(model::PhaseTypeModel; 
                                 constraints = nothing, 
                                 surrogate_constraints = nothing, 
                                 surrogate_parameters = nothing, 
-                                crude = false)
-    # Phase-type models are Markov on expanded space, so always use crude init
-    # The surrogate approach doesn't apply since we're already Markov
-    set_crude_init!(model; constraints = constraints)
+                                method::Symbol = :auto,
+                                npaths::Int = 10)
+    # Validate npaths
+    npaths > 0 || throw(ArgumentError("npaths must be positive, got $npaths"))
+    
+    # Resolve :auto → :surrogate for PhaseType
+    actual_method = method == :auto ? :surrogate : method
+    
+    # Validate method
+    actual_method in (:crude, :surrogate) ||
+        throw(ArgumentError("PhaseTypeModel supports :crude or :surrogate, got :$method"))
+    
+    if actual_method == :crude
+        set_crude_init!(model; constraints = constraints)
+    else  # :surrogate
+        _init_phasetype_from_surrogate_paths!(model, npaths; constraints = constraints)
+    end
+    
+    return nothing
 end
 
 """
-    initialize_parameters(model::PhaseTypeModel; kwargs...)
+    initialize_parameters(model::PhaseTypeModel; method=:auto, npaths=10, ...) -> PhaseTypeModel
 
-Non-mutating version of initialize_parameters! for phase-type models.
+Return a new phase-type model with initialized parameters (non-mutating version).
+
+See [`initialize_parameters!`](@ref) for argument descriptions.
 """
 function initialize_parameters(model::PhaseTypeModel; 
                                constraints = nothing, 
                                surrogate_constraints = nothing, 
                                surrogate_parameters = nothing, 
-                               crude = false)
+                               method::Symbol = :auto,
+                               npaths::Int = 10)
     model_copy = deepcopy(model)
     initialize_parameters!(model_copy; 
                            constraints = constraints,
                            surrogate_constraints = surrogate_constraints,
                            surrogate_parameters = surrogate_parameters,
-                           crude = crude)
+                           method = method,
+                           npaths = npaths)
     return model_copy
 end
 

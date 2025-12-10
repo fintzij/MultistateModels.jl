@@ -345,117 +345,74 @@ function get_parnames(surrogate::MarkovSurrogate)
 end
 
 """
-    get_vcov(model::MultistateModelFitted) 
+    get_vcov(model::MultistateModelFitted; type::Symbol=:model) 
 
-Return the variance covariance matrix at the maximum likelihood estimate. 
+Return the variance-covariance matrix at the maximum likelihood estimate.
 
 # Arguments 
-- model: fitted model
-"""
-function get_vcov(model::MultistateModelFitted)
-    if isnothing(model.vcov)
-        println("The variance-covariance matrix was not computed for this model.")
-    end
-    model.vcov
-end
-
-"""
-    get_ij_vcov(model::MultistateModelFitted)
-
-Return the infinitesimal jackknife (IJ) / sandwich variance-covariance matrix.
-
-# Formula
-The IJ variance is computed as:
-```math
-Var_{IJ}(θ̂) = H⁻¹ K H⁻¹
-```
-where:
-- H is the observed Fisher information (negative Hessian at the MLE)
-- K = Σᵢ gᵢgᵢᵀ is the sum of outer products of subject-level score vectors
-
-# Interpretation
-This is also known as the **robust** or **Huber-White** variance estimator.
-Unlike the model-based variance (H⁻¹), the sandwich variance remains valid
-even when the model is misspecified.
-
-# Arguments
-- `model::MultistateModelFitted`: fitted model (must have been fit with `compute_ij_vcov=true`)
+- `model::MultistateModelFitted`: fitted model
+- `type::Symbol=:model`: Type of variance estimator
+  - `:model` - Model-based variance (inverse Hessian, H⁻¹)
+  - `:ij` - Infinitesimal jackknife / sandwich / robust variance (H⁻¹ K H⁻¹)
+  - `:jk` - Jackknife variance ((n-1)/n times IJ variance)
 
 # Returns
 - `Symmetric{Float64, Matrix{Float64}}`: p × p variance-covariance matrix, or `nothing` if not computed
 
+# Details
+- `:model` - Valid under correct model specification. Requires `compute_vcov=true` (default).
+- `:ij` - Also known as robust/Huber-White variance. Valid under model misspecification.
+  Requires `compute_ij_vcov=true` during fitting.
+- `:jk` - Jackknife variance with finite-sample correction. 
+  Related to IJ by: Var_JK = ((n-1)/n) × Var_IJ.
+  Requires `compute_jk_vcov=true` during fitting.
+
 # Example
 ```julia
-# Fit model with IJ variance
-fitted = fit(model, data; compute_ij_vcov=true)
+# Fit model with all variance types
+fitted = fit(model; compute_ij_vcov=true, compute_jk_vcov=true)
 
-# Get robust standard errors
-ij_vcov = get_ij_vcov(fitted)
-if !isnothing(ij_vcov)
-    robust_se = sqrt.(diag(ij_vcov))
-    println("Robust SEs: ", robust_se)
-end
+# Compare standard errors
+model_se = sqrt.(diag(get_vcov(fitted)))                    # Model-based
+robust_se = sqrt.(diag(get_vcov(fitted; type=:ij)))         # Robust/sandwich
+jk_se = sqrt.(diag(get_vcov(fitted; type=:jk)))             # Jackknife
 
-# Compare to model-based SE
-model_se = sqrt.(diag(get_vcov(fitted)))
-println("Model-based SEs: ", model_se)
-println("Ratio (robust/model): ", robust_se ./ model_se)
+# Ratio of robust to model-based SE (>1 suggests misspecification)
+println("SE ratio (robust/model): ", robust_se ./ model_se)
 ```
 
-See also: [`get_jk_vcov`](@ref), [`get_vcov`](@ref), [`fit`](@ref)
+# See also
+- [`get_subject_gradients`](@ref) - Get subject-level score vectors
+- [`get_pseudovalues`](@ref) - Get jackknife or IJ pseudo-values
 """
+function get_vcov(model::MultistateModelFitted; type::Symbol=:model)
+    if type == :model
+        if isnothing(model.vcov)
+            @warn "Model-based variance-covariance matrix was not computed for this model."
+        end
+        return model.vcov
+    elseif type == :ij
+        if isnothing(model.ij_vcov)
+            @warn "IJ variance-covariance matrix was not computed. Refit with compute_ij_vcov=true."
+        end
+        return model.ij_vcov
+    elseif type == :jk
+        if isnothing(model.jk_vcov)
+            @warn "Jackknife variance-covariance matrix was not computed. Refit with compute_jk_vcov=true."
+        end
+        return model.jk_vcov
+    else
+        throw(ArgumentError("type must be :model, :ij, or :jk (got :$type)"))
+    end
+end
+
+# Internal helpers - prefer get_vcov(model; type=:ij/:jk) for new code
 function get_ij_vcov(model::MultistateModelFitted)
-    if isnothing(model.ij_vcov)
-        println("The IJ variance-covariance matrix was not computed for this model.")
-    end
-    model.ij_vcov
+    return get_vcov(model; type=:ij)
 end
 
-"""
-    get_jk_vcov(model::MultistateModelFitted)
-
-Return the jackknife variance-covariance matrix.
-
-# Formula
-The jackknife variance is computed as:
-```math
-Var_{JK}(θ̂) = \frac{n-1}{n} Σᵢ ΔᵢΔᵢᵀ
-```
-where Δᵢ = H⁻¹gᵢ are the leave-one-out parameter perturbations.
-
-# Relationship to IJ Variance
-The jackknife and IJ variances are related by:
-```math
-Var_{JK}(θ̂) = \frac{n-1}{n} Var_{IJ}(θ̂)
-```
-The factor (n-1)/n is a finite-sample correction; for large n they are essentially equivalent.
-
-# Arguments
-- `model::MultistateModelFitted`: fitted model (must have been fit with `compute_jk_vcov=true`)
-
-# Returns
-- `Symmetric{Float64, Matrix{Float64}}`: p × p variance-covariance matrix, or `nothing` if not computed
-
-# Example
-```julia
-# Fit model with jackknife variance
-fitted = fit(model, data; compute_jk_vcov=true)
-
-# Get jackknife standard errors  
-jk_vcov = get_jk_vcov(fitted)
-if !isnothing(jk_vcov)
-    jk_se = sqrt.(diag(jk_vcov))
-    println("Jackknife SEs: ", jk_se)
-end
-```
-
-See also: [`get_ij_vcov`](@ref), [`get_vcov`](@ref), [`get_jk_pseudovalues`](@ref)
-"""
 function get_jk_vcov(model::MultistateModelFitted)
-    if isnothing(model.jk_vcov)
-        println("The jackknife variance-covariance matrix was not computed for this model.")
-    end
-    model.jk_vcov
+    return get_vcov(model; type=:jk)
 end
 
 """
@@ -563,116 +520,76 @@ function get_loo_perturbations(model::MultistateModelFitted; method::Symbol=:dir
 end
 
 """
-    get_jk_pseudovalues(model::MultistateModelFitted)
+    get_pseudovalues(model::MultistateModelFitted; type::Symbol=:jk)
 
-Return the jackknife pseudo-values for each subject.
-
-# Formula
-The jackknife pseudo-value for subject i is:
-```math
-θ̃ᵢ = n θ̂ - (n-1) θ̂_{-i} = θ̂ - (n-1) Δᵢ
-```
-
-# Statistical Properties
-1. **Mean equals estimate**: `(1/n) Σᵢ θ̃ᵢ = θ̂`
-2. **Variance estimates estimator variance**: `Var(θ̃) / n ≈ Var(θ̂)`
-3. **Approximately IID**: Under regularity conditions, pseudo-values are approximately
-   independent with mean θ (the true parameter)
+Return pseudo-values for each subject.
 
 # Arguments
 - `model::MultistateModelFitted`: fitted model (requires `compute_ij_vcov=true` or `compute_jk_vcov=true`)
+- `type::Symbol=:jk`: Type of pseudo-values
+  - `:jk` - Jackknife pseudo-values: θ̃ᵢ = θ̂ - (n-1)·Δᵢ
+  - `:ij` - IJ pseudo-values (LOO estimates): θ̃ᵢ = θ̂ + Δᵢ
 
 # Returns
-- `Matrix{Float64}`: p × n matrix where column i is the pseudo-value θ̃ᵢ
+- `Matrix{Float64}`: p × n matrix where column i is the pseudo-value for subject i
 
-# Uses
-- **Jackknife variance**: `Var(θ̂) ≈ (1/(n(n-1))) Σᵢ (θ̃ᵢ - θ̂)(θ̃ᵢ - θ̂)ᵀ`
-- **Jackknife confidence intervals**: Treat pseudo-values as IID sample, use t-interval
-- **Regression on pseudo-values**: Standard regression methods with pseudo-values as outcomes
+# Details
+**Jackknife pseudo-values** (`:jk`):
+- Formula: θ̃ᵢ = n·θ̂ - (n-1)·θ̂₋ᵢ = θ̂ - (n-1)·Δᵢ
+- Property: mean(θ̃) = θ̂ (unbiased)
+- Use: Can be treated as approximately IID for variance estimation
+
+**IJ pseudo-values** (`:ij`):
+- Formula: θ̃ᵢ = θ̂ + Δᵢ ≈ θ̂₋ᵢ (leave-one-out estimate)
+- Property: These ARE the approximate LOO estimates
+- Use: Influence diagnostics, model checking
 
 # Example
 ```julia
-fitted = fit(model, data; compute_jk_vcov=true)
-pseudo = get_jk_pseudovalues(fitted)
+fitted = fit(model; compute_ij_vcov=true)
 
-# Verify mean equals estimate
-theta_hat = get_parameters_flat(fitted)
-mean_pseudo = mean(pseudo, dims=2)
-println("Difference from estimate: ", maximum(abs.(mean_pseudo .- theta_hat)))
+# Get jackknife pseudo-values
+jk_pseudo = get_pseudovalues(fitted)  # default :jk
+# Mean equals the MLE
+mean(jk_pseudo, dims=2) ≈ get_parameters(fitted; scale=:flat)
 
-# Manual jackknife variance calculation
-n = size(pseudo, 2)
-jk_var_manual = (1/(n*(n-1))) * sum((pseudo[:, i] .- theta_hat) * (pseudo[:, i] .- theta_hat)' 
-                                    for i in 1:n)
+# Get IJ pseudo-values (LOO estimates)
+ij_pseudo = get_pseudovalues(fitted; type=:ij)
+# Column i is approximately θ̂₋ᵢ
 ```
 
 # References
 - Efron, B. (1982). The Jackknife, the Bootstrap and Other Resampling Plans. SIAM.
 - Miller, R. G. (1974). The jackknife - a review. Biometrika, 61(1), 1-15.
 
-See also: [`get_ij_pseudovalues`](@ref), [`get_jk_vcov`](@ref)
+# See also
+- [`get_vcov`](@ref) - Get variance-covariance matrices
+- [`get_loo_perturbations`](@ref) - Get raw LOO perturbations Δᵢ
+- [`get_influence_functions`](@ref) - Alias for LOO perturbations
 """
-function get_jk_pseudovalues(model::MultistateModelFitted)
+function get_pseudovalues(model::MultistateModelFitted; type::Symbol=:jk)
     deltas = get_loo_perturbations(model)
-    n = size(deltas, 2)
-    theta_hat = get_parameters_flat(model)
+    theta_hat = get_parameters(model; scale=:flat)
     
-    # θ̃ᵢ = θ̂ - (n-1)·Δᵢ
-    pseudovalues = theta_hat .- (n - 1) .* deltas
-    return pseudovalues
+    if type == :jk
+        # θ̃ᵢ = θ̂ - (n-1)·Δᵢ
+        n = size(deltas, 2)
+        return theta_hat .- (n - 1) .* deltas
+    elseif type == :ij
+        # θ̃ᵢ = θ̂ + Δᵢ (the LOO estimate itself)
+        return theta_hat .+ deltas
+    else
+        throw(ArgumentError("type must be :jk or :ij (got :$type)"))
+    end
 end
 
-"""
-    get_ij_pseudovalues(model::MultistateModelFitted)
+# Internal helpers - prefer get_pseudovalues(model; type=:jk/:ij) for new code
+function get_jk_pseudovalues(model::MultistateModelFitted)
+    return get_pseudovalues(model; type=:jk)
+end
 
-Return the infinitesimal jackknife (IJ) pseudo-values for each subject.
-
-# Formula
-The IJ pseudo-value for subject i is:
-```math
-θ̃ᵢ^{IJ} = θ̂ + Δᵢ = θ̂ + H⁻¹ gᵢ ≈ θ̂_{-i}
-```
-
-This is simply the approximate LOO estimate for subject i. Unlike jackknife
-pseudo-values, IJ pseudo-values are NOT scaled by (n-1).
-
-# Relationship to Jackknife Pseudo-values
-- JK pseudo-value: `θ̃ᵢ = θ̂ - (n-1)Δᵢ` (bias-corrected, mean = θ̂)
-- IJ pseudo-value: `θ̃ᵢ^{IJ} = θ̂ + Δᵢ` (LOO estimate, mean ≠ θ̂)
-
-# Arguments
-- `model::MultistateModelFitted`: fitted model (requires `compute_ij_vcov=true` or `compute_jk_vcov=true`)
-
-# Returns
-- `Matrix{Float64}`: p × n matrix where column i is the IJ pseudo-value (LOO estimate)
-
-# Variance Calculation
-The IJ variance can be computed from pseudo-values as:
-```math
-Var_{IJ}(θ̂) = \frac{1}{n^2} Σᵢ (θ̃ᵢ^{IJ} - θ̂)(θ̃ᵢ^{IJ} - θ̂)ᵀ = \frac{1}{n^2} Σᵢ ΔᵢΔᵢᵀ
-```
-
-# Example
-```julia
-fitted = fit(model, data; compute_ij_vcov=true)
-ij_pseudo = get_ij_pseudovalues(fitted)
-theta_hat = get_parameters_flat(fitted)
-
-# These are the approximate LOO estimates
-println("LOO estimate for subject 1: ", ij_pseudo[:, 1])
-println("Full estimate: ", theta_hat)
-println("Difference: ", ij_pseudo[:, 1] .- theta_hat)  # Same as delta_1
-```
-
-See also: [`get_jk_pseudovalues`](@ref), [`get_loo_perturbations`](@ref)
-"""
 function get_ij_pseudovalues(model::MultistateModelFitted)
-    deltas = get_loo_perturbations(model)
-    theta_hat = get_parameters_flat(model)
-    
-    # θ̃ᵢ = θ̂ + Δᵢ (the LOO estimate itself)
-    pseudovalues = theta_hat .+ deltas
-    return pseudovalues
+    return get_pseudovalues(model; type=:ij)
 end
 
 """
@@ -739,71 +656,122 @@ function get_convergence_records(model::MultistateModelFitted)
 end
 
 """
-    summary(model::MultistateModelFitted) 
+    summary(model::MultistateModelFitted; compute_se=true, confidence_level=0.95, 
+            estimate_likelihood=false, min_ess=100)
 
-Summary of model output. 
+Generate a summary of a fitted multistate model with parameter estimates,
+standard errors, and confidence intervals.
 
-# Arguments 
-- `model::MultistateModelFitted`: fitted model
-- `confidence_level::Float64`: confidence level of the confidence intervals
+# Arguments
+- `model::MultistateModelFitted`: A fitted multistate model
+- `compute_se::Bool=true`: Whether to compute standard errors and confidence intervals
+- `confidence_level::Float64=0.95`: Confidence level for intervals (default 95%)
+- `estimate_likelihood::Bool=false`: Whether to estimate log-likelihood via importance sampling
+- `min_ess::Int=100`: Minimum effective sample size for IS likelihood estimation
+
+# Returns
+A NamedTuple containing:
+- `summary`: NamedTuple of DataFrames with parameter estimates for each hazard
+- `loglik`: Log-likelihood value
+- `AIC`: Akaike Information Criterion
+- `BIC`: Bayesian Information Criterion  
+- `MCSE_loglik`: Monte Carlo standard error of log-likelihood (if estimated)
+
+# Example
+```julia
+fitted = fit(model)
+s = summary(fitted)
+s.summary.h12  # DataFrame for hazard h12
+s.loglik       # Log-likelihood
+s.AIC          # AIC
+```
 """
-function summary(model::MultistateModelFitted; compute_se = true, confidence_level::Float64 = 0.95, estimate_likelihood = false, min_ess = 100) 
+function summary(model::MultistateModelFitted; compute_se::Bool=true, confidence_level::Float64=0.95, 
+                 estimate_likelihood::Bool=false, min_ess::Int=100) 
     
-    # maximum likelihood estimates
-    mle = get_parameters(model)
-
-    # container for summary table
-    summary_table = Vector{DataFrame}(undef, length(model.hazards))
-
-    if isnothing(model.vcov) | !compute_se
-
-        if isnothing(model.vcov)
-            println("Confidence intervals are not computed for models without a variance-covariance matrix.")
+    # Get parameters on natural scale
+    mle = get_parameters(model; scale=:natural)
+    
+    # Get flat parameters for SE computation (vcov is on estimation scale)
+    flat_pars = model.parameters.flat
+    
+    # Container for summary tables
+    summary_tables = Dict{Symbol, DataFrame}()
+    
+    # Process each hazard
+    sorted_hazkeys = sort(collect(model.hazkeys), by = x -> x[2])
+    par_offset = 0  # Track position in flat parameter vector
+    
+    for (hazname, idx) in sorted_hazkeys
+        haz = model.hazards[idx]
+        npar = haz.npar_total
+        parnames = haz.parnames
+        estimates = collect(mle[hazname])
+        
+        # Clean up parameter names for display
+        clean_names = String[]
+        for pname in parnames
+            pname_str = string(pname)
+            # Remove hazard prefix if present
+            prefix = string(hazname) * "_"
+            if startswith(pname_str, prefix)
+                push!(clean_names, pname_str[length(prefix)+1:end])
+            else
+                push!(clean_names, pname_str)
+            end
         end
-        # populate summary tables for each hazard
-        for s in eachindex(summary_table)
-            # summary for hazard s (only the estimate when there is no vcov)
-            summary_table[s] = DataFrame(estimate = reduce(vcat, mle[s]))
+        
+        if isnothing(model.vcov) || !compute_se
+            # No standard errors available
+            df = DataFrame(
+                parameter = clean_names,
+                estimate = estimates
+            )
+        else
+            # Extract SEs for this hazard from the diagonal of vcov
+            varcov = get_vcov(model)
+            se_flat = sqrt.(diag(varcov))
+            se = se_flat[par_offset+1:par_offset+npar]
+            
+            # Critical value for CI
+            z_crit = quantile(Normal(0.0, 1.0), 1 - (1 - confidence_level) / 2)
+            
+            df = DataFrame(
+                parameter = clean_names,
+                estimate = estimates,
+                se = se,
+                lower = estimates .- z_crit .* se,
+                upper = estimates .+ z_crit .* se
+            )
         end
-    else    
-        # standard error
-        varcov = get_vcov(model)
-        se = sqrt.(varcov[diagind(varcov)])
-        se_nested = unflatten(model.parameters.reconstructor, se)
-        # critical value
-        z_critical = quantile(Normal(0.0, 1.0), 1-(1-confidence_level)/2)
-
-        # populate summary tables for each hazard
-        for s in eachindex(summary_table)
-            # summary for hazard s
-            summary_table[s] = DataFrame(
-                estimate = reduce(vcat, mle[s]),
-                se = reduce(vcat, se_nested[s]))
-                summary_table[s].lower = summary_table[s].estimate .- z_critical .* summary_table[s].se
-                summary_table[s].upper = summary_table[s].estimate .+ z_critical .* summary_table[s].se
-        end
+        
+        summary_tables[hazname] = df
+        par_offset += npar
     end
-
-    # add hazard names to the table
-    haznames = map(x -> model.hazards[x].hazname, collect(1:length(model.hazards)))
-    summary_table = (;zip(haznames, summary_table)...)
     
-    # log likelihood  
+    # Convert to NamedTuple
+    summary_nt = NamedTuple(summary_tables)
+    
+    # Print warning if no vcov
+    if isnothing(model.vcov) && compute_se
+        @warn "Variance-covariance matrix not computed. Standard errors and confidence intervals unavailable."
+    end
+    
+    # Log likelihood
     if estimate_likelihood
-        ll_result = estimate_loglik(model; min_ess = min_ess)
+        ll_result = estimate_loglik(model; min_ess=min_ess)
         ll = ll_result.loglik
         mcse = ll_result.mcse_loglik
     else
-        ll = get_loglik(model; ll = "loglik")
+        ll = get_loglik(model; ll="loglik")
         mcse = nothing
     end
+    
+    # Information criteria
+    AIC = MultistateModels.aic(model; loglik=ll)
+    BIC = MultistateModels.bic(model; loglik=ll)
 
-    # information criteria
-    AIC = MultistateModels.aic(model; loglik = ll)
-
-    BIC = MultistateModels.bic(model; loglik = ll)
-
-    return (summary = summary_table, loglik = ll, AIC = AIC, BIC = BIC, MCSE_loglik = mcse)
+    return (summary=summary_nt, loglik=ll, AIC=AIC, BIC=BIC, MCSE_loglik=mcse)
 end
 
 """
@@ -817,7 +785,16 @@ Estimate the log marginal likelihood for a fitted multistate model. Require that
 function estimate_loglik(model::MultistateProcess; min_ess = 100)
 
     # sample paths and grab logliks
-    samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights = draw_paths(model; min_ess = min_ess, paretosmooth = false, return_logliks = true)
+    result = draw_paths(model; min_ess = min_ess, paretosmooth = false, return_logliks = true)
+    
+    # For exact Markov data, draw_paths returns (loglik, subj_lml) directly
+    if haskey(result, :loglik) && haskey(result, :subj_lml) && !haskey(result, :samplepaths)
+        return (loglik = result.loglik, loglik_subj = result.subj_lml, 
+                mcse_loglik = 0.0, mcse_loglik_subj = zeros(length(result.subj_lml)))
+    end
+    
+    # For importance sampling case, unpack the full result
+    samplepaths, loglik_target, subj_ess, loglik_surrog, ImportanceWeightsNormalized, ImportanceWeights = result
 
     # calculate the log marginal likelihood
     subj_ml = map(w -> mean(w), ImportanceWeights) # need to use the *un-normalized* weights
@@ -944,7 +921,7 @@ end
 """
     Base.show(io::IO, model::MultistateModelFitted)
 
-Pretty print a fitted multistate model with parameter estimates.
+Pretty print a fitted multistate model with parameter estimates and standard errors.
 For phase-type fitted models, displays user-facing parameters.
 """
 function Base.show(io::IO, model::MultistateModelFitted)
@@ -957,7 +934,7 @@ function Base.show(io::IO, model::MultistateModelFitted)
     else
         println(io, "MultistateModelFitted")
     end
-    println(io, "─" ^ 50)
+    println(io, "─" ^ 60)
     
     # Basic info
     n_subj = length(model.subjectindices)
@@ -977,14 +954,29 @@ function Base.show(io::IO, model::MultistateModelFitted)
         println(io, "  Hazards: $n_hazards")
     end
     
-    # Log-likelihood
+    # Log-likelihood and information criteria (compute directly to avoid warnings)
     ll = model.loglik.loglik
+    npar = length(get_parameters_flat(model))
+    nsubj = sum(model.SubjectWeights)
+    aic_val = -2 * ll + 2 * npar
+    bic_val = -2 * ll + npar * log(nsubj)
+    
     println(io, "  Log-likelihood: $(round(ll, digits=4))")
+    println(io, "  AIC: $(round(aic_val, digits=4))")
+    println(io, "  BIC: $(round(bic_val, digits=4))")
     
     # Convergence status for phase-type
     if is_pt
         conv = get_convergence(model) ? "converged" : "not converged"
         println(io, "  Status: $conv")
+    end
+    
+    # Get standard errors if vcov is available
+    has_se = !isnothing(model.vcov)
+    se_flat = nothing
+    if has_se
+        varcov = get_vcov(model)
+        se_flat = sqrt.(diag(varcov))
     end
     
     # Parameters
@@ -994,7 +986,7 @@ function Base.show(io::IO, model::MultistateModelFitted)
     else
         println(io, "Parameter estimates (natural scale):")
     end
-    println(io, "─" ^ 50)
+    println(io, "─" ^ 60)
     
     if is_pt
         # Display user-facing phase-type parameters
@@ -1048,12 +1040,14 @@ function Base.show(io::IO, model::MultistateModelFitted)
             end
         end
     else
-        # Standard display for non-phase-type models
+        # Standard display for non-phase-type models with optional SE
         sorted_hazkeys = sort(collect(model.hazkeys), by = x -> x[2])
+        par_offset = 0
         
         for (hazname, idx) in sorted_hazkeys
             haz = model.hazards[idx]
             parnames = haz.parnames
+            npar = haz.npar_total
             natural_pars = model.parameters.natural[hazname]
             
             # Format transition
@@ -1068,18 +1062,28 @@ function Base.show(io::IO, model::MultistateModelFitted)
                 if startswith(pname_str, string(hazname) * "_")
                     pname_str = pname_str[length(string(hazname))+2:end]
                 end
-                println(io, "    $pname_str = $(round(pval, digits=4))")
+                
+                # Format with or without SE
+                if has_se
+                    se = se_flat[par_offset + i]
+                    println(io, "    $pname_str = $(round(pval, digits=4)) (SE: $(round(se, digits=4)))")
+                else
+                    println(io, "    $pname_str = $(round(pval, digits=4))")
+                end
             end
+            par_offset += npar
         end
     end
     
     # Variance-covariance status
     println(io)
-    if !isnothing(model.vcov)
-        println(io, "  Variance-covariance: computed")
+    if has_se
+        println(io, "  Variance-covariance: computed (robust sandwich)")
     else
         println(io, "  Variance-covariance: not computed")
     end
+    println(io)
+    println(io, "Use `summary(model)` for confidence intervals.")
 end
 
 """

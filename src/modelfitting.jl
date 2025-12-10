@@ -1020,12 +1020,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         error("MCEM requires a Markov surrogate. Call `set_surrogate!(model)` or use `surrogate=:markov` in `multistatemodel()` before fitting.")
     end
     
-    # Check if surrogate needs to be fitted (has default zero params)
-    # This happens when surrogate=:markov is used without optimize_surrogate=true
-    surrog_pars = model.markovsurrogate.parameters.flat
-    if all(isapprox.(surrog_pars, 0.0; atol=1e-6))
+    # Check if surrogate needs to be fitted (not yet fitted)
+    # This happens when surrogate=:markov is used with fit_surrogate=false
+    if !model.markovsurrogate.fitted
         if verbose
-            println("Markov surrogate has default parameters. Fitting via MLE...")
+            println("Markov surrogate not yet fitted. Fitting via MLE...")
         end
         # Fit the surrogate via set_surrogate! with MLE method
         set_surrogate!(model; type=:markov, method=:mle, verbose=verbose)

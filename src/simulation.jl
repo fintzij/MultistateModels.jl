@@ -49,8 +49,7 @@ Useful for regression testing or debugging.
 struct DirectTransformStrategy <: AbstractTransformStrategy end
 
 # Legacy aliases for backward compatibility
-const TangTransformStrategy = CachedTransformStrategy
-const LegacyTransformStrategy = DirectTransformStrategy
+
 
 # Strategy dispatch helpers
 """

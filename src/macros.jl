@@ -1,12 +1,14 @@
 const _ANALYTIC_HAZARD_FAMILY_ALIASES = Dict(
-    :exp => "exp",
-    :exponential => "exp",
-    :wei => "wei",
-    :weibull => "wei",
-    :gom => "gom",
-    :gompertz => "gom",
-    :sp => "sp",
-    :spline => "sp"
+    :exp => :exp,
+    :exponential => :exp,
+    :wei => :wei,
+    :weibull => :wei,
+    :gom => :gom,
+    :gompertz => :gom,
+    :sp => :sp,
+    :spline => :sp,
+    :pt => :pt,
+    :phasetype => :pt
 )
 
 @inline function _hazard_macro_transition(value)

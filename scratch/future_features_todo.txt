@@ -2,11 +2,29 @@
 FUTURE FEATURES TODO - MultistateModels.jl
 ================================================================================
 Created: 2025-11-29
-Updated: 2025-06-03
+Updated: 2025-06-16
 Branch: infrastructure_changes
 
 ================================================================================
-RECENTLY COMPLETED (2025-06-03 Session)
+RECENTLY COMPLETED (2025-06-16 Session)
+================================================================================
+
+1. TEST INFRASTRUCTURE REORGANIZATION
+   - Moved all tests from `test/` to standalone `MultistateModelsTests.jl` package
+   - 1079 tests passing via `Pkg.test()`
+   - Structure: unit/, integration/, longtests/, fixtures/, diagnostics/
+   - Added diagnostic wrapper functions: `generate_simulation_diagnostics()`,
+     `diagnostics_path()`, `diagnostics_assets_path()`
+   - Main `test/runtests.jl` is now a 4-line shim delegating to test package
+
+2. DOCUMENTATION CLEANUP
+   - Removed 7 obsolete implementation plan documents from `docs/`
+   - Moved diagnostic assets from `docs/assets/diagnostics/` to test package
+   - Removed `docs/plot_env/` (superseded by test package diagnostics)
+   - Retained: `make.jl`, `src/` (actual docs), `build/`
+
+================================================================================
+PREVIOUSLY COMPLETED (2025-06-03 Session)
 ================================================================================
 
 1. LOO_METHOD DOCUMENTATION
@@ -22,10 +40,9 @@ RECENTLY COMPLETED (2025-06-03 Session)
      - Eigenvalue thresholding for ill-conditioned Hessians
    - Updated `docs/make.jl` to include new page in navigation
 
-3. TEST DOCUMENTATION UPDATE
-   - Updated `test/reports/testcoverage.md` (763 tests passing)
-   - Renamed `distribution_longtests.md` → `simulation_longtests.md`
-   - Created `test/reports/inference_longtests.md` for MCEM/MLE tests
+3. TEST DOCUMENTATION UPDATE (SUPERSEDED by test package reorganization)
+   - Test reports now in `MultistateModelsTests/` package
+   - 1079 tests passing (up from 763)
 
 ================================================================================
 FEATURE 1: PHASE-TYPE MARKOV SURROGATES (PRIORITY: HIGH)

@@ -1281,7 +1281,8 @@ function compute_robust_vcov(params::AbstractVector,
                 H_chol = cholesky(fisher_result.fishinf)
                 loo_deltas = loo_perturbations_cholesky(H_chol, fisher_result.subject_hessians, 
                                                         fisher_result.subject_grads)
-            catch
+            catch e
+                @debug "Cholesky factorization failed for JK variance; falling back to direct solve" exception=(e, catch_backtrace())
                 # Fall back to direct if Cholesky fails
                 loo_deltas = loo_perturbations_direct(vcov, fisher_result.subject_grads)
             end
@@ -1348,7 +1349,8 @@ function compute_robust_vcov(params::AbstractVector,
                 H_chol = cholesky(fisher_result.fishinf)
                 loo_deltas = loo_perturbations_cholesky(H_chol, fisher_result.subject_hessians,
                                                         fisher_result.subject_grads)
-            catch
+            catch e
+                @debug "Cholesky factorization failed for JK variance; falling back to direct solve" exception=(e, catch_backtrace())
                 loo_deltas = loo_perturbations_direct(vcov, fisher_result.subject_grads)
             end
         else
@@ -1470,7 +1472,8 @@ function compute_robust_vcov(params::AbstractVector,
                 H_chol = cholesky(fisher_result.fishinf)
                 loo_deltas = loo_perturbations_cholesky(H_chol, fisher_result.subject_hessians,
                                                         fisher_result.subject_grads)
-            catch
+            catch e
+                @debug "Cholesky factorization failed for JK variance; falling back to direct solve" exception=(e, catch_backtrace())
                 # Fall back to direct if Cholesky fails
                 loo_deltas = loo_perturbations_direct(vcov, fisher_result.subject_grads)
             end
@@ -1601,7 +1604,8 @@ function NCVState(H_lambda::AbstractMatrix,
     # Attempt Cholesky factorization
     H_chol = try
         cholesky(Symmetric(H_mat))
-    catch
+    catch e
+        @debug "Cholesky factorization failed during NCVState initialization; NCV will use direct solves" exception=(e, catch_backtrace())
         nothing
     end
     
@@ -1834,13 +1838,15 @@ function ncv_loo_perturbation_woodbury(H_chol::Cholesky,
         correction = M \ H_inv_g
         delta = H_inv_g + H_inv_Hk * correction
         return (delta=delta, indefinite=true)
-    catch
+    catch e1
+        @debug "Woodbury formula failed; trying direct solve" exception=(e1, catch_backtrace())
         # If Woodbury also fails, fall back to direct solve
         H_lambda_k = H_chol.L * H_chol.U - H_k
         try
             delta = Symmetric(H_lambda_k) \ g_k
             return (delta=delta, indefinite=true)
-        catch
+        catch e2
+            @debug "Direct solve also failed; returning NaN" exception=(e2, catch_backtrace())
             # Complete failure - return NaN to signal problem
             return (delta=fill(NaN, length(g_k)), indefinite=true)
         end
@@ -1870,7 +1876,8 @@ function ncv_loo_perturbation_direct(H_lambda::AbstractMatrix,
     try
         delta = Symmetric(H_lambda_k) \ g_k
         return (delta=delta, indefinite=false)
-    catch
+    catch e1
+        @debug "Direct solve failed; adding ridge regularization" exception=(e1, catch_backtrace())
         # Matrix singular or indefinite - try with regularization
         try
             # Add small ridge for stability
@@ -1878,7 +1885,8 @@ function ncv_loo_perturbation_direct(H_lambda::AbstractMatrix,
             ridge = 1e-8 * I(p)
             delta = (Symmetric(H_lambda_k) + ridge) \ g_k
             return (delta=delta, indefinite=true)
-        catch
+        catch e2
+            @debug "Ridge-regularized solve also failed; returning NaN" exception=(e2, catch_backtrace())
             return (delta=fill(NaN, length(g_k)), indefinite=true)
         end
     end

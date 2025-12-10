@@ -1,8 +1,8 @@
 # MultistateModels.jl Infrastructure Status
 
 **Branch:** `infrastructure_changes`  
-**Last updated:** 2025-12-04  
-**Test status:** ✅ 605 quick tests passing, 0 broken  
+**Last updated:** 2025-06-16  
+**Test status:** ✅ 1079 tests passing (via `Pkg.test()`)  
 **PR readiness:** See Section 9
 
 ---
@@ -11,11 +11,43 @@
 
 The `infrastructure_changes` branch has made significant progress on testing infrastructure, simulation validation, code organization, and antipattern fixes. Key accomplishments include comprehensive exact data testing, spline hazard integration, ParameterHandling.jl migration, fail-fast error handling improvements, robust variance estimation with LOO method options, unified surrogate fitting API, phase-type distribution improvements, and AD backend infrastructure.
 
-**Recent Milestone:** AD backend infrastructure with ForwardDiff/Mooncake support (2025-12-04).
+**Recent Milestone:** Test infrastructure reorganization - all tests moved to standalone `MultistateModelsTests.jl` package (2025-06-16).
 
 ---
 
-## Recent Session (2025-12-04)
+## Recent Session (2025-06-16)
+
+### Test Infrastructure Reorganization
+
+1. **Standalone Test Package** (`MultistateModelsTests/`)
+   - All tests moved from `test/` to standalone package at repo root
+   - 1079 tests passing via `Pkg.test()`
+   - Structure:
+     - `src/MultistateModelsTests.jl` - main module with `runtests()` and diagnostic wrappers
+     - `unit/` - fast unit tests (test_*.jl)
+     - `integration/` - MCEM, crossval, inference tests
+     - `longtests/` - long-running simulation validation (env var controlled)
+     - `fixtures/` - shared test setup files
+     - `diagnostics/` - CairoMakie-based diagnostic report generation
+
+2. **Diagnostic Report Infrastructure**
+   - Moved `test/diagnostics/` → `MultistateModelsTests/diagnostics/`
+   - Added wrapper functions: `generate_simulation_diagnostics()`, `diagnostics_path()`, `diagnostics_assets_path()`
+   - Includes simulation validation plots and model generation testing
+
+3. **Main Test Shim** (`test/runtests.jl`)
+   - Thin 4-line wrapper that delegates to test package
+   - `Pkg.test()` works via standard Julia workflow
+
+4. **Documentation Cleanup** (`docs/`)
+   - Removed obsolete implementation plans (7 markdown files)
+   - Removed `docs/plot_env/` (superseded by test package diagnostics)
+   - Removed `docs/assets/diagnostics/` (moved to test package)
+   - Retained: `make.jl`, `src/` (actual docs), `build/`
+
+---
+
+## Previous Session (2025-12-04)
 
 ### AD Backend Infrastructure
 
@@ -38,17 +70,17 @@ The `infrastructure_changes` branch has made significant progress on testing inf
    - Removed: ChainRulesCore, ReverseDiff (not needed)
    - Enzyme available but Julia 1.12 not yet supported (Issue #2699)
 
-### Test Infrastructure Updates
+### Test Infrastructure Updates (superseded by 2025-06-16 reorganization)
 
 1. **Added `test_reversible_tvc_loglik.jl`** to quick tests
    - 6 tests for reversible semi-Markov models with TVC
    - Validates sojourn time resets and likelihood correctness
 
-2. **Updated `runtests.jl`**
-   - Added `longtest_mcem_tvc.jl`, `longtest_robust_parametric.jl`, `longtest_robust_markov_phasetype.jl` to full test suite
-   - Quick tests: 605 passing
+2. **Test Suite Reorganization**
+   - Tests now in standalone `MultistateModelsTests/` package
+   - All 1079 tests passing via `Pkg.test()`
 
-3. **Updated `testcoverage-gfm.md`**
+3. **Updated documentation**
    - Accurate test counts and suite listing
    - Removed stale references to deleted files
 
@@ -477,47 +509,48 @@ end
 | `modelgeneration.jl` | `multistatemodel`, `build_hazards` | ✅ `test_modelgeneration.jl` |
 | `modeloutput.jl` | Output formatting | Partial |
 | `pathfunctions.jl` | Path utilities | Indirect |
+| `phasetype.jl` | Phase-type distributions | ✅ `test_phasetype_is.jl` |
 | `sampling.jl` | Path sampling, FFBS | ✅ `test_phasetype_is.jl` |
 | `simulation.jl` | `simulate`, `simulate_path` | ✅ `test_simulation.jl` |
 | `smooths.jl` | Spline basis functions | ✅ `test_splines.jl` |
+| `statsutils.jl` | Statistical utilities | Partial |
 | `surrogates.jl` | Surrogate model construction | ✅ `test_surrogates.jl` |
 | `crossvalidation.jl` | IJ/JK variance | Partial |
 
-### Test Files (`test/`)
-| File | Tests | Purpose |
-|------|-------|---------|
-| `runtests.jl` | — | Entry point |
-| `test_modelgeneration.jl` | 41 | Model construction, validation |
-| `test_hazards.jl` | 159 | Hazard evaluation |
-| `test_helpers.jl` | 119 | Utility functions |
-| `test_make_subjdat.jl` | 34 | Subject data processing |
-| `test_simulation.jl` | 84 | Path simulation |
-| `test_ncv.jl` | 66 | Cross-validation, variance estimation |
-| `test_exact_data_fitting.jl` | 74 | Exact data MLE |
-| `test_phasetype_is.jl` | 143 | Phase-type importance sampling |
-| `test_splines.jl` | 108 | Spline hazards, knot placement |
-| `test_surrogates.jl` | 42 | Surrogate fitting API |
-| `test_mcem.jl` | 41 | MCEM helpers, SQUAREM |
-| `longtest_mcem.jl` | — | MCEM (full suite only) |
-| `longtest_mcem_splines.jl` | — | MCEM + splines (full suite only) |
-| `longtest_exact_markov.jl` | — | Exact data MLE (full suite only) |
-| `longtest_simulation_distribution.jl` | — | Simulation validation (full suite only) |
-| `longtest_simulation_tvc.jl` | — | TVC simulation (full suite only) |
-| `fixtures/TestFixtures.jl` | — | Shared fixtures |
+### Test Package (`MultistateModelsTests/`)
+
+Structure:
+```
+MultistateModelsTests/
+├── Project.toml           # Package dependencies
+├── README.md              # Test package documentation
+├── src/
+│   └── MultistateModelsTests.jl  # Main module with runtests() and diagnostics wrappers
+├── unit/                  # Fast unit tests (test_*.jl)
+├── integration/           # MCEM, crossval, inference tests
+├── longtests/             # Long-running tests (MSM_TEST_LEVEL=full)
+├── fixtures/              # Shared test setup files
+└── diagnostics/           # CairoMakie-based report generation
+```
+
+Test count: **1079 tests passing**
+
+### Main Test Shim (`test/runtests.jl`)
+4-line wrapper that delegates to `MultistateModelsTests.runtests()`.
 
 ---
 
 ## 6. Commands Reference
 
 ```bash
-# Run quick tests (default)
+# Run all tests (standard workflow)
 julia --project -e 'using Pkg; Pkg.test()'
 
-# Run full tests including MCEM
+# Run long tests (MCEM, simulation validation)
 MSM_TEST_LEVEL=full julia --project -e 'using Pkg; Pkg.test()'
 
-# Generate diagnostic plots
-julia --project test/diagnostics/generate_model_diagnostics.jl
+# Generate diagnostic reports
+cd MultistateModelsTests/diagnostics && julia --project=.. generate_model_diagnostics.jl
 
 # Build documentation
 julia --project=docs docs/make.jl
@@ -525,8 +558,19 @@ julia --project=docs docs/make.jl
 
 ---
 
-## 7. Recent Changes (2025-12-02)
+## 7. Recent Changes (2025-06-16)
 
+1. **Test infrastructure reorganization**: All tests moved to standalone `MultistateModelsTests.jl` package
+2. **Diagnostic wrappers**: Added `generate_simulation_diagnostics()`, `diagnostics_path()`, `diagnostics_assets_path()`
+3. **Documentation cleanup**: Removed 7 obsolete implementation plans, moved diagnostic assets to test package
+4. **Test count**: 1079 tests passing (up from 605 in previous session)
+
+### Previous Changes (2025-12-04)
+1. **AD backend infrastructure**: ForwardDiff/Mooncake support via ADTypes.jl
+2. **Non-mutating likelihood**: `loglik_markov_functional()` for AD compatibility
+3. **TVC reversible tests**: `test_reversible_tvc_loglik.jl` added
+
+### Previous Changes (2025-12-02)
 1. **Unified surrogate fitting API**: `fit_surrogate(model; type, method, ...)` with {markov,phasetype} × {mle,heuristic}
 2. **compute_markov_marginal_loglik**: New helper for marginal log-likelihood under Markov surrogate
 3. **NormConstantProposal bug fix**: Fixed undefined `surrogate_fitted.loglik.loglik` reference in `modelfitting.jl`
@@ -538,11 +582,7 @@ julia --project=docs docs/make.jl
 ### Previous Changes (2025-06-03)
 1. **LOO method documentation**: Added `loo_method` parameter to all `fit()` docstrings
 2. **Optimization guide**: Created `docs/src/optimization.md` with comprehensive variance estimation docs
-3. **Test documentation overhaul**:
-   - Updated `testcoverage.md` (763 tests)
-   - Renamed `distribution_longtests.md` → `simulation_longtests.md`
-   - Created `inference_longtests.md` for MCEM/MLE tests
-4. **Updated `future_features_todo.txt`**: Added recently completed items
+3. **Test documentation overhaul**: Updated coverage reports
 
 ### Previous Changes (2025-12-01)
 1. **Antipattern fixes**: `@error`→`error()`, input validation, DRY helpers, boolean naming
@@ -581,7 +621,8 @@ julia --project=docs docs/make.jl
 | Unit tests for surrogate fitting (≥20 tests) | ✅ 41 tests |
 | Unit tests for MCEM helpers (≥10 tests) | ✅ 47 tests |
 | No TODOs remaining in source | ✅ |
-| All 763+ tests passing | ✅ 852 tests |
+| All tests passing | ✅ 1079 tests |
+| Test infrastructure reorganized | ✅ MultistateModelsTests/ |
 | Long tests passing (`MSM_TEST_LEVEL=full`) | ⏳ To verify |
 | Documentation updated | ✅ |
 
@@ -616,6 +657,7 @@ No actionable TODOs remain in the source code. The Caffo ESS power calculation T
 | `compute_markov_marginal_loglik` | `src/surrogates.jl` | 303-350 |
 | `fit(::MultistateSemiMarkovModel)` | `src/modelfitting.jl` | 514-1294 |
 | MCEM helpers | `src/mcem.jl` | 1-274 |
+| Test package | `MultistateModelsTests/src/` | — |
 | Phase-type distributions | `src/phasetype.jl` | 1-2456 |
 | Spline hazards | `src/smooths.jl` | 1-500 |
 | Test fixtures | `test/fixtures/TestFixtures.jl` | 1-200 |

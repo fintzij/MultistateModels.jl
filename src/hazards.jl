@@ -320,9 +320,9 @@ end
 
 @inline function _time_transform_hazard(hazard::SemiMarkovHazard, pars::AbstractVector, t::Real, linpred::Real)
     family = hazard.family
-    if family == "wei"
+    if family == :wei
         return _time_transform_hazard_weibull(pars, linpred, hazard.metadata.linpred_effect, t)
-    elseif family == "gom"
+    elseif family == :gom
         return _time_transform_hazard_gompertz(pars, linpred, hazard.metadata.linpred_effect, t)
     else
         throw(ArgumentError("time_transform=true is not implemented for family $(family)"))
@@ -331,9 +331,9 @@ end
 
 @inline function _time_transform_cumhaz(hazard::SemiMarkovHazard, pars::AbstractVector, lb::Real, ub::Real, linpred::Real)
     family = hazard.family
-    if family == "wei"
+    if family == :wei
         return _time_transform_cumhaz_weibull(pars, linpred, hazard.metadata.linpred_effect, lb, ub)
-    elseif family == "gom"
+    elseif family == :gom
         return _time_transform_cumhaz_gompertz(pars, linpred, hazard.metadata.linpred_effect, lb, ub)
     else
         throw(ArgumentError("time_transform=true is not implemented for family $(family)"))

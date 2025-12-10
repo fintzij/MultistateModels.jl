@@ -1,7 +1,33 @@
-"""
-    set_crude_init!(model::MultistateProcess)
+# =============================================================================
+# Parameter Initialization
+# =============================================================================
+# This module provides functions for initializing parameters in multistate models.
+# The main entry points are:
+#   - initialize_parameters!(): in-place parameter initialization
+#   - initialize_parameters(): returns new model with initialized parameters
+#   - set_crude_init!(): sets parameters to crude rates from data
+#
+# Initialization methods:
+#   - :crude - Use crude log rates from observed data
+#   - :markov - Fit Markov surrogate, use its log rates (semi-Markov only)
+#   - :surrogate - Draw paths from surrogate, fit to exact data, use those parameters
+#   - :auto - Select based on model type (:crude for Markov, :surrogate for semi-Markov)
+# =============================================================================
 
-Modify the parameter values in a MultistateProcess object
+"""
+    set_crude_init!(model::MultistateProcess; constraints = nothing)
+
+Set parameter values to crude rate estimates from observed data.
+
+Crude rates are computed as (number of transitions) / (time at risk) for each
+transition type, then log-transformed for use as initial parameter values.
+
+# Arguments
+- `model::MultistateProcess`: Model to initialize
+- `constraints`: Must be `nothing` (crude init doesn't support constraints)
+
+# Throws
+- `ErrorException`: If constraints are provided
 """
 function set_crude_init!(model::MultistateProcess; constraints = nothing)
 
@@ -27,96 +53,355 @@ function set_crude_init!(model::MultistateProcess; constraints = nothing)
     end
 end
 
+# =============================================================================
+# Helper Functions for Initialization
+# =============================================================================
+
 """
-    initialize_parameters(model::MultistateProcess; constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, crude = false)
+    _is_semimarkov(model::MultistateProcess) -> Bool
 
-Modify the parameter values in a MultistateProcess object, calibrate to the MLE of a Markov surrogate.
+Check if model has any non-Markov (semi-Markov) hazards.
 """
-function initialize_parameters(model::MultistateProcess; constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, crude = false)
-
-    model = deepcopy(model)
-
-    if crude
-        set_crude_init!(model; constraints = constraints)
-    else
-        # check that surrogate constraints are supplied if there are other constraints
-        if !isnothing(constraints) && isnothing(surrogate_constraints)
-            @error "Constraints for the Markov surrogate must be provided if there are constraints on the model parameters."
-        end
-
-        # fit Markov surrogate
-        surrog = fit_surrogate(model; surrogate_constraints = constraints, surrogate_parameters = surrogate_parameters, verbose = false)
-
-        for i in eachindex(model.hazards)
-            hazard = model.hazards[i]
-            
-            # Get log-scale baseline parameter from surrogate's nested structure
-            surrog_log_rate = surrog.parameters.nested[hazard.hazname].baseline[1]
-            set_par_to = init_par(hazard, surrog_log_rate)
-
-            # Copy covariate effects if there are any
-            if hazard.has_covariates
-                ncovar = hazard.npar_total - hazard.npar_baseline
-                # Get full parameter vector for this hazard from surrogate
-                surrog_params_flat = collect(Iterators.flatten(values(surrog.parameters.nested[hazard.hazname])))
-                set_par_to[reverse(range(length(set_par_to); step = -1, length = ncovar))] .= surrog_params_flat[Not(1:hazard.npar_baseline)]
-            end
-            
-            set_parameters!(model, NamedTuple{(hazard.hazname,)}((set_par_to,)))
-
-            if isa(hazard, _SplineHazard)
-                log_params = get_estimation_scale_params(model.parameters)
-                remake_splines!(hazard, log_params[i])
-                set_riskperiod!(hazard)
-            end
-        end
-    end
-
-    return model
+function _is_semimarkov(model::MultistateProcess)
+    !all(isa.(model.hazards, _MarkovHazard))
 end
 
 """
-    initialize_parameters!(model::MultistateProcess; constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, crude = false)
+    _interpolate_covariates!(exact_data::DataFrame, original_data::DataFrame)
 
-Modify the parameter values in a MultistateProcess object, calibrate to the MLE of a Markov surrogate.
+Interpolate covariates from original panel data into exact transition data.
+
+Uses piecewise constant interpolation: for each row in exact_data, finds the
+original data row where id matches and tstart ≤ exact_row.tstart < tstop,
+then copies all covariate columns.
+
+# Arguments
+- `exact_data::DataFrame`: Exact transition data (will be modified in place)
+- `original_data::DataFrame`: Original panel data with covariates
+
+# Returns
+- The modified `exact_data` DataFrame with covariate columns added
 """
-function initialize_parameters!(model::MultistateProcess; constraints = nothing, surrogate_constraints = nothing, surrogate_parameters = nothing, crude = false)
-
-    if crude
-        set_crude_init!(model; constraints = constraints)
-    else
-        # check that surrogate constraints are supplied if there are other constraints
-        if !isnothing(constraints) && isnothing(surrogate_constraints)
-            @error "Constraints for the Markov surrogate must be provided if there are constraints on the model parameters."
+function _interpolate_covariates!(exact_data::DataFrame, original_data::DataFrame)
+    # Identify covariate columns (all columns beyond standard 6)
+    standard_cols = ["id", "tstart", "tstop", "statefrom", "stateto", "obstype"]
+    covariate_cols = setdiff(names(original_data), standard_cols)
+    
+    if isempty(covariate_cols)
+        return exact_data  # No covariates to interpolate
+    end
+    
+    # Add covariate columns to exact_data
+    for col in covariate_cols
+        exact_data[!, col] = Vector{eltype(original_data[!, col])}(undef, nrow(exact_data))
+    end
+    
+    # Group original data by subject for efficient lookup
+    orig_grouped = groupby(original_data, :id)
+    
+    # Interpolate for each row in exact_data
+    for i in 1:nrow(exact_data)
+        subj_id = exact_data.id[i]
+        t = exact_data.tstart[i]
+        
+        # Find original data for this subject
+        subj_orig = orig_grouped[(id = subj_id,)]
+        
+        # Find interval containing t (tstart ≤ t < tstop, or last interval if t == final tstop)
+        row_idx = findfirst(r -> subj_orig.tstart[r] <= t < subj_orig.tstop[r], 1:nrow(subj_orig))
+        if isnothing(row_idx)
+            # Edge case: t equals final tstop, use last interval
+            row_idx = findlast(r -> subj_orig.tstop[r] >= t, 1:nrow(subj_orig))
         end
-
-        # fit Markov surrogate
-        surrog = fit_surrogate(model; surrogate_constraints = constraints, surrogate_parameters = surrogate_parameters, verbose = false)
-
-        for i in eachindex(model.hazards)
-            hazard = model.hazards[i]
-            
-            # Get log-scale baseline parameter from surrogate's nested structure
-            surrog_log_rate = surrog.parameters.nested[hazard.hazname].baseline[1]
-            set_par_to = init_par(hazard, surrog_log_rate)
-
-            # Copy covariate effects if there are any
-            if hazard.has_covariates
-                ncovar = hazard.npar_total - hazard.npar_baseline
-                # Get full parameter vector for this hazard from surrogate
-                surrog_params_flat = collect(Iterators.flatten(values(surrog.parameters.nested[hazard.hazname])))
-                set_par_to[reverse(range(length(set_par_to); step = -1, length = ncovar))] .= surrog_params_flat[Not(1:hazard.npar_baseline)]
-            end
-            
-            set_parameters!(model, NamedTuple{(hazard.hazname,)}((set_par_to,)))
-
-            if isa(hazard, _SplineHazard)
-                log_params = get_estimation_scale_params(model.parameters)
-                remake_splines!(hazard, log_params[i])
-                set_riskperiod!(hazard)
-            end
+        
+        @assert !isnothing(row_idx) "Could not find interval for subject $subj_id at time $t"
+        
+        # Copy covariates
+        for col in covariate_cols
+            exact_data[i, col] = subj_orig[row_idx, col]
         end
     end
+    
+    return exact_data
+end
+
+"""
+    _select_one_path_per_subject(samplepaths, weights) -> Vector{SamplePath}
+
+Select one path per subject from importance-weighted samples.
+
+# Arguments
+- `samplepaths::Vector{Vector{SamplePath}}`: Paths for each subject (outer) and sample (inner)
+- `weights::Vector{Vector{Float64}}`: Normalized importance weights per subject
+
+# Returns
+- `Vector{SamplePath}`: One selected path per subject
+"""
+function _select_one_path_per_subject(samplepaths::Vector{Vector{SamplePath}}, 
+                                       weights::Vector{Vector{Float64}})
+    selected = Vector{SamplePath}(undef, length(samplepaths))
+    for i in eachindex(samplepaths)
+        # Sample one path proportional to normalized weights
+        idx = sample(1:length(samplepaths[i]), Weights(weights[i]))
+        selected[i] = samplepaths[i][idx]
+    end
+    return selected
+end
+
+"""
+    _transfer_parameters!(target_model, source_model)
+
+Transfer parameters from source model to target model.
+
+Copies flat parameters and handles spline hazards if needed.
+
+# Arguments
+- `target_model::MultistateProcess`: Model to receive parameters
+- `source_model`: Model to copy parameters from (fitted or unfitted)
+"""
+function _transfer_parameters!(target_model::MultistateProcess, source_model)
+    # Get flat parameters from source
+    source_params = get_parameters_flat(source_model)
+    
+    # Set on target model using flat vector
+    copyto!(target_model.parameters.flat, source_params)
+    
+    # Handle splines if needed
+    for i in eachindex(target_model.hazards)
+        if isa(target_model.hazards[i], _SplineHazard)
+            log_params = get_estimation_scale_params(target_model.parameters)
+            remake_splines!(target_model.hazards[i], log_params[i])
+            set_riskperiod!(target_model.hazards[i])
+        end
+    end
+end
+
+"""
+    _init_from_surrogate_rates!(model; surrogate_constraints, surrogate_parameters)
+
+Initialize parameters using log rates from fitted Markov surrogate.
+
+This is the implementation for `method = :markov`.
+
+If the model already has a fitted Markov surrogate (created during model generation
+or via `set_surrogate!`), it will be used directly. Otherwise, a new surrogate
+will be fitted.
+
+# Arguments
+- `model::MultistateProcess`: Model to initialize
+- `surrogate_constraints`: Constraints for surrogate fitting (only used if new fit needed)
+- `surrogate_parameters`: Fixed surrogate parameters (optional)
+"""
+function _init_from_surrogate_rates!(model::MultistateProcess;
+                                      surrogate_constraints = nothing,
+                                      surrogate_parameters = nothing)
+    # Check if model already has a fitted surrogate
+    if !isnothing(model.markovsurrogate) && model.markovsurrogate.fitted
+        surrog = model.markovsurrogate
+    else
+        # Fit Markov surrogate
+        surrog = fit_surrogate(model; surrogate_constraints = surrogate_constraints, 
+                               surrogate_parameters = surrogate_parameters, verbose = false)
+    end
+
+    for i in eachindex(model.hazards)
+        hazard = model.hazards[i]
+        hazname = hazard.hazname
+        
+        # Get log-scale baseline parameter from surrogate's nested structure
+        # Surrogate always has exponential hazards with one baseline param (log rate)
+        surrog_nested = surrog.parameters.nested[hazname]
+        surrog_log_rate = first(values(surrog_nested.baseline))
+        
+        # Initialize baseline params using the surrogate log rate
+        set_par_to = init_par(hazard, surrog_log_rate)
+
+        # Copy covariate effects if there are any
+        if hazard.has_covariates && haskey(surrog_nested, :covariates)
+            surrog_covar_values = collect(values(surrog_nested.covariates))
+            ncovar = length(surrog_covar_values)
+            nbaseline = hazard.npar_baseline
+            # Covariate params are at the end of set_par_to
+            set_par_to[(nbaseline + 1):(nbaseline + ncovar)] .= surrog_covar_values
+        end
+        
+        set_parameters!(model, NamedTuple{(hazname,)}((set_par_to,)))
+
+        if isa(hazard, _SplineHazard)
+            log_params = get_estimation_scale_params(model.parameters)
+            remake_splines!(hazard, log_params[i])
+            set_riskperiod!(hazard)
+        end
+    end
+end
+
+"""
+    _init_from_surrogate_paths!(model, npaths; constraints, surrogate_constraints)
+
+Initialize semi-Markov model parameters by simulating from surrogate and fitting to exact data.
+
+# Algorithm
+1. Draw `npaths` paths per subject from the Markov surrogate
+2. Select one path per subject (weighted by importance weights)
+3. Convert paths to exact-observation data
+4. Interpolate covariates from original data
+5. Create new model with exact data and same hazard specifications
+6. Initialize and fit the exact-data model
+7. Transfer fitted parameters to original model
+
+# Arguments
+- `model`: Semi-Markov model to initialize
+- `npaths::Int`: Number of paths to draw per subject
+- `constraints`: Parameter constraints for exact-data fitting
+- `surrogate_constraints`: Constraints for surrogate fitting
+"""
+function _init_from_surrogate_paths!(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored},
+                                      npaths::Int;
+                                      constraints = nothing,
+                                      surrogate_constraints = nothing)
+    # Step 1: Draw paths from surrogate (will fit surrogate if needed)
+    result = draw_paths(model; npaths = npaths, paretosmooth = false)
+    
+    # Step 2: Select one path per subject (weighted sample)
+    selected_paths = _select_one_path_per_subject(result.samplepaths, 
+                                                   result.ImportanceWeightsNormalized)
+    
+    # Step 3: Convert to exact data
+    exact_data = paths_to_dataset(selected_paths)
+    
+    # Check if we have any transitions
+    if nrow(exact_data) == 0
+        @warn "No transitions in simulated paths; falling back to :markov initialization"
+        _init_from_surrogate_rates!(model; surrogate_constraints = surrogate_constraints)
+        return
+    end
+    
+    # Step 4: Interpolate covariates from original data
+    _interpolate_covariates!(exact_data, model.data)
+    
+    # Step 5: Create model with exact data (same hazard specs)
+    exact_model = multistatemodel(model.modelcall.hazards...; 
+                                   data = exact_data,
+                                   SubjectWeights = nothing,  # All subjects weighted equally
+                                   CensoringPatterns = nothing)
+    
+    # Step 6: Initialize exact model with :markov method (quick starting point)
+    _init_from_surrogate_rates!(exact_model; surrogate_constraints = surrogate_constraints)
+    
+    # Step 7: Fit exact model (fast - exact likelihood, no MCEM)
+    exact_fitted = fit(exact_model; constraints = constraints, 
+                       compute_vcov = false, compute_ij_vcov = false, 
+                       compute_jk_vcov = false, verbose = false)
+    
+    # Step 8: Transfer parameters to original model
+    _transfer_parameters!(model, exact_fitted)
+end
+
+# =============================================================================
+# Main Entry Points
+# =============================================================================
+
+"""
+    initialize_parameters!(model::MultistateProcess; method=:auto, npaths=10, ...)
+
+Initialize model parameters using the specified method.
+
+# Arguments
+- `model::MultistateProcess`: Model to initialize (modified in place)
+- `constraints`: Parameter constraints for fitting (used with :surrogate method)
+- `surrogate_constraints`: Constraints for surrogate fitting
+- `surrogate_parameters`: Fixed surrogate parameters (for :markov method)
+- `method::Symbol = :auto`: Initialization method
+  - `:auto` - Select based on model type (:crude for Markov, :surrogate for semi-Markov)
+  - `:crude` - Use crude rates from observed data
+  - `:markov` - Fit Markov surrogate, use its log rates
+  - `:surrogate` - Draw paths from surrogate, fit to exact data, use those parameters
+- `npaths::Int = 10`: Number of paths per subject for :surrogate method
+
+# Examples
+```julia
+# Auto-select method based on model type
+initialize_parameters!(model)
+
+# Force crude initialization
+initialize_parameters!(model; method = :crude)
+
+# Use surrogate simulation with more paths
+initialize_parameters!(model; method = :surrogate, npaths = 50)
+```
+
+See also: [`initialize_parameters`](@ref), [`set_crude_init!`](@ref)
+"""
+function initialize_parameters!(model::MultistateProcess;
+                                constraints = nothing,
+                                surrogate_constraints = nothing,
+                                surrogate_parameters = nothing,
+                                method::Symbol = :auto,
+                                npaths::Int = 10)
+    
+    # Validate npaths
+    npaths > 0 || throw(ArgumentError("npaths must be positive, got $npaths"))
+    
+    # Resolve :auto method based on model type
+    actual_method = if method == :auto
+        _is_semimarkov(model) ? :surrogate : :crude
+    else
+        method
+    end
+    
+    # Validate method
+    actual_method in (:crude, :markov, :surrogate) || 
+        throw(ArgumentError("method must be :auto, :crude, :markov, or :surrogate, got :$method"))
+    
+    # Check constraints compatibility
+    if actual_method == :markov && !isnothing(constraints) && isnothing(surrogate_constraints)
+        @warn "Constraints provided but surrogate_constraints not specified for :markov method"
+    end
+    
+    # Dispatch on method
+    if actual_method == :crude
+        set_crude_init!(model; constraints = constraints)
+        
+    elseif actual_method == :markov
+        _init_from_surrogate_rates!(model; 
+                                     surrogate_constraints = surrogate_constraints,
+                                     surrogate_parameters = surrogate_parameters)
+        
+    elseif actual_method == :surrogate
+        if !_is_semimarkov(model)
+            @warn "Using :surrogate method on Markov model; this is equivalent to :crude"
+            set_crude_init!(model; constraints = constraints)
+        else
+            _init_from_surrogate_paths!(model, npaths; 
+                                         constraints = constraints,
+                                         surrogate_constraints = surrogate_constraints)
+        end
+    end
+    
+    return nothing
+end
+
+"""
+    initialize_parameters(model::MultistateProcess; method=:auto, npaths=10, ...) -> MultistateProcess
+
+Return a new model with initialized parameters (non-mutating version).
+
+See [`initialize_parameters!`](@ref) for argument descriptions.
+"""
+function initialize_parameters(model::MultistateProcess; 
+                               constraints = nothing, 
+                               surrogate_constraints = nothing, 
+                               surrogate_parameters = nothing,
+                               method::Symbol = :auto,
+                               npaths::Int = 10)
+    model_copy = deepcopy(model)
+    initialize_parameters!(model_copy; 
+                           constraints = constraints,
+                           surrogate_constraints = surrogate_constraints,
+                           surrogate_parameters = surrogate_parameters,
+                           method = method,
+                           npaths = npaths)
+    return model_copy
 end
 
 """
@@ -222,17 +507,17 @@ function init_par(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, cr
     has_covs = hazard.has_covariates
     ncovar = hazard.npar_total - hazard.npar_baseline
     
-    if family == "exp"
+    if family == :exp
         # Exponential: [log_baseline] or [log_baseline, β1, β2, ...]
         return has_covs ? vcat(crude_log_rate, zeros(ncovar)) : [crude_log_rate]
         
-    elseif family == "wei"
+    elseif family == :wei
         # Weibull: [log_shape, log_scale] or [log_shape, log_scale, β1, β2, ...]
         # Initialize shape=1 (log_shape=0) to start as exponential
         baseline = [0.0, crude_log_rate]  # log(shape=1), log_scale
         return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
         
-    elseif family == "gom"
+    elseif family == :gom
         # Gompertz: [shape, log_rate] or [shape, log_rate, β1, β2, ...]
         # shape is unconstrained (can be positive, negative, or zero)
         # rate is positive, stored on log scale
@@ -240,7 +525,7 @@ function init_par(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, cr
         baseline = [0.0, crude_log_rate]  # shape=0 (not log-transformed), log_rate
         return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
         
-    elseif family == "sp"
+    elseif family == :sp
         # Spline: Initialize all spline coefficients to give constant hazard
         # log(coef) = 0 → coef = 1 → constant hazard at value 1
         # The crude_log_rate can be used to shift the overall level

@@ -161,6 +161,447 @@ function default_nknots(n_observations::Integer)
 end
 
 # =============================================================================
+# Spline Knot Calibration Functions
+# =============================================================================
+
+"""
+    calibrate_splines(model::MultistateProcess; 
+                      quantiles=nothing, 
+                      nknots=nothing,
+                      n_paths::Int=1000,
+                      min_ess::Int=100,
+                      verbose::Bool=true) -> NamedTuple
+
+Compute recommended knot locations for spline hazards based on transition times.
+
+For exact data (obstype 1 or 3), uses observed sojourn times directly.
+For panel data (obstype 2), fits a Markov surrogate, simulates sample paths,
+and uses the simulated transition times to determine knot locations.
+
+# Arguments
+- `model::MultistateProcess`: An unfitted model with one or more spline hazards.
+- `quantiles`: Interior knot quantile levels. Can be:
+  - `Vector{Float64}`: Quantile levels (e.g., `[0.25, 0.5, 0.75]`) applied to all hazards
+  - `NamedTuple`: Per-hazard quantiles, e.g., `(h12 = [0.25, 0.5], h23 = [0.33, 0.67])`
+  - `nothing` (default): Use `nknots` to generate evenly-spaced quantiles
+- `nknots`: Number of interior knots. Can be:
+  - `Int`: Number of interior knots for all hazards
+  - `NamedTuple`: Per-hazard counts, e.g., `(h12 = 3, h23 = 2)`
+  - `nothing` (default): Use `floor(n^(1/5))` following Tang et al. (2022)
+- `n_paths::Int=1000`: Number of paths to sample per subject (panel data only)
+- `min_ess::Int=100`: Minimum effective sample size for importance sampling (panel data only)
+- `verbose::Bool=true`: Print info about knot placement
+
+# Returns
+A `NamedTuple` with one entry per spline hazard, each containing:
+- `boundary_knots::Vector{Float64}`: `[0.0, max_sojourn]` for the transition
+- `interior_knots::Vector{Float64}`: Recommended interior knot locations
+
+# Errors
+- `ArgumentError` if model is a `MultistateModelFitted`
+- `ArgumentError` if model has no spline hazards
+- `ArgumentError` if both `quantiles` and `nknots` are specified
+
+# Notes
+- For exact data: uses observed sojourn times directly (no surrogate fitting)
+- For panel data: fits Markov surrogate, simulates paths, extracts transition times
+- Lower boundary is always 0.0 (sojourns are non-negative)
+- Upper boundary is the maximum observed/simulated sojourn time
+- For ties, knots are spread evenly using [`place_interior_knots`](@ref)
+
+# Example
+```julia
+h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree=3)
+h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree=3)
+model = multistatemodel(h12, h23; data=data)
+
+# Auto-select nknots based on sample size
+knots = calibrate_splines(model)
+
+# Specify number of knots
+knots = calibrate_splines(model; nknots=3)
+
+# Different knots per hazard
+knots = calibrate_splines(model; nknots=(h12=4, h23=2))
+
+# Specify explicit quantiles
+knots = calibrate_splines(model; quantiles=[0.2, 0.4, 0.6, 0.8])
+```
+
+See also: [`calibrate_splines!`](@ref), [`place_interior_knots`](@ref)
+"""
+function calibrate_splines(model::MultistateProcess;
+                           quantiles::Union{Vector{Float64}, NamedTuple, Nothing}=nothing,
+                           nknots::Union{Int, NamedTuple, Nothing}=nothing,
+                           n_paths::Int=1000,
+                           min_ess::Int=100,
+                           verbose::Bool=true)
+    
+    # Validation
+    if model isa MultistateModelFitted
+        throw(ArgumentError("Cannot calibrate splines on a fitted model. Use an unfitted MultistateModel."))
+    end
+    
+    if !isnothing(quantiles) && !isnothing(nknots)
+        throw(ArgumentError("Specify either `quantiles` or `nknots`, not both."))
+    end
+    
+    # Find spline hazards
+    spline_indices = findall(h -> h isa RuntimeSplineHazard, model.hazards)
+    if isempty(spline_indices)
+        throw(ArgumentError("Model has no spline hazards to calibrate."))
+    end
+    
+    # Determine if data is exact or panel
+    has_exact_data = _has_exact_transitions(model)
+    
+    # Get sojourns by transition
+    if has_exact_data
+        # Use observed data directly
+        verbose && @info "Using observed transition times for knot calibration"
+        sojourns_by_transition = _extract_sojourns_from_data(model)
+    else
+        # Fit surrogate and simulate paths
+        verbose && @info "Fitting Markov surrogate and simulating paths for knot calibration"
+        sojourns_by_transition = _extract_sojourns_from_surrogate(model, n_paths, min_ess)
+    end
+    
+    # Compute knots for each spline hazard
+    results = Dict{Symbol, NamedTuple}()
+    
+    for idx in spline_indices
+        haz = model.hazards[idx]
+        hazname = haz.hazname
+        key = (haz.statefrom, haz.stateto)
+        
+        # Get sojourns for this transition
+        sojourns = get(sojourns_by_transition, key, Float64[])
+        
+        if isempty(sojourns)
+            @warn "No transitions $(key[1])→$(key[2]) for hazard $hazname; using model boundaries"
+            bknots = [haz.knots[1], haz.knots[end]]
+            results[hazname] = (boundary_knots=bknots, interior_knots=Float64[])
+            continue
+        end
+        
+        # Determine number of knots
+        nk = _get_nknots_for_hazard(hazname, nknots, length(sojourns))
+        
+        # Determine quantile levels or compute from nknots
+        qlevels = _get_quantiles_for_hazard(hazname, quantiles, nk)
+        
+        # Compute boundary knots
+        lb = 0.0  # Lower boundary is always 0 for sojourns
+        ub = maximum(sojourns)
+        
+        # Compute interior knots
+        if qlevels !== nothing
+            # User-specified quantiles
+            interior = quantile(sojourns, qlevels)
+            interior = unique(interior)
+        else
+            # Use place_interior_knots for automatic placement with tie handling
+            interior = place_interior_knots(sojourns, nk; lower_bound=lb, upper_bound=ub)
+        end
+        
+        verbose && @info "Calibrated $(length(interior)) interior knots for $hazname at: $(round.(interior, digits=3))"
+        results[hazname] = (boundary_knots=[lb, ub], interior_knots=interior)
+    end
+    
+    return NamedTuple(results)
+end
+
+"""
+    calibrate_splines!(model::MultistateProcess; quantiles=nothing, nknots=nothing, 
+                       n_paths=1000, min_ess=100, verbose=true)
+
+Compute and apply knot locations for spline hazards in-place.
+
+Modifies the spline hazards in `model` to use the computed knot locations.
+See [`calibrate_splines`](@ref) for argument details.
+
+# Arguments
+Same as [`calibrate_splines`](@ref).
+
+# Returns
+`NamedTuple` with computed knot locations (same as [`calibrate_splines`](@ref)).
+
+# Notes
+- Modifies `model.hazards` in place for all `RuntimeSplineHazard` hazards
+- Also rebuilds the parameter structure to match the new number of basis functions
+- After calling this, the model's spline hazards will have updated knots
+
+# Example
+```julia
+model = multistatemodel(h12, h23; data=data)
+knots = calibrate_splines!(model; nknots=5)  # Updates knots in-place
+fitted = fit(model)  # Fit with calibrated knots
+```
+
+See also: [`calibrate_splines`](@ref)
+"""
+function calibrate_splines!(model::MultistateProcess;
+                            quantiles::Union{Vector{Float64}, NamedTuple, Nothing}=nothing,
+                            nknots::Union{Int, NamedTuple, Nothing}=nothing,
+                            n_paths::Int=1000,
+                            min_ess::Int=100,
+                            verbose::Bool=true)
+    
+    # Get recommended knots (this also does validation)
+    knots = calibrate_splines(model; quantiles=quantiles, nknots=nknots, 
+                              n_paths=n_paths, min_ess=min_ess, verbose=verbose)
+    
+    # Build knot_locations dict for _rebuild_model_with_knots!
+    knot_locations = Dict{Tuple{Int,Int}, Vector{Float64}}()
+    for idx in findall(h -> h isa RuntimeSplineHazard, model.hazards)
+        haz = model.hazards[idx]
+        result = knots[haz.hazname]
+        knot_locations[(haz.statefrom, haz.stateto)] = result.interior_knots
+    end
+    
+    # Rebuild model with new knots
+    _rebuild_model_with_knots!(model, knot_locations)
+    
+    # Update model parameters to match new hazard dimensions
+    _rebuild_model_parameters!(model)
+    
+    return knots
+end
+
+"""
+    _extract_sojourns_from_data(model::MultistateProcess) -> Dict{Tuple{Int,Int}, Vector{Float64}}
+
+Extract observed sojourn times for each transition from the model's data.
+
+Returns dictionary mapping (statefrom, stateto) to vector of sojourn times.
+Only includes exact transitions (obstype 1 or 3) where the transition actually occurred.
+"""
+function _extract_sojourns_from_data(model::MultistateProcess)
+    data = model.data
+    result = Dict{Tuple{Int,Int}, Vector{Float64}}()
+    
+    for row in eachrow(data)
+        # Only exact transitions
+        obstype = row.obstype
+        if !(obstype == 1 || obstype == 3)
+            continue
+        end
+        
+        statefrom = row.statefrom
+        stateto = row.stateto
+        
+        # Skip if no actual transition
+        if statefrom == stateto
+            continue
+        end
+        
+        # Sojourn time
+        sojourn = row.tstop - row.tstart
+        
+        key = (statefrom, stateto)
+        if !haskey(result, key)
+            result[key] = Float64[]
+        end
+        push!(result[key], sojourn)
+    end
+    
+    return result
+end
+
+"""
+    _has_exact_transitions(model::MultistateProcess) -> Bool
+
+Check if the model data contains any exact transition observations (obstype 1 or 3).
+"""
+function _has_exact_transitions(model::MultistateProcess)
+    data = model.data
+    for row in eachrow(data)
+        obstype = row.obstype
+        if (obstype == 1 || obstype == 3) && row.statefrom != row.stateto
+            return true
+        end
+    end
+    return false
+end
+
+"""
+    _extract_sojourns_from_surrogate(model::MultistateProcess, n_paths::Int, min_ess::Int) 
+        -> Dict{Tuple{Int,Int}, Vector{Float64}}
+
+Fit a Markov surrogate to the model, simulate sample paths, and extract sojourn times.
+
+Used for panel data where exact transition times are not observed.
+"""
+function _extract_sojourns_from_surrogate(model::MultistateProcess, n_paths::Int, min_ess::Int)
+    # Fit Markov surrogate
+    surrogate_fitted = fit_surrogate(model; verbose=false)
+    
+    # Draw sample paths
+    path_result = draw_paths(surrogate_fitted; min_ess=min_ess)
+    
+    # Extract paths - handle different return types from draw_paths
+    # For panel data: returns NamedTuple with samplepaths::Vector{Vector{SamplePath}}
+    # For exact data: returns NamedTuple with loglik (paths come from data)
+    all_paths = if path_result isa NamedTuple && haskey(path_result, :samplepaths)
+        # Panel data: NamedTuple with samplepaths field - flatten nested vectors
+        SamplePath[p for subj_paths in path_result.samplepaths for p in subj_paths]
+    elseif path_result isa NamedTuple && haskey(path_result, :loglik)
+        # Exact data case (shouldn't happen here, but handle gracefully)
+        extract_paths(surrogate_fitted.data)
+    elseif path_result isa Vector{<:Vector}
+        # Direct Vector{Vector{SamplePath}} - flatten
+        SamplePath[p for subj_paths in path_result for p in subj_paths]
+    else
+        # Already a flat vector
+        path_result
+    end
+    
+    # Extract sojourns for each transition
+    result = Dict{Tuple{Int,Int}, Vector{Float64}}()
+    
+    # Get all possible transitions from tmat
+    tmat = model.tmat
+    n_states = size(tmat, 1)
+    for i in 1:n_states
+        for j in 1:n_states
+            if tmat[i, j] != 0
+                sojourns = extract_sojourns(i, j, all_paths)
+                if !isempty(sojourns)
+                    result[(i, j)] = sojourns
+                end
+            end
+        end
+    end
+    
+    return result
+end
+
+"""
+    _get_nknots_for_hazard(hazname::Symbol, nknots, n_obs::Int) -> Int
+
+Determine number of interior knots for a specific hazard.
+"""
+function _get_nknots_for_hazard(hazname::Symbol, 
+                                 nknots::Union{Int, NamedTuple, Nothing},
+                                 n_obs::Int)
+    if nknots === nothing
+        return default_nknots(n_obs)
+    elseif nknots isa Int
+        return nknots
+    else
+        # NamedTuple - look up by hazard name
+        return haskey(nknots, hazname) ? nknots[hazname] : default_nknots(n_obs)
+    end
+end
+
+"""
+    _get_quantiles_for_hazard(hazname::Symbol, quantiles, nknots::Int) -> Union{Vector{Float64}, Nothing}
+
+Determine quantile levels for a specific hazard, or nothing if using automatic placement.
+"""
+function _get_quantiles_for_hazard(hazname::Symbol,
+                                    quantiles::Union{Vector{Float64}, NamedTuple, Nothing},
+                                    nknots::Int)
+    if quantiles === nothing
+        return nothing  # Use place_interior_knots for automatic placement
+    elseif quantiles isa Vector{Float64}
+        return quantiles
+    else
+        # NamedTuple - look up by hazard name
+        return haskey(quantiles, hazname) ? quantiles[hazname] : nothing
+    end
+end
+
+"""
+    _rebuild_model_parameters!(model::MultistateProcess)
+
+Rebuild model parameter structure after spline hazard modification.
+
+When spline hazards are rebuilt with different knot counts, the number of
+basis functions changes. This function rebuilds the parameter structure
+to match the new hazard dimensions.
+"""
+function _rebuild_model_parameters!(model::MultistateProcess)
+    # Collect new parameter structure from hazards
+    flat_params = Float64[]
+    nested_data = Dict{Symbol, NamedTuple}()
+    
+    for haz in model.hazards
+        hazname = haz.hazname
+        npar = haz.npar_total
+        
+        # Initialize at zero (log scale)
+        haz_params = zeros(Float64, npar)
+        append!(flat_params, haz_params)
+        
+        # Build nested structure
+        npar_baseline = haz.npar_baseline
+        baseline = haz_params[1:npar_baseline]
+        covariates = npar > npar_baseline ? haz_params[(npar_baseline+1):end] : Float64[]
+        nested_data[hazname] = (baseline=baseline, covariates=covariates)
+    end
+    
+    # Build unflatten function
+    nested_tuple = NamedTuple(nested_data)
+    unflatten = _build_unflatten_function(model.hazards)
+    
+    # Natural scale parameters (exp of baseline for splines)
+    natural_data = Dict{Symbol, NamedTuple}()
+    for haz in model.hazards
+        hazname = haz.hazname
+        nested_haz = nested_data[hazname]
+        if haz isa RuntimeSplineHazard
+            natural_data[hazname] = (baseline=exp.(nested_haz.baseline), covariates=nested_haz.covariates)
+        else
+            natural_data[hazname] = nested_haz
+        end
+    end
+    natural_tuple = NamedTuple(natural_data)
+    
+    # Update model parameters
+    model.parameters = (flat=flat_params, nested=nested_tuple, natural=natural_tuple, unflatten=unflatten)
+    
+    return nothing
+end
+
+"""
+    _build_unflatten_function(hazards::Vector{<:_Hazard})
+
+Build a function that converts flat parameter vector to nested structure.
+"""
+function _build_unflatten_function(hazards::Vector{<:_Hazard})
+    # Precompute offsets and sizes
+    offsets = Int[]
+    sizes = Int[]
+    baselines = Int[]
+    haznames = Symbol[]
+    
+    offset = 0
+    for haz in hazards
+        push!(offsets, offset)
+        push!(sizes, haz.npar_total)
+        push!(baselines, haz.npar_baseline)
+        push!(haznames, haz.hazname)
+        offset += haz.npar_total
+    end
+    
+    function unflatten(flat::AbstractVector)
+        result = Dict{Symbol, NamedTuple}()
+        for i in eachindex(hazards)
+            start_idx = offsets[i] + 1
+            end_idx = offsets[i] + sizes[i]
+            haz_params = flat[start_idx:end_idx]
+            baseline = haz_params[1:baselines[i]]
+            covariates = sizes[i] > baselines[i] ? haz_params[(baselines[i]+1):end] : eltype(flat)[]
+            result[haznames[i]] = (baseline=baseline, covariates=covariates)
+        end
+        return NamedTuple(result)
+    end
+    
+    return unflatten
+end
+
+# =============================================================================
 # Legacy coefficient transformation functions
 # =============================================================================
 # These functions are retained for backward compatibility with any external
@@ -366,256 +807,5 @@ function _update_spline_hazards!(hazards::Vector{<:_Hazard}, pars)
             set_riskperiod!(hazards[i])
         end
     end
-    return nothing
-end
-
-# =============================================================================
-# Data-Driven Knot Placement from Sampled Paths
-# =============================================================================
-
-"""
-    place_knots_from_paths!(target_model::MultistateProcess, 
-                            fitted_model::MultistateProcess;
-                            n_paths::Int = 1000,
-                            n_knots::Union{Int, Nothing} = nothing,
-                            quantile_probs::Union{Vector{Float64}, Nothing} = nothing,
-                            min_ess::Int = 100)
-
-Update spline hazards in `target_model` with knot locations computed from conditional 
-sample paths drawn using `fitted_model` as the proposal distribution.
-
-This function is useful for data-driven knot placement when you have:
-1. A fitted Markov or phase-type surrogate model that approximates the true process
-2. An unfitted model with spline hazards where you want optimal knot locations
-
-The workflow:
-1. Draw conditional sample paths from `fitted_model` using importance sampling
-2. Extract transition times (sojourns) for each transition type from the sampled paths
-3. Compute quantiles of the sojourn distributions to place interior knots
-4. Rebuild `target_model` with updated spline hazards using the recommended knots
-
-# Arguments
-- `target_model::MultistateProcess`: Unfitted model with spline hazards to update (modified in place)
-- `fitted_model::MultistateProcess`: Fitted Markov or phase-type model used to draw paths
-- `n_paths::Int=1000`: Number of paths to sample per subject (if using fixed count)
-- `n_knots::Union{Int,Nothing}=nothing`: Number of interior knots per transition. 
-   If `nothing`, uses `default_nknots()` based on sample size.
-- `quantile_probs::Union{Vector{Float64},Nothing}=nothing`: Custom quantile probabilities 
-   for knot placement (e.g., `[0.25, 0.5, 0.75]`). If `nothing`, uses evenly-spaced quantiles.
-- `min_ess::Int=100`: Minimum effective sample size for importance sampling
-
-# Returns
-- `Dict{Tuple{Int,Int}, Vector{Float64}}`: Dictionary mapping `(statefrom, stateto)` to 
-   the computed interior knot locations for each transition
-
-# Example
-```julia
-# Fit a Markov surrogate first
-markov_fit = fit(markov_model)
-
-# Create target model with spline hazards (knots will be replaced)
-h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree=3, knots=nothing)
-h21 = Hazard(@formula(0 ~ 1), "sp", 2, 1; degree=3, knots=nothing)
-spline_model = multistatemodel(h12, h21; data=data)
-
-# Place knots based on sampled paths
-knot_locations = place_knots_from_paths!(spline_model, markov_fit; n_knots=5)
-
-# Now fit the spline model
-spline_fit = fit(spline_model)
-```
-
-# Notes
-- Only updates hazards that are `SplineHazard` types in `target_model`
-- Requires that `fitted_model` has been fitted and has a valid surrogate
-- The transition matrix of both models must be compatible
-- For transitions with no sampled events, falls back to evenly-spaced knots
-
-See also: [`place_interior_knots`](@ref), [`draw_paths`](@ref), [`default_nknots`](@ref)
-"""
-function place_knots_from_paths!(target_model::MultistateProcess, 
-                                  fitted_model::MultistateProcess;
-                                  n_paths::Int = 1000,
-                                  n_knots::Union{Int, Nothing} = nothing,
-                                  quantile_probs::Union{Vector{Float64}, Nothing} = nothing,
-                                  min_ess::Int = 100)
-    
-    # Validate inputs
-    @assert size(target_model.tmat) == size(fitted_model.tmat) "Transition matrices must have same dimensions"
-    
-    # Check that fitted_model has been fitted:
-    # - MultistateModelFitted: fitted via fit() - either exact data or MCEM with surrogate
-    # - MultistateMarkovModel: can use draw_paths directly for exact data
-    is_fitted = fitted_model isa MultistateModelFitted
-    is_markov_unfitted = fitted_model isa MultistateMarkovModel || fitted_model isa MultistateMarkovModelCensored
-    @assert is_fitted || is_markov_unfitted "fitted_model must be a MultistateModelFitted or Markov model"
-    
-    # Draw conditional sample paths
-    path_result = draw_paths(fitted_model; min_ess=min_ess)
-    
-    # Extract paths - handle different return types
-    all_paths = if path_result isa NamedTuple && haskey(path_result, :loglik)
-        # Exact data case - extract paths from data
-        extract_paths(fitted_model.data)
-    else
-        # Imputed paths case - flatten the subject-level vectors
-        vcat(path_result...)
-    end
-    
-    # Dictionary to store computed knots per transition
-    knot_locations = Dict{Tuple{Int,Int}, Vector{Float64}}()
-    
-    # Process each spline hazard in target model
-    for (idx, haz) in enumerate(target_model.hazards)
-        if !(haz isa _SplineHazard)
-            continue
-        end
-        
-        statefrom = haz.statefrom
-        stateto = haz.stateto
-        
-        # Extract sojourn times for this transition from sampled paths
-        sojourns = extract_sojourns(statefrom, stateto, all_paths)
-        
-        if isempty(sojourns)
-            @warn "No sampled transitions $(statefrom)→$(stateto); using evenly-spaced knots"
-            # Fall back to evenly spaced knots within boundary
-            bknots = haz.knots[1], haz.knots[end]
-            nk = n_knots !== nothing ? n_knots : 2
-            interior = collect(range(bknots[1] + (bknots[2] - bknots[1])/(nk + 1),
-                                     stop=bknots[2] - (bknots[2] - bknots[1])/(nk + 1),
-                                     length=nk))
-            knot_locations[(statefrom, stateto)] = interior
-            continue
-        end
-        
-        # Determine number of knots
-        nk = n_knots !== nothing ? n_knots : default_nknots(length(sojourns))
-        
-        # Compute knot locations
-        if quantile_probs !== nothing
-            # User-specified quantiles
-            @assert length(quantile_probs) == nk "quantile_probs length must match n_knots"
-            interior = quantile(sojourns, quantile_probs)
-        else
-            # Evenly-spaced quantiles via place_interior_knots
-            lb = 0.0
-            ub = maximum(sojourns)
-            interior = place_interior_knots(sojourns, nk; lower_bound=lb, upper_bound=ub)
-        end
-        
-        knot_locations[(statefrom, stateto)] = interior
-        
-        @info "Placed $(length(interior)) knots for $(statefrom)→$(stateto) at: $(round.(interior, digits=3))"
-    end
-    
-    # Rebuild target model with new knot locations
-    # This requires reconstructing the hazard specifications and calling multistatemodel again
-    _rebuild_model_with_knots!(target_model, knot_locations)
-    
-    return knot_locations
-end
-
-"""
-    _rebuild_model_with_knots!(model::MultistateProcess, knot_locations::Dict)
-
-Internal helper to rebuild spline hazards with new knot locations.
-Modifies the model's RuntimeSplineHazard objects in place.
-
-Note: This is a simplified update that modifies the internal hazard structures.
-For a complete rebuild, use `multistatemodel` with updated hazard specifications.
-"""
-function _rebuild_model_with_knots!(model::MultistateProcess, 
-                                     knot_locations::Dict{Tuple{Int,Int}, Vector{Float64}})
-    # For now, we update the knots field in RuntimeSplineHazard
-    # A more complete solution would rebuild the entire spline basis
-    
-    for (idx, haz) in enumerate(model.hazards)
-        if !(haz isa RuntimeSplineHazard)
-            continue
-        end
-        
-        key = (haz.statefrom, haz.stateto)
-        if !haskey(knot_locations, key)
-            continue
-        end
-        
-        new_interior = knot_locations[key]
-        
-        # Get current boundary knots
-        old_knots = haz.knots
-        lb = old_knots[1]
-        ub = old_knots[end]
-        
-        # Extend boundaries if needed to encompass new interior knots
-        if !isempty(new_interior)
-            lb = min(lb, minimum(new_interior) - 0.001)
-            ub = max(ub, maximum(new_interior) + 0.001)
-        end
-        
-        # New complete knot sequence
-        new_knots = unique(sort([lb; new_interior; ub]))
-        
-        # Rebuild the spline basis with appropriate boundary conditions
-        B = BSplineBasis(BSplineOrder(haz.degree + 1), copy(new_knots))
-        if haz.extrapolation == "constant" && haz.degree >= 2
-            # constant: D¹=0 at both boundaries for C¹ continuity
-            B = RecombinedBSplineBasis(B, Derivative(1))
-        elseif (haz.degree > 1) && haz.natural_spline
-            # Natural spline: D²=0 at boundaries
-            B = RecombinedBSplineBasis(B, Natural())
-        end
-        
-        # Use the stored extrapolation method
-        extrap_method = if haz.extrapolation == "linear"
-            BSplineKit.SplineExtrapolations.Linear()
-        else
-            # "constant" uses Flat() - the smooth basis above ensures C¹ continuity
-            BSplineKit.SplineExtrapolations.Flat()
-        end
-        
-        nbasis = length(B)
-        
-        # Get linpred_effect from metadata (Symbol: :none, :linear, or :all)
-        linpred_effect = haz.metadata.linpred_effect
-        
-        # Regenerate parameter names with correct count
-        # Baseline spline parameters: hazname_sp1, hazname_sp2, etc.
-        baseline_names = [Symbol(string(haz.hazname), "_sp", i) for i in 1:nbasis]
-        # Keep covariate parameters as-is
-        covar_pars = haz.has_covariates ? [Symbol(string(haz.hazname), "_", c) for c in haz.covar_names] : Symbol[]
-        new_parnames = vcat(baseline_names, covar_pars)
-        
-        # Generate new hazard/cumhaz functions with correct nbasis
-        hazard_fn, cumhaz_fn = _generate_spline_hazard_fns(
-            B, extrap_method, haz.monotone, nbasis, new_parnames, linpred_effect
-        )
-        
-        # Create new RuntimeSplineHazard with updated knots and parnames
-        new_haz = RuntimeSplineHazard(
-            haz.hazname,
-            haz.statefrom,
-            haz.stateto,
-            haz.family,
-            new_parnames,  # Updated parameter names
-            nbasis,        # Updated npar_baseline
-            nbasis + length(covar_pars),  # Updated npar_total
-            hazard_fn,     # New function
-            cumhaz_fn,     # New function
-            haz.has_covariates,
-            haz.covar_names,
-            haz.degree,
-            new_knots,     # Updated knots
-            haz.natural_spline,
-            haz.monotone,
-            haz.extrapolation,
-            haz.metadata,
-            haz.shared_baseline_key
-        )
-        
-        # Replace in model
-        model.hazards[idx] = new_haz
-    end
-    
     return nothing
 end

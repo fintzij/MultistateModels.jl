@@ -350,14 +350,14 @@ function _get_or_fit_surrogate(model::MultistateProcess, is_semimarkov::Bool)
         return nothing  # Markov models don't need surrogate
     end
     
-    # Check if model already has a surrogate
-    if !isnothing(model.markovsurrogate)
+    # Check if model already has a fitted surrogate
+    if !isnothing(model.markovsurrogate) && model.markovsurrogate.fitted
         return model.markovsurrogate
     end
     
-    # Need to fit a new surrogate
-    surrogate_fitted = fit_surrogate(model; verbose = false)
-    return MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters)
+    # Need to fit a new surrogate (either no surrogate or not yet fitted)
+    fitted_surrogate = _fit_markov_surrogate(model; verbose = false)
+    return fitted_surrogate
 end
 
 """
