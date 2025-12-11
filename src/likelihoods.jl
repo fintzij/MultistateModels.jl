@@ -801,12 +801,25 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
     # unflatten parameters to natural scale (AD-compatible)
     pars = unflatten_natural(parameters, data.model)
 
-    # build containers for transition intensity and prob mtcs
-    hazmat_book = build_hazmat_book(eltype(parameters), data.model.tmat, data.books[1])
-    tpm_book = build_tpm_book(eltype(parameters), data.model.tmat, data.books[1])
+    # Element type for AD compatibility
+    T = eltype(parameters)
 
-    # allocate memory for matrix exponential
-    cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
+    # Use cached arrays for Float64, allocate fresh for Dual types (AD)
+    if T === Float64
+        # Reuse pre-allocated cache (zero-allocation path for non-AD evaluations)
+        hazmat_book = data.cache.hazmat_book
+        tpm_book = data.cache.tpm_book
+        cache = data.cache.exp_cache
+        # Reset hazmat matrices to zero (they accumulate)
+        for hmat in hazmat_book
+            fill!(hmat, zero(Float64))
+        end
+    else
+        # Allocate fresh arrays for AD (element type must be Dual)
+        hazmat_book = build_hazmat_book(T, data.model.tmat, data.books[1])
+        tpm_book = build_tpm_book(T, data.model.tmat, data.books[1])
+        cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
+    end
 
     # Solve Kolmogorov equations for TPMs
     for t in eachindex(data.books[1])
@@ -830,9 +843,6 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
     # number of subjects
     nsubj = length(data.model.subjectindices)
 
-    # Element type for AD compatibility
-    T = eltype(parameters)
-
     # accumulate the log likelihood
     ll = zero(T)
 
@@ -844,8 +854,22 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
     # number of states
     S = size(data.model.tmat, 1)
 
-    # initialize Q 
-    q = zeros(eltype(parameters), S, S)
+    # initialize Q (use cached version for Float64, allocate for AD)
+    if T === Float64
+        q = data.cache.q_work
+        fill!(q, zero(Float64))
+    else
+        q = zeros(T, S, S)
+    end
+
+    # Pre-extracted column accessors for O(1) access (avoids DataFrame dispatch overhead)
+    cols = data.columns
+    
+    # check if observation weights are provided (once, outside loop)
+    has_obs_weights = !isnothing(data.model.ObservationWeights)
+    
+    # Cache hazard covar_names to avoid repeated lookups (once, outside loop)
+    hazards = data.model.hazards
 
     # for each subject, compute the likelihood contribution
     for subj in Base.OneTo(nsubj)
@@ -853,14 +877,18 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
         # subject data
         subj_inds = data.model.subjectindices[subj]
 
-        # check if observation weights are provided
-        has_obs_weights = !isnothing(data.model.ObservationWeights)
-
-        # Cache hazard covar_names to avoid repeated lookups
-        hazards = data.model.hazards
+        # Check if all observations are exact (1) or panel (2) - no censoring
+        # Manual loop avoids broadcast allocations from all(... .∈ Ref([1,2]))
+        all_exact_or_panel = true
+        @inbounds for i in subj_inds
+            if cols.obstype[i] > 2
+                all_exact_or_panel = false
+                break
+            end
+        end
 
         # no state is censored
-        if all(data.model.data.obstype[subj_inds] .∈ Ref([1,2]))
+        if all_exact_or_panel
             
             # subject contribution to the loglikelihood
             subj_ll = zero(T)
@@ -870,15 +898,15 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                 # get observation weight (default to 1.0)
                 obs_weight = has_obs_weights ? data.model.ObservationWeights[i] : 1.0
                 
-                obstype_i = data.model.data.obstype[i]
+                obstype_i = cols.obstype[i]
                 
                 if obstype_i == 1 # exact data
                     # Use @view to avoid DataFrameRow allocation
                     row_data = @view data.model.data[i, :]
                     
-                    statefrom_i = data.model.data.statefrom[i]
-                    stateto_i = data.model.data.stateto[i]
-                    dt = data.model.data.tstop[i] - data.model.data.tstart[i]
+                    statefrom_i = cols.statefrom[i]
+                    stateto_i = cols.stateto[i]
+                    dt = cols.tstop[i] - cols.tstart[i]
                     
                     obs_ll = survprob(
                         0,
@@ -900,8 +928,8 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                     subj_ll += obs_ll * obs_weight
 
                 else # panel data (obstype == 2)
-                    statefrom_i = data.model.data.statefrom[i]
-                    stateto_i = data.model.data.stateto[i]
+                    statefrom_i = cols.statefrom[i]
+                    stateto_i = cols.stateto[i]
                     book_idx1 = data.books[2][i, 1]
                     book_idx2 = data.books[2][i, 2]
                     subj_ll += log(tpm_book[book_idx1][book_idx2][statefrom_i, stateto_i]) * obs_weight
@@ -920,9 +948,19 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
             tmat_cache = data.model.tmat
             transient_dests = [findall(tmat_cache[r,:] .!= 0) for r in 1:S]
             
-            # initialize likelihood matrix
-            lmat = zeros(eltype(parameters), S, length(subj_inds) + 1)
-            @inbounds lmat[data.model.data.statefrom[subj_inds[1]], 1] = 1
+            # initialize likelihood matrix (use cache for Float64)
+            nobs_subj = length(subj_inds)
+            if T === Float64
+                # Use cached lmat_work, resize if needed
+                if size(data.cache.lmat_work, 2) < nobs_subj + 1
+                    data.cache.lmat_work = zeros(Float64, S, nobs_subj + 1)
+                end
+                lmat = @view data.cache.lmat_work[:, 1:(nobs_subj + 1)]
+                fill!(lmat, zero(Float64))
+            else
+                lmat = zeros(T, S, nobs_subj + 1)
+            end
+            @inbounds lmat[cols.statefrom[subj_inds[1]], 1] = 1
 
             # initialize counter for likelihood matrix
             ind = 1
@@ -933,8 +971,8 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                 # increment counter for likelihood matrix
                 ind += 1
                 
-                obstype_i = data.model.data.obstype[i]
-                dt = data.model.data.tstop[i] - data.model.data.tstart[i]
+                obstype_i = cols.obstype[i]
+                dt = cols.tstop[i] - cols.tstart[i]
 
                 # compute q, the transition probability matrix
                 if obstype_i != 1
@@ -983,7 +1021,7 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                 # compute the set of possible "states to" and their emission probabilities
                 # For exact observations (stateto > 0), only that state is possible with probability 1
                 # For censored observations, use the emission matrix
-                stateto_i = data.model.data.stateto[i]
+                stateto_i = cols.stateto[i]
                 if stateto_i > 0
                     # Exact observation - only one state possible
                     for r in 1:S
@@ -1060,6 +1098,9 @@ function _loglik_markov_functional(parameters, data::MPanelData; neg = true)
     n_states = size(tmat, 1)
     T = eltype(parameters)
     
+    # Pre-extracted column accessors for O(1) access (avoids DataFrame dispatch overhead)
+    cols = data.columns
+    
     # Build TPM book functionally (no mutation)
     # For each unique covariate/time pattern, compute Q then P = exp(Q*dt)
     tpm_dict = Dict{Tuple{Int,Int}, Matrix{T}}()
@@ -1083,20 +1124,27 @@ function _loglik_markov_functional(parameters, data::MPanelData; neg = true)
         subj_inds = data.model.subjectindices[subj]
         subj_weight = data.model.SubjectWeights[subj]
         
-        # Check if any censored observations
-        all_uncensored = all(data.model.data.obstype[subj_inds] .∈ Ref([1, 2]))
+        # Check if any censored observations using direct column access
+        # Manual loop avoids broadcast allocations from all(... .∈ Ref([1,2]))
+        all_uncensored = true
+        for i in subj_inds
+            if cols.obstype[i] > 2
+                all_uncensored = false
+                break
+            end
+        end
         
         if all_uncensored
             # Simple case: no forward algorithm needed
             subj_ll = sum(subj_inds) do i
                 obs_weight = has_obs_weights ? data.model.ObservationWeights[i] : one(T)
-                obstype_i = data.model.data.obstype[i]
+                obstype_i = cols.obstype[i]
                 
                 if obstype_i == 1  # exact data
                     row_data = @view data.model.data[i, :]
-                    statefrom_i = data.model.data.statefrom[i]
-                    stateto_i = data.model.data.stateto[i]
-                    dt = data.model.data.tstop[i] - data.model.data.tstart[i]
+                    statefrom_i = cols.statefrom[i]
+                    stateto_i = cols.stateto[i]
+                    dt = cols.tstop[i] - cols.tstart[i]
                     
                     obs_ll = survprob(zero(T), dt, pars, row_data, 
                                      data.model.totalhazards[statefrom_i], hazards; 
@@ -1112,8 +1160,8 @@ function _loglik_markov_functional(parameters, data::MPanelData; neg = true)
                     
                     obs_ll * obs_weight
                 else  # panel data (obstype == 2)
-                    statefrom_i = data.model.data.statefrom[i]
-                    stateto_i = data.model.data.stateto[i]
+                    statefrom_i = cols.statefrom[i]
+                    stateto_i = cols.stateto[i]
                     book_idx1 = data.books[2][i, 1]
                     book_idx2 = data.books[2][i, 2]
                     P = tpm_dict[(book_idx1, book_idx2)]
@@ -1148,21 +1196,24 @@ Returns the log-likelihood contribution for one subject.
 """
 function _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, ::Type{T}, 
                                        n_states::Int, hazards, tmat) where T
+    # Pre-extracted column accessors for O(1) access
+    cols = data.columns
+    
     # Initialize: probability vector for initial state
-    init_state = data.model.data.statefrom[subj_inds[1]]
+    init_state = cols.statefrom[subj_inds[1]]
     α = zeros(T, n_states)
     α = setindex_immutable_vec(α, one(T), init_state)
     
     # Forward pass: α[t+1] = α[t] * P[t] (with emission probabilities for censored states)
     for i in subj_inds
-        obstype_i = data.model.data.obstype[i]
-        dt = data.model.data.tstop[i] - data.model.data.tstart[i]
+        obstype_i = cols.obstype[i]
+        dt = cols.tstop[i] - cols.tstart[i]
         
         if obstype_i == 1
             # Exact data: compute transition probabilities directly
             row_data = @view data.model.data[i, :]
-            statefrom = data.model.data.statefrom[i]
-            stateto = data.model.data.stateto[i]
+            statefrom = cols.statefrom[i]
+            stateto = cols.stateto[i]
             
             # Survival probability + hazard
             log_surv = survprob(zero(T), dt, pars, row_data,
@@ -1193,7 +1244,7 @@ function _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, ::Type{T
             α = P' * α  # transpose because α is a column vector
             
             # Apply emission probabilities for censored observations
-            stateto_i = data.model.data.stateto[i]
+            stateto_i = cols.stateto[i]
             if stateto_i > 0
                 # Exact observation at panel time - concentrate on observed state
                 prob = α[stateto_i]

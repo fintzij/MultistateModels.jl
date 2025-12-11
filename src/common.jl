@@ -972,13 +972,103 @@ struct ExactDataAD
 end
 
 """
+    MPanelDataColumnAccessor
+
+Pre-extracted DataFrame columns for allocation-free access in hot paths.
+Avoids DataFrame dispatch overhead by storing direct references to column vectors.
+"""
+struct MPanelDataColumnAccessor
+    tstart::Vector{Float64}
+    tstop::Vector{Float64}
+    statefrom::Vector{Int}
+    stateto::Vector{Int}
+    obstype::Vector{Int}
+end
+
+function MPanelDataColumnAccessor(data::DataFrame)
+    MPanelDataColumnAccessor(
+        data.tstart,
+        data.tstop,
+        data.statefrom,
+        data.stateto,
+        data.obstype
+    )
+end
+
+"""
+    TPMCache
+
+Mutable cache for pre-allocated arrays used in Markov likelihood computation.
+Stores hazard matrix book, TPM book, matrix exponential cache, and work arrays.
+
+This cache is used when parameters are Float64 to avoid repeated allocations.
+When parameters are Dual (ForwardDiff), fresh arrays are allocated since the
+element type must match the parameter type for AD compatibility.
+
+# Fields
+- `hazmat_book`: Pre-allocated hazard intensity matrices (one per covariate pattern)
+- `tpm_book`: Pre-allocated transition probability matrices (nested: pattern × time interval)
+- `exp_cache`: Pre-allocated workspace for matrix exponential computation
+- `q_work`: Work matrix for forward algorithm (S × S)
+- `lmat_work`: Work matrix for forward algorithm likelihood (S × max_obs+1)
+"""
+mutable struct TPMCache
+    hazmat_book::Vector{Matrix{Float64}}
+    tpm_book::Vector{Vector{Matrix{Float64}}}
+    exp_cache::Any  # ExponentialUtilities cache (type varies)
+    q_work::Matrix{Float64}
+    lmat_work::Matrix{Float64}
+end
+
+function TPMCache(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
+    nstates = size(tmat, 1)
+    nmats = map(x -> nrow(x), tpm_index)
+    
+    # Pre-allocate hazmat_book (one matrix per covariate pattern)
+    hazmat_book = [zeros(Float64, nstates, nstates) for _ in eachindex(tpm_index)]
+    
+    # Pre-allocate tpm_book (nested: one vector of matrices per covariate pattern)
+    tpm_book = [[zeros(Float64, nstates, nstates) for _ in 1:nmats[i]] for i in eachindex(tpm_index)]
+    
+    # Pre-allocate matrix exponential cache
+    exp_cache = ExponentialUtilities.alloc_mem(hazmat_book[1], ExpMethodGeneric())
+    
+    # Work arrays for forward algorithm
+    q_work = zeros(Float64, nstates, nstates)
+    
+    # lmat_work sized for largest subject (estimate conservatively)
+    # Will be resized if needed during computation
+    max_obs_estimate = 100
+    lmat_work = zeros(Float64, nstates, max_obs_estimate + 1)
+    
+    TPMCache(hazmat_book, tpm_book, exp_cache, q_work, lmat_work)
+end
+
+"""
     MPanelData(model::MultistateProcess, books::Tuple)
 
 Struct containing panel data, a model object, and bookkeeping objects. Used in fitting a multistate Markov model to panel data.
+
+# Fields
+- `model`: The multistate model
+- `books`: Bookkeeping tuple (tpm_index, tpm_map) from `build_tpm_mapping`
+- `columns`: Pre-extracted DataFrame column accessors for allocation-free access
+
+The `columns` field provides direct access to data columns without DataFrame dispatch
+overhead, significantly reducing allocations in the likelihood hot path.
 """
 struct MPanelData
     model::MultistateProcess
     books::Tuple # tpm_index and tpm_map, from build_tpm_containers
+    columns::MPanelDataColumnAccessor  # Pre-extracted columns for fast access
+    cache::TPMCache  # Pre-allocated arrays for Float64 likelihood evaluations
+end
+
+# Constructor with automatic column extraction and cache allocation
+function MPanelData(model::MultistateProcess, books::Tuple)
+    columns = MPanelDataColumnAccessor(model.data)
+    cache = TPMCache(model.tmat, books[1])
+    MPanelData(model, books, columns, cache)
 end
 
 """
