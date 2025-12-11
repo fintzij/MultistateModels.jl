@@ -16,8 +16,8 @@ function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, max_sam
     use_phasetype = !isnothing(phasetype_surrogate)
 
     # make sure spline parameters are assigned correctly
-    # unflatten parameters using ParameterHandling.jl (AD-compatible)
-    pars = safe_unflatten(params_cur, model)
+    # unflatten parameters to natural scale (AD-compatible)
+    pars = unflatten_natural(params_cur, model)
 
     # update spline hazards with current parameters (no-op for functional splines)
     _update_spline_hazards!(model.hazards, pars)
@@ -135,8 +135,8 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
             end
             
             # target log-likelihood (same for both proposal types)
-            # safe_unflatten now returns natural-scale params
-            target_pars = safe_unflatten(params_cur, model)
+            # unflatten_natural returns natural-scale params
+            target_pars = unflatten_natural(params_cur, model)
             loglik_target_cur[i][j] = loglik(target_pars, samplepaths[i][j], model.hazards, model) 
             
             # unnormalized log importance weight

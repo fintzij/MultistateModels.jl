@@ -382,15 +382,11 @@ function fit(model::PhaseTypeModel;
               "Use ForwardDiffBackend() if you encounter errors."
     end
 
-    # Select likelihood function based on AD backend
-    loglik_fn = if adbackend isa EnzymeBackend || adbackend isa MooncakeBackend
-        loglik_markov_functional
-    else
-        loglik_markov
-    end
-
     # Create panel data object using expanded data and hazards
     panel_data = MPanelData(model, books)
+
+    # Create closure that dispatches to correct implementation based on backend
+    loglik_fn = (p, d) -> loglik_markov(p, d; backend=adbackend)
 
     # Parse constraints and solve
     if isnothing(constraints)
@@ -649,13 +645,8 @@ function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; 
               "ChainRules.jl's exp rule also uses LAPACK internally. Use ForwardDiffBackend() if you encounter errors."
     end
 
-    # Select likelihood function based on AD backend
-    # Enzyme and Mooncake (reverse-mode) require non-mutating code
-    loglik_fn = if adbackend isa EnzymeBackend || adbackend isa MooncakeBackend
-        loglik_markov_functional
-    else
-        loglik_markov
-    end
+    # Create closure that dispatches to correct implementation based on backend
+    loglik_fn = (p, d) -> loglik_markov(p, d; backend=adbackend)
 
     # parse constraints, or not, and solve
     if isnothing(constraints)

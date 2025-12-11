@@ -589,7 +589,9 @@ function simulate_path(model::MultistateProcess, subj::Int64;
     subj_dat  = view(model.data, subj_inds, :)
 
     # Get natural-scale parameters for hazard functions (family-aware)
-    params = get_hazard_params(model.parameters, model.hazards)
+    # Use indexed tuple for fast access in hot loops
+    params_named = get_hazard_params(model.parameters, model.hazards)
+    params = values(params_named)  # Convert to Tuple for indexed access
 
     # current index
     row = 1 # row in subject's data that is incremented
@@ -601,7 +603,7 @@ function simulate_path(model::MultistateProcess, subj::Int64;
     # current state
     scur = subj_dat.statefrom[1]
 
-    tt_context = time_transform ? maybe_time_transform_context(params, subj_dat, model.hazards; time_column = :tstop) : nothing
+    tt_context = time_transform ? maybe_time_transform_context(params_named, subj_dat, model.hazards; time_column = :tstop) : nothing
 
     # tcur and tstop
     tcur    = subj_dat.tstart[1]

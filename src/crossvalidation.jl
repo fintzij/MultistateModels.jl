@@ -93,7 +93,7 @@ function compute_subject_gradients(params::AbstractVector, model::MultistateMode
         
         # closure for subject i's log-likelihood
         function ll_subj_i(pars)
-            pars_nested = safe_unflatten(pars, model)
+            pars_nested = unflatten_natural(pars, model)
             subj_inds = model.subjectindices[path.subj]
             subj_dat = view(model.data, subj_inds, :)
             subjdat_df = make_subjdat(path, subj_dat)
@@ -266,7 +266,7 @@ function compute_subject_hessians(params::AbstractVector, model::MultistateModel
         
         # closure for subject i's log-likelihood
         function ll_subj_i(pars)
-            pars_nested = safe_unflatten(pars, model)
+            pars_nested = unflatten_natural(pars, model)
             subj_inds = model.subjectindices[path.subj]
             subj_dat = view(model.data, subj_inds, :)
             subjdat_df = make_subjdat(path, subj_dat)
@@ -339,8 +339,8 @@ function loglik_weighted_with_params(θw::AbstractVector{T}, npaths::Int, nparam
     θ = @view θw[1:nparams]
     w = @view θw[nparams+1:end]
     
-    # unflatten parameters using ParameterHandling.jl
-    pars_nested = safe_unflatten(θ, model)
+    # unflatten parameters to natural scale
+    pars_nested = unflatten_natural(θ, model)
     hazards = model.hazards
     
     # remake spline parameters if needed (no-op for RuntimeSplineHazard)
@@ -388,8 +388,8 @@ function loglik_paths_subject(pars::AbstractVector{T}, subject_paths::Vector{Sam
     npaths = length(subject_paths)
     lls = Vector{T}(undef, npaths)
     
-    # unflatten parameters using ParameterHandling.jl
-    pars_nested = safe_unflatten(pars, model)
+    # unflatten parameters to natural scale
+    pars_nested = unflatten_natural(pars, model)
     hazards = model.hazards
     
     # remake spline parameters if needed (no-op for RuntimeSplineHazard)
@@ -440,8 +440,8 @@ function loglik_weighted_subject(pars::AbstractVector{T}, subject_paths::Vector{
     npaths = length(subject_paths)
     ll_weighted = zero(T)
     
-    # unflatten parameters using ParameterHandling.jl
-    pars_nested = safe_unflatten(pars, model)
+    # unflatten parameters to natural scale
+    pars_nested = unflatten_natural(pars, model)
     hazards = model.hazards
     
     # remake spline parameters if needed (no-op for RuntimeSplineHazard)

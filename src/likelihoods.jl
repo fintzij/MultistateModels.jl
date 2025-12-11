@@ -26,14 +26,18 @@ _unwrap_to_float(x::ForwardDiff.Dual) = _unwrap_to_float(ForwardDiff.value(x))
 Normalize parameter representations for downstream hazard calls.
 Uses multiple dispatch to handle different parameter container types.
 
+For flat vectors, this is equivalent to calling `unflatten_natural(p, model)`.
+
 # Supported types
 - `Tuple`: Nested parameters indexed by hazard number (returned as-is)
-- `NamedTuple`: Parameters keyed by hazard name (converted to values tuple)
+- `NamedTuple`: Parameters keyed by hazard name (returned as-is)
 - `AbstractVector{<:AbstractVector}`: Already nested format (returned as-is)
-- `AbstractVector`: Flat parameter vector (unflattened via ParameterHandling.jl)
+- `AbstractVector{<:Real}`: Flat parameter vector (unflattened via `unflatten_natural`)
 
 # Note on AD Compatibility
-Uses safe_unflatten() to handle both Float64 and ForwardDiff.Dual types correctly.
+Uses `unflatten_natural` to handle both Float64 and ForwardDiff.Dual types correctly.
+
+See also: [`unflatten_natural`](@ref), [`unflatten_estimation`](@ref)
 """
 prepare_parameters(p::Tuple, ::MultistateProcess) = p
 prepare_parameters(p::NamedTuple, ::MultistateProcess) = p
@@ -42,7 +46,7 @@ prepare_parameters(p::AbstractVector{<:AbstractVector}, ::MultistateProcess) = p
 function prepare_parameters(p::AbstractVector{<:Real}, model::MultistateProcess)
     # Return NamedTuple indexed by hazard name (not Tuple of values)
     # Downstream code accesses parameters[hazard.hazname]
-    return safe_unflatten(p, model)
+    return unflatten_natural(p, model)
 end
 
 # =============================================================================
@@ -706,8 +710,8 @@ See also: [`loglik_exact`](@ref), [`ExactDataAD`](@ref)
 """
 function loglik_AD(parameters, data::ExactDataAD; neg = true)
 
-    # unflatten parameters using ParameterHandling.jl (AD-compatible)
-    pars = safe_unflatten(parameters, data.model)
+    # unflatten parameters to natural scale (AD-compatible)
+    pars = unflatten_natural(parameters, data.model)
 
     # snag the hazards
     hazards = data.model.hazards
@@ -733,14 +737,69 @@ function loglik_AD(parameters, data::ExactDataAD; neg = true)
 end
 
 """
-    loglik(parameters, data::MPanelData; neg = true)
+    loglik_markov(parameters, data::MPanelData; neg=true, return_ll_subj=false, backend=nothing)
 
-Return sum of (negative) log likelihood for a Markov model fit to panel and/or exact and/or censored data. 
+Unified Markov panel likelihood with automatic AD backend dispatch.
+
+Return sum of (negative) log likelihood for a Markov model fit to panel and/or exact 
+and/or censored data.
+
+# Arguments
+- `parameters`: Flat parameter vector
+- `data::MPanelData`: Markov panel data container
+- `neg::Bool=true`: Return negative log-likelihood
+- `return_ll_subj::Bool=false`: Return vector of subject-level log-likelihoods
+- `backend::Union{Nothing,ADBackend}=nothing`: AD backend for implementation dispatch
+  - `nothing` or `ForwardDiffBackend()`: Use mutating implementation (default)
+  - `EnzymeBackend()` or `MooncakeBackend()`: Use non-mutating functional implementation
+
+# Implementation Details
+- **Mutating implementation** (`_loglik_markov_mutating`): Uses in-place operations
+  (`compute_hazmat!`, `compute_tmat!`) for efficiency. Compatible with ForwardDiff.
+- **Functional implementation** (`_loglik_markov_functional`): Avoids all mutations
+  for reverse-mode AD compatibility (Enzyme, Mooncake). ~10-20% slower due to allocations.
+
+# Returns
+- If `return_ll_subj=false`: Scalar (negative) log-likelihood
+- If `return_ll_subj=true`: Vector of per-subject weighted log-likelihoods
+
+# Note
+For reverse-mode AD backends (Enzyme, Mooncake), `return_ll_subj` is not supported
+and will raise an error.
+
+See also: [`loglik_exact`](@ref), [`loglik_semi_markov`](@ref)
 """
-function loglik_markov(parameters, data::MPanelData; neg = true, return_ll_subj = false)
+function loglik_markov(parameters, data::MPanelData; 
+                       neg = true, 
+                       return_ll_subj = false,
+                       backend::Union{Nothing, ADBackend} = nothing)
+    # Dispatch based on backend type
+    if isnothing(backend) || backend isa ForwardDiffBackend
+        # Use mutating implementation (default, ForwardDiff-compatible)
+        return _loglik_markov_mutating(parameters, data; neg=neg, return_ll_subj=return_ll_subj)
+    elseif backend isa EnzymeBackend || backend isa MooncakeBackend
+        # Use functional implementation (reverse-mode AD compatible)
+        if return_ll_subj
+            throw(ArgumentError("return_ll_subj=true is not supported with reverse-mode AD backends"))
+        end
+        return _loglik_markov_functional(parameters, data; neg=neg)
+    else
+        throw(ArgumentError("Unknown AD backend type: $(typeof(backend))"))
+    end
+end
 
-    # unflatten parameters using ParameterHandling.jl (AD-compatible)
-    pars = safe_unflatten(parameters, data.model)
+"""
+    _loglik_markov_mutating(parameters, data::MPanelData; neg=true, return_ll_subj=false)
+
+Mutating implementation of Markov panel likelihood. Uses in-place operations
+for efficiency. Compatible with ForwardDiff (forward-mode AD).
+
+This is an internal function. Use `loglik_markov` for the public API.
+"""
+function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, return_ll_subj = false)
+
+    # unflatten parameters to natural scale (AD-compatible)
+    pars = unflatten_natural(parameters, data.model)
 
     # build containers for transition intensity and prob mtcs
     hazmat_book = build_hazmat_book(eltype(parameters), data.model.tmat, data.books[1])
@@ -968,9 +1027,9 @@ end
 # =============================================================================
 
 """
-    loglik_markov_functional(parameters, data::MPanelData; neg=true)
+    _loglik_markov_functional(parameters, data::MPanelData; neg=true)
 
-Non-mutating version of `loglik_markov` compatible with reverse-mode AD (Enzyme, Zygote).
+Non-mutating implementation of Markov panel likelihood for reverse-mode AD (Enzyme, Mooncake).
 
 This version avoids all in-place mutations:
 - Uses `compute_hazmat` and `compute_tmat` instead of their `!` variants
@@ -978,7 +1037,10 @@ This version avoids all in-place mutations:
 - Uses comprehensions and reductions instead of loops with mutation
 
 Performance: ~10-20% slower than mutating version due to allocations,
-but enables Enzyme gradient computation which may be faster overall for large models.
+but enables reverse-mode gradient computation which may be faster overall for large models.
+
+This is an internal function. Use `loglik_markov(params, data; backend=EnzymeBackend())` 
+for the public API.
 
 # Arguments
 - `parameters`: Flat parameter vector
@@ -988,9 +1050,9 @@ but enables Enzyme gradient computation which may be faster overall for large mo
 # Returns
 Scalar (negative) log-likelihood value.
 """
-function loglik_markov_functional(parameters, data::MPanelData; neg = true)
-    # Unflatten parameters using ParameterHandling.jl (AD-compatible)
-    pars = safe_unflatten(parameters, data.model)
+function _loglik_markov_functional(parameters, data::MPanelData; neg = true)
+    # Unflatten parameters to natural scale (AD-compatible)
+    pars = unflatten_natural(parameters, data.model)
     
     # Model components
     hazards = data.model.hazards
@@ -1073,6 +1135,10 @@ function loglik_markov_functional(parameters, data::MPanelData; neg = true)
     ll = sum(subj_contributions)
     return neg ? -ll : ll
 end
+
+# Backward compatibility alias
+# Use loglik_markov(params, data; backend=EnzymeBackend()) instead
+const loglik_markov_functional = _loglik_markov_functional
 
 """
     _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, T, n_states, hazards, tmat)
@@ -1199,8 +1265,8 @@ Scalar (negative) log-likelihood value.
 """
 function loglik_semi_markov(parameters, data::SMPanelData; neg=true, use_sampling_weight=true, parallel=false)
 
-    # Unflatten parameters using ParameterHandling.jl (AD-compatible)
-    pars = safe_unflatten(parameters, data.model)
+    # Unflatten parameters to natural scale (AD-compatible)
+    pars = unflatten_natural(parameters, data.model)
 
     # Get hazards and model components
     hazards = data.model.hazards
@@ -1335,8 +1401,8 @@ ODE solvers would be invoked instead of analytic cumulative hazard formulas.
 """
 function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
 
-    # unflatten parameters using ParameterHandling.jl (AD-compatible)
-    pars = safe_unflatten(parameters, data.model)
+    # Unflatten parameters to natural scale (AD-compatible)
+    pars = unflatten_natural(parameters, data.model)
 
     # snag the hazards and model components
     hazards = data.model.hazards
@@ -1404,8 +1470,8 @@ Arguments:
 - `data`: SMPanelData containing the model and paths
 """
 function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}}, data::SMPanelData)
-    # Unflatten parameters using ParameterHandling.jl (AD-compatible)
-    pars = safe_unflatten(parameters, data.model)
+    # Unflatten parameters to natural scale (AD-compatible)
+    pars = unflatten_natural(parameters, data.model)
     
     # Get hazards
     hazards = data.model.hazards
@@ -1686,8 +1752,8 @@ the sequential path). Use parallel for objective evaluation during line search.
 - If `return_ll_subj=true`: Vector of per-path weighted log-likelihoods
 """
 function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false, parallel=false)
-    # Unflatten parameters using ParameterHandling.jl - preserves dual number types (AD-compatible)
-    pars = safe_unflatten(parameters, data.model)
+    # Unflatten parameters to natural scale - preserves dual number types (AD-compatible)
+    pars = unflatten_natural(parameters, data.model)
     
     # Get model components
     hazards = data.model.hazards
@@ -1827,6 +1893,10 @@ function _compute_path_loglik_fused(
     # Initialize log-likelihood for this path
     ll = zero(T)
     
+    # Pre-extract hazard parameters by index to avoid repeated NamedTuple lookups
+    # This converts dynamic symbol lookup to static tuple indexing
+    pars_indexed = values(pars)  # Convert NamedTuple to Tuple for indexed access
+    
     # Check if we have time-varying covariates
     has_tvc = !isempty(subj_cache.covar_data) && nrow(subj_cache.covar_data) > 1
     
@@ -1851,7 +1921,7 @@ function _compute_path_loglik_fused(
                 # Accumulate cumulative hazards for all exit hazards
                 for h in tothaz.components
                     hazard = hazards[h]
-                    hazard_pars = pars[hazard.hazname]
+                    hazard_pars = pars_indexed[h]  # Fast indexed access
                     
                     # Extract covariates
                     covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[h])
@@ -1870,7 +1940,7 @@ function _compute_path_loglik_fused(
                 if statefrom != stateto
                     trans_h = tmat[statefrom, stateto]
                     hazard = hazards[trans_h]
-                    hazard_pars = pars[hazard.hazname]
+                    hazard_pars = pars_indexed[trans_h]  # Fast indexed access
                     covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[trans_h])
                     
                     haz_value = eval_hazard(
@@ -1896,7 +1966,7 @@ function _compute_path_loglik_fused(
             if tothaz isa _TotalHazardTransient
                 for h in tothaz.components
                     hazard = hazards[h]
-                    hazard_pars = pars[hazard.hazname]
+                    hazard_pars = pars_indexed[h]  # Fast indexed access
                     covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[h])
                     
                     cumhaz = eval_cumhaz(
@@ -1911,7 +1981,7 @@ function _compute_path_loglik_fused(
                 if interval.statefrom != interval.stateto
                     trans_h = tmat[interval.statefrom, interval.stateto]
                     hazard = hazards[trans_h]
-                    hazard_pars = pars[hazard.hazname]
+                    hazard_pars = pars_indexed[trans_h]  # Fast indexed access
                     covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[trans_h])
                     
                     haz_value = eval_hazard(

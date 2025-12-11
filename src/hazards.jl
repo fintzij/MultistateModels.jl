@@ -894,14 +894,14 @@ end
 
 Return the log-total cumulative hazard out of a transient state over the interval [lb, ub].
 
-PARAMETER CONVENTION: Expects natural-scale parameters (from safe_unflatten or get_hazard_params).
+PARAMETER CONVENTION: Expects natural-scale parameters (from unflatten_natural or get_hazard_params).
 """
 function total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardTransient, _hazards;
                         give_log = true,
                         apply_transform::Bool = false,
                         cache_context::Union{Nothing,TimeTransformContext}=nothing) 
 
-    # Parameters should already be on natural scale (from safe_unflatten or get_hazard_params)
+    # Parameters should already be on natural scale (from unflatten_natural or get_hazard_params)
     # Use directly without additional transformation
     
     # log total cumulative hazard
@@ -947,6 +947,90 @@ function total_cumulhaz(lb, ub, parameters, covars_cache::AbstractVector{<:Named
     end
 
     give_log ? log(tot_haz) : tot_haz
+end
+
+# =============================================================================
+# Indexed Parameter Access (Performance Optimization)
+# =============================================================================
+#
+# The following methods accept parameters as a Tuple (indexed by hazard position)
+# instead of NamedTuple (indexed by symbol). This avoids runtime symbol lookup
+# overhead in hot loops. Use `values(named_tuple)` to convert NamedTuple to Tuple.
+#
+# =============================================================================
+
+"""
+    total_cumulhaz(lb, ub, parameters::Tuple, ...)
+
+Optimized version using indexed parameter access (Tuple instead of NamedTuple).
+Call `values(params_named)` once outside the loop, then pass the tuple to this method.
+"""
+function total_cumulhaz(lb, ub, parameters::Tuple, subjdat_row, _totalhazard::_TotalHazardTransient, _hazards;
+                        give_log = true,
+                        apply_transform::Bool = false,
+                        cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    tot_haz = 0.0
+    
+    for x in _totalhazard.components
+        hazard = _hazards[x]
+        tot_haz += eval_cumhaz(
+            hazard, lb, ub, parameters[x], subjdat_row;  # Indexed access
+            apply_transform = apply_transform,
+            cache_context = cache_context,
+            hazard_slot = x)
+    end
+    
+    give_log ? log(tot_haz) : tot_haz
+end
+
+function total_cumulhaz(lb, ub, parameters::Tuple, covars_cache::AbstractVector{<:NamedTuple}, _totalhazard::_TotalHazardTransient, _hazards;
+                        give_log = true,
+                        apply_transform::Bool = false,
+                        cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    tot_haz = 0.0
+    
+    for x in _totalhazard.components
+        hazard = _hazards[x]
+        covars = _covariate_entry(covars_cache, x)
+        tot_haz += eval_cumhaz(
+            hazard, lb, ub, parameters[x], covars;  # Indexed access
+            apply_transform = apply_transform,
+            cache_context = cache_context,
+            hazard_slot = x)
+    end
+    
+    give_log ? log(tot_haz) : tot_haz
+end
+
+"""
+    survprob(lb, ub, parameters::Tuple, ...)
+
+Optimized version using indexed parameter access.
+"""
+function survprob(lb, ub, parameters::Tuple, subjdat_row, _totalhazard::_TotalHazardTransient, _hazards;
+                  give_log = true,
+                  apply_transform::Bool = false,
+                  cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    log_survprob = -total_cumulhaz(
+        lb, ub, parameters, subjdat_row, _totalhazard, _hazards;
+        give_log = false,
+        apply_transform = apply_transform,
+        cache_context = cache_context)
+    
+    give_log ? log_survprob : exp(log_survprob)
+end
+
+function survprob(lb, ub, parameters::Tuple, covars_cache::AbstractVector{<:NamedTuple}, _totalhazard::_TotalHazardTransient, _hazards;
+                  give_log = true,
+                  apply_transform::Bool = false,
+                  cache_context::Union{Nothing,TimeTransformContext}=nothing)
+    log_survprob = -total_cumulhaz(
+        lb, ub, parameters, covars_cache, _totalhazard, _hazards;
+        give_log = false,
+        apply_transform = apply_transform,
+        cache_context = cache_context)
+    
+    give_log ? log_survprob : exp(log_survprob)
 end
 
 """
@@ -1031,10 +1115,13 @@ function _next_state_probs!(ns_probs::AbstractVector{Float64}, trans_inds::Abstr
     end
 
     # Compute log-hazards for softmax
+    # Support both NamedTuple (symbol access) and Tuple (index access)
     vals = map(totalhazards[scur].components) do x
         hazard = hazards[x]
         covars = _covariate_entry(covars_cache, x)
-        haz = eval_hazard(hazard, t, parameters[hazard.hazname], covars;
+        # Use indexed access for Tuple, symbol access for NamedTuple
+        hazard_pars = parameters isa Tuple ? parameters[x] : parameters[hazard.hazname]
+        haz = eval_hazard(hazard, t, hazard_pars, covars;
                           apply_transform = apply_transform && hazard.metadata.time_transform,
                           cache_context = cache_context,
                           hazard_slot = x)
