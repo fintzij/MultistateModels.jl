@@ -3,14 +3,10 @@
 # =============================================================================
 #
 # Shared utility functions for inference long tests.
+# These functions are included in the MultistateModelsTests module context,
+# so they have access to DataFrames, Distributions, LinearAlgebra, Printf,
+# Random, and Statistics via the module's imports.
 # =============================================================================
-
-using DataFrames
-using Distributions
-using LinearAlgebra
-using Printf
-using Random
-using Statistics
 
 # =============================================================================
 # Relative Error Computation
@@ -319,6 +315,26 @@ function compute_state_prevalence(paths::Vector, eval_times::Vector{Float64}, n_
     
     prevalence ./= n_paths
     return prevalence
+end
+
+"""
+    count_transitions(paths::Vector, n_states::Int)
+
+Count total transitions between each pair of states from sample paths.
+Returns a matrix of size (n_states, n_states) with transition counts.
+"""
+function count_transitions(paths::Vector, n_states::Int)
+    counts = zeros(Int, n_states, n_states)
+    for path in paths
+        for i in 1:(length(path.states) - 1)
+            from_state = path.states[i]
+            to_state = path.states[i+1]
+            if from_state <= n_states && to_state <= n_states
+                counts[from_state, to_state] += 1
+            end
+        end
+    end
+    return counts
 end
 
 """

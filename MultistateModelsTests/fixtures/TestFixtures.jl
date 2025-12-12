@@ -451,7 +451,8 @@ function toy_tvc_gom_model(;
     
     h12 = Hazard(@formula(0 ~ x), "gom", 1, 2; linpred_effect = linpred_effect, time_transform = true)
     model = multistatemodel(h12; data = data)
-    set_parameters!(model, (h12 = [log(shape), log(scale), beta],))
+    # Gompertz: shape is unconstrained (stored as-is), scale is positive (stored as log)
+    set_parameters!(model, (h12 = [shape, log(scale), beta],))
     
     return (; model, data, config = (; t_changes, x_values, horizon, shape, scale, beta, linpred_effect))
 end

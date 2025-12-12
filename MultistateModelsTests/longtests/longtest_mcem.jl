@@ -47,48 +47,12 @@ const MAX_ITER = 30              # Maximum MCEM iterations
 const PARAM_TOL_REL = 0.35       # Relaxed relative tolerance for MCEM (more MC noise)
 const MAX_PATHS_PER_SUBJECT = 200  # Diagnostic hard limit for MCEM path counts
 
+# Shared helper functions (compute_state_prevalence, count_transitions, etc.) are loaded
+# from longtest_helpers.jl by the test runner.
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
-
-"""
-    compute_state_prevalence(paths::Vector{SamplePath}, eval_times::Vector{Float64}, n_states::Int)
-
-Compute state prevalence at each evaluation time from a collection of sample paths.
-"""
-function compute_state_prevalence(paths::Vector{SamplePath}, eval_times::Vector{Float64}, n_states::Int)
-    n_times = length(eval_times)
-    prevalence = zeros(Float64, n_times, n_states)
-    n_paths = length(paths)
-    
-    for path in paths
-        for (t_idx, t) in enumerate(eval_times)
-            state_idx = searchsortedlast(path.times, t)
-            if state_idx >= 1
-                state = path.states[state_idx]
-                prevalence[t_idx, state] += 1.0
-            end
-        end
-    end
-    
-    prevalence ./= n_paths
-    return prevalence
-end
-
-"""
-    count_transitions(paths::Vector{SamplePath}, n_states::Int)
-
-Count total transitions between each pair of states.
-"""
-function count_transitions(paths::Vector{SamplePath}, n_states::Int)
-    counts = zeros(Int, n_states, n_states)
-    for path in paths
-        for i in 1:(length(path.states) - 1)
-            counts[path.states[i], path.states[i+1]] += 1
-        end
-    end
-    return counts
-end
 
 """
     generate_panel_data_illness_death(hazards, true_params; n_subj, obs_times, covariate_data)

@@ -84,6 +84,131 @@ struct OptimJumpSolver <: AbstractJumpSolver
     OptimJumpSolver(; rel_tol::Float64 = sqrt(sqrt(eps())), abs_tol::Float64 = sqrt(eps())) = new(rel_tol, abs_tol)
 end
 
+"""
+    ExponentialJumpSolver <: AbstractJumpSolver
+
+Uses closed-form inversion for exponential (Markov) hazards.
+
+For states where all outgoing transitions have constant (time-invariant) hazard rates,
+the jump time can be computed analytically without root-finding:
+
+    t = -log(1 - (u - cuminc)/(1 - cuminc)) / total_rate
+
+This solver is automatically selected when the simulation detects that all
+hazards from the current state are Markov (exponential).
+
+Falls back to OptimJumpSolver for non-exponential hazards.
+"""
+struct ExponentialJumpSolver <: AbstractJumpSolver
+    fallback::OptimJumpSolver
+    ExponentialJumpSolver(; fallback::OptimJumpSolver = OptimJumpSolver()) = new(fallback)
+end
+
+"""
+    HybridJumpSolver <: AbstractJumpSolver
+
+Automatically selects between exponential (closed-form) and ITP (root-finding)
+based on whether the current state's hazards are all Markov (exponential).
+
+This is the recommended solver for mixed models with both exponential and
+non-exponential transitions.
+
+# Fields  
+- `exp_solver::ExponentialJumpSolver`: Solver for exponential hazards
+- `itp_solver::OptimJumpSolver`: Solver for non-exponential hazards
+"""
+struct HybridJumpSolver <: AbstractJumpSolver
+    exp_solver::ExponentialJumpSolver
+    itp_solver::OptimJumpSolver
+    HybridJumpSolver(; 
+        exp_solver::ExponentialJumpSolver = ExponentialJumpSolver(),
+        itp_solver::OptimJumpSolver = OptimJumpSolver()
+    ) = new(exp_solver, itp_solver)
+end
+
+# ----------------------------------------------------------------------------
+# Helper Functions for Exponential Hazard Detection
+# ----------------------------------------------------------------------------
+
+"""
+    _is_state_all_markov(state::Int, totalhazard::_TotalHazardTransient, hazards::Vector{<:_Hazard}) -> Bool
+
+Check if all outgoing hazards from a state are Markov (exponential/time-invariant).
+
+Returns `true` if all component hazards are `_MarkovHazard` subtypes.
+"""
+@inline function _is_state_all_markov(totalhazard::_TotalHazardTransient, hazards::AbstractVector{<:_Hazard})
+    @inbounds for idx in totalhazard.components
+        hazards[idx] isa _MarkovHazard || return false
+    end
+    return true
+end
+
+"""
+    _compute_total_markov_rate(params::Tuple, covars_cache::AbstractVector{<:NamedTuple},
+                               totalhazard::_TotalHazardTransient, hazards::AbstractVector{<:_Hazard}) -> Float64
+
+Compute the total hazard rate for a state where all hazards are Markov (exponential).
+
+For Markov hazards, the rate is constant: h(t) = rate = baseline * exp(Xβ).
+The total rate is the sum of all component hazard rates.
+
+# Arguments
+- `params::Tuple`: Indexed parameters (from `values(params_named)`)
+- `covars_cache::AbstractVector{<:NamedTuple}`: Cached covariate values per hazard
+- `totalhazard::_TotalHazardTransient`: Total hazard specification
+- `hazards::AbstractVector{<:_Hazard}`: All hazard functions
+
+# Returns
+- `Float64`: Sum of all hazard rates from the current state
+"""
+@inline function _compute_total_markov_rate(params::Tuple, covars_cache::AbstractVector{<:NamedTuple},
+                                            totalhazard::_TotalHazardTransient, hazards::AbstractVector{<:_Hazard})
+    total_rate = 0.0
+    @inbounds for idx in totalhazard.components
+        hazard = hazards[idx]
+        # For Markov hazards, eval at t=0 gives the constant rate
+        total_rate += hazard(0.0, params[idx], covars_cache[idx])
+    end
+    return total_rate
+end
+
+"""
+    _exponential_jump_time(u::Float64, cuminc::Float64, total_rate::Float64, interval_len::Float64) -> Float64
+
+Compute jump time analytically for exponential hazards.
+
+Solves: u = cuminc + (1 - cuminc) * (1 - exp(-total_rate * t))
+
+# Arguments
+- `u`: Uniform random variate (cumulative incidence target)
+- `cuminc`: Current cumulative incidence
+- `total_rate`: Sum of all hazard rates from current state
+- `interval_len`: Maximum time in interval (upper bound)
+
+# Returns
+- `Float64`: Jump time (clamped to interval_len)
+"""
+@inline function _exponential_jump_time(u::Float64, cuminc::Float64, total_rate::Float64, interval_len::Float64)
+    # Solve: u = cuminc + (1 - cuminc) * (1 - exp(-total_rate * t))
+    # => (u - cuminc) / (1 - cuminc) = 1 - exp(-total_rate * t)
+    # => exp(-total_rate * t) = 1 - (u - cuminc) / (1 - cuminc)
+    # => t = -log(1 - (u - cuminc) / (1 - cuminc)) / total_rate
+    
+    remaining_survival = 1.0 - cuminc
+    if remaining_survival <= _DELTA_U || total_rate <= 0.0
+        return interval_len  # Edge case: return boundary
+    end
+    
+    prob_increment = (u - cuminc) / remaining_survival
+    if prob_increment >= 1.0 - _DELTA_U
+        return interval_len  # Event at or beyond boundary
+    end
+    
+    t = -log(1.0 - prob_increment) / total_rate
+    return min(t, interval_len)  # Clamp to interval
+end
+
 # ----------------------------------------------------------------------------
 # Helper Functions for Simulation Data Preparation
 # ----------------------------------------------------------------------------
@@ -487,6 +612,17 @@ function _find_jump_time(solver::OptimJumpSolver, gap_fn, lo, hi)
 end
 
 """
+    _find_jump_time_exponential(u, cuminc, total_rate, interval_len)
+
+Closed-form jump time computation for exponential hazards.
+
+This is the core computation, called when we know all hazards are Markov.
+"""
+@inline function _find_jump_time_exponential(u::Float64, cuminc::Float64, total_rate::Float64, interval_len::Float64)
+    return _exponential_jump_time(u, cuminc, total_rate, interval_len)
+end
+
+"""
     _materialize_covariates(row::DataFrameRow, hazards::AbstractVector{<:_Hazard})
 
 Extract and cache covariate values for all hazards from a single data row.
@@ -619,6 +755,17 @@ function simulate_path(model::MultistateProcess, subj::Int64;
     ns_probs = zeros(Float64, nstates)
     transitions_by_state = [findall(model.tmat[row, :] .!= 0) for row in 1:nstates]
 
+    # Pre-compute which states have all-Markov (exponential) outgoing hazards
+    # This enables closed-form jump time computation for those states
+    is_state_all_markov = Vector{Bool}(undef, nstates)
+    @inbounds for s in 1:nstates
+        if model.totalhazards[s] isa _TotalHazardTransient
+            is_state_all_markov[s] = _is_state_all_markov(model.totalhazards[s], model.hazards)
+        else
+            is_state_all_markov[s] = false  # Absorbing states
+        end
+    end
+
     # initialize sample path
     times  = [tcur]; sizehint!(times, nstates * 2)
     states = [scur]; sizehint!(states, nstates * 2)
@@ -652,23 +799,31 @@ function simulate_path(model::MultistateProcess, subj::Int64;
         if (u < (cuminc + interval_incid)) && (u >= cuminc)
 
             interval_len = tstop - tcur
-            current_timeinstate = timeinstate
-            gap_fn = t -> begin
-                surv = survprob(
-                    current_timeinstate,
-                    current_timeinstate + t,
-                    params,
-                    covars_cache,
-                    model.totalhazards[scur],
-                    model.hazards;
-                    give_log = false,
-                    apply_transform = use_transform,
-                    cache_context = tt_context)
-                cuminc + (1 - cuminc) * (1 - surv) - u
+            
+            # Use closed-form for exponential hazards, root-finding otherwise
+            if is_state_all_markov[scur]
+                # Closed-form: compute total rate and use analytical formula
+                total_rate = _compute_total_markov_rate(params, covars_cache, 
+                                                        model.totalhazards[scur], model.hazards)
+                timeincrement = _find_jump_time_exponential(u, cuminc, total_rate, interval_len)
+            else
+                # Non-exponential: use root-finding
+                current_timeinstate = timeinstate
+                gap_fn = t -> begin
+                    surv = survprob(
+                        current_timeinstate,
+                        current_timeinstate + t,
+                        params,
+                        covars_cache,
+                        model.totalhazards[scur],
+                        model.hazards;
+                        give_log = false,
+                        apply_transform = use_transform,
+                        cache_context = tt_context)
+                    cuminc + (1 - cuminc) * (1 - surv) - u
+                end
+                timeincrement = _find_jump_time(solver, gap_fn, _DELTA_U, interval_len)
             end
-
-            # Use solver dispatch to find jump time
-            timeincrement = _find_jump_time(solver, gap_fn, _DELTA_U, interval_len)
 
             timeinstate += timeincrement
 

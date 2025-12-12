@@ -111,6 +111,8 @@ export
     # Simulation strategy types
     # --------------------------------------------------------------------------
     OptimJumpSolver,
+    ExponentialJumpSolver,
+    HybridJumpSolver,
     CachedTransformStrategy,
     DirectTransformStrategy,
     

@@ -20,7 +20,7 @@ using Statistics
 using StatsModels
 using Test
 
-include(joinpath(@__DIR__, "fixtures", "TestFixtures.jl"))
+include(joinpath(@__DIR__, "..", "fixtures", "TestFixtures.jl"))
 using .TestFixtures: toy_two_state_exp_model
 
 const RNG_SEED = 0x9b5ef02d

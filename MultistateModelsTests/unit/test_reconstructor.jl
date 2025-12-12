@@ -5,6 +5,9 @@ using Test
 using MultistateModels
 using ForwardDiff
 
+# Import internal types for testing
+import MultistateModels: FlattenContinuous, FlattenAll, UnflattenStrict, UnflattenFlexible
+
 @testset "ReConstructor Implementation" begin
     
     @testset "Type Definitions" begin

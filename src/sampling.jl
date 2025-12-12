@@ -1,3 +1,164 @@
+# ============================================================================
+# Thread-local workspace for path sampling (allocation reduction)
+# ============================================================================
+
+"""
+    PathWorkspace
+
+Pre-allocated workspace for path sampling to reduce allocations in hot loops.
+Each thread gets its own workspace to avoid contention.
+
+Contains:
+- `times`, `states`: Main path vectors
+- `times_temp`, `states_temp`: Temporary vectors for ECCTMC sampling
+- `R_slices`: Pre-allocated 3D array for R matrix powers
+- `R_base`, `R_power`: Workspace matrices for matrix operations
+"""
+mutable struct PathWorkspace
+    # Main path storage
+    times::Vector{Float64}
+    states::Vector{Int}
+    times_len::Int
+    states_len::Int
+    
+    # ECCTMC temporary vectors
+    times_temp::Vector{Float64}
+    states_temp::Vector{Int}
+    
+    # R matrix storage (3D: nstates x nstates x max_jumps)
+    R_slices::Array{Float64, 3}
+    R_base::Matrix{Float64}     # Base R = I + Q/m
+    R_power::Matrix{Float64}    # Workspace for matrix power
+    nstates::Int                # Current state space size
+    
+    function PathWorkspace(max_jumps::Int=1000, max_states::Int=10)
+        new(
+            Vector{Float64}(undef, max_jumps),
+            Vector{Int}(undef, max_jumps),
+            0, 0,
+            Vector{Float64}(undef, max_jumps),
+            Vector{Int}(undef, max_jumps),
+            Array{Float64}(undef, max_states, max_states, max_jumps),
+            Matrix{Float64}(undef, max_states, max_states),
+            Matrix{Float64}(undef, max_states, max_states),
+            max_states
+        )
+    end
+end
+
+"""Reset workspace for new path"""
+@inline function reset!(ws::PathWorkspace)
+    ws.times_len = 0
+    ws.states_len = 0
+end
+
+"""Ensure R matrices are sized correctly for nstates"""
+@inline function ensure_R_capacity!(ws::PathWorkspace, nstates::Int, njumps::Int)
+    if nstates > ws.nstates || njumps > size(ws.R_slices, 3)
+        new_nstates = max(nstates, ws.nstates)
+        new_njumps = max(njumps, size(ws.R_slices, 3))
+        ws.R_slices = Array{Float64}(undef, new_nstates, new_nstates, new_njumps)
+        ws.R_base = Matrix{Float64}(undef, new_nstates, new_nstates)
+        ws.R_power = Matrix{Float64}(undef, new_nstates, new_nstates)
+        ws.nstates = new_nstates
+    end
+end
+
+"""Ensure temp vectors have capacity"""
+@inline function ensure_temp_capacity!(ws::PathWorkspace, n::Int)
+    if n > length(ws.times_temp)
+        resize!(ws.times_temp, max(n, 2 * length(ws.times_temp)))
+        resize!(ws.states_temp, max(n, 2 * length(ws.states_temp)))
+    end
+end
+
+"""Push time to workspace, growing if needed"""
+@inline function push_time!(ws::PathWorkspace, t::Float64)
+    ws.times_len += 1
+    if ws.times_len > length(ws.times)
+        resize!(ws.times, 2 * ws.times_len)
+    end
+    @inbounds ws.times[ws.times_len] = t
+end
+
+"""Push state to workspace, growing if needed"""
+@inline function push_state!(ws::PathWorkspace, s::Int)
+    ws.states_len += 1
+    if ws.states_len > length(ws.states)
+        resize!(ws.states, 2 * ws.states_len)
+    end
+    @inbounds ws.states[ws.states_len] = s
+end
+
+"""Push time and state together"""
+@inline function push_time_state!(ws::PathWorkspace, t::Float64, s::Int)
+    push_time!(ws, t)
+    push_state!(ws, s)
+end
+
+"""Append multiple times to workspace"""
+@inline function append_times!(ws::PathWorkspace, times::AbstractVector{Float64})
+    n = length(times)
+    new_len = ws.times_len + n
+    if new_len > length(ws.times)
+        resize!(ws.times, max(2 * new_len, new_len + 100))
+    end
+    @inbounds for i in 1:n
+        ws.times[ws.times_len + i] = times[i]
+    end
+    ws.times_len = new_len
+end
+
+"""Append multiple states to workspace"""
+@inline function append_states!(ws::PathWorkspace, states::AbstractVector{Int})
+    n = length(states)
+    new_len = ws.states_len + n
+    if new_len > length(ws.states)
+        resize!(ws.states, max(2 * new_len, new_len + 100))
+    end
+    @inbounds for i in 1:n
+        ws.states[ws.states_len + i] = states[i]
+    end
+    ws.states_len = new_len
+end
+
+"""Get current times as view"""
+@inline function get_times(ws::PathWorkspace)
+    @view ws.times[1:ws.times_len]
+end
+
+"""Get current states as view"""  
+@inline function get_states(ws::PathWorkspace)
+    @view ws.states[1:ws.states_len]
+end
+
+"""Create SamplePath from workspace (copies data)"""
+function to_samplepath(ws::PathWorkspace, subj::Int)
+    SamplePath(subj, ws.times[1:ws.times_len], ws.states[1:ws.states_len])
+end
+
+# Thread-local workspace storage
+const PATH_WORKSPACES = Dict{Int, PathWorkspace}()
+const PATH_WORKSPACE_LOCK = ReentrantLock()
+
+"""Get or create thread-local PathWorkspace"""
+function get_path_workspace()::PathWorkspace
+    tid = Threads.threadid()
+    ws = get(PATH_WORKSPACES, tid, nothing)
+    if isnothing(ws)
+        lock(PATH_WORKSPACE_LOCK) do
+            ws = get!(PATH_WORKSPACES, tid) do
+                PathWorkspace(1000)
+            end
+        end
+    end
+    return ws
+end
+
+# ============================================================================
+# Main DrawSamplePaths! functions
+# ============================================================================
+
 """
     DrawSamplePaths(model; ...)
 
@@ -792,8 +953,23 @@ end
     draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map)
 
 Draw sample paths from a Markov surrogate process conditional on panel data.
+Uses thread-local workspace for reduced allocations in hot paths.
 """
 function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map, fbmats, absorbingstates)
+    # Get thread-local workspace
+    ws = get_path_workspace()
+    return draw_samplepath!(ws, subj, model, tpm_book, hazmat_book, tpm_map, fbmats, absorbingstates)
+end
+
+"""
+    draw_samplepath!(ws::PathWorkspace, subj::Int64, model::MultistateProcess, ...)
+
+Workspace-based version of draw_samplepath for reduced allocations.
+Uses pre-allocated workspace vectors, only allocates final SamplePath.
+"""
+function draw_samplepath!(ws::PathWorkspace, subj::Int64, model::MultistateProcess, tpm_book, hazmat_book, tpm_map, fbmats, absorbingstates)
+    # Reset workspace
+    reset!(ws)
 
     # subject data
     subj_inds = model.subjectindices[subj] # rows in the dataset corresponding to the subject
@@ -805,35 +981,238 @@ function draw_samplepath(subj::Int64, model::MultistateProcess, tpm_book, hazmat
         BackwardSampling!(subj_dat, fbmats[subj])
     end
 
-    # initialize sample path
-    times  = [subj_dat.tstart[1]]; sizehint!(times, size(model.tmat, 2) * 2)
-    states = [subj_dat.statefrom[1]]; sizehint!(states, size(model.tmat, 2) * 2)
+    # initialize sample path with first time/state
+    push_time_state!(ws, subj_dat.tstart[1], subj_dat.statefrom[1])
 
-    # loop through data and sample endpoint conditioned paths - need to give control flow some thought
+    # loop through data and sample endpoint conditioned paths
     for i in eachindex(subj_inds) # loop over each interval for the subject
         if subj_dat.obstype[i] == 1 
-            push!(times, subj_dat.tstop[i])
-            push!(states, subj_dat.stateto[i])
+            push_time_state!(ws, subj_dat.tstop[i], subj_dat.stateto[i])
         else
-            sample_ecctmc!(times, states, tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]], hazmat_book[subj_tpm_map[i,1]], subj_dat.statefrom[i], subj_dat.stateto[i], subj_dat.tstart[i], subj_dat.tstop[i])
+            # sample_ecctmc! needs regular vectors to append to
+            # Use workspace view as temporary working vectors
+            _sample_ecctmc_ws!(ws, tpm_book[subj_tpm_map[i,1]][subj_tpm_map[i,2]], hazmat_book[subj_tpm_map[i,1]], subj_dat.statefrom[i], subj_dat.stateto[i], subj_dat.tstart[i], subj_dat.tstop[i])
         end
     end
 
     # append last state and time
     if subj_dat.obstype[end] != 1
-        push!(times, subj_dat.tstop[end])
-        push!(states, subj_dat.stateto[end])
+        push_time_state!(ws, subj_dat.tstop[end], subj_dat.stateto[end])
     end
 
     # truncate at entry to absorbing states
-    truncind = findfirst(states .∈ Ref(absorbingstates))
+    truncind = nothing
+    @inbounds for k in 1:ws.states_len
+        if ws.states[k] in absorbingstates
+            truncind = k
+            break
+        end
+    end
     if !isnothing(truncind)
-        times = first(times, truncind)
-        states = first(states, truncind)
+        ws.times_len = truncind
+        ws.states_len = truncind
     end
 
-    # return path
-    return reduce_jumpchain(SamplePath(subj, times, states))
+    # Create and return reduced path
+    return reduce_jumpchain_ws(ws, subj)
+end
+
+"""
+    _sample_ecctmc_ws!(ws::PathWorkspace, P, Q, a, b, t0, t1)
+
+Workspace-based endpoint-conditioned CTMC sampling. Appends to workspace.
+Uses pre-allocated arrays from workspace to minimize allocations.
+"""
+function _sample_ecctmc_ws!(ws::PathWorkspace, P, Q, a, b, t0, t1)
+    # number of states
+    nstates = size(Q, 1)
+
+    # length of time interval
+    T = t1 - t0
+
+    # maximum total hazard
+    m = maximum(abs.(diag(Q)))
+
+    # extract the a,b element of P
+    p_ab = P[a,b]
+
+    # Ensure workspace has capacity for this state space
+    ensure_R_capacity!(ws, nstates, 100)
+    
+    # Build base R matrix = I + Q/m in workspace (avoid diagm allocation)
+    R_base = @view ws.R_base[1:nstates, 1:nstates]
+    @inbounds for i in 1:nstates
+        for j in 1:nstates
+            R_base[i,j] = (i == j ? 1.0 : 0.0) + Q[i,j] / m
+        end
+    end
+    
+    # Store first slice (R^1 = R_base)
+    @inbounds for i in 1:nstates
+        for j in 1:nstates
+            ws.R_slices[i,j,1] = R_base[i,j]
+        end
+    end
+
+    # sample threshold for determining number of states
+    nthresh = rand()
+    
+    # initialize number of jumps and conditional prob of jumps
+    njumps = 0
+    cprob = exp(-m*T) * (a==b) / p_ab
+
+    if cprob > nthresh 
+        return # no jumps, the full path is `a` in [t0,t1]
+    else
+        # increment the number of jumps and compute cprob
+        njumps += 1
+        cprob += exp(-m*T) * (m*T) * ws.R_slices[a,b,1] / p_ab
+
+        # if there is exactly one jump
+        if cprob > nthresh
+            if a == b
+                return # jump is virtual, path is `a` in [t0,t1]
+            else
+                # jump is real - append single time and state
+                push_time_state!(ws, rand() * T + t0, b)
+                return 
+            end
+        else
+            # calculate the number of jumps - compute R^k iteratively
+            R_power = @view ws.R_power[1:nstates, 1:nstates]
+            
+            while cprob < nthresh
+                # increment the number of jumps
+                njumps += 1
+                
+                # Ensure capacity
+                if njumps > size(ws.R_slices, 3)
+                    ensure_R_capacity!(ws, nstates, 2 * njumps)
+                end
+                
+                # Compute R^njumps = R_base^njumps using matrix multiplication
+                # R_slices[:,:,njumps] = R_base^njumps
+                if njumps == 2
+                    # R^2 = R_base * R_base
+                    mul!(@view(ws.R_slices[1:nstates, 1:nstates, 2]), R_base, R_base)
+                else
+                    # R^k = R^(k-1) * R_base
+                    mul!(@view(ws.R_slices[1:nstates, 1:nstates, njumps]), 
+                         @view(ws.R_slices[1:nstates, 1:nstates, njumps-1]), R_base)
+                end
+
+                # calculate cprob
+                cprob += exp(-m*T) * (m*T)^njumps / factorial(big(njumps)) * ws.R_slices[a,b,njumps] / p_ab
+            end
+
+            # Ensure temp vectors have capacity
+            ensure_temp_capacity!(ws, njumps)
+            
+            # Generate uniform random times and sort
+            @inbounds for k in 1:njumps
+                ws.times_temp[k] = rand() * T + t0
+            end
+            sort!(@view(ws.times_temp[1:njumps]))
+
+            # sample the states at the transition times
+            scur = a
+            @inbounds for k in 1:njumps
+                ws.states_temp[k] = 0
+            end
+
+            @inbounds for s in 1:(njumps-1)
+                # Compute weights for state sampling
+                # weights[i] = R[scur,i,1] * R[i,b,njumps-s] / R[scur,b,njumps-s+1]
+                denom = ws.R_slices[scur, b, njumps-s+1]
+                weight_sum = 0.0
+                for i in 1:nstates
+                    weight_sum += ws.R_slices[scur, i, 1] * ws.R_slices[i, b, njumps-s] / denom
+                end
+                
+                # Sample from categorical distribution
+                u = rand() * weight_sum
+                cumsum = 0.0
+                snext = nstates
+                for i in 1:nstates
+                    cumsum += ws.R_slices[scur, i, 1] * ws.R_slices[i, b, njumps-s] / denom
+                    if cumsum >= u
+                        snext = i
+                        break
+                    end
+                end
+                
+                if snext != scur
+                    scur = snext
+                    ws.states_temp[s] = scur
+                end
+            end
+
+            ws.states_temp[njumps] = scur != b ? b : 0
+
+            # append only real transitions (non-virtual)
+            @inbounds for k in 1:njumps
+                if ws.states_temp[k] != 0
+                    push_time_state!(ws, ws.times_temp[k], ws.states_temp[k])
+                end
+            end
+
+            return
+        end
+    end
+end
+
+"""
+    reduce_jumpchain_ws(ws::PathWorkspace, subj::Int)
+
+Reduce jump chain directly from workspace (avoid intermediate allocation).
+Returns SamplePath with only actual state changes.
+"""
+function reduce_jumpchain_ws(ws::PathWorkspace, subj::Int)
+    pathlen = ws.states_len
+    
+    # No need to reduce short paths
+    if pathlen <= 2
+        return SamplePath(subj, ws.times[1:ws.times_len], ws.states[1:ws.states_len])
+    end
+    
+    # Find jump indices (where state actually changes)
+    # Always include first and last
+    jump_count = 1
+    @inbounds for i in 2:pathlen
+        if ws.states[i] != ws.states[i-1]
+            jump_count += 1
+        end
+    end
+    # Always include last point
+    if ws.states[pathlen] == ws.states[pathlen-1]
+        jump_count += 1  # Last wasn't counted as a change
+    end
+    
+    # Build reduced arrays
+    new_times = Vector{Float64}(undef, jump_count)
+    new_states = Vector{Int}(undef, jump_count)
+    
+    @inbounds begin
+        new_times[1] = ws.times[1]
+        new_states[1] = ws.states[1]
+        
+        j = 2
+        prev_state = ws.states[1]
+        for i in 2:pathlen-1
+            if ws.states[i] != prev_state
+                new_times[j] = ws.times[i]
+                new_states[j] = ws.states[i]
+                prev_state = ws.states[i]
+                j += 1
+            end
+        end
+        
+        # Always include last point
+        new_times[j] = ws.times[pathlen]
+        new_states[j] = ws.states[pathlen]
+    end
+    
+    return SamplePath(subj, new_times, new_states)
 end
 
 """

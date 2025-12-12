@@ -1038,7 +1038,7 @@ function _build_progression_hazard(observed_state::Int, phase_index::Int, n_phas
         hazname,
         from_phase,        # expanded state from
         to_phase,          # expanded state to
-        "exp",
+        :exp,
         [parname],
         1,                 # npar_baseline
         1,                 # npar_total
@@ -1098,7 +1098,7 @@ function _build_exit_hazard(pt_spec::PhaseTypeHazardSpec,
         hazname,
         from_phase,
         to_phase,
-        "exp",
+        :exp,
         parnames,
         1,                 # npar_baseline (just μ)
         npar_total,
@@ -1171,7 +1171,7 @@ function _build_expanded_hazard(h::HazardFunction,
                                  data::DataFrame)
     # Create a modified hazard spec with expanded state indices
     # The family determines which builder to use
-    family = lowercase(h.family)
+    family = h.family isa Symbol ? h.family : Symbol(lowercase(String(h.family)))
     
     hazname = Symbol("h$(observed_from)$(observed_to)")
     
@@ -4088,7 +4088,7 @@ function _make_collapsed_markov_model(model::PhaseTypeModel)
     
     for hazspec in model.hazards_spec
         # Create exponential version of this hazard (same formula for covariates)
-        exp_haz = Hazard(hazspec.formula, :exp, hazspec.statefrom, hazspec.stateto)
+        exp_haz = Hazard(hazspec.hazard, :exp, hazspec.statefrom, hazspec.stateto)
         push!(collapsed_hazards, exp_haz)
     end
     
@@ -4562,17 +4562,42 @@ function _rebuild_original_params_from_values!(model::PhaseTypeModel,
             hazname_sym = first(pair)
             idx = last(pair)
             # Get parameter names from existing structure
+            # Try original_parameters first, then fall back to expanded model parameters
+            parnames = Symbol[]
+            found_parnames = false
+            
             if haskey(model.original_parameters.nested, hazname_sym)
                 existing_params = model.original_parameters.nested[hazname_sym]
-                parnames = vcat(
-                    collect(keys(existing_params.baseline)),
-                    haskey(existing_params, :covariates) ? collect(keys(existing_params.covariates)) : Symbol[]
-                )
-            else
-                # Fallback: construct from hazname
+                # Check if baseline is a NamedTuple (has Symbol keys) or Vector (has Int keys)
+                if existing_params.baseline isa NamedTuple
+                    parnames = vcat(
+                        collect(keys(existing_params.baseline)),
+                        haskey(existing_params, :covariates) && existing_params.covariates isa NamedTuple ? 
+                            collect(keys(existing_params.covariates)) : Symbol[]
+                    )
+                    found_parnames = true
+                end
+            end
+            
+            # If original_parameters had placeholder structure, try expanded model parameters
+            if !found_parnames && haskey(model.parameters.nested, hazname_sym)
+                existing_params = model.parameters.nested[hazname_sym]
+                if existing_params.baseline isa NamedTuple
+                    parnames = vcat(
+                        collect(keys(existing_params.baseline)),
+                        haskey(existing_params, :covariates) && existing_params.covariates isa NamedTuple ? 
+                            collect(keys(existing_params.covariates)) : Symbol[]
+                    )
+                    found_parnames = true
+                end
+            end
+            
+            # Fallback: construct from hazname
+            if !found_parnames
                 npar_total = length(newvalues[idx])
                 parnames = [Symbol(hazname_sym, "_p", i) for i in 1:npar_total]
             end
+            
             hazname_sym => build_hazard_params(newvalues[idx], parnames, npar_baseline_list[idx], length(newvalues[idx]))
         end
         for pair in sort(collect(hazkeys), by = x -> x[2])

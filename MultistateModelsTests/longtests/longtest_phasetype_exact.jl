@@ -51,37 +51,12 @@ println("Testing inference for models with Coxian phase-type hazard structure.")
 println("These models are Markov on the expanded state space → direct MLE.")
 println("Default sample size: n=$N_SUBJECTS")
 
+# Shared helper functions (compute_state_prevalence, compute_state_prevalence_phasetype, etc.) 
+# are loaded from longtest_helpers.jl by the test runner.
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
-
-"""
-    compute_state_prevalence(paths, eval_times, n_states)
-
-Compute observed-state prevalence at each evaluation time.
-Collapses phase-space to observed states.
-"""
-function compute_state_prevalence(paths::Vector{SamplePath}, eval_times::Vector{Float64}, 
-                                   n_states::Int; phase_to_state=nothing)
-    n_times = length(eval_times)
-    prevalence = zeros(Float64, n_times, n_states)
-    n_paths = length(paths)
-    
-    for path in paths
-        for (t_idx, t) in enumerate(eval_times)
-            state_idx = searchsortedlast(path.times, t)
-            if state_idx >= 1
-                phase = path.states[state_idx]
-                # Map phase to observed state if needed
-                state = isnothing(phase_to_state) ? phase : phase_to_state[phase]
-                prevalence[t_idx, state] += 1.0
-            end
-        end
-    end
-    
-    prevalence ./= n_paths
-    return prevalence
-end
 
 """
     check_parameter_recovery(fitted_params, true_params; tol_rel)
@@ -176,7 +151,7 @@ end
         # All hazards should be MarkovHazard (exponential on expanded space)
         for haz in model.hazards
             @test haz isa MultistateModels.MarkovHazard
-            @test haz.family == "exp"
+            @test haz.family == :exp
         end
     end
     

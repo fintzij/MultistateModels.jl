@@ -368,8 +368,18 @@ function initialize_parameters!(model::MultistateProcess;
                                      surrogate_parameters = surrogate_parameters)
         
     elseif actual_method == :surrogate
-        if !_is_semimarkov(model)
-            @warn "Using :surrogate method on Markov model; this is equivalent to :crude"
+        # Check if model supports surrogate path initialization:
+        # 1. Must have semi-Markov hazards
+        # 2. Must be a model type that has panel/censored observations (not exact data)
+        supports_surrogate = _is_semimarkov(model) && 
+                             isa(model, Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored})
+        
+        if !supports_surrogate
+            if !_is_semimarkov(model)
+                @warn "Using :surrogate method on Markov model; this is equivalent to :crude"
+            else
+                @warn "Using :surrogate method on exact-data model; falling back to :crude"
+            end
             set_crude_init!(model; constraints = constraints)
         else
             _init_from_surrogate_paths!(model, npaths; 

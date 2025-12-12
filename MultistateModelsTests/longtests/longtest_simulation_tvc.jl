@@ -23,7 +23,7 @@ using MultistateModels: simulate_path, CachedTransformStrategy, DirectTransformS
 
 # Include fixtures - handle both standalone and runtests contexts
 if !isdefined(Main, :TestFixtures)
-    include(joinpath(@__DIR__, "fixtures/TestFixtures.jl"))
+    include(joinpath(@__DIR__, "..", "fixtures", "TestFixtures.jl"))
 end
 using .TestFixtures: toy_tvc_exp_model, toy_tvc_wei_model, toy_tvc_gom_model,
                      toy_illness_death_tvc_model, toy_semi_markov_tvc_model
@@ -80,22 +80,23 @@ end
 
 """
 Compute piecewise cumulative hazard for Gompertz PH with TVC.
-h(t) = γ α exp(α t + β x)
-Λ(t) = γ exp(β x) * (exp(α t) - exp(α t₀)) for each piece.
+flexsurv parameterization: h(t) = rate * exp(shape * t)
+H(t) = (rate/shape) * (exp(shape*t) - exp(shape*t₀)) for each piece.
+With PH: H(t) = (rate/shape) * exp(β x) * (exp(shape*t) - exp(shape*t₀))
 """
 function piecewise_cumhaz_gom_ph(t, shape, scale, beta, t_changes, x_values)
     cumhaz = 0.0
     prev_t = 0.0
     for (i, tc) in enumerate(t_changes)
         if t <= tc
-            cumhaz += scale * exp(beta * x_values[i]) * (exp(shape * t) - exp(shape * prev_t))
+            cumhaz += (scale / shape) * exp(beta * x_values[i]) * (exp(shape * t) - exp(shape * prev_t))
             return cumhaz
         else
-            cumhaz += scale * exp(beta * x_values[i]) * (exp(shape * tc) - exp(shape * prev_t))
+            cumhaz += (scale / shape) * exp(beta * x_values[i]) * (exp(shape * tc) - exp(shape * prev_t))
             prev_t = tc
         end
     end
-    cumhaz += scale * exp(beta * x_values[end]) * (exp(shape * t) - exp(shape * prev_t))
+    cumhaz += (scale / shape) * exp(beta * x_values[end]) * (exp(shape * t) - exp(shape * prev_t))
     return cumhaz
 end
 
@@ -133,24 +134,31 @@ end
 
 """
 Compute piecewise cumulative hazard for Gompertz AFT with TVC.
+flexsurv parameterization: h(t) = rate * exp(shape * t)
+For AFT, time is scaled: H(t) = (rate*ts)/(shape*ts) * (exp(shape*ts*t) - exp(shape*ts*t₀))
+                              = (rate/shape) * (exp(scaled_shape*t) - exp(scaled_shape*t₀))
+where ts = exp(-β x) and scaled_shape = shape * ts
 """
 function piecewise_cumhaz_gom_aft(t, shape, scale, beta, t_changes, x_values)
     cumhaz = 0.0
     prev_t = 0.0
-    time_scale = 1.0
     for (i, tc) in enumerate(t_changes)
         ts = exp(-beta * x_values[i])  # time scale for this interval
+        scaled_shape = shape * ts
+        scaled_rate = scale * ts
         if t <= tc
             # Gompertz AFT cumhaz from prev_t to t
-            cumhaz += scale * (exp(shape * ts * t) - exp(shape * ts * prev_t))
+            cumhaz += (scaled_rate / scaled_shape) * (exp(scaled_shape * t) - exp(scaled_shape * prev_t))
             return cumhaz
         else
-            cumhaz += scale * (exp(shape * ts * tc) - exp(shape * ts * prev_t))
+            cumhaz += (scaled_rate / scaled_shape) * (exp(scaled_shape * tc) - exp(scaled_shape * prev_t))
             prev_t = tc
         end
     end
     ts = exp(-beta * x_values[end])
-    cumhaz += scale * (exp(shape * ts * t) - exp(shape * ts * prev_t))
+    scaled_shape = shape * ts
+    scaled_rate = scale * ts
+    cumhaz += (scaled_rate / scaled_shape) * (exp(scaled_shape * t) - exp(scaled_shape * prev_t))
     return cumhaz
 end
 
@@ -176,8 +184,7 @@ function collect_event_durations(model, n_samples; rng = Random.GLOBAL_RNG)
     horizon = maximum(model.data.tstop)
     
     for _ in 1:n_samples
-        path = simulate_path(model, 1, sqrt(eps()), sqrt(eps()); 
-                            strategy = CachedTransformStrategy(), rng = rng)
+        path = simulate_path(model, 1; strategy = CachedTransformStrategy(), rng = rng)
         # Check if transition occurred before horizon
         if length(path.states) > 1 && path.states[end] != path.states[1]
             push!(durations, path.times[2])  # time of first transition
@@ -369,8 +376,7 @@ end
         n_total = 0
         
         for _ in 1:TVC_SIM_SAMPLES
-            path = simulate_path(model, 1, sqrt(eps()), sqrt(eps());
-                                strategy = CachedTransformStrategy(), rng = rng)
+            path = simulate_path(model, 1; strategy = CachedTransformStrategy(), rng = rng)
             n_total += 1
             
             # Check for back-and-forth transitions (1 → 2 → 1)
@@ -402,8 +408,7 @@ end
         n_censored = 0  # no transition
         
         for _ in 1:TVC_SIM_SAMPLES
-            path = simulate_path(model, 1, sqrt(eps()), sqrt(eps());
-                                strategy = CachedTransformStrategy(), rng = rng)
+            path = simulate_path(model, 1; strategy = CachedTransformStrategy(), rng = rng)
             
             if path.states[end] == 3
                 if length(path.states) == 2
@@ -433,12 +438,10 @@ end
         model = fixture.model
         
         rng1 = Random.MersenneTwister(99999)
-        path1 = simulate_path(model, 1, sqrt(eps()), sqrt(eps());
-                             strategy = CachedTransformStrategy(), rng = rng1)
+        path1 = simulate_path(model, 1; strategy = CachedTransformStrategy(), rng = rng1)
         
         rng2 = Random.MersenneTwister(99999)
-        path2 = simulate_path(model, 1, sqrt(eps()), sqrt(eps());
-                             strategy = CachedTransformStrategy(), rng = rng2)
+        path2 = simulate_path(model, 1; strategy = CachedTransformStrategy(), rng = rng2)
         
         @test path1.times == path2.times
         @test path1.states == path2.states
@@ -458,10 +461,8 @@ end
         durations_direct = Float64[]
         
         for _ in 1:1000
-            path_c = simulate_path(model, 1, sqrt(eps()), sqrt(eps());
-                                  strategy = CachedTransformStrategy(), rng = rng_cached)
-            path_d = simulate_path(model, 1, sqrt(eps()), sqrt(eps());
-                                  strategy = DirectTransformStrategy(), rng = rng_direct)
+            path_c = simulate_path(model, 1; strategy = CachedTransformStrategy(), rng = rng_cached)
+            path_d = simulate_path(model, 1; strategy = DirectTransformStrategy(), rng = rng_direct)
             
             if length(path_c.states) > 1 && path_c.states[end] != path_c.states[1]
                 push!(durations_cached, path_c.times[2])

@@ -14,6 +14,10 @@ using MultistateModels
 using DataFrames
 using Random
 
+# Import internal types for testing
+import MultistateModels: ThreadingConfig, get_parameters_flat, should_parallelize, 
+                          get_threading_config, set_threading_config!
+
 @testset "Parallel Likelihood Evaluation" begin
     
     @testset "Threading Utilities" begin

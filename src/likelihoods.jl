@@ -798,46 +798,98 @@ This is an internal function. Use `loglik_markov` for the public API.
 """
 function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, return_ll_subj = false)
 
-    # unflatten parameters to natural scale (AD-compatible)
-    pars = unflatten_natural(parameters, data.model)
-
     # Element type for AD compatibility
     T = eltype(parameters)
+
+    # Pre-extracted column accessors for O(1) access (avoids DataFrame dispatch overhead)
+    cols = data.columns
+    
+    # Check if we can use pre-computed hazard rates (Markov models only)
+    # For Markov hazards, rates are time-invariant and can be computed once per likelihood call
+    # But interaction terms (e.g., trt * age) can't be pre-cached, so check validity
+    is_markov = data.model isa MultistateMarkovProcess
+    can_use_rate_cache = is_markov && T === Float64 && 
+                         !isempty(data.cache.hazard_rates_cache) &&
+                         _covars_cache_valid(data.cache.covars_cache, data.model.hazards)
 
     # Use cached arrays for Float64, allocate fresh for Dual types (AD)
     if T === Float64
         # Reuse pre-allocated cache (zero-allocation path for non-AD evaluations)
         hazmat_book = data.cache.hazmat_book
         tpm_book = data.cache.tpm_book
-        cache = data.cache.exp_cache
-        # Reset hazmat matrices to zero (they accumulate)
-        for hmat in hazmat_book
-            fill!(hmat, zero(Float64))
+        exp_cache = data.cache.exp_cache
+        
+        # Unflatten to NamedTuple structure (required by hazard functions)
+        # NamedTuple allocations are minimal (~13) and mostly stack-allocated
+        pars = unflatten_natural(parameters, data.model)
+        
+        # Pre-compute hazard rates once for all patterns (Markov models only)
+        if can_use_rate_cache
+            compute_hazard_rates!(data.cache.hazard_rates_cache, pars, 
+                                  data.model.hazards, data.cache.covars_cache)
+        end
+        
+        # Reset hazard matrices and compute TPMs
+        # Use batched eigendecomposition approach when multiple Δt values exist
+        @inbounds for t in eachindex(data.books[1])
+            # Use cached rates path for Markov models
+            if can_use_rate_cache
+                compute_hazmat_from_rates!(
+                    hazmat_book[t],
+                    data.cache.hazard_rates_cache[t],
+                    data.model.hazards)
+            else
+                fill!(hazmat_book[t], zero(Float64))
+                compute_hazmat!(
+                    hazmat_book[t],
+                    pars,
+                    data.model.hazards,
+                    data.books[1][t],
+                    data.model.data)
+            end
+            
+            # Invalidate eigen cache when Q changes (new parameters)
+            invalidate_eigen_cache!(data.cache, t)
+            
+            # Use batched approach when >= 2 unique Δt values (eigendecomp pays off)
+            n_dt = length(data.cache.dt_values[t])
+            if n_dt >= 2
+                compute_tmat_batched!(
+                    tpm_book[t],
+                    hazmat_book[t],
+                    data.cache.dt_values[t],
+                    data.cache.eigen_cache,
+                    t)
+            else
+                # Single Δt: use standard approach
+                compute_tmat!(
+                    tpm_book[t],
+                    hazmat_book[t],
+                    data.books[1][t],
+                    exp_cache)
+            end
         end
     else
         # Allocate fresh arrays for AD (element type must be Dual)
+        pars = unflatten_natural(parameters, data.model)
         hazmat_book = build_hazmat_book(T, data.model.tmat, data.books[1])
         tpm_book = build_tpm_book(T, data.model.tmat, data.books[1])
-        cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
-    end
-
-    # Solve Kolmogorov equations for TPMs
-    for t in eachindex(data.books[1])
-
-        # compute the transition intensity matrix
-        compute_hazmat!(
-            hazmat_book[t],
-            pars,
-            data.model.hazards,
-            data.books[1][t],
-            data.model.data)
-
-        # compute transition probability matrices
-        compute_tmat!(
-            tpm_book[t],
-            hazmat_book[t],
-            data.books[1][t],
-            cache)
+        exp_cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
+        
+        # Solve Kolmogorov equations for TPMs
+        @inbounds for t in eachindex(data.books[1])
+            compute_hazmat!(
+                hazmat_book[t],
+                pars,
+                data.model.hazards,
+                data.books[1][t],
+                data.model.data)
+            compute_tmat!(
+                tpm_book[t],
+                hazmat_book[t],
+                data.books[1][t],
+                exp_cache)
+        end
     end
 
     # number of subjects
@@ -861,9 +913,6 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
     else
         q = zeros(T, S, S)
     end
-
-    # Pre-extracted column accessors for O(1) access (avoids DataFrame dispatch overhead)
-    cols = data.columns
     
     # check if observation weights are provided (once, outside loop)
     has_obs_weights = !isnothing(data.model.ObservationWeights)
@@ -930,8 +979,8 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                 else # panel data (obstype == 2)
                     statefrom_i = cols.statefrom[i]
                     stateto_i = cols.stateto[i]
-                    book_idx1 = data.books[2][i, 1]
-                    book_idx2 = data.books[2][i, 2]
+                    book_idx1 = cols.tpm_map_col1[i]
+                    book_idx2 = cols.tpm_map_col2[i]
                     subj_ll += log(tpm_book[book_idx1][book_idx2][statefrom_i, stateto_i]) * obs_weight
                 end
             end
@@ -977,8 +1026,8 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                 # compute q, the transition probability matrix
                 if obstype_i != 1
                     # if panel data, simply grab q from tpm_book
-                    book_idx1 = data.books[2][i, 1]
-                    book_idx2 = data.books[2][i, 2]
+                    book_idx1 = cols.tpm_map_col1[i]
+                    book_idx2 = cols.tpm_map_col2[i]
                     copyto!(q, tpm_book[book_idx1][book_idx2])
                     
                 else
@@ -1162,8 +1211,8 @@ function _loglik_markov_functional(parameters, data::MPanelData; neg = true)
                 else  # panel data (obstype == 2)
                     statefrom_i = cols.statefrom[i]
                     stateto_i = cols.stateto[i]
-                    book_idx1 = data.books[2][i, 1]
-                    book_idx2 = data.books[2][i, 2]
+                    book_idx1 = cols.tpm_map_col1[i]
+                    book_idx2 = cols.tpm_map_col2[i]
                     P = tpm_dict[(book_idx1, book_idx2)]
                     log(P[statefrom_i, stateto_i]) * obs_weight
                 end
@@ -1236,8 +1285,8 @@ function _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, ::Type{T
             α = new_α
         else
             # Panel/censored data: multiply by TPM
-            book_idx1 = data.books[2][i, 1]
-            book_idx2 = data.books[2][i, 2]
+            book_idx1 = cols.tpm_map_col1[i]
+            book_idx2 = cols.tpm_map_col2[i]
             P = tpm_dict[(book_idx1, book_idx2)]
             
             # Matrix-vector product (non-mutating)
@@ -1664,16 +1713,26 @@ Compute likelihood intervals directly from a SamplePath without creating a DataF
 Returns a vector of LightweightIntervals.
 
 This implements the same logic as `make_subjdat` but avoids DataFrame allocation.
+
+For repeated calls (e.g., MCEM), uses thread-local workspace to reduce allocations.
 """
 function compute_intervals_from_path(path::SamplePath, subject_covar::SubjectCovarCache)
-    # Determine evaluation times
-    # For paths without covariates, use path times directly
-    # For paths with covariates, merge path times with covariate change times
-    
+    # Get thread-local workspace for TVC case
+    ws = get_tvc_workspace()
+    return compute_intervals_from_path!(ws, path, subject_covar)
+end
+
+"""
+    compute_intervals_from_path!(ws::TVCIntervalWorkspace, path::SamplePath, subject_covar::SubjectCovarCache)
+
+Workspace-based version that minimizes allocations for repeated calls.
+"""
+function compute_intervals_from_path!(ws::TVCIntervalWorkspace, path::SamplePath, subject_covar::SubjectCovarCache)
     n_transitions = length(path.times) - 1
     
     if isempty(subject_covar.covar_data) || nrow(subject_covar.covar_data) <= 1
         # No time-varying covariates - use path times directly
+        # Still need to allocate result, but workspace not needed
         intervals = Vector{LightweightInterval}(undef, n_transitions)
         
         sojourn = 0.0
@@ -1697,59 +1756,105 @@ function compute_intervals_from_path(path::SamplePath, subject_covar::SubjectCov
         
         return intervals
     else
-        # Time-varying covariates - need to split intervals at covariate change times
-        # Find times where covariates change
+        # Time-varying covariates - use workspace to reduce allocations
         tstart = subject_covar.tstart
         covar_data = subject_covar.covar_data
         
-        # Identify covariate change times (where row differs from previous)
-        change_times = [tstart[1]]  # Always include first time
+        # Identify covariate change times using workspace
+        n_change = 1
+        @inbounds ws.change_times[1] = tstart[1]
         for i in 2:length(tstart)
             if !isequal(covar_data[i-1, :], covar_data[i, :])
-                push!(change_times, tstart[i])
+                n_change += 1
+                if n_change > length(ws.change_times)
+                    resize!(ws.change_times, 2 * n_change)
+                end
+                ws.change_times[n_change] = tstart[i]
             end
         end
         
-        # Merge path times with covariate change times
-        utimes = sort(unique(vcat(path.times, change_times)))
+        # Merge path times with covariate change times into utimes
+        # Collect all unique times in range
+        n_utimes = 0
+        path_start = path.times[1]
+        path_end = path.times[end]
         
-        # Filter to only times within path range
-        filter!(t -> path.times[1] <= t <= path.times[end], utimes)
+        # Add path times
+        for t in path.times
+            n_utimes += 1
+            if n_utimes > length(ws.utimes)
+                resize!(ws.utimes, 2 * n_utimes)
+            end
+            @inbounds ws.utimes[n_utimes] = t
+        end
         
-        n_intervals = length(utimes) - 1
-        intervals = Vector{LightweightInterval}(undef, n_intervals)
+        # Add change times within range
+        for i in 1:n_change
+            t = ws.change_times[i]
+            if path_start <= t <= path_end
+                n_utimes += 1
+                if n_utimes > length(ws.utimes)
+                    resize!(ws.utimes, 2 * n_utimes)
+                end
+                @inbounds ws.utimes[n_utimes] = t
+            end
+        end
         
-        # Track sojourn per state visit
-        pathinds = searchsortedlast.(Ref(path.times), utimes)
-        datinds = searchsortedlast.(Ref(tstart), utimes)
+        # Sort and remove duplicates (in-place)
+        sort!(@view(ws.utimes[1:n_utimes]))
         
-        # Compute sojourns by grouping consecutive intervals in same state visit
-        sojourns = zeros(n_intervals)
+        # Unique in-place
+        j = 1
+        @inbounds for i in 2:n_utimes
+            if ws.utimes[i] != ws.utimes[j]
+                j += 1
+                ws.utimes[j] = ws.utimes[i]
+            end
+        end
+        n_utimes = j
+        
+        n_intervals = n_utimes - 1
+        
+        # Ensure workspace capacity
+        if n_intervals > length(ws.intervals)
+            resize!(ws.intervals, max(n_intervals, 2 * length(ws.intervals)))
+            resize!(ws.sojourns, length(ws.intervals))
+            resize!(ws.pathinds, length(ws.intervals) + 1)
+            resize!(ws.datinds, length(ws.intervals) + 1)
+        end
+        
+        # Compute path and data indices
+        @inbounds for i in 1:n_utimes
+            ws.pathinds[i] = searchsortedlast(path.times, ws.utimes[i])
+            ws.datinds[i] = searchsortedlast(tstart, ws.utimes[i])
+        end
+        
+        # Compute sojourns
         current_sojourn = 0.0
-        current_pathind = pathinds[1]
+        current_pathind = ws.pathinds[1]
         
-        for i in 1:n_intervals
-            increment = utimes[i+1] - utimes[i]
+        @inbounds for i in 1:n_intervals
+            increment = ws.utimes[i+1] - ws.utimes[i]
             
-            # Reset sojourn if we're in a new state visit
-            if pathinds[i] != current_pathind
+            if ws.pathinds[i] != current_pathind
                 current_sojourn = 0.0
-                current_pathind = pathinds[i]
+                current_pathind = ws.pathinds[i]
             end
             
-            sojourns[i] = current_sojourn
+            ws.sojourns[i] = current_sojourn
             current_sojourn += increment
         end
         
-        # Build intervals
-        for i in 1:n_intervals
-            increment = utimes[i+1] - utimes[i]
+        # Build intervals (need to allocate result vector)
+        intervals = Vector{LightweightInterval}(undef, n_intervals)
+        @inbounds for i in 1:n_intervals
+            increment = ws.utimes[i+1] - ws.utimes[i]
             intervals[i] = LightweightInterval(
-                sojourns[i],
-                sojourns[i] + increment,
-                path.states[pathinds[i]],
-                path.states[pathinds[i+1]],
-                datinds[i]
+                ws.sojourns[i],
+                ws.sojourns[i] + increment,
+                path.states[ws.pathinds[i]],
+                path.states[ws.pathinds[i+1]],
+                ws.datinds[i]
             )
         end
         

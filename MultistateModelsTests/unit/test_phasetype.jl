@@ -40,7 +40,8 @@ import MultistateModels: PhaseTypeConfig, PhaseTypeDistribution, PhaseTypeSurrog
     expand_data_for_phasetype, needs_data_expansion_for_phasetype,
     compute_expanded_subject_indices, build_coxian_intensity, subintensity,
     absorption_rates, progression_rates, loglik_phasetype_expanded, SamplePath,
-    collapse_phasetype_path
+    collapse_phasetype_path, get_parameters_flat, get_parameters_nested,
+    get_parameters_natural, get_unflatten_fn
 
 # =============================================================================
 # Helper: Analytic Matrix Exponential for 2-Phase Coxian

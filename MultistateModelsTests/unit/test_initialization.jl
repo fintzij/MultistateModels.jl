@@ -366,7 +366,7 @@ end
         )
         
         model = multistatemodel(h12; data = panel_data, 
-                                surrogate = :markov, optimize_surrogate = true)
+                                surrogate = :markov, fit_surrogate = true)
         
         # Initialize with :surrogate method
         initialize_parameters!(model; method = :surrogate, npaths = 10)
@@ -395,7 +395,7 @@ end
         )
         
         model = multistatemodel(h12; data = panel_data, 
-                                surrogate = :markov, optimize_surrogate = true)
+                                surrogate = :markov, fit_surrogate = true)
         
         # Initialize with :surrogate
         initialize_parameters!(model; method = :surrogate, npaths = 10)

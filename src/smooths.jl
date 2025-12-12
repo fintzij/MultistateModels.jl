@@ -369,6 +369,123 @@ function calibrate_splines!(model::MultistateProcess;
 end
 
 """
+    _rebuild_model_with_knots!(model::MultistateProcess, knot_locations::Dict{Tuple{Int,Int}, Vector{Float64}})
+
+Rebuild spline hazards in-place with new interior knot locations.
+
+This function creates new `RuntimeSplineHazard` objects with updated knots
+and replaces them in the model's hazard vector. The boundary knots are preserved
+from the original hazards.
+
+# Arguments
+- `model::MultistateProcess`: The model to modify
+- `knot_locations::Dict{Tuple{Int,Int}, Vector{Float64}}`: Map from (statefrom, stateto) 
+  to new interior knot locations
+
+# Notes
+- Only modifies `RuntimeSplineHazard` entries
+- Preserves all other hazard properties (degree, natural_spline, monotone, etc.)
+- After calling this, `_rebuild_model_parameters!` should be called to update parameters
+"""
+function _rebuild_model_with_knots!(model::MultistateProcess, 
+                                     knot_locations::Dict{Tuple{Int,Int}, Vector{Float64}})
+    
+    for (idx, haz) in enumerate(model.hazards)
+        # Only process spline hazards
+        haz isa RuntimeSplineHazard || continue
+        
+        key = (haz.statefrom, haz.stateto)
+        haskey(knot_locations, key) || continue
+        
+        new_interior_knots = knot_locations[key]
+        
+        # Preserve boundary knots from existing hazard
+        old_knots = haz.knots
+        bknots = [old_knots[1], old_knots[end]]
+        
+        # Combine and sort knots
+        allknots = unique(sort([bknots[1]; new_interior_knots; bknots[2]]))
+        
+        # Build new B-spline basis with same settings as original
+        B = BSplineBasis(BSplineOrder(haz.degree + 1), copy(allknots))
+        
+        # Apply boundary conditions via basis recombination (same as original)
+        use_constant = haz.extrapolation == "constant"
+        if use_constant && (haz.degree >= 2)
+            B = RecombinedBSplineBasis(B, Derivative(1))
+        elseif (haz.degree > 1) && haz.natural_spline
+            B = RecombinedBSplineBasis(B, Natural())
+        end
+        
+        # Determine extrapolation method
+        extrap_method = if haz.extrapolation == "linear"
+            BSplineKit.SplineExtrapolations.Linear()
+        else
+            BSplineKit.SplineExtrapolations.Flat()
+        end
+        
+        # Number of basis functions = number of spline coefficients
+        nbasis = length(B)
+        
+        # Build new parameter names
+        n_covar = length(haz.covar_names)
+        baseline_names = [Symbol(string(haz.hazname), "_sp", i) for i in 1:nbasis]
+        covar_parnames = [Symbol(string(haz.hazname), "_", cn) for cn in haz.covar_names]
+        parnames = vcat(baseline_names, covar_parnames)
+        npar_total = nbasis + n_covar
+        
+        # Generate new hazard and cumhaz functions
+        hazard_fn, cumhaz_fn = _generate_spline_hazard_fns(
+            B, extrap_method, haz.monotone, nbasis, parnames, haz.metadata.linpred_effect
+        )
+        
+        # Create new RuntimeSplineHazard with updated knots
+        new_haz = RuntimeSplineHazard(
+            haz.hazname,
+            haz.statefrom,
+            haz.stateto,
+            haz.family,
+            parnames,
+            nbasis,
+            npar_total,
+            hazard_fn,
+            cumhaz_fn,
+            haz.has_covariates,
+            haz.covar_names,
+            haz.degree,
+            allknots,
+            haz.natural_spline,
+            haz.monotone,
+            haz.extrapolation,
+            haz.metadata,
+            haz.shared_baseline_key,
+        )
+        
+        # Replace in model
+        model.hazards[idx] = new_haz
+    end
+    
+    # Also update totalhazards if they reference spline hazards
+    _rebuild_totalhazards!(model)
+    
+    return nothing
+end
+
+"""
+    _rebuild_totalhazards!(model::MultistateProcess)
+
+Rebuild the totalhazards structure after hazard modifications.
+"""
+function _rebuild_totalhazards!(model::MultistateProcess)
+    # Rebuild totalhazards from scratch using current hazards
+    model.totalhazards = build_totalhazards(model.hazards, model.tmat)
+    return nothing
+end
+
+# Import _generate_spline_hazard_fns from modelgeneration - it's already available
+# since smooths.jl is included after modelgeneration.jl
+
+"""
     _extract_sojourns_from_data(model::MultistateProcess) -> Dict{Tuple{Int,Int}, Vector{Float64}}
 
 Extract observed sojourn times for each transition from the model's data.

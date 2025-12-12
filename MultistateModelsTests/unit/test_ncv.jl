@@ -10,6 +10,13 @@
 using LinearAlgebra
 using Random
 
+# Import internal functions for testing
+import MultistateModels: cholesky_downdate!, cholesky_downdate_copy,
+                          ncv_loo_perturbation_direct, ncv_loo_perturbation_cholesky,
+                          ncv_loo_perturbation_woodbury,
+                          NCVState, compute_ncv_perturbations!, ncv_criterion,
+                          loo_perturbations_direct, ncv_get_loo_estimates, ncv_vcov
+
 # =============================================================================
 # 1. Cholesky Downdate Algorithm
 # =============================================================================

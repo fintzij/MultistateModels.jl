@@ -17,6 +17,9 @@ using MultistateModels
 using Random
 using QuadGK
 
+# Import internal functions for testing
+import MultistateModels: get_parameters_flat, default_nknots, place_interior_knots
+
 @testset "Spline Hazards" begin
 
     # =========================================================================
@@ -687,7 +690,7 @@ using QuadGK
             new_knots = model.hazards[1].knots
             new_npar = model.hazards[1].npar_baseline
             
-            # Verify model was modified
+            # Verify model was modified (knots changed)
             @test length(new_knots) != length(old_knots) || new_knots != old_knots
             
             # Verify parameters were rebuilt

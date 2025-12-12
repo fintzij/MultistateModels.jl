@@ -8,9 +8,10 @@
 | **Phase 1** | Quick Wins | 2-3 days | Low | Minimal | ✅ Complete (~24% speedup) |
 | **Phase 2** | Parameter System | 3-5 days | Medium | Moderate | ✅ Complete (API consolidated) |
 | **Phase 3** | Likelihood Unification | 2-3 days | Medium | Yes | ✅ Complete |
-| **Phase 4** | Caching Optimization | 2-3 days | Low | No | Not started |
+| **Phase 4** | Caching Optimization | 2-3 days | Low | No | ✅ Complete (Zero GC achieved) |
+| **Phase 4b** | Simulation Optimization | 0.5 days | Low | No | ✅ Complete (5.5x speedup for Markov) |
 | **Phase 5** | File Reorganization | 1-2 days | Low | No | Not started |
-| **Phase 6** | AD Modernization | 3-5 days | High | Yes | Not started |
+| **Phase 6** | AD Modernization | 3-5 days | High | Yes | ⚠️ Blocked (Mooncake LAPACK issue)
 
 ## Completed Phase Summary
 
@@ -41,6 +42,34 @@
 - **Backward compatibility**: `loglik_markov_functional` alias preserved
 - **Files modified**: `src/likelihoods.jl`, `src/modelfitting.jl`
 - **Tests**: All Phase 3 validation tests pass
+
+### Phase 4 Results (Caching Optimization)
+- **MPanelDataColumnAccessor**: Pre-extracted DataFrame columns for O(1) access
+- **TPMCache infrastructure**:
+  - `hazmat_book`: Pre-allocated Q matrices per covariate pattern
+  - `tpm_book`: Pre-allocated P matrices per pattern × time interval
+  - `exp_cache`: Reused ExponentialUtilities workspace
+  - `q_work`, `lmat_work`: Forward algorithm scratch space
+  - `covars_cache`: Pre-extracted covariates per (pattern, hazard)
+  - `hazard_rates_cache`: Pre-computed rates for Markov models
+  - `eigen_cache`: Cached eigendecompositions for batched matrix exp
+  - `dt_values`: Unique Δt values per pattern
+- **Batched matrix exponential**: Eigendecomposition approach for ≥2 unique Δt values (1.6-2x speedup)
+- **Pre-computed hazard rates**: For Markov models, rates computed once per likelihood call
+- **Performance**: Zero GC time achieved across all model sizes
+- **SIMD/Memory Layout**: Analyzed and determined not beneficial for 3×3 matrices
+- **Files modified**: `src/common.jl`, `src/hazards.jl`, `src/likelihoods.jl`
+
+### Phase 4b Results (Simulation Optimization)
+- **Closed-form jump times for Markov hazards**: For states where all outgoing hazards are exponential, jump times are computed analytically instead of using root-finding
+- **Formula**: `t = -log(1 - (u - cuminc)/(1 - cuminc)) / total_rate`
+- **New solver types**: `ExponentialJumpSolver`, `HybridJumpSolver` (exported)
+- **Helper functions**: `_is_state_all_markov()`, `_compute_total_markov_rate()`, `_exponential_jump_time()`
+- **Performance**: 
+  - Markov simulation: 13.5 ms (50 subjects, 100 paths)
+  - Weibull simulation: 75 ms (same setup)
+  - **5.5x speedup** for Markov models vs root-finding
+- **Files modified**: `src/simulation.jl`, `src/MultistateModels.jl` (exports)
 
 ---
 

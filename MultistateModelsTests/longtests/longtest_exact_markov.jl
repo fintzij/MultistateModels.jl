@@ -41,48 +41,12 @@ const MAX_TIME = 20.0           # Maximum follow-up time
 const PARAM_TOL_SE = 3.0        # Parameter should be within 3 SEs of truth
 const PARAM_TOL_REL = 0.15      # Relative tolerance (15% with n=1000)
 
+# Shared helper functions (compute_state_prevalence, count_transitions, etc.) are loaded
+# from longtest_helpers.jl by the test runner.
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
-
-"""
-    compute_state_prevalence(paths::Vector{SamplePath}, eval_times::Vector{Float64}, n_states::Int)
-
-Compute state prevalence at each evaluation time from a collection of sample paths.
-"""
-function compute_state_prevalence(paths::Vector{SamplePath}, eval_times::Vector{Float64}, n_states::Int)
-    n_times = length(eval_times)
-    prevalence = zeros(Float64, n_times, n_states)
-    n_paths = length(paths)
-    
-    for path in paths
-        for (t_idx, t) in enumerate(eval_times)
-            state_idx = searchsortedlast(path.times, t)
-            if state_idx >= 1
-                state = path.states[state_idx]
-                prevalence[t_idx, state] += 1.0
-            end
-        end
-    end
-    
-    prevalence ./= n_paths
-    return prevalence
-end
-
-"""
-    count_transitions(paths::Vector{SamplePath}, n_states::Int)
-
-Count total transitions between each pair of states.
-"""
-function count_transitions(paths::Vector{SamplePath}, n_states::Int)
-    counts = zeros(Int, n_states, n_states)
-    for path in paths
-        for i in 1:(length(path.states) - 1)
-            counts[path.states[i], path.states[i+1]] += 1
-        end
-    end
-    return counts
-end
 
 """
     generate_exact_data_progressive(hazards, true_params; n_subj, max_time, covariate_data)
@@ -632,6 +596,122 @@ end
     end
 end
 
+@testset "Gompertz - TVC" begin
+    Random.seed!(RNG_SEED + 42)
+    
+    n_subj = N_SUBJECTS
+    
+    # TVC data: x changes at time 5
+    tvc_data = vcat([
+        DataFrame(
+            id = fill(i, 2),
+            tstart = [0.0, 5.0],
+            tstop = [5.0, 30.0],  # Longer follow-up for Gompertz
+            statefrom = [1, 1],
+            stateto = [1, 1],
+            obstype = [1, 1],
+            x = [0.0, 1.0]
+        ) for i in 1:n_subj
+    ]...)
+    
+    # Gompertz parameters: (shape, rate, beta)
+    # Shape is identity-transformed, rate is log-transformed
+    true_shape_12, true_rate_12, true_beta_12 = 0.08, 0.10, 0.3
+    true_shape_23, true_rate_23, true_beta_23 = 0.06, 0.08, -0.2
+    
+    true_params = (
+        h12 = [true_shape_12, log(true_rate_12), true_beta_12],
+        h23 = [true_shape_23, log(true_rate_23), true_beta_23]
+    )
+    
+    h12 = Hazard(@formula(0 ~ x), "gom", 1, 2)
+    h23 = Hazard(@formula(0 ~ x), "gom", 2, 3)
+    
+    model_sim = multistatemodel(h12, h23; data=tvc_data)
+    set_parameters!(model_sim, true_params)
+    
+    # Use autotmax=false to preserve TVC interval structure
+    sim_result = simulate(model_sim; paths=false, data=true, nsim=1, autotmax=false)
+    exact_data = sim_result[1]
+    
+    model_fit = multistatemodel(h12, h23; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
+    
+    @testset "TVC Gompertz parameter recovery" begin
+        p = get_parameters(fitted; scale=:estimation)
+        # Shape is on natural scale (identity transform)
+        @test isapprox(p[1], true_shape_12; atol=0.05)
+        # Rate is log-transformed
+        @test isapprox(exp(p[2]), true_rate_12; rtol=PARAM_TOL_REL)
+        # TVC beta may have higher variance
+        @test isapprox(p[3], true_beta_12; atol=0.25)
+    end
+end
+
+@testset "Spline - TVC" begin
+    Random.seed!(RNG_SEED + 43)
+    
+    n_subj = N_SUBJECTS
+    
+    # TVC data: x changes at time 5
+    tvc_data = vcat([
+        DataFrame(
+            id = fill(i, 2),
+            tstart = [0.0, 5.0],
+            tstop = [5.0, MAX_TIME],
+            statefrom = [1, 1],
+            stateto = [1, 1],
+            obstype = [1, 1],
+            x = [0.0, 1.0]
+        ) for i in 1:n_subj
+    ]...)
+    
+    # Generate underlying data from Weibull with TVC effect
+    true_shape_12, true_scale_12, true_beta_12 = 1.2, 0.20, 0.5
+    true_shape_23, true_scale_23, true_beta_23 = 1.0, 0.15, -0.3
+    
+    h12_wei = Hazard(@formula(0 ~ x), "wei", 1, 2)
+    h23_wei = Hazard(@formula(0 ~ x), "wei", 2, 3)
+    
+    wei_params = (
+        h12 = [log(true_shape_12), log(true_scale_12), true_beta_12],
+        h23 = [log(true_shape_23), log(true_scale_23), true_beta_23]
+    )
+    
+    model_sim = multistatemodel(h12_wei, h23_wei; data=tvc_data)
+    set_parameters!(model_sim, wei_params)
+    
+    # Use autotmax=false to preserve TVC interval structure
+    sim_result = simulate(model_sim; paths=false, data=true, nsim=1, autotmax=false)
+    exact_data = sim_result[1]
+    
+    # Fit with splines + TVC covariate
+    h12_sp = Hazard(@formula(0 ~ x), "sp", 1, 2; degree=3, knots=[5.0, 10.0, 15.0],
+                    boundaryknots=[0.0, MAX_TIME], extrapolation="constant")
+    h23_sp = Hazard(@formula(0 ~ x), "sp", 2, 3; degree=3, knots=[5.0, 10.0, 15.0],
+                    boundaryknots=[0.0, MAX_TIME], extrapolation="constant")
+    
+    model_fit = multistatemodel(h12_sp, h23_sp; data=exact_data)
+    fitted = fit(model_fit; verbose=false)
+    
+    @testset "TVC Spline fit converges" begin
+        @test isfinite(fitted.loglik.loglik)
+        @test fitted.loglik.loglik < 0
+    end
+    
+    @testset "TVC covariate effect reasonable" begin
+        # Last parameter in each hazard should be the TVC covariate effect
+        p = get_parameters_flat(fitted)
+        n_h12 = fitted.hazards[1].npar_total
+        beta_12_est = p[n_h12]  # Last param of h12
+        beta_23_est = p[end]    # Last param of h23
+        
+        # Covariate effects should have same sign as truth
+        @test sign(beta_12_est) == sign(true_beta_12)
+        @test sign(beta_23_est) == sign(true_beta_23)
+    end
+end
+
 # ============================================================================
 # TEST SECTION 6: EDGE CASES
 # ============================================================================
@@ -706,11 +786,10 @@ end
 
 println("\n=== Exact Data Long Test Suite Complete ===\n")
 println("This test suite validated:")
-println("  - Exponential hazards: no covariate, with covariate")
-println("  - Weibull hazards: no covariate, with covariate")
-println("  - Gompertz hazards: no covariate, with covariate")
-println("  - Spline hazards: no covariate, with covariate")
-println("  - Time-varying covariates: exponential, Weibull")
+println("  - Exponential hazards: no covariate, with covariate, TVC")
+println("  - Weibull hazards: no covariate, with covariate, TVC")
+println("  - Gompertz hazards: no covariate, with covariate, TVC")
+println("  - Spline hazards: no covariate, with covariate, TVC")
 println("  - Edge cases: subject weights, likelihood properties")
 println("Model structure: progressive 3-state (1→2→3)")
 println("Sample size: n=$(N_SUBJECTS), simulation trajectories: $(N_SIM_TRAJ)")

@@ -1,9 +1,11 @@
 module MultistateModelsTests
 
 using DataFrames
+using Distributions
 using LinearAlgebra
 using MultistateModels
 using Random
+using Statistics
 using Test
 
 const TEST_LEVEL = get(ENV, "MSM_TEST_LEVEL", "quick")
@@ -50,6 +52,10 @@ function runtests()
 
     if TEST_LEVEL == "full"
         @info "Running full test suite including long statistical tests..."
+
+        # Load shared configuration and helper functions for long tests
+        include(joinpath(LONGTESTS_DIR, "longtest_config.jl"))
+        include(joinpath(LONGTESTS_DIR, "longtest_helpers.jl"))
 
         only_test = get(ENV, "MSM_LONGTEST_ONLY", "")
         if !isempty(only_test)

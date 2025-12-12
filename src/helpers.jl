@@ -427,6 +427,93 @@ function unflatten_natural(flat_params::AbstractVector{T}, model::MultistateProc
     return to_natural_scale(params_estimation, model.hazards, T)
 end
 
+"""
+    update_pars_cache!(pars_cache, flat_params, hazards)
+
+Update mutable parameter vectors in-place from flat parameter vector.
+This avoids allocating new NamedTuples on each likelihood call.
+
+For Float64 parameters only - AD types should use unflatten_natural.
+
+# Arguments
+- `pars_cache::Vector{Vector{Float64}}`: Pre-allocated parameter vectors (one per hazard)
+- `flat_params::Vector{Float64}`: Flat parameter vector on estimation scale
+- `hazards::Vector{<:_Hazard}`: Hazard objects with npar_total info
+
+The function transforms baseline parameters to natural scale (exp) in-place.
+"""
+function update_pars_cache!(pars_cache::Vector{Vector{Float64}}, 
+                            flat_params::AbstractVector{Float64}, 
+                            hazards::Vector{<:_Hazard})
+    offset = 0
+    @inbounds for (h, hazard) in enumerate(hazards)
+        npars = hazard.npar_total
+        nbase = hazard.npar_baseline
+        pars_h = pars_cache[h]
+        
+        # Copy baseline parameters with exp transformation (natural scale)
+        for i in 1:nbase
+            pars_h[i] = exp(flat_params[offset + i])
+        end
+        
+        # Copy covariate parameters as-is
+        for i in (nbase + 1):npars
+            pars_h[i] = flat_params[offset + i]
+        end
+        
+        offset += npars
+    end
+    return nothing
+end
+
+"""
+    compute_hazard_rates_cached!(rates_cache, pars_cache, covars_cache, hazards)
+
+Compute hazard rates using cached parameters and covariates.
+Updates rates_cache in-place for all (pattern, hazard) combinations.
+
+# Arguments
+- `rates_cache::Vector{Vector{Float64}}`: Pre-allocated rates [pattern][hazard]
+- `pars_cache::Vector{Vector{Float64}}`: Cached parameter vectors [hazard]
+- `covars_cache::Vector{Vector{NamedTuple}}`: Cached covariates [pattern][hazard]
+- `hazards::Vector{<:_Hazard}`: Hazard objects
+
+For Markov models, hazard rates don't depend on time, so we compute once per pattern.
+"""
+function compute_hazard_rates_cached!(rates_cache::Vector{Vector{Float64}},
+                                      pars_cache::Vector{Vector{Float64}},
+                                      covars_cache::Vector{Vector{NamedTuple}},
+                                      hazards::Vector{<:_Hazard})
+    npatterns = length(rates_cache)
+    nhazards = length(hazards)
+    
+    @inbounds for p in 1:npatterns
+        pattern_covars = covars_cache[p]
+        pattern_rates = rates_cache[p]
+        for h in 1:nhazards
+            hazard = hazards[h]
+            pars = pars_cache[h]
+            covars = pattern_covars[h]
+            # Evaluate hazard at t=0 (for Markov, rate is constant)
+            pattern_rates[h] = _eval_hazard_from_vec(hazard, 0.0, pars, covars)
+        end
+    end
+    return nothing
+end
+
+"""
+    _eval_hazard_from_vec(hazard, t, pars_vec, covars)
+
+Evaluate hazard using a flat parameter vector (natural scale) instead of NamedTuple.
+This is the allocation-free path for cached parameters.
+"""
+@inline function _eval_hazard_from_vec(hazard::_Hazard, t::Real, 
+                                        pars_vec::Vector{Float64}, 
+                                        covars::NamedTuple)
+    # Call the hazard with vector parameters directly
+    return hazard(t, pars_vec, covars)
+end
+
 # Backward compatibility aliases (deprecated)
 # Use unflatten_natural instead
 const unflatten_parameters = unflatten_natural
