@@ -458,40 +458,44 @@ abstract type ADBackend end
 struct ForwardDiffBackend <: ADBackend end
 # Forward-mode AD: O(n) cost in parameters
 # Tolerates in-place mutation
-# Default choice for most models
+# Default and recommended choice
 
 struct EnzymeBackend <: ADBackend end
 # Reverse-mode AD: O(1) cost in parameters
 # Requires mutation-free code
-# Better for large parameter counts
+# NOT working for Markov models (LAPACK issue)
 
 struct MooncakeBackend <: ADBackend end
 # Alternative reverse-mode AD
 # Pure Julia implementation
-# May fail on Markov models (LAPACK calls)
+# NOT working for Markov models (LAPACK issue)
 ```
+
+**Known Limitation (as of Dec 2024):**
+
+Mooncake and Enzyme do **NOT** work for Markov panel models. The matrix exponential computation uses `LAPACK.gebal!` internally, which these reverse-mode AD backends cannot differentiate through. Even though `ChainRules.jl` has an `rrule` for `exp(::Matrix)`, that rule itself calls LAPACK, so reverse-mode still fails.
+
+**Recommendation:** Use `ForwardDiffBackend()` for all Markov models. The reverse-mode backends may work for semi-Markov models (which don't use matrix exponential in the likelihood), but this is not extensively tested.
 
 **Helper Functions:**
 
 ```julia
 get_physical_cores() -> Int
 recommended_nthreads() -> Int
-select_ad_backend(n_params::Int) -> ADBackend  # Auto-select based on size
+default_ad_backend(n_params; is_markov=false) -> ADBackend  # Auto-select
 get_optimization_ad(backend::ADBackend) -> Optimization.AbstractADType
 ```
 
 **Usage:**
 
 ```julia
-# Default (ForwardDiff)
+# Default (ForwardDiff) - recommended for all current use cases
 fitted = fit(model)
 fitted = fit(model; adbackend=ForwardDiffBackend())
 
-# Enzyme for large models
-fitted = fit(model; adbackend=EnzymeBackend())
-
-# Mooncake (experimental)
-fitted = fit(model; adbackend=MooncakeBackend())
+# Enzyme/Mooncake - NOT working for Markov models
+# fitted = fit(model; adbackend=EnzymeBackend())    # Will fail on matrix exp
+# fitted = fit(model; adbackend=MooncakeBackend())  # Will fail on matrix exp
 ```
 
 ---
