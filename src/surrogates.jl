@@ -1,52 +1,79 @@
-
+# =============================================================================
+# Markov Surrogate Model Construction
+# =============================================================================
 
 """
-make_surrogate_model(model::MultistateSemiMarkovModel)
+    make_surrogate_model(model)
 
-Create a Markov surrogate model.
+Create a Markov surrogate model from a multistate model.
+
+If the model already has a `markovsurrogate`, uses its hazards and parameters.
+Otherwise, builds surrogate hazards from scratch using the model's hazard specifications.
 
 # Arguments
+- `model`: multistate model object
 
-- model: multistate model object
+# Returns
+- `MultistateMarkovModel` or `MultistateMarkovModelCensored` suitable for fitting as a Markov model
 """
 function make_surrogate_model(model::Union{MultistateModel, MultistateMarkovModel, MultistateSemiMarkovModel})
+    if isnothing(model.markovsurrogate)
+        # Build surrogate hazards from scratch
+        surrogate_haz, surrogate_pars, _ = build_hazards(model.modelcall.hazards...; data = model.data, surrogate = true)
+        markov_surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars)
+    else
+        markov_surrogate = model.markovsurrogate
+    end
+    
     MultistateModels.MultistateMarkovModel(
         model.data,
-        model.markovsurrogate.parameters,
-        model.markovsurrogate.hazards,
+        markov_surrogate.parameters,  # Use surrogate's parameters
+        markov_surrogate.hazards,
         model.totalhazards,
         model.tmat,
         model.emat,
         model.hazkeys,
         model.subjectindices,
-        model.SamplingWeights,
+        model.SubjectWeights,
+        model.ObservationWeights,
         model.CensoringPatterns,
-        model.markovsurrogate,
+        markov_surrogate,
         model.modelcall)
 end
 
 """
-make_surrogate_model(model::MultistateSemiMarkovModelCensored)
+    make_surrogate_model(model::Union{MultistateMarkovModelCensored, MultistateSemiMarkovModelCensored})
 
 Create a Markov surrogate model with censored states.
 
 # Arguments
+- `model`: multistate model object with censored observations
 
-- model: multistate model object
+# Returns
+- `MultistateMarkovModelCensored` suitable for fitting as a Markov model
 """
 function make_surrogate_model(model::Union{MultistateMarkovModelCensored,MultistateSemiMarkovModelCensored})
+    if isnothing(model.markovsurrogate)
+        # Build surrogate hazards from scratch
+        surrogate_haz, surrogate_pars, _ = build_hazards(model.modelcall.hazards...; data = model.data, surrogate = true)
+        markov_surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars)
+    else
+        markov_surrogate = model.markovsurrogate
+    end
+    
     MultistateModels.MultistateMarkovModelCensored(
         model.data,
-        model.markovsurrogate.parameters,
-        model.markovsurrogate.hazards,
+        markov_surrogate.parameters,  # Use surrogate's parameters
+        markov_surrogate.hazards,
         model.totalhazards,
         model.tmat,
         model.emat,
         model.hazkeys,
         model.subjectindices,
-        model.SamplingWeights,
+        model.SubjectWeights,
+        model.ObservationWeights,
         model.CensoringPatterns,
-        model.markovsurrogate,
+        markov_surrogate,
         model.modelcall)
 end
 
@@ -56,43 +83,640 @@ fit_surrogate(model::MultistateSemiMarkovModelCensored)
 
 Fit a Markov surrogate model.
 
+!!! note "Deprecated"
+    This signature is deprecated. Use `fit_surrogate(model; type=:markov, method=:mle, ...)` instead.
+
 # Arguments
-
 - model: multistate model object
-"""
-function fit_surrogate(model; surrogate_parameters = nothing, surrogate_constraints = nothing, crude_inits = true, verbose = true)
+- surrogate_parameters: Optional fixed parameters
+- surrogate_constraints: Optional constraints for MLE fitting
+- crude_inits: Use crude initializations (ignored, for backward compatibility)
+- verbose: Print progress information
 
-    # initialize the surrogate
+# Returns
+- `MultistateMarkovModelFitted`: Fitted Markov model (for backward compatibility)
+"""
+function fit_surrogate(model::MultistateProcess; 
+    surrogate_parameters = nothing, 
+    surrogate_constraints = nothing, 
+    crude_inits = true, 
+    verbose = true,
+    # New unified API parameters
+    type::Symbol = :markov,
+    method::Symbol = :mle,
+    n_phases::Union{Int, Vector{Int}, Symbol} = 2)
+    
+    # Check if using new API (type or method specified non-default)
+    using_new_api = (type !== :markov) || 
+                    (method !== :mle && isnothing(surrogate_parameters))
+    
+    if using_new_api || type === :phasetype
+        # Use new unified API
+        _validate_surrogate_inputs(type, method)
+        
+        if type === :markov
+            return _fit_markov_surrogate(model; 
+                method = method,
+                surrogate_parameters = surrogate_parameters,
+                surrogate_constraints = surrogate_constraints,
+                verbose = verbose)
+        else  # :phasetype
+            return _fit_phasetype_surrogate(model;
+                method = method,
+                n_phases = n_phases,
+                surrogate_parameters = surrogate_parameters,
+                surrogate_constraints = surrogate_constraints,
+                verbose = verbose)
+        end
+    end
+    
+    # Backward compatible path: return fitted model (not MarkovSurrogate)
+    # This is for callers expecting surrogate_fitted.parameters, surrogate_fitted.loglik, etc.
     surrogate_model = make_surrogate_model(model)
 
-    # set parameters to supplied or crude inits
     if !isnothing(surrogate_parameters) 
         set_parameters!(surrogate_model, surrogate_parameters)
     elseif crude_inits
         set_crude_init!(surrogate_model)
     end
 
-    # generate the constraint function and test at initial values
     if !isnothing(surrogate_constraints)
-        # create the function
-        consfun_surrogate = parse_constraints(surrogate_constraints.cons, surrogate_model.hazards; consfun_name = :consfun_surrogate)
-
-        # test the initial values
-        initcons = consfun_surrogate(zeros(length(surrogate_constraints.cons)), flatview(surrogate_model.parameters), nothing)
-        
-        badcons = findall(initcons .< surrogate_constraints.lcons .|| initcons .> surrogate_constraints.ucons)
-
+        consfun_surrogate = parse_constraints(surrogate_constraints.cons, surrogate_model.hazards; 
+                                               consfun_name = :consfun_surrogate)
+        initcons = consfun_surrogate(zeros(length(surrogate_constraints.cons)), 
+                                      get_parameters_flat(surrogate_model), nothing)
+        badcons = findall(initcons .< surrogate_constraints.lcons .|| 
+                         initcons .> surrogate_constraints.ucons)
         if length(badcons) > 0
-            @error "Constraints $badcons are violated at the initial parameter values for the Markov surrogate. Consider manually setting surrogate parameters."
+            error("Constraints $badcons are violated at the initial parameter values for the Markov surrogate.")
         end
     end
 
-    # optimize the Markov surrogate
     if verbose
         println("Obtaining the MLE for the Markov surrogate model ...\n")
     end
     
     surrogate_fitted = fit(surrogate_model; constraints = surrogate_constraints, compute_vcov = false)
-
     return surrogate_fitted
+end
+
+"""
+    _validate_surrogate_inputs(type, method)
+
+Validate surrogate fitting input parameters.
+"""
+function _validate_surrogate_inputs(type::Symbol, method::Symbol)
+    type in (:markov, :phasetype) || 
+        error("type must be :markov or :phasetype, got :$type")
+    method in (:mle, :heuristic) || 
+        error("method must be :mle or :heuristic, got :$method")
+end
+
+# =============================================================================
+# Internal: Markov Surrogate Fitting
+# =============================================================================
+
+"""
+    _fit_markov_surrogate(model; method, surrogate_parameters, surrogate_constraints, verbose)
+
+Internal function to fit a Markov surrogate.
+
+- `:mle` method: Fits exponential hazards via maximum likelihood
+- `:heuristic` method: Uses crude transition rates from data
+"""
+function _fit_markov_surrogate(model;
+    method::Symbol = :mle,
+    surrogate_parameters = nothing,
+    surrogate_constraints = nothing,
+    verbose = true)
+    
+    # Build surrogate model structure
+    surrogate_model = make_surrogate_model(model)
+    
+    # If parameters provided directly, use them
+    if !isnothing(surrogate_parameters)
+        set_parameters!(surrogate_model, surrogate_parameters)
+        markov_surrogate = MarkovSurrogate(surrogate_model.hazards, surrogate_model.parameters; fitted=true)
+        if verbose
+            println("Markov surrogate built with provided parameters.\n")
+        end
+        return markov_surrogate
+    end
+    
+    if method === :heuristic
+        # Heuristic: use crude rates
+        set_crude_init!(surrogate_model)
+        markov_surrogate = MarkovSurrogate(surrogate_model.hazards, surrogate_model.parameters; fitted=true)
+        if verbose
+            println("Markov surrogate built with crude rate heuristic.\n")
+        end
+        return markov_surrogate
+        
+    else  # :mle
+        # MLE: optimize
+        if verbose
+            println("Fitting Markov surrogate via MLE ...\n")
+        end
+        
+        # Set crude inits as starting point
+        set_crude_init!(surrogate_model)
+        
+        # Validate constraints if provided
+        if !isnothing(surrogate_constraints)
+            consfun_surrogate = parse_constraints(surrogate_constraints.cons, surrogate_model.hazards; 
+                                                   consfun_name = :consfun_surrogate)
+            initcons = consfun_surrogate(zeros(length(surrogate_constraints.cons)), 
+                                          get_parameters_flat(surrogate_model), nothing)
+            badcons = findall(initcons .< surrogate_constraints.lcons .|| 
+                             initcons .> surrogate_constraints.ucons)
+            if length(badcons) > 0
+                error("Constraints $badcons are violated at the initial parameter values for the Markov surrogate.")
+            end
+        end
+        
+        # Fit via Markov model MLE
+        surrogate_fitted = fit(surrogate_model; constraints = surrogate_constraints, 
+                               compute_vcov = false, verbose = false)
+        
+        markov_surrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters; fitted=true)
+        
+        if verbose
+            println("Markov surrogate MLE complete.\n")
+        end
+        
+        return markov_surrogate
+    end
+end
+
+# =============================================================================
+# Internal: Phase-Type Surrogate Fitting  
+# =============================================================================
+
+"""
+    _fit_phasetype_surrogate(model; method, n_phases, surrogate_parameters, surrogate_constraints, verbose)
+
+Internal function to fit a phase-type surrogate.
+
+- `:mle` method: First fits Markov surrogate via MLE, then builds phase-type
+- `:heuristic` method: Uses crude rates divided by n_phases
+"""
+function _fit_phasetype_surrogate(model;
+    method::Symbol = :mle,
+    n_phases::Union{Int, Vector{Int}, Symbol} = 2,
+    surrogate_parameters = nothing,
+    surrogate_constraints = nothing,
+    verbose = true)
+    
+    # First, get or fit the Markov surrogate
+    markov_surrogate = _fit_markov_surrogate(model;
+        method = method,
+        surrogate_parameters = surrogate_parameters,
+        surrogate_constraints = surrogate_constraints,
+        verbose = verbose)
+    
+    # Build phase-type from Markov surrogate
+    config = ProposalConfig(type = :phasetype, n_phases = n_phases)
+    
+    phasetype_surrogate = _build_phasetype_from_markov(model, markov_surrogate; 
+                                                        config = config, 
+                                                        verbose = verbose)
+    
+    return phasetype_surrogate
+end
+
+"""
+    _build_phasetype_from_markov(model, markov_surrogate; config, verbose)
+
+Build a phase-type surrogate from a fitted/initialized Markov surrogate.
+This is the core phase-type construction logic.
+"""
+function _build_phasetype_from_markov(model, markov_surrogate::MarkovSurrogate;
+                                       config::ProposalConfig, verbose::Bool = true)
+    
+    n_states = size(model.tmat, 1)
+    is_absorbing = [all(model.tmat[s, :] .== 0) for s in 1:n_states]
+    transient_states = findall(.!is_absorbing)
+    
+    # Determine number of phases per state
+    n_phases = config.n_phases
+    if n_phases === :auto
+        n_phases_vec = _select_n_phases_bic(model.tmat, model.data; 
+                                            max_phases = config.max_phases, verbose = verbose)
+    elseif n_phases === :heuristic
+        n_phases_vec = _compute_default_n_phases(model.tmat, model.hazards)
+    elseif n_phases isa Int
+        n_phases_vec = [is_absorbing[s] ? 1 : n_phases for s in 1:n_states]
+    else
+        # Per-state specification (Vector{Int})
+        n_phases_vec = zeros(Int, n_states)
+        transient_idx = 1
+        for s in 1:n_states
+            if is_absorbing[s]
+                n_phases_vec[s] = 1
+            else
+                n_phases_vec[s] = n_phases[transient_idx]
+                transient_idx += 1
+            end
+        end
+    end
+    
+    if verbose
+        println("Phase-type surrogate configuration:")
+        println("  n_phases per state: $n_phases_vec")
+    end
+    
+    # Build state mappings
+    state_to_phases, phase_to_state, n_expanded = _build_state_mappings(n_states, n_phases_vec)
+    
+    # Extract transition rates from Markov surrogate
+    transition_rates = Dict{Tuple{Int,Int}, Float64}()
+    surrogate_pars = values(markov_surrogate.parameters.natural)
+    
+    for (haz_idx, h) in enumerate(markov_surrogate.hazards)
+        s, d = h.statefrom, h.stateto
+        rate = surrogate_pars[haz_idx][1]
+        transition_rates[(s, d)] = rate
+    end
+    
+    # Build phase-type distributions for each transient state
+    phasetype_dists = Dict{Int, PhaseTypeDistribution}()
+    structure = config.structure
+    for s in transient_states
+        n_ph = n_phases_vec[s]
+        total_rate = sum(get(transition_rates, (s, d), 0.0) for d in 1:n_states if d != s)
+        
+        if total_rate <= 0
+            phasetype_dists[s] = _build_default_phasetype(n_ph)
+        else
+            phasetype_dists[s] = _build_coxian_from_rate(n_ph, total_rate; structure = structure)
+        end
+    end
+    
+    # Build the expanded Q matrix
+    expanded_Q = build_expanded_Q(model.tmat, n_phases_vec, state_to_phases, 
+                                  phase_to_state, phasetype_dists, n_expanded;
+                                  transition_rates = transition_rates)
+    
+    # Create PhaseTypeConfig for storage
+    ph_config = PhaseTypeConfig(n_phases = n_phases_vec, structure = structure,
+                                max_phases = config.max_phases)
+    
+    surrogate = PhaseTypeSurrogate(
+        phasetype_dists,
+        n_states,
+        n_expanded,
+        state_to_phases,
+        phase_to_state,
+        expanded_Q,
+        ph_config
+    )
+    
+    if verbose
+        println("  Total expanded states: $n_expanded")
+        println("  Phase-type surrogate built successfully.\n")
+    end
+    
+    return surrogate
+end
+
+
+"""
+    is_surrogate_fitted(model::MultistateProcess) -> Bool
+
+Check if the model's Markov surrogate has been fitted.
+
+Returns `true` if the model has a surrogate and it has been fitted via MLE or
+with user-provided parameters. Returns `false` if there is no surrogate or
+if the surrogate has only default (placeholder) parameters.
+
+# Example
+```julia
+model = multistatemodel(h12; data=data, surrogate=:markov)  # fitted by default
+is_surrogate_fitted(model)  # true
+
+model2 = multistatemodel(h12; data=data, surrogate=:markov, fit_surrogate=false)
+is_surrogate_fitted(model2)  # false
+```
+
+See also: [`set_surrogate!`](@ref), [`MarkovSurrogate`](@ref)
+"""
+function is_surrogate_fitted(model::MultistateProcess)
+    isnothing(model.markovsurrogate) && return false
+    return model.markovsurrogate.fitted
+end
+
+
+"""
+    set_surrogate!(model; type=:markov, method=:mle, ...)
+
+Build and fit a Markov or phase-type surrogate for a multistate model,
+populating the model's `markovsurrogate` field in-place.
+
+This function always fits the surrogate (via MLE or heuristic), marking it
+as `fitted=true`. For models created with `surrogate=:markov` and `fit_surrogate=true`
+(the default), the surrogate is already fitted and calling this function will refit it.
+
+# Arguments
+- `model`: A mutable multistate model (MultistateModel, MultistateSemiMarkovModel, etc.)
+
+# Keywords
+- `type::Symbol = :markov`: Surrogate type (:markov or :phasetype)
+- `method::Symbol = :mle`: Fitting method (:mle or :heuristic)
+- `n_phases = 2`: For phase-type: number of phases
+- `surrogate_parameters = nothing`: Optional fixed parameters (skips fitting)
+- `surrogate_constraints = nothing`: Optional constraints for MLE fitting
+- `verbose::Bool = true`: Print progress information
+
+# Returns
+- The modified model (also modifies in-place)
+
+# Examples
+```julia
+# Create a semi-Markov model without surrogate
+model = multistatemodel(h12, h21; data=data)
+
+# Add and fit a Markov surrogate via MLE
+set_surrogate!(model)
+
+# Use heuristic (faster, no optimization)
+set_surrogate!(model; method=:heuristic)
+
+# Use phase-type surrogate
+set_surrogate!(model; type=:phasetype, n_phases=3)
+
+# Check if surrogate is fitted
+is_surrogate_fitted(model)  # true
+```
+
+See also: [`is_surrogate_fitted`](@ref), [`fit_surrogate`](@ref), [`multistatemodel`](@ref)
+"""
+function set_surrogate!(model::MultistateProcess; 
+    type::Symbol = :markov,
+    method::Symbol = :mle,
+    n_phases::Union{Int, Vector{Int}, Symbol} = 2,
+    surrogate_parameters = nothing, 
+    surrogate_constraints = nothing, 
+    verbose = true,
+    # Backward compatibility
+    optimize = nothing,
+    crude_inits = nothing)
+    
+    # Handle backward compatibility
+    if !isnothing(optimize)
+        @warn "optimize keyword is deprecated. Use method=:heuristic instead of optimize=false."
+        if !optimize
+            method = :heuristic
+        end
+    end
+    if !isnothing(crude_inits)
+        @warn "crude_inits keyword is deprecated. Use method=:heuristic for crude initialization."
+    end
+    
+    _validate_surrogate_inputs(type, method)
+    
+    if type === :markov
+        markov_surrogate = _fit_markov_surrogate(model;
+            method = method,
+            surrogate_parameters = surrogate_parameters,
+            surrogate_constraints = surrogate_constraints,
+            verbose = verbose)
+        model.markovsurrogate = markov_surrogate
+    else
+        # Phase-type: also need to set Markov surrogate for infrastructure
+        markov_surrogate = _fit_markov_surrogate(model;
+            method = method,
+            surrogate_parameters = surrogate_parameters,
+            surrogate_constraints = surrogate_constraints,
+            verbose = verbose)
+        model.markovsurrogate = markov_surrogate
+        # Note: Phase-type surrogate is built in fit() when needed
+    end
+    
+    return model
+end
+
+
+"""
+    fit_phasetype_surrogate(model, markov_surrogate; config, verbose)
+
+Build a phase-type surrogate from a fitted Markov surrogate.
+
+!!! note "Deprecated"
+    This function is deprecated. Use `fit_surrogate(model; type=:phasetype, ...)` 
+    or `_build_phasetype_from_markov()` instead.
+
+# Arguments
+- `model`: The semi-Markov model being fitted
+- `markov_surrogate::MarkovSurrogate`: Fitted Markov surrogate
+- `config::ProposalConfig`: Proposal configuration with n_phases specification
+- `verbose::Bool`: Print progress information
+
+# Returns
+- `PhaseTypeSurrogate`: Expanded surrogate for importance sampling
+"""
+function fit_phasetype_surrogate(model, markov_surrogate::MarkovSurrogate; 
+                                  config::ProposalConfig, verbose::Bool=true)
+    # Delegate to new implementation
+    return _build_phasetype_from_markov(model, markov_surrogate; config = config, verbose = verbose)
+end
+
+
+"""
+    _build_coxian_from_rate(n_phases::Int, total_rate::Float64; 
+                            structure::Symbol=:allequal) -> PhaseTypeDistribution
+
+Build a Coxian phase-type distribution that has approximately the same mean
+sojourn time as an exponential with the given rate.
+
+A Coxian distribution has subintensity matrix S of the form (for 3 phases):
+```
+S = [-(r₁ + a₁)    r₁           0     ]
+    [    0      -(r₂ + a₂)     r₂     ]
+    [    0          0         -a₃    ]
+```
+where rᵢ is the progression rate to the next phase and aᵢ is the absorption rate.
+The absorption rates are computed as: aᵢ = -sum(S[i,:]) (negative row sums).
+
+The full intensity matrix Q (including absorbing state) would be:
+```
+Q = [-(r₁ + a₁)    r₁           0        a₁  ]
+    [    0      -(r₂ + a₂)     r₂        a₂  ]
+    [    0          0         -a₃        a₃  ]
+    [    0          0           0         0  ]
+```
+
+# Arguments
+- `n_phases::Int`: Number of phases in the Coxian distribution
+- `total_rate::Float64`: Target total exit rate (mean sojourn time ≈ 1/total_rate)
+- `structure::Symbol`: Coxian structure constraint (default: `:unstructured`)
+  - `:unstructured`: All rates are independent free parameters (for initialization, uses
+    decreasing progression/increasing absorption pattern to capture typical non-Markov shapes)
+  - `:prop_to_prog`: aᵢ = c × rᵢ for i < n (Titman & Sharples 2010, Section 2)
+  - `:allequal`: r₁ = r₂ = ... = r and a₁ = a₂ = ... = a
+  - `Function`: Custom constraint function `f(n_phases, total_rate) -> S` returning the 
+    n_phases × n_phases subintensity matrix
+
+# Returns
+- `PhaseTypeDistribution`: Coxian distribution with the specified structure
+
+# References
+- Titman & Sharples (2010) Biometrics 66(3):742-752
+"""
+function _build_coxian_from_rate(n_phases::Int, total_rate::Float64; 
+                                  structure::Union{Symbol, Function} = :unstructured)
+    if n_phases == 1
+        # Single phase = exponential with the given rate
+        # Q is 2×2: phase + absorbing state
+        Q = [-total_rate  total_rate;
+              0.0         0.0]
+        initial = [1.0]
+        return PhaseTypeDistribution(1, Q, initial)
+    end
+    
+    # Handle custom constraint function - expects user to return full Q matrix
+    if structure isa Function
+        Q = structure(n_phases, total_rate)
+        expected_size = n_phases + 1
+        @assert size(Q) == (expected_size, expected_size) "Custom constraint must return $(expected_size)×$(expected_size) matrix (phases + absorbing)"
+        @assert all(diag(Q)[1:n_phases] .< 0) "Diagonal elements (transient states) must be negative"
+        @assert all(Q[end, :] .== 0) "Last row (absorbing state) must be zeros"
+        initial = zeros(Float64, n_phases)
+        initial[1] = 1.0
+        return PhaseTypeDistribution(n_phases, Q, initial)
+    end
+    
+    # Build Q matrix: (n_phases + 1) × (n_phases + 1)
+    Q = zeros(Float64, n_phases + 1, n_phases + 1)
+    
+    if structure == :allequal
+        # All progression rates equal, all absorption rates equal
+        # To match mean ≈ 1/total_rate:
+        # Set absorption_rate = total_rate, progression_rate = (n-1) × total_rate
+        absorption_rate = total_rate
+        progression_rate = (n_phases - 1) * total_rate
+        
+        for i in 1:n_phases
+            if i < n_phases
+                Q[i, i+1] = progression_rate
+                Q[i, n_phases+1] = absorption_rate
+                Q[i, i] = -(progression_rate + absorption_rate)
+            else
+                Q[i, n_phases+1] = absorption_rate
+                Q[i, i] = -absorption_rate
+            end
+        end
+        
+    elseif structure == :prop_to_prog
+        # Absorption rates proportional to progression rates: aᵢ = c × rᵢ
+        # For phases 1 to n-1, set rᵢ = r (same progression rate)
+        # Then aᵢ = c × r for i < n
+        # Last phase has only absorption rate aₙ
+        #
+        # Mean sojourn time calculation for prop_to_prog:
+        # Let r be the common progression rate and c the proportionality constant
+        # Probability of absorbing from phase i: p = c×r / (r + c×r) = c / (1 + c)
+        # Expected phases visited: 1/p = (1 + c) / c
+        # Time per phase: 1/(r(1+c))
+        # Mean = (1+c)/(c × r(1+c)) = 1/(c×r)
+        #
+        # For mean = 1/total_rate: c × r = total_rate
+        # Choose c = 0.5 (reasonable default), then r = 2 × total_rate
+        c = 0.5  # proportionality constant
+        progression_rate = total_rate / c  # so that c × r = total_rate
+        absorption_rate_intermediate = c * progression_rate  # = total_rate for phases 1 to n-1
+        absorption_rate_final = total_rate  # for last phase
+        
+        for i in 1:n_phases
+            if i < n_phases
+                Q[i, i+1] = progression_rate
+                Q[i, n_phases+1] = absorption_rate_intermediate
+                Q[i, i] = -(progression_rate + absorption_rate_intermediate)
+            else
+                Q[i, n_phases+1] = absorption_rate_final
+                Q[i, i] = -absorption_rate_final
+            end
+        end
+        
+    elseif structure == :unstructured
+        # Unstructured: all rates can differ
+        # For initialization, use a decreasing pattern for progression rates
+        # and increasing absorption rates (captures common non-Markov shapes)
+        base_rate = total_rate
+        
+        for i in 1:n_phases
+            if i < n_phases
+                # Decreasing progression rates: r_i = base × (n - i) / n
+                prog_i = base_rate * (n_phases - i) / n_phases
+                # Increasing absorption rates: a_i = base × i / n  
+                abs_i = base_rate * i / n_phases
+                Q[i, i+1] = prog_i
+                Q[i, n_phases+1] = abs_i
+                Q[i, i] = -(prog_i + abs_i)
+            else
+                # Last phase: only absorption
+                Q[i, n_phases+1] = base_rate
+                Q[i, i] = -base_rate
+            end
+        end
+    else
+        throw(ArgumentError("Unknown structure: $structure. Use :unstructured, :prop_to_prog, or :allequal"))
+    end
+    # Last row (absorbing state) is already zeros
+    
+    initial = zeros(Float64, n_phases)
+    initial[1] = 1.0  # Start in first phase
+    
+    return PhaseTypeDistribution(n_phases, Q, initial)
+end
+
+
+# =============================================================================
+# Markov Surrogate Marginal Log-Likelihood
+# =============================================================================
+
+"""
+    compute_markov_marginal_loglik(model, surrogate::MarkovSurrogate)
+
+Compute the marginal log-likelihood of the observed data under the Markov surrogate.
+
+This is used as the normalizing constant r(Y|θ') in importance sampling:
+    log f̂(Y|θ) = log r(Y|θ') + Σᵢ log(mean(νᵢ))
+
+where νᵢ are the importance weights for subject i.
+
+# Arguments
+- `model`: The multistate model containing the data
+- `surrogate::MarkovSurrogate`: The fitted Markov surrogate
+
+# Returns
+- `Float64`: The marginal log-likelihood under the surrogate
+"""
+function compute_markov_marginal_loglik(model::MultistateProcess, surrogate::MarkovSurrogate)
+    # Build a temporary Markov model with the surrogate's hazards and parameters
+    surrogate_model = MultistateMarkovModel(
+        model.data,
+        surrogate.parameters,
+        surrogate.hazards,
+        model.totalhazards,
+        model.tmat,
+        model.emat,
+        model.hazkeys,
+        model.subjectindices,
+        model.SubjectWeights,
+        model.ObservationWeights,
+        model.CensoringPatterns,
+        surrogate,
+        model.modelcall
+    )
+    
+    # Build the bookkeeping structure for MPanelData
+    books = build_tpm_mapping(surrogate_model.data)
+    
+    # Create MPanelData for the Markov likelihood
+    data = MPanelData(surrogate_model, books)
+    
+    # Compute log-likelihood using the surrogate's flat parameters
+    ll = loglik_markov(surrogate.parameters.flat, data; neg = false)
+    
+    return ll
 end

@@ -1,47 +1,146 @@
+const _DEFAULT_HAZARD_FORMULA = StatsModels.@formula(0 ~ 1)
+
+@inline function _hazard_formula_has_intercept(rhs_term)
+    rhs_term isa StatsModels.ConstantTerm && return true
+    rhs_term isa StatsModels.InterceptTerm && return true
+    if rhs_term isa StatsModels.MatrixTerm
+        return any(_hazard_formula_has_intercept, rhs_term.terms)
+    end
+    return false
+end
+
 """
-    Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; df::Union{Int64,Nothing} = nothing, degree::Int64 = 3, knots::Union{Vector{Float64}, Float64, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing}, periodic::Bool = false, monotonic::Bool = false)
+        Hazard(family::Union{AbstractString,Symbol}, statefrom::Integer, stateto::Integer; kwargs...)
+        Hazard(hazard::StatsModels.FormulaTerm, family::Union{AbstractString,Symbol}, statefrom::Integer, stateto::Integer; kwargs...)
 
-Specify a parametric or semi-parametric baseline cause-specific hazard function. 
+Construct a parametric or semi-parametric cause-specific hazard specification to be
+consumed by `multistatemodel`. Provide a `StatsModels` formula only when the hazard
+has covariates; when you omit it, the constructor automatically supplies the
+intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yourself.
 
-# Arguments
-- `hazard`: StatsModels.jl FormulaTerm for the log-hazard. Covariates have a multiplicative effect on the baseline cause specific hazard. Must be specified with "0 ~" on the left hand side. 
-- `family`: one of "exp", "wei", or "gom" for exponential, Weibull, or Gompertz cause-specific baseline hazard functions, or "sp" for a semi-parametric spline basis up to degree 3 for the baseline hazard.
-- `statefrom`: integer specifying the origin state.
-- `stateto`: integer specifying the destination state.
+# Positional arguments
+- `family`: `:exp`, `:wei`, `:gom`, `:sp`, or `:pt` (symbol or string, case-insensitive).
+  - `:exp`: Exponential (constant hazard)
+  - `:wei`: Weibull
+  - `:gom`: Gompertz
+  - `:sp`: Spline (flexible baseline hazard)
+  - `:pt`: Phase-type (Coxian) - flexible sojourn distribution via latent phases
+- `statefrom` / `stateto`: integers describing the transition.
+- `hazard` *(optional)*: a `StatsModels.FormulaTerm` describing covariates that act
+    multiplicatively on the baseline hazard. Skip this argument for intercept-only hazards.
 
-# Additional arguments for semiparametric baseline hazards. Splines up to degree 3 (cubic polynomials) are supported . Spline bases are constructed via a call to the BSplineKit.jl. See [the BSplineKit.jl documentation](https://jipolanco.github.io/BSplineKit.jl/stable/) for additional details. 
-- `degree`: Degree of the spline polynomial basis, defaults to 3 for a cubic polynomial basis.
-- `knots`: Vector of interior knots.
-- `boundaryknots`: Optional vector of boundary knots, defaults to the range of possible sojourn times if not supplied.
-- `extrapolation`: Either "linear" or "flat", see the BSplineKit.jl package. 
-- `natural_spline`: Restrict the second derivative to zero at the boundaries, defaults to true.
-- `knots` argument is interpreted as interior knots. 
-- `monotone`; 0, -1, or 1 for non-monotone, monotone decreasing, or monotone increasing.
+# Keyword arguments
+- `degree`, `knots`, `boundaryknots`, `natural_spline`, `extrapolation`, `monotone`:
+    spline controls used only when `family == :sp`. See the BSplineKit docs for details.
+- `monotone`: `0` (default) leaves the spline unconstrained, `1` enforces an increasing
+    hazard, and `-1` enforces a decreasing hazard.
+- `n_phases::Int`: Number of Coxian phases (only for `family == :pt`, default: 2).
+    Must be ≥ 1. With n phases, the baseline has 2n-1 parameters (n-1 progression rates,
+    n exit rates). n_phases=1 is equivalent to exponential.
+- `time_transform::Bool`: enable Tang-style shared-trajectory caching for this transition.
+- `linpred_effect::Symbol`: `:ph` (default) for proportional hazards or `:aft` for
+    accelerated-failure-time behaviour.
+
+# Examples
+```julia
+julia> Hazard(:exp, 1, 2)                        # intercept only
+julia> Hazard(@formula(0 ~ age + trt), :wei, 1, 3)
+julia> Hazard(:pt, 1, 2; n_phases=3)             # 3-phase Coxian
+julia> Hazard(@formula(0 ~ age), :pt, 1, 2; n_phases=2)  # with covariates
+julia> @hazard begin                              # macro front-end uses the same rules
+                     family = :gom
+                     transition = 2 => 4
+                     formula = @formula(0 ~ stage)
+             end
+```
 """
-function Hazard(hazard::StatsModels.FormulaTerm, family::String, statefrom::Int64, stateto::Int64; degree::Int64 = 3, knots::Union{Vector{Float64}, Float64, Nothing} = nothing, boundaryknots::Union{Vector{Float64}, Nothing} = nothing, natural_spline = true, extrapolation = "linear", monotone = 0)
+function Hazard(
+    hazard::StatsModels.FormulaTerm,
+    family::Union{AbstractString,Symbol},
+    statefrom::Int64,
+    stateto::Int64;
+    degree::Int64 = 3,
+    knots::Union{Vector{Float64}, Float64, Nothing} = nothing,
+    boundaryknots::Union{Vector{Float64}, Nothing} = nothing,
+    natural_spline = true,
+    extrapolation = "constant",
+    monotone = 0,
+    n_phases::Int = 2,
+    coxian_structure::Symbol = :unstructured,
+    time_transform::Bool = false,
+    linpred_effect::Symbol = :ph)
 
-    if family != "sp"
-        h = ParametricHazard(hazard, family, statefrom, stateto)
+    # Input validation
+    @assert statefrom > 0 "statefrom must be a positive integer, got $statefrom"
+    @assert stateto > 0 "stateto must be a positive integer, got $stateto"
+    @assert statefrom != stateto "statefrom and stateto must differ (got $statefrom → $stateto)"
+    
+    # Normalize family to Symbol (accept both String and Symbol for backward compatibility)
+    family_key = family isa Symbol ? family : Symbol(lowercase(String(family)))
+    
+    valid_families = (:exp, :wei, :gom, :sp, :pt)
+    @assert family_key in valid_families "family must be one of $valid_families, got :$family_key"
+    
+    if family_key == :sp
+        @assert degree >= 0 "spline degree must be non-negative, got $degree"
+        @assert extrapolation in ("linear", "constant", "flat") "extrapolation must be \"linear\", \"constant\", or \"flat\", got \"$extrapolation\""
+        @assert monotone in (-1, 0, 1) "monotone must be -1, 0, or 1, got $monotone"
+        # For degree < 2, constant extrapolation (C1 boundary) is impossible.
+        # Default to flat extrapolation (C0 boundary) which is usually desired.
+        if extrapolation == "constant" && degree < 2
+            extrapolation = "flat"
+        end
+    end
+    
+    if family_key == :pt
+        @assert n_phases >= 1 "n_phases must be ≥ 1, got $n_phases"
+        @assert coxian_structure in (:unstructured, :allequal, :prop_to_prog) "coxian_structure must be :unstructured, :allequal, or :prop_to_prog, got :$coxian_structure"
+    end
+    
+    @assert linpred_effect in (:ph, :aft) "linpred_effect must be :ph or :aft, got :$linpred_effect"
+    
+    metadata = HazardMetadata(time_transform = time_transform, linpred_effect = linpred_effect)
+
+    if family_key == :pt
+        # Phase-type (Coxian) hazard
+        h = PhaseTypeHazardSpec(hazard, family_key, statefrom, stateto, n_phases, coxian_structure, metadata)
+    elseif family_key != :sp
+        h = ParametricHazard(hazard, family_key, statefrom, stateto, metadata)
     else 
         if natural_spline & (monotone != 0)
             @info "Natural boundary conditions are not currently compatible with monotone splines. The restrictions on second derivatives at the spline boundaries will be removed."
             natural_spline = false
         end
 
-        # change extrapolation to flat if degree = 0
-        extrapolation = degree > 0 ? extrapolation : "flat"
+        # For degree < 2, constant extrapolation (C1 boundary) is impossible.
+        # Fall back to flat extrapolation which is usually desired.
+        if degree < 2 && extrapolation == "constant"
+            extrapolation = "flat"
+        end
         natural_spline = degree < 2 ? false : natural_spline
 
-        h = SplineHazard(hazard, family, statefrom, stateto, degree, knots, boundaryknots, extrapolation, natural_spline, sign(monotone))
+        h = SplineHazard(hazard, family_key, statefrom, stateto, degree, knots, boundaryknots, extrapolation, natural_spline, sign(monotone), metadata)
     end
 
     return h
 end
 
-"""
-    enumerate_hazards(hazards::Hazard...)
+function Hazard(
+    family::Union{AbstractString,Symbol},
+    statefrom::Integer,
+    stateto::Integer;
+    kwargs...)
+    # Pass through to main constructor which handles String/Symbol normalization
+    return Hazard(_DEFAULT_HAZARD_FORMULA, family, Int(statefrom), Int(stateto); kwargs...)
+end
 
-Generate a matrix whose columns record the origin state, destination state, and transition number for a collection of hazards. The hazards are reordered by origin state, then by destination state. `hazards::Hazard...` is an iterable collection of user-supplied `Hazard` objects.
+"""
+    enumerate_hazards(hazards::HazardFunction...)
+
+Standardise a collection of `Hazard`/`@hazard` definitions. The result is a
+`DataFrame` with columns `statefrom`, `stateto`, `trans`, and `order`, sorted by
+origin and destination so downstream helpers (e.g. `create_tmat`) can rely on a
+stable ordering. Duplicate transitions (same origin/destination pair) raise an error.
 """
 function enumerate_hazards(hazards::HazardFunction...)
 
@@ -61,6 +160,13 @@ function enumerate_hazards(hazards::HazardFunction...)
         hazinfo.stateto[i] = hazards[i].stateto
     end
 
+    # check for duplicate transitions
+    transition_pairs = [(hazinfo.statefrom[i], hazinfo.stateto[i]) for i in 1:n_haz]
+    if length(unique(transition_pairs)) != n_haz
+        duplicates = [tp for tp in unique(transition_pairs) if count(==(tp), transition_pairs) > 1]
+        error("Duplicate transitions detected: $(duplicates). Each transition (statefrom → stateto) should be specified only once.")
+    end
+
     # enumerate and sort hazards
     sort!(hazinfo, [:statefrom, :stateto])
     hazinfo[:,:trans] = collect(1:n_haz)
@@ -72,7 +178,9 @@ end
 """
     create_tmat(hazinfo::DataFrame)
 
-Generate a matrix enumerating instantaneous transitions. Origin states correspond to rows, destination states to columns, and zero entries indicate that an instantaneous state transition is not possible. Transitions are enumerated in non-zero elements of the matrix. `hazinfo` is the output of a call to `enumerate_hazards`.
+Create the familiar transition matrix that `multistatemodel` expects. Rows are
+origin states, columns are destination states, zeros mark impossible transitions,
+and the positive entries are the transition numbers assigned by `enumerate_hazards`.
 """
 function create_tmat(hazinfo::DataFrame)
     
@@ -92,245 +200,687 @@ function create_tmat(hazinfo::DataFrame)
 end
 
 
-# mutable structs
+# hazard build orchestration -------------------------------------------------
+
+struct HazardBuildContext
+    hazard::HazardFunction
+    hazname::Symbol
+    family::Symbol
+    metadata::HazardMetadata
+    rhs_names::Vector{String}
+    shared_baseline_key::Union{Nothing,SharedBaselineKey}
+    data::DataFrame  # For data-dependent operations like automatic knot placement
+end
+
+# Computed accessors for HazardBuildContext - avoids storing redundant data
+_ncovar(ctx::HazardBuildContext) = max(length(ctx.rhs_names) - 1, 0)
+_has_covariates(ctx::HazardBuildContext) = length(ctx.rhs_names) > 1
+
+const _HAZARD_BUILDERS = Dict{Symbol,Function}()
+
+function register_hazard_family!(name::Union{AbstractString,Symbol}, builder::Function)
+    key = name isa Symbol ? name : Symbol(lowercase(String(name)))
+    _HAZARD_BUILDERS[key] = builder
+    return builder
+end
+
+function _hazard_rhs_names(hazschema)
+    has_intercept = _hazard_formula_has_intercept(hazschema.rhs)
+    coef_names = StatsModels.coefnames(hazschema.rhs)
+    coef_vec = coef_names isa AbstractVector ? collect(coef_names) : [coef_names]
+    return has_intercept ? coef_vec : vcat("(Intercept)", coef_vec)
+end
+
+@inline function _hazard_name(hazard::HazardFunction)
+    return Symbol("h$(hazard.statefrom)$(hazard.stateto)")
+end
+
+function _prepare_hazard_context(hazard::HazardFunction,
+                                 data::DataFrame;
+                                 surrogate::Bool = false)
+    schema = StatsModels.schema(hazard.hazard, data)
+    hazschema = apply_schema(hazard.hazard, schema)
+    modelcols(hazschema, data) # validate design matrix construction
+    rhs_names = _hazard_rhs_names(hazschema)
+    # Normalize family to Symbol (hazard.family is now Symbol)
+    runtime_family = surrogate ? :exp : hazard.family
+    hazname = _hazard_name(hazard)
+    shared_key = shared_baseline_key(hazard, runtime_family)
+    return HazardBuildContext(
+        hazard,
+        hazname,
+        runtime_family,
+        hazard.metadata,
+        rhs_names,
+        shared_key,
+        data,
+    )
+end
+
+@inline function _covariate_labels(rhs_names::Vector{String})
+    if length(rhs_names) <= 1
+        return String[]
+    end
+    return rhs_names[2:end]
+end
+
+@inline function _prefixed_symbols(hazname::Symbol, labels::Vector{String})
+    prefix = string(hazname) * "_"
+    clean = replace.(labels, "(Intercept)" => "Intercept")
+    return Symbol.(prefix .* clean)
+end
 
 """
-    build_hazards(hazards:Hazard...; data:DataFrame, surrogate = false)
+    _build_parametric_hazard_common(ctx, baseline_names, generator_fn, hazard_type)
 
-Return internal array of internal _Hazard subtypes called _hazards.
-
-Accept iterable collection of `Hazard` objects, plus data. 
-
-_hazards[1] corresponds to the first allowable transition enumerated in a transition matrix (in row major order), _hazards[2] to the second and so on... So _hazards will have length equal to number of allowable transitions.
+Common logic for building parametric hazard structs. Reduces duplication across
+exponential, Weibull, and Gompertz builders.
 """
-function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = false)
+function _build_parametric_hazard_common(
+    ctx::HazardBuildContext,
+    baseline_names::Vector{Symbol},
+    generator_fn::Function,
+    ::Type{HazType}
+) where {HazType <: _Hazard}
+    covar_pars = _semimarkov_covariate_parnames(ctx)
+    parnames = vcat(baseline_names, covar_pars)
+    hazard_fn, cumhaz_fn = generator_fn(parnames, ctx.metadata.linpred_effect)
+    npar_baseline = length(baseline_names)
+    ncovar = _ncovar(ctx)
+    npar_total = npar_baseline + ncovar
+    covar_names = Symbol.(_covariate_labels(ctx.rhs_names))
     
-    # initialize the arrays of hazards
-    _hazards = Vector{_Hazard}(undef, length(hazards))
+    haz_struct = HazType(
+        ctx.hazname,
+        ctx.hazard.statefrom,
+        ctx.hazard.stateto,
+        ctx.family,
+        parnames,
+        npar_baseline,
+        npar_total,
+        hazard_fn,
+        cumhaz_fn,
+        _has_covariates(ctx),
+        covar_names,
+        ctx.metadata,
+        ctx.shared_baseline_key,
+    )
+    return haz_struct, zeros(Float64, npar_total)
+end
 
-    # initialize vector of parameters
-    parameters = VectorOfVectors{Float64}()
+function _build_exponential_hazard(ctx::HazardBuildContext)
+    baseline = Symbol[Symbol(string(ctx.hazname), "_Intercept")]
+    return _build_parametric_hazard_common(ctx, baseline, generate_exponential_hazard, MarkovHazard)
+end
 
-    # initialize a dictionary for indexing into the vector of hazards
-    hazkeys = Dict{Symbol, Int64}()
+function _baseline_parnames(hazname::Symbol, labels::Vector{String})
+    return _prefixed_symbols(hazname, labels)
+end
 
-    # assign a hazard function
-    for h in eachindex(hazards) 
+function _semimarkov_covariate_parnames(ctx::HazardBuildContext)
+    covars = _covariate_labels(ctx.rhs_names)
+    return _prefixed_symbols(ctx.hazname, covars)
+end
 
-        # name for the hazard
-        hazname = "h"*string(hazards[h].statefrom)*string(hazards[h].stateto)
+function _build_weibull_hazard(ctx::HazardBuildContext)
+    baseline = Symbol[Symbol(string(ctx.hazname), "_shape"), Symbol(string(ctx.hazname), "_scale")]
+    return _build_parametric_hazard_common(ctx, baseline, generate_weibull_hazard, SemiMarkovHazard)
+end
 
-        # save index in the dictionary
-        merge!(hazkeys, Dict(Symbol(hazname) => h))
+function _build_gompertz_hazard(ctx::HazardBuildContext)
+    baseline = Symbol[Symbol(string(ctx.hazname), "_shape"), Symbol(string(ctx.hazname), "_scale")]
+    return _build_parametric_hazard_common(ctx, baseline, generate_gompertz_hazard, SemiMarkovHazard)
+end
 
-        # generate the model matrix
-        hazschema = 
-            apply_schema(
-                hazards[h].hazard, 
-                 StatsModels.schema(
-                     hazards[h].hazard, 
-                     data))
+"""
+    _build_spline_hazard(ctx::HazardBuildContext)
 
-        # grab the design matrix 
-        hazdat = modelcols(hazschema, data)[2]
+Build a SplineHazard from the hazard specification context.
 
-        # get the family
-        family = surrogate ? "exp" : hazards[h].family 
+Uses BSplineKit to construct the spline basis at build time, then generates
+runtime hazard/cumhaz functions that construct Spline objects on-the-fly from
+the current parameters. This functional approach ensures AD compatibility.
 
-        # now we get the functions and other objects for the mutable struct
-        if family == "exp"
-
-            # number of parameters
-            npars = size(hazdat)[2]
-
-            # vector for parameters
-            hazpars = zeros(Float64, npars)
-
-            # append to model parameters
-            push!(parameters, hazpars)
-
-            # get names
-            parnames = replace.(hazname*"_".*coefnames(hazschema)[2], "(Intercept)" => "Intercept")
-
-            # generate hazard struct
-            if npars == 1
-                haz_struct = 
-                    _Exponential(
-                        Symbol(hazname),
-                        hazdat,
-                        [Symbol.(parnames)],
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1) # make sure this is a vector
+The spline coefficients are parameterized on log scale for positivity.
+For monotone splines (monotone != 0), an I-spline-like cumsum transformation
+is applied via spline_ests2coefs().
+"""
+function _build_spline_hazard(ctx::HazardBuildContext)
+    # Access the original SplineHazard (user-facing type) from context
+    hazard = ctx.hazard::SplineHazard
+    data = ctx.data
+    
+    # Covariate parameter names (if any)
+    covar_pars = _semimarkov_covariate_parnames(ctx)
+    covar_names = Symbol.(_covariate_labels(ctx.rhs_names))
+    has_covars = !isempty(covar_names)
+    
+    # Extract sojourn times on the reset scale for this transition
+    # Used for automatic boundary and knot placement
+    samplepaths = extract_paths(data)
+    sojourns_transition = extract_sojourns(hazard.statefrom, hazard.stateto, samplepaths)
+    sojourns_stay = extract_sojourns(hazard.statefrom, hazard.statefrom, samplepaths)
+    all_sojourns = vcat(sojourns_transition, sojourns_stay)
+    
+    # Determine boundary knots
+    if hazard.boundaryknots === nothing
+        if isempty(all_sojourns)
+            # No observations for this transition - use timespan as fallback
+            bknots = [0.0, maximum(data.tstop)]
+        else
+            bknots = [0.0, maximum(all_sojourns)]
+        end
+    else
+        bknots = copy(hazard.boundaryknots)
+    end
+    
+    # Determine interior knots - automatic placement if not specified
+    if hazard.knots === nothing
+        # Automatic knot placement using quantiles
+        if isempty(sojourns_transition)
+            # No observed transitions - use evenly spaced knots
+            nknots = default_nknots(length(all_sojourns))
+            if nknots > 0
+                intknots = collect(range(bknots[1] + (bknots[2] - bknots[1])/(nknots + 1),
+                                         stop=bknots[2] - (bknots[2] - bknots[1])/(nknots + 1),
+                                         length=nknots))
             else
-                haz_struct = 
-                    _ExponentialPH(
-                        Symbol(hazname),
-                        hazdat,
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1)
+                intknots = Float64[]
             end
-
-        elseif family == "wei" 
-
-            # number of parameters
-            npars = size(hazdat, 2)
-
-            # vector for parameters
-            hazpars = zeros(Float64, 1 + npars)
-
-            # append to model parameters
-            push!(parameters, hazpars)
-
-            # generate hazard struct
-            if npars == 1
-                
-                # parameter names
-                parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "_(Intercept)" => "")
-
-                haz_struct = 
-                    _Weibull(
-                        Symbol(hazname),
-                        hazdat, 
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1)
-                        
-            else
-                
-                # parameter names
-                parnames = vcat(
-                        hazname * "_shape",
-                        hazname * "_scale",
-                        hazname*"_".*coefnames(hazschema)[2][Not(1)])
-
-                haz_struct = 
-                    _WeibullPH(
-                        Symbol(hazname),
-                        hazdat,
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1)
+        else
+            nknots = default_nknots(length(sojourns_transition))
+            intknots = place_interior_knots(sojourns_transition, nknots;
+                                           lower_bound=bknots[1], upper_bound=bknots[2])
+        end
+        
+        if !isempty(intknots)
+            @info "Auto-placed $(length(intknots)) interior knots for $(hazard.statefrom)→$(hazard.stateto) transition at: $(round.(intknots, digits=3))"
+        end
+    elseif hazard.knots isa Float64
+        intknots = [hazard.knots]
+    else
+        intknots = copy(hazard.knots)
+    end
+    
+    # Track whether user provided explicit boundary knots
+    user_provided_boundaries = hazard.boundaryknots !== nothing
+    
+    # Validate interior knots are within boundaries
+    # If user provided both boundaries and interior knots that exceed them, warn
+    # If boundaries were inferred, silently extend to encompass interior knots
+    if !isempty(intknots)
+        needs_adjustment = any(intknots .< bknots[1]) || any(intknots .> bknots[2])
+        if needs_adjustment
+            if user_provided_boundaries
+                @warn "Interior knots outside user-specified boundary knots. Adjusting boundaries."
             end
+            # Silently extend boundaries if they were inferred
+            bknots[1] = min(bknots[1], minimum(intknots))
+            bknots[2] = max(bknots[2], maximum(intknots))
+        end
+    end
+    
+    # Combine and sort knots
+    allknots = unique(sort([bknots[1]; intknots; bknots[2]]))
+    
+    # Build B-spline basis
+    B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(allknots))
+    
+    # Determine if we need smooth constant extrapolation
+    # "constant" enforces h'=0 at boundaries for C¹ continuity with flat extrapolation
+    use_constant = hazard.extrapolation == "constant"
+    
+    # Apply boundary conditions via basis recombination
+    if use_constant && (hazard.degree >= 2)
+        # constant: enforce D¹=0 (Neumann BC) at both boundaries
+        # This gives C¹ continuity when extending as constant beyond boundaries
+        # The hazard approaches the boundary tangentially (zero slope), ensuring
+        # a smooth transition to the constant extrapolation region.
+        B = RecombinedBSplineBasis(B, Derivative(1))
+    elseif (hazard.degree > 1) && hazard.natural_spline
+        # Natural spline: D²=0 at boundaries only
+        B = RecombinedBSplineBasis(B, Natural())
+    end
+    
+    # Determine extrapolation method
+    # "constant" uses Flat() with the Neumann BC basis above for C¹ continuity
+    # "linear" uses Linear() for slope-based extrapolation
+    extrap_method = if hazard.extrapolation == "linear"
+        BSplineKit.SplineExtrapolations.Linear()
+    else
+        # "constant" uses Flat() - the smooth basis above ensures C¹ continuity
+        BSplineKit.SplineExtrapolations.Flat()
+    end
+    
+    # Number of basis functions = number of spline coefficients
+    nbasis = length(B)
+    
+    # Build parameter names: spline coefficients + covariates
+    baseline_names = [Symbol(string(ctx.hazname), "_sp", i) for i in 1:nbasis]
+    parnames = vcat(baseline_names, covar_pars)
+    npar_total = nbasis + length(covar_pars)
+    
+    # Generate runtime hazard and cumhaz functions
+    hazard_fn, cumhaz_fn = _generate_spline_hazard_fns(
+        B, extrap_method, hazard.monotone, nbasis, parnames, ctx.metadata.linpred_effect
+    )
+    
+    # Build the internal RuntimeSplineHazard struct
+    haz_struct = RuntimeSplineHazard(
+        ctx.hazname,
+        hazard.statefrom,
+        hazard.stateto,
+        ctx.family,
+        parnames,
+        nbasis,
+        npar_total,
+        hazard_fn,
+        cumhaz_fn,
+        has_covars,
+        covar_names,
+        hazard.degree,
+        allknots,
+        hazard.natural_spline,
+        hazard.monotone,
+        hazard.extrapolation,
+        ctx.metadata,
+        ctx.shared_baseline_key,
+    )
+    
+    # Initialize parameters at zero (log scale → exp(0) = 1 for all coefficients)
+    init_params = zeros(Float64, npar_total)
+    
+    return haz_struct, init_params
+end
 
-        elseif family == "gom"
+"""
+    _generate_spline_hazard_fns(basis, extrap_method, monotone, nbasis, parnames, linpred_effect)
 
-            # number of parameters
-            npars = size(hazdat, 2)
+Generate runtime hazard and cumulative hazard functions for spline hazards.
 
-            # vector for parameters
-            hazpars = zeros(Float64, 1 + npars)
+Returns a tuple (hazard_fn, cumhaz_fn) where each function has signature:
+- hazard_fn(t, pars, covars) -> Float64
+- cumhaz_fn(lb, ub, pars, covars) -> Float64
 
-            # append to model parameters
-            push!(parameters, hazpars)
-
-            # generate hazard struct
-            if npars == 1
+The functions construct Spline objects on-the-fly from parameters, ensuring
+AD compatibility by avoiding stored mutable state.
+"""
+function _generate_spline_hazard_fns(
+    basis::Union{BSplineBasis, RecombinedBSplineBasis},
+    extrap_method,
+    monotone::Int,
+    nbasis::Int,
+    parnames::Vector{Symbol},
+    linpred_effect::Symbol
+)
+    # Extract covariate names (if any)
+    covar_names = extract_covar_names(parnames)
+    has_covars = !isempty(covar_names)
+    
+    # Capture spline infrastructure in closures
+    # Note: basis and extrap_method are immutable, safe to capture
+    
+    if linpred_effect == :ph
+        # Proportional hazards: h(t|x) = h0(t) * exp(β'x)
+        hazard_fn = let B = basis, ext = extrap_method, mono = monotone, nb = nbasis, has_cov = has_covars
+            function(t, pars, covars)
+                # Handle both vector and NamedTuple parameter formats
+                if pars isa AbstractVector
+                    # Legacy vector format: first nbasis elements are spline coefficients
+                    spline_coefs_vec = pars[1:nb]
+                    covar_pars = has_cov ? pars[(nb+1):end] : Float64[]
+                else
+                    # NamedTuple format
+                    spline_coefs_vec = collect(values(pars.baseline))
+                    covar_pars = has_cov ? pars.covariates : NamedTuple()
+                end
                 
-                # parameter names
-                parnames = replace.(vec(hazname*"_".*["shape" "scale"].*"_".*coefnames(hazschema)[2]), "_(Intercept)" => "")
-
-                haz_struct = 
-                    _Gompertz(
-                        Symbol(hazname),
-                        hazdat, 
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1)
-                        
-            else
-                
-                # parameter names
-                parnames = vcat(
-                        hazname * "_shape",
-                        hazname * "_scale",
-                        hazname*"_".*coefnames(hazschema)[2][Not(1)])
-
-                haz_struct = 
-                    _GompertzPH(
-                        Symbol(hazname),
-                        hazdat,
-                        Symbol.(parnames),
-                        hazards[h].statefrom,
-                        hazards[h].stateto,
-                        size(hazdat, 2) - 1)
-            end
-        elseif family == "sp" # B-splines
-
-            # grab hazard object from splines2
-            hazard, cumulative_hazard, rmat, knots, timespan = spline_hazards(hazards[h], data)
-
-            # number of parameters
-            npars = size(rmat, 2) + size(hazdat, 2) - 1
-
-            # generate hazard struct
-            ### no covariates
-            if(size(hazdat, 2) == 1) 
-                
-                # parameter names
-                parnames = replace.(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:length(hazard.spline.basis)))), "(Intercept)" => "Intercept")
-
-                # vector for parameters
-                hazpars = zeros(Float64, npars)
-
-                # append to model parameters
-                push!(parameters, hazpars)
-
-                haz_struct = _Spline(Symbol(hazname),
-                                        hazdat, 
-                                        Symbol.(parnames),
-                                        hazards[h].statefrom,
-                                        hazards[h].stateto,
-                                        hazards[h].degree,
-                                        knots,
-                                        hazard,
-                                        cumulative_hazard,
-                                        hazards[h].natural_spline,
-                                        hazards[h].monotone,
-                                        timespan,
-                                        timespan,
-                                        length(hazard.spline.basis),
-                                        size(hazdat, 2) - 1)            
-            else
-                ### proportional hazards
-                # parameter names
-                parnames = replace.(vcat(vec(hazname*"_".*"splinecoef".*"_".*string.(collect(1:length(hazard.spline.basis)))), hazname*"_".*coefnames(hazschema)[2][Not(1)]))
-               
-                # vector for parameters
-                hazpars = zeros(Float64, npars)
-
-                # append to model parameters
-                push!(parameters, hazpars)
-
-                # hazard struct
-                haz_struct = _SplinePH(Symbol(hazname),
-                                        hazdat[:,Not(1)], 
-                                        Symbol.(parnames),
-                                        hazards[h].statefrom,
-                                        hazards[h].stateto,
-                                        hazards[h].degree,
-                                        knots,
-                                        hazard,
-                                        cumulative_hazard,
-                                        hazards[h].natural_spline,
-                                        hazards[h].monotone,
-                                        timespan,
-                                        timespan,
-                                        length(hazard.spline.basis),
-                                        size(hazdat, 2) - 1)                             
+                # Transform parameters to spline coefficients
+                coefs = _spline_ests2coefs(spline_coefs_vec, B, mono)
+                # Build spline on-the-fly
+                spline = Spline(B, coefs)
+                spline_ext = SplineExtrapolation(spline, ext)
+                # Evaluate baseline hazard
+                h0 = spline_ext(t)
+                # Apply covariate effect - only if covariates actually provided
+                n_covars = covars isa AbstractVector ? length(covars) : length(covars)
+                if has_cov && n_covars > 0
+                    linear_pred = pars isa AbstractVector ? 
+                                  dot(collect(covars), covar_pars) : 
+                                  _eval_linear_pred_named(covar_pars, covars)
+                else
+                    linear_pred = 0.0
+                end
+                return h0 * exp(linear_pred)
             end
         end
+        
+        cumhaz_fn = let B = basis, ext = extrap_method, mono = monotone, nb = nbasis, has_cov = has_covars
+            function(lb, ub, pars, covars)
+                # Handle both vector and NamedTuple parameter formats
+                if pars isa AbstractVector
+                    # Legacy vector format
+                    spline_coefs_vec = pars[1:nb]
+                    covar_pars = has_cov ? pars[(nb+1):end] : Float64[]
+                else
+                    # NamedTuple format
+                    spline_coefs_vec = collect(values(pars.baseline))
+                    covar_pars = has_cov ? pars.covariates : NamedTuple()
+                end
+                
+                # Transform parameters to spline coefficients
+                coefs = _spline_ests2coefs(spline_coefs_vec, B, mono)
+                # Build spline and its integral on-the-fly
+                spline = Spline(B, coefs)
+                spline_ext = SplineExtrapolation(spline, ext)
+                cumhaz_spline = integral(spline_ext.spline)
+                # Handle extrapolation for cumulative hazard
+                H0 = _eval_cumhaz_with_extrap(spline_ext, cumhaz_spline, lb, ub)
+                # Apply covariate effect - only if covariates actually provided
+                n_covars_provided = covars isa NamedTuple ? length(covars) : length(covars)
+                if n_covars_provided > 0
+                    linear_pred = pars isa AbstractVector ? 
+                                  dot(collect(covars), covar_pars) : 
+                                  _eval_linear_pred_named(covar_pars, covars)
+                else
+                    linear_pred = 0.0
+                end
+                return H0 * exp(linear_pred)
+            end
+        end
+    else
+        error("Spline hazards currently only support proportional hazards (linpred_effect=:ph)")
+    end
+    
+    return hazard_fn, cumhaz_fn
+end
 
-        # note: want a symbol that names the hazard + vector of symbols for parameters
-        _hazards[h] = haz_struct
+"""
+    _spline_ests2coefs(ests, basis, monotone)
+
+Transform spline parameter estimates (log scale) to spline coefficients.
+
+For monotone == 0: simple exponentiation (positivity constraint)
+For monotone == 1: I-spline-like cumulative sum (increasing hazard)
+For monotone == -1: reverse cumulative sum (decreasing hazard)
+"""
+function _spline_ests2coefs(ests::AbstractVector{T}, basis, monotone::Int) where T
+    if monotone == 0
+        # Simple positivity: exp(θ)
+        return exp.(ests)
+    else
+        # I-spline transformation for monotonicity
+        ests_nat = exp.(ests)
+        coefs = zeros(T, length(ests))
+        
+        if length(coefs) > 1
+            k = BSplineKit.order(basis)
+            t = BSplineKit.knots(basis)
+            
+            for i in 2:length(coefs)
+                coefs[i] = coefs[i-1] + ests_nat[i] * (t[i + k] - t[i]) / k
+            end
+        end
+        
+        # Add intercept
+        coefs .+= ests_nat[1]
+        
+        # Reverse for decreasing monotone
+        if monotone == -1
+            reverse!(coefs)
+        end
+        
+        return coefs
+    end
+end
+
+"""
+    _spline_coefs2ests(coefs, basis, monotone; clamp_zeros=false)
+
+Transform spline coefficients back to log-scale parameter estimates.
+Inverse of `_spline_ests2coefs`.
+
+For monotone == 0: simple log (inverse of exp)
+For monotone == 1: difference transformation (inverse of cumsum)
+For monotone == -1: reverse then difference
+"""
+function _spline_coefs2ests(coefs::AbstractVector{T}, basis, monotone::Int; clamp_zeros::Bool=false) where T
+    if monotone == 0
+        # Inverse of exp
+        ests_nat = coefs
+    else
+        # Reverse if decreasing
+        coefs_nat = monotone == 1 ? copy(coefs) : reverse(coefs)
+        
+        ests_nat = zeros(T, length(coefs_nat))
+        
+        if length(coefs) > 1
+            k = BSplineKit.order(basis)
+            t = BSplineKit.knots(basis)
+            
+            # Inverse of the cumsum: take differences
+            for i in length(ests_nat):-1:2
+                ests_nat[i] = (coefs_nat[i] - coefs_nat[i - 1]) * k / (t[i + k] - t[i])
+            end
+        end
+        
+        # Intercept
+        ests_nat[1] = coefs_nat[1]
+    end
+    
+    # Clamp numerical zeros
+    if clamp_zeros
+        ests_nat[findall(isapprox.(ests_nat, 0.0; atol = sqrt(eps())))] .= zero(T)
+    end
+    
+    return log.(ests_nat)
+end
+
+"""
+    _eval_linear_pred(pars, covars, start_idx)
+
+Evaluate the linear predictor β'x starting from index start_idx in pars.
+"""
+function _eval_linear_pred(pars::AbstractVector, covars, start_idx::Int)
+    result = zero(eltype(pars))
+    if covars isa NamedTuple
+        covar_vec = collect(values(covars))
+    else
+        covar_vec = covars
+    end
+    for (i, x) in enumerate(covar_vec)
+        result += pars[start_idx + i - 1] * x
+    end
+    return result
+end
+
+"""
+    _eval_linear_pred_named(pars_covariates::NamedTuple, covars::NamedTuple)
+
+Evaluate the linear predictor β'x using named parameter and covariate access.
+Assumes parameter names match covariate names (with hazard prefix stripped).
+
+# Example
+```julia
+pars.covariates = (h12_age = 0.3, h12_sex = 0.1)
+covars = (age = 50.0, sex = 1.0)
+result = _eval_linear_pred_named(pars.covariates, covars)  # 0.3*50 + 0.1*1
+```
+"""
+function _eval_linear_pred_named(pars_covariates::NamedTuple, covars::NamedTuple)
+    result = 0.0
+    for (pname, pval) in pairs(pars_covariates)
+        # Extract covariate name by stripping hazard prefix (h12_age → age)
+        cname_str = replace(String(pname), r"^h\d+_" => "")
+        cname = Symbol(cname_str)
+        if haskey(covars, cname)
+            result += pval * getfield(covars, cname)
+        else
+            error("Covariate $cname not found in covars NamedTuple")
+        end
+    end
+    return result
+end
+
+"""
+    _eval_cumhaz_with_extrap(spline_ext, cumhaz_spline, lb, ub)
+
+Evaluate cumulative hazard over [lb, ub] with proper extrapolation handling.
+
+For "constant" extrapolation: hazard is constant beyond boundaries (with C¹ smooth
+transition via Neumann BC), so cumulative hazard grows linearly.
+
+For "linear" extrapolation: hazard varies linearly beyond boundaries:
+  h(t) = h(t_b) + h'(t_b) * (t - t_b)
+so cumulative hazard is:
+  H(a,b) = h(t_b) * Δt + h'(t_b) * Δt² / 2  (for t > t_hi)
+  H(a,b) = h(t_b) * Δt - h'(t_b) * Δt² / 2  (for t < t_lo)
+"""
+function _eval_cumhaz_with_extrap(spline_ext::SplineExtrapolation, cumhaz_spline, lb, ub)
+    bounds = BSplineKit.boundaries(spline_ext.spline.basis)
+    t_lo, t_hi = bounds
+    
+    # Simple case: both endpoints within spline support
+    if lb >= t_lo && ub <= t_hi
+        return cumhaz_spline(ub) - cumhaz_spline(lb)
+    end
+    
+    # Handle extrapolation
+    H_total = zero(eltype(coefficients(spline_ext.spline)))
+    is_linear = spline_ext.method isa BSplineKit.SplineExtrapolations.Linear
+    
+    # Contribution from below lower boundary
+    if lb < t_lo
+        h_lo = spline_ext.spline(t_lo)  # Hazard at lower boundary
+        dt = min(ub, t_lo) - lb
+        if is_linear
+            # Linear extrapolation: h(t) = h(t_lo) + h'(t_lo) * (t - t_lo) for t < t_lo
+            # ∫[lb, t_lo] h(t) dt = h(t_lo) * dt + h'(t_lo) * ∫[lb, t_lo] (t - t_lo) dt
+            # The integral ∫[lb, t_lo] (t - t_lo) dt = -dt²/2 (since t - t_lo < 0 in this region)
+            dh_lo = ForwardDiff.derivative(t -> spline_ext.spline(t), t_lo)
+            H_total += h_lo * dt - dh_lo * dt^2 / 2
+        else
+            # Constant: hazard stays at boundary value (C¹ continuous for "constant" mode)
+            H_total += h_lo * dt
+        end
+    end
+    
+    # Contribution within spline support
+    actual_lb = max(lb, t_lo)
+    actual_ub = min(ub, t_hi)
+    if actual_ub > actual_lb
+        H_total += cumhaz_spline(actual_ub) - cumhaz_spline(actual_lb)
+    end
+    
+    # Contribution from above upper boundary
+    if ub > t_hi
+        h_hi = spline_ext.spline(t_hi)  # Hazard at upper boundary
+        dt = ub - max(lb, t_hi)
+        if is_linear
+            # Linear extrapolation: h(t) = h(t_hi) + h'(t_hi) * (t - t_hi) for t > t_hi
+            # ∫[t_hi, ub] h(t) dt = h(t_hi) * dt + h'(t_hi) * dt²/2
+            dh_hi = ForwardDiff.derivative(t -> spline_ext.spline(t), t_hi)
+            H_total += h_hi * dt + dh_hi * dt^2 / 2
+        else
+            # Constant: hazard stays at boundary value (C¹ continuous for "constant" mode)
+            H_total += h_hi * dt
+        end
+    end
+    
+    return H_total
+end
+
+register_hazard_family!(:exp, _build_exponential_hazard)
+register_hazard_family!(:wei, _build_weibull_hazard)
+register_hazard_family!(:gom, _build_gompertz_hazard)
+register_hazard_family!(:sp, _build_spline_hazard)
+
+
+# mutable structs
+
+#=============================================================================
+PHASE 2: Consolidated build_hazards with Runtime Functions
+=============================================================================# 
+
+"""
+        build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate::Bool = false)
+
+Instantiate runtime hazard objects from the symbolic specifications produced by
+`Hazard` or `@hazard`. This attaches the relevant design matrices, builds the
+baseline parameter containers, and returns everything needed by `multistatemodel`.
+
+# Arguments
+- `hazards`: one or more hazard specifications. Formula arguments are optional for
+    intercept-only transitions, matching the `Hazard` constructor semantics.
+- `data`: `DataFrame` containing the covariates referenced by the hazard formulas.
+- `surrogate`: when `true`, force exponential baselines (useful for MCEM surrogates).
+
+# Returns
+1. `_hazards`: callable hazard objects used internally by the simulator/likelihood.
+2. `parameters`: the ParameterHandling.jl structure (flat, natural, transforms, etc.).
+3. `hazkeys`: dictionary mapping hazard names (e.g. `:h12`) to indices in `_hazards`.
+"""
+function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = false)
+    contexts = [_prepare_hazard_context(h, data; surrogate = surrogate) for h in hazards]
+
+    _hazards = Vector{_Hazard}(undef, length(hazards))
+    parameters_list = Vector{Vector{Float64}}()  # Collect parameters as nested vectors
+    hazkeys = Dict{Symbol, Int64}()
+
+    for (idx, ctx) in enumerate(contexts)
+        hazkeys[ctx.hazname] = idx
+        builder = get(_HAZARD_BUILDERS, ctx.family, nothing)
+        builder === nothing && error("Unknown hazard family: $(ctx.family)")
+        hazard_struct, hazpars = builder(ctx)
+        _hazards[idx] = hazard_struct
+        push!(parameters_list, hazpars)
     end
 
+    parameters = build_parameters(parameters_list, hazkeys, _hazards)
     return _hazards, parameters, hazkeys
+end
+
+"""
+    build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Symbol, Int64}, hazards::Vector{<:_Hazard})
+
+Create a parameters structure from nested parameter vectors.
+
+Returns a NamedTuple with fields:
+- `flat`: Vector{Float64} of all parameters (log scale for baseline, as-is for covariates)
+- `nested`: NamedTuple of NamedTuples per hazard with `baseline` and optional `covariates` fields
+- `natural`: NamedTuple of Vectors for each hazard (natural scale for baseline, as-is for covariates)
+- `unflatten`: Function to reconstruct nested structure from flat vector
+
+Parameters are stored on log scale for baseline (rates, shapes, scales) because hazard 
+functions expect log-scale and apply exp() internally. Covariate coefficients are unconstrained.
+"""
+function build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Symbol, Int64}, hazards::Vector{<:_Hazard})
+    # Build nested parameters structure per hazard
+    # Parameters are stored on log scale for baseline, as-is for covariates
+    params_nested_pairs = [
+        hazname => build_hazard_params(parameters[idx], hazards[idx].parnames, hazards[idx].npar_baseline, hazards[idx].npar_total)
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    params_nested = NamedTuple(params_nested_pairs)
+    
+    # Create ReConstructor for AD-compatible flatten/unflatten
+    reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
+    params_flat = flatten(reconstructor, params_nested)
+    
+    # Get natural scale parameters (family-aware transformation)
+    params_natural_pairs = [
+        hazname => extract_natural_vector(params_nested[hazname], hazards[idx].family)
+        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
+    ]
+    params_natural = NamedTuple(params_natural_pairs)
+    
+    # Return structure
+    return (
+        flat = params_flat,
+        nested = params_nested,
+        natural = params_natural,
+        reconstructor = reconstructor  # NEW: Store ReConstructor instead of unflatten_fn
+    )
 end
 
 ### Total hazards
@@ -361,22 +911,48 @@ function build_totalhazards(_hazards, tmat)
 end
 
 """
-    build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64})
+    build_emat(data::DataFrame, CensoringPatterns::Matrix{Float64}, EmissionMatrix::Union{Nothing, Matrix{Float64}}, tmat::Matrix{Int64})
 
-Generate a matrix enumerating instantaneous transitions. Origin states correspond to rows, destination states to columns, and zero entries indicate that an instantaneous state transition is not possible. Transitions are enumerated in non-zero elements of the matrix. `hazinfo` is the output of a call to `enumerate_hazards`.
+Create the emission matrix used by the forward–backward routines. Each row
+corresponds to an observation; columns correspond to latent states. The helper
+marks which states are compatible with each observation or censoring code using
+`CensoringPatterns` (if provided) and the transition structure `tmat`.
+
+If `EmissionMatrix` is provided, it is used directly (allowing observation-specific emission probabilities).
+Otherwise, the emission matrix is constructed from `CensoringPatterns` and observation types.
+
+Values represent P(observation | state): 0 means impossible, 1 means certain, values in (0,1) 
+represent soft evidence.
 """
-function build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64}, tmat::Matrix{Int64})
+function build_emat(data::DataFrame, CensoringPatterns::Matrix{Float64}, EmissionMatrix::Union{Nothing, Matrix{Float64}}, tmat::Matrix{Int64})
     
-    # initialize the emission matrix
     n_obs = nrow(data)
     n_states = size(tmat, 1)
-    emat = zeros(Int64, n_obs, n_states)
+    
+    # If EmissionMatrix is provided, validate and use it directly
+    if !isnothing(EmissionMatrix)
+        if size(EmissionMatrix) != (n_obs, n_states)
+            error("EmissionMatrix must have dimensions ($(n_obs), $(n_states)), got $(size(EmissionMatrix)).")
+        end
+        if any(EmissionMatrix .< 0) || any(EmissionMatrix .> 1)
+            error("EmissionMatrix values must be in [0, 1].")
+        end
+        for i in 1:n_obs
+            if all(EmissionMatrix[i,:] .== 0)
+                error("EmissionMatrix row $i has no allowed states (all zeros).")
+            end
+        end
+        return EmissionMatrix
+    end
+    
+    # Otherwise, build from CensoringPatterns
+    emat = zeros(Float64, n_obs, n_states)
 
     for i in 1:n_obs
         if data.obstype[i] ∈ [1, 2] # observation not censored
-            emat[i,data.stateto[i]] = 1
-        elseif data.obstype[i] == 0 # observation censored, all state are possible
-            emat[i,:] = ones(n_states)
+            emat[i,data.stateto[i]] = 1.0
+        elseif data.obstype[i] == 0 # observation censored, all states are possible
+            emat[i,:] .= 1.0
         else
             emat[i,:] .= CensoringPatterns[data.obstype[i] - 2, 2:n_states+1]
         end 
@@ -385,15 +961,176 @@ function build_emat(data::DataFrame, CensoringPatterns::Matrix{Int64}, tmat::Mat
     return emat
 end
 
-"""
-    multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights = nothing, CensoringPatterns = nothing, verbose = false)
+@inline function _ensure_subject_weights(SubjectWeights, nsubj)
+    return isnothing(SubjectWeights) ? ones(Float64, nsubj) : SubjectWeights
+end
 
-Constructs a multistate model from cause specific hazards. Parses the supplied hazards and dataset and returns an object of type `MultistateModel` that can be used for simulation and inference. Optional keyword arguments specified in kwargs may include sampling weights and censoring patterns.
-"""
-function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWeights::Union{Nothing,Vector{Float64}} = nothing, CensoringPatterns::Union{Nothing,Matrix{Int64}} = nothing, verbose = false) 
+@inline function _ensure_observation_weights(ObservationWeights)
+    return ObservationWeights  # nothing stays nothing, vector stays vector
+end
 
-    # catch the model call
-    modelcall = (hazards = hazards, data = data, SamplingWeights = SamplingWeights, CensoringPatterns = CensoringPatterns)
+@inline function _prepare_censoring_patterns(CensoringPatterns, n_states)
+    return isnothing(CensoringPatterns) ? Matrix{Float64}(undef, 0, n_states) : Float64.(CensoringPatterns)
+end
+
+function _validate_inputs!(data::DataFrame,
+                           tmat::Matrix{Int64},
+                           CensoringPatterns::Matrix{Float64},
+                           SubjectWeights,
+                           ObservationWeights;
+                           verbose::Bool)
+    check_data!(data, tmat, CensoringPatterns; verbose = verbose)
+    
+    # Validate weights
+    if !isnothing(SubjectWeights)
+        check_SubjectWeights(SubjectWeights, data)
+    end
+    if !isnothing(ObservationWeights)
+        check_ObservationWeights(ObservationWeights, data)
+    end
+    
+    if any(data.obstype .∉ Ref([1, 2]))
+        check_CensoringPatterns(CensoringPatterns, tmat)
+    end
+end
+
+@inline function _observation_mode(data::DataFrame)
+    if all(data.obstype .== 1)
+        return :exact
+    elseif all(data.obstype .∈ Ref([1, 2]))
+        return :panel
+    else
+        return :censored
+    end
+end
+
+@inline function _process_class(hazards::Vector{<:_Hazard})
+    # Use the _is_markov_hazard helper for consistent classification
+    # This correctly handles PhaseTypeCoxianHazard (Markov) and degree-0 splines
+    return all(_is_markov_hazard.(hazards)) ? :markov : :semi_markov
+end
+
+@inline function _model_constructor(mode::Symbol, process::Symbol)
+    if mode == :exact
+        return MultistateModel
+    elseif mode == :panel
+        return process == :markov ? MultistateMarkovModel : MultistateSemiMarkovModel
+    elseif mode == :censored
+        return process == :markov ? MultistateMarkovModelCensored : MultistateSemiMarkovModelCensored
+    else
+        error("Unknown observation mode $(mode)")
+    end
+end
+
+function _assemble_model(mode::Symbol,
+                         process::Symbol,
+                         components::NamedTuple,
+                         surrogate::Union{Nothing, MarkovSurrogate},
+                         modelcall)
+    ctor = _model_constructor(mode, process)
+    return ctor(
+        components.data,
+        components.parameters,
+        components.hazards,
+        components.totalhazards,
+        components.tmat,
+        components.emat,
+        components.hazkeys,
+        components.subjinds,
+        components.SubjectWeights,
+        components.ObservationWeights,
+        components.CensoringPatterns,
+        surrogate,
+        modelcall,
+    )
+end
+
+"""
+    multistatemodel(hazards::HazardFunction...; data::DataFrame, surrogate = :none, ...)
+
+Construct a full multistate model from a collection of hazards defined via `Hazard`
+or `@hazard`. Hazards without covariates can omit a `@formula` entirely; the helper
+will insert the intercept-only design automatically as described in `Hazard`'s docs.
+
+# Keywords
+- `data`: long-format `DataFrame` with at least `:subject`, `:statefrom`, `:stateto`, `:time`, `:obstype`.
+- `constraints`: optional parameter constraints (see `make_constraints`). When provided at model creation,
+  constraints are validated at parameter setting time and used as defaults in `fit()`.
+- `surrogate::Symbol = :none`: surrogate model for importance sampling in MCEM.
+  - `:none` (default): no surrogate created (for Markov models or exact data)
+  - `:markov`: create a Markov surrogate (required for semi-Markov MCEM fitting)
+- `fit_surrogate::Bool = true`: if `surrogate = :markov`, fit the surrogate via MLE at model creation time.
+  If `false`, surrogate parameters remain at default values and will be fitted when `fit()` is called.
+  Setting to `true` (default) is recommended as it avoids redundant fitting during initialization.
+- `surrogate_constraints`: optional constraints for surrogate optimization (only used if `fit_surrogate = true`).
+- `SubjectWeights`: optional per-subject weights (length = number of subjects). Mutually exclusive with `ObservationWeights`.
+- `ObservationWeights`: optional per-observation weights (length = number of rows in data). Mutually exclusive with `SubjectWeights`.
+- `CensoringPatterns`: optional matrix describing which states are compatible with each censoring code. Values in [0,1].
+- `EmissionMatrix`: optional matrix of emission probabilities (nrow(data) × nstates). Values are P(observation|state).
+- `verbose`: print additional validation output.
+
+# Examples
+```julia
+# Markov model (no surrogate needed)
+model = multistatemodel(h12, h21; data = df)
+
+# Model with parameter constraints
+cons = make_constraints(
+    cons = [:(log_λ_12 == log_λ_21)],  # Equal rates
+    lcons = [0.0],
+    ucons = [0.0]
+)
+model = multistatemodel(h12, h21; data = df, constraints = cons)
+
+# Semi-Markov model - surrogate created and fitted at model creation time (default)
+model = multistatemodel(h12_wei, h21_wei; data = df, surrogate = :markov)
+
+# Semi-Markov model - defer surrogate fitting to fit() call
+model = multistatemodel(h12_wei, h21_wei; data = df, surrogate = :markov, fit_surrogate = false)
+```
+"""
+function multistatemodel(hazards::HazardFunction...; 
+                        data::DataFrame, 
+                        constraints = nothing,
+                        surrogate::Symbol = :none,
+                        fit_surrogate::Bool = true,
+                        optimize_surrogate::Union{Bool, Nothing} = nothing,  # deprecated
+                        surrogate_constraints = nothing,
+                        SubjectWeights::Union{Nothing,Vector{Float64}} = nothing, 
+                        ObservationWeights::Union{Nothing,Vector{Float64}} = nothing,
+                        CensoringPatterns::Union{Nothing,Matrix{<:Real}} = nothing, 
+                        EmissionMatrix::Union{Nothing,Matrix{Float64}} = nothing,
+                        verbose = false) 
+
+    # Handle deprecated optimize_surrogate keyword
+    if !isnothing(optimize_surrogate)
+        @warn "optimize_surrogate is deprecated. Use fit_surrogate instead." maxlog=1
+        fit_surrogate = optimize_surrogate
+    end
+
+    # Validate surrogate option
+    if surrogate ∉ (:none, :markov)
+        error("surrogate must be :none or :markov, got :$surrogate")
+    end
+    
+    # Validate inputs
+    isempty(hazards) && throw(ArgumentError("At least one hazard must be provided"))
+
+    # Check for phase-type hazards and route accordingly
+    if any(h -> h isa PhaseTypeHazardSpec, hazards)
+        return _build_phasetype_model_from_hazards(hazards;
+            data = data,
+            constraints = constraints,
+            SubjectWeights = SubjectWeights,
+            ObservationWeights = ObservationWeights,
+            CensoringPatterns = CensoringPatterns,
+            EmissionMatrix = EmissionMatrix,
+            verbose = verbose
+        )
+    end
+
+    # catch the model call (includes constraints for use by fit())
+    modelcall = (hazards = hazards, data = data, constraints = constraints, SubjectWeights = SubjectWeights, ObservationWeights = ObservationWeights, CensoringPatterns = CensoringPatterns, EmissionMatrix = EmissionMatrix)
 
     # get indices for each subject in the dataset
     subjinds, nsubj = get_subjinds(data)
@@ -408,125 +1145,55 @@ function multistatemodel(hazards::HazardFunction...; data::DataFrame, SamplingWe
     # compile matrix enumerating instantaneous state transitions
     tmat = create_tmat(hazinfo)
 
-    # initialize SamplingWeights if none supplied
-    if isnothing(SamplingWeights)
-        SamplingWeights = ones(Float64, nsubj)
-    end
+    # Handle weight exclusivity and defaults
+    SubjectWeights, ObservationWeights = check_weight_exclusivity(SubjectWeights, ObservationWeights, nsubj)
+    
+    # Prepare patterns
+    CensoringPatterns = _prepare_censoring_patterns(CensoringPatterns, size(tmat, 1))
 
-    # initialize censoring patterns if none supplied
-    if isnothing(CensoringPatterns)
-        CensoringPatterns = Matrix{Int64}(undef, 0, size(tmat, 1))
-    end
+    _validate_inputs!(data, tmat, CensoringPatterns, SubjectWeights, ObservationWeights; verbose = verbose)
+    emat = build_emat(data, CensoringPatterns, EmissionMatrix, tmat)
 
-    # check data formatting
-    check_data!(data, tmat, CensoringPatterns; verbose = verbose)
-
-    # check SamplingWeights
-    check_SamplingWeights(SamplingWeights, data)
-
-    # check CensoringPatterns and build emission matrix
-    if any(data.obstype .∉ Ref([1,2]))
-        check_CensoringPatterns(CensoringPatterns, tmat)
-    end
-
-    # build emission matrix
-    emat = build_emat(data, CensoringPatterns, tmat)
-
-    # generate tuple for compiled hazard functions
-    # _hazards is a tuple of _Hazard objects
     _hazards, parameters, hazkeys = build_hazards(hazards...; data = data, surrogate = false)
+    _totalhazards = build_totalhazards(_hazards, tmat)
 
-    # generate vector for total hazards 
-    _totalhazards = build_totalhazards(_hazards, tmat)  
-
-    # build exponential surrogate hazards
-    surrogate = build_hazards(hazards...; data = data, surrogate = true)
-
-    # construct multistate mode
-    # exactly observed data
-    if all(data.obstype .== 1)        
-        model = MultistateModel(
-        data,
-        parameters,
-        _hazards,
-        _totalhazards,
-        tmat,
-        emat,
-        hazkeys,
-        subjinds,
-        SamplingWeights,
-        CensoringPatterns,
-        MarkovSurrogate(surrogate[1], surrogate[2]),
-        modelcall)
-
-    # panel data and/or exactly observed data
-    elseif all(data.obstype .∈ Ref([1,2]))
-        # Markov model
-        if all(isa.(_hazards, _MarkovHazard))
-            model = MultistateMarkovModel(
-                data,
-                parameters,
-                _hazards,
-                _totalhazards,
-                tmat,
-                emat,
-                hazkeys,
-                subjinds,
-                SamplingWeights,
-                CensoringPatterns,
-                MarkovSurrogate(surrogate[1], surrogate[2]),
-                modelcall)
-        # Semi-Markov model
-        elseif any(isa.(_hazards, _SemiMarkovHazard))
-            model = MultistateSemiMarkovModel(
-                data,
-                parameters,
-                _hazards,
-                _totalhazards,
-                tmat,
-                emat,
-                hazkeys,
-                subjinds,
-                SamplingWeights,
-                CensoringPatterns,
-                MarkovSurrogate(surrogate[1], surrogate[2]),
-                modelcall)
-        end
-
-    # censored states and/or panel data and/or exactly observed data
-    elseif !all(data.obstype .∈ Ref([1,2]))
-        # Markov model
-        if all(isa.(_hazards, _MarkovHazard))
-            model = MultistateMarkovModelCensored(
-                data,
-                parameters,
-                _hazards,
-                _totalhazards,
-                tmat,
-                emat,
-                hazkeys,
-                subjinds,
-                SamplingWeights,
-                CensoringPatterns,
-                MarkovSurrogate(surrogate[1], surrogate[2]),
-                modelcall)
-        # semi-Markov model
-        elseif any(isa.(_hazards, _SemiMarkovHazard))
-            model = MultistateSemiMarkovModelCensored(
-                data,
-                parameters,
-                _hazards,
-                _totalhazards,
-                tmat,
-                emat,
-                hazkeys,
-                subjinds,
-                SamplingWeights,
-                CensoringPatterns,
-                MarkovSurrogate(surrogate[1], surrogate[2]),
-                modelcall)
-        end        
+    # Build surrogate if requested (initially unfitted)
+    if surrogate === :markov
+        surrogate_haz, surrogate_pars_ph, _ = build_hazards(hazards...; data = data, surrogate = true)
+        markov_surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars_ph; fitted=false)
+    else
+        markov_surrogate = nothing
     end
 
+    components = (
+        data = data,
+        parameters = parameters,
+        hazards = _hazards,
+        totalhazards = _totalhazards,
+        tmat = tmat,
+        emat = emat,
+        hazkeys = hazkeys,
+        subjinds = subjinds,
+        SubjectWeights = SubjectWeights,
+        ObservationWeights = ObservationWeights,
+        CensoringPatterns = CensoringPatterns,
+    )
+
+    mode = _observation_mode(data)
+    process = _process_class(_hazards)
+
+    model = _assemble_model(mode, process, components, markov_surrogate, modelcall)
+    
+    # Fit surrogate at model creation time (default: true)
+    if fit_surrogate && surrogate === :markov
+        if verbose
+            println("Fitting Markov surrogate at model creation time...")
+        end
+        fitted_surrogate = _fit_markov_surrogate(model; 
+            surrogate_constraints = surrogate_constraints, 
+            verbose = verbose)
+        model.markovsurrogate = fitted_surrogate
+    end
+    
     return model
 end

@@ -239,3 +239,166 @@ function reduce_jumpchain(path::SamplePath)
 
     return newpath
 end
+
+"""
+    path_to_dataframe(path::SamplePath)
+
+Convert a single SamplePath to a DataFrame with the full path (exact transition times).
+
+# Arguments
+- `path::SamplePath`: A sample path with subject id, times, and states
+
+# Returns
+- `DataFrame`: Dataset with columns `id`, `tstart`, `tstop`, `statefrom`, `stateto`, `obstype`
+  where `obstype = 1` indicates exact observation of transitions.
+
+See also: [`paths_to_dataset`](@ref)
+"""
+function path_to_dataframe(path::SamplePath)
+    n = length(path.times) - 1
+    if n == 0
+        # Edge case: path with single time point (no intervals)
+        return DataFrame(
+            id = Int[],
+            tstart = Float64[],
+            tstop = Float64[],
+            statefrom = Int[],
+            stateto = Int[],
+            obstype = Int[]
+        )
+    end
+    
+    # Use @view to avoid allocating copies of the slices
+    return DataFrame(
+        id = fill(path.subj, n),
+        tstart = @view(path.times[1:end-1]),
+        tstop = @view(path.times[2:end]),
+        statefrom = @view(path.states[1:end-1]),
+        stateto = @view(path.states[2:end]),
+        obstype = fill(1, n)  # obstype=1 for exact observations
+    )
+end
+
+"""
+    paths_to_dataset(samplepaths::Vector{SamplePath})
+
+Convert a collection of sample paths to a DataFrame containing the full paths
+(exact transition times), not observed at discrete times.
+
+# Arguments
+- `samplepaths::Vector{SamplePath}`: Vector of sample paths
+
+# Returns
+- `DataFrame`: Vertically concatenated dataset with full path data from all paths.
+  Columns: `id`, `tstart`, `tstop`, `statefrom`, `stateto`, `obstype` (always 1 for exact).
+
+# Example
+```julia
+# After drawing sample paths
+paths = [draw_samplepath(i, model, ...) for i in 1:nsubj]
+dataset = paths_to_dataset(paths)
+```
+
+See also: [`path_to_dataframe`](@ref), [`observe_path`](@ref), [`simulate`](@ref)
+"""
+function paths_to_dataset(samplepaths::AbstractVector{SamplePath})
+    # Pre-compute total rows for pre-allocation
+    total_rows = sum(max(0, length(p.times) - 1) for p in samplepaths)
+    
+    if total_rows == 0
+        return DataFrame(
+            id = Int[],
+            tstart = Float64[],
+            tstop = Float64[],
+            statefrom = Int[],
+            stateto = Int[],
+            obstype = Int[]
+        )
+    end
+    
+    # Pre-allocate arrays
+    ids = Vector{Int}(undef, total_rows)
+    tstarts = Vector{Float64}(undef, total_rows)
+    tstops = Vector{Float64}(undef, total_rows)
+    statefroms = Vector{Int}(undef, total_rows)
+    statetos = Vector{Int}(undef, total_rows)
+    obstypes = Vector{Int}(undef, total_rows)
+    
+    # Fill arrays in one pass
+    row = 1
+    @inbounds for path in samplepaths
+        n = length(path.times) - 1
+        if n > 0
+            for i in 1:n
+                ids[row] = path.subj
+                tstarts[row] = path.times[i]
+                tstops[row] = path.times[i+1]
+                statefroms[row] = path.states[i]
+                statetos[row] = path.states[i+1]
+                obstypes[row] = 1
+                row += 1
+            end
+        end
+    end
+    
+    return DataFrame(
+        id = ids,
+        tstart = tstarts,
+        tstop = tstops,
+        statefrom = statefroms,
+        stateto = statetos,
+        obstype = obstypes
+    )
+end
+
+"""
+    paths_to_dataset(samplepaths::Matrix{SamplePath})
+
+Convert a matrix of sample paths (subjects × simulations) to a vector of DataFrames
+containing the full paths (exact transition times).
+
+# Arguments
+- `samplepaths::Matrix{SamplePath}`: Matrix of sample paths (nsubj × nsim)
+
+# Returns
+- `Vector{DataFrame}`: Vector of datasets, one per simulation
+
+See also: [`path_to_dataframe`](@ref), [`observe_path`](@ref), [`simulate`](@ref)
+"""
+function paths_to_dataset(samplepaths::Matrix{SamplePath})
+    nsim = size(samplepaths, 2)
+    datasets = Vector{DataFrame}(undef, nsim)
+    
+    # Process each simulation column using the optimized Vector method
+    for i in 1:nsim
+        datasets[i] = paths_to_dataset(@view(samplepaths[:, i]))
+    end
+    
+    return datasets
+end
+
+"""
+    paths_to_dataset(samplepaths::Vector{Vector{SamplePath}})
+
+Convert a vector of vectors of sample paths (one vector per simulation) to a vector 
+of DataFrames containing the full paths (exact transition times).
+
+This method handles the output format from `simulate(...; paths=true)`.
+
+# Arguments
+- `samplepaths::Vector{Vector{SamplePath}}`: Vector of vectors of sample paths (nsim vectors, each with nsubj paths)
+
+# Returns
+- `Vector{DataFrame}`: Vector of datasets, one per simulation
+
+# Example
+```julia
+data, paths = simulate(model; nsim=10, paths=true)
+full_path_data = paths_to_dataset(paths)
+```
+
+See also: [`path_to_dataframe`](@ref), [`simulate`](@ref)
+"""
+function paths_to_dataset(samplepaths::Vector{Vector{SamplePath}})
+    return [paths_to_dataset(sim_paths) for sim_paths in samplepaths]
+end
