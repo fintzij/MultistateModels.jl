@@ -463,39 +463,39 @@ struct ForwardDiffBackend <: ADBackend end
 struct EnzymeBackend <: ADBackend end
 # Reverse-mode AD: O(1) cost in parameters
 # Requires mutation-free code
-# NOT working for Markov models (LAPACK issue)
 
 struct MooncakeBackend <: ADBackend end
 # Alternative reverse-mode AD
 # Pure Julia implementation
-# NOT working for Markov models (LAPACK issue)
 ```
 
-**Known Limitation (as of Dec 2024):**
+**Backend Compatibility:**
 
-Mooncake and Enzyme do **NOT** work for Markov panel models. The matrix exponential computation uses `LAPACK.gebal!` internally, which these reverse-mode AD backends cannot differentiate through. Even though `ChainRules.jl` has an `rrule` for `exp(::Matrix)`, that rule itself calls LAPACK, so reverse-mode still fails.
+| Data Type | ForwardDiff | Mooncake | Enzyme |
+|-----------|-------------|----------|--------|
+| Exact data | ✓ | ✓ | Untested |
+| Panel data (Markov) | ✓ | ✗ (LAPACK issue) | ✗ (LAPACK issue) |
 
-**Recommendation:** Use `ForwardDiffBackend()` for all Markov models. The reverse-mode backends may work for semi-Markov models (which don't use matrix exponential in the likelihood), but this is not extensively tested.
+**Note:** Markov panel models use matrix exponential which calls `LAPACK.gebal!` internally. Reverse-mode AD backends cannot differentiate through LAPACK. However, this is not a practical limitation since Markov models typically have few parameters where forward-mode AD is already efficient.
 
 **Helper Functions:**
 
 ```julia
 get_physical_cores() -> Int
 recommended_nthreads() -> Int
-default_ad_backend(n_params; is_markov=false) -> ADBackend  # Auto-select
+default_ad_backend(n_params; is_markov=false) -> ADBackend
 get_optimization_ad(backend::ADBackend) -> Optimization.AbstractADType
 ```
 
 **Usage:**
 
 ```julia
-# Default (ForwardDiff) - recommended for all current use cases
+# Default (ForwardDiff) - works for all model types
 fitted = fit(model)
 fitted = fit(model; adbackend=ForwardDiffBackend())
 
-# Enzyme/Mooncake - NOT working for Markov models
-# fitted = fit(model; adbackend=EnzymeBackend())    # Will fail on matrix exp
-# fitted = fit(model; adbackend=MooncakeBackend())  # Will fail on matrix exp
+# Mooncake - works for exact data, may be faster for many parameters
+fitted = fit(model; adbackend=MooncakeBackend())
 ```
 
 ---
