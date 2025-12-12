@@ -45,6 +45,44 @@ COMPLETED FEATURES (as of 2025-12-12)
 
 
 ================================================================================
+FEATURE: SPLINE FUNCTIONS ON COVARIATES
+================================================================================
+
+Status: Not started
+Priority: HIGH
+
+MOTIVATION:
+- Allow flexible, non-linear covariate effects
+- Common in survival analysis (e.g., age effects often non-linear)
+- Natural extension of current spline hazard infrastructure
+
+DESIGN IDEAS:
+```julia
+# Option 1: Formula-based syntax (like R's mgcv)
+h12 = Hazard(@formula(0 ~ 1 + s(age) + treatment), :wei, 1, 2)
+
+# Option 2: Explicit spline covariate term
+h12 = Hazard(@formula(0 ~ 1 + treatment), :wei, 1, 2;
+             spline_covars = [SplineCovariate(:age, degree=3, nknots=5)])
+```
+
+KEY QUESTIONS:
+- How to integrate with StatsModels.jl formula interface?
+- Should share infrastructure with RuntimeSplineHazard?
+- Need automatic knot placement based on covariate distribution
+- Penalization for smooth covariate effects?
+
+IMPLEMENTATION NOTES:
+- Reuse BSplines.jl infrastructure from hazard splines
+- Knots placed at quantiles of covariate distribution
+- May need to extend extract_covar_names() and covariate handling
+
+REFERENCES:
+- Wood (2017) GAMs: An Introduction with R, 2nd ed
+- survPen (Fauvernier et al. 2019) - supports spline covariates
+
+
+================================================================================
 FEATURE: PENALIZED SPLINES (NEXT PRIORITY)
 ================================================================================
 
