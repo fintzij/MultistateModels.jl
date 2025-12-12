@@ -14,3 +14,6 @@ LocalPreferences.toml
 test/testcoverage-gfm.md
 test/testcoverage.html
 test/testcoverage_files/
+
+# External test package (separate repo: https://github.com/fintzij/MultistateModelsTests.jl)
+MultistateModelsTests/

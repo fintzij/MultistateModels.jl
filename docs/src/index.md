@@ -186,4 +186,53 @@ paths = simulate(fitted, n=100)
 
 # Simulate panel data
 simdata = simulate_data(fitted, n=100, times=[0, 1, 2, 3])
+```
+
+### Simulation Strategies
+
+For models with `time_transform=true` hazards, you can choose between two simulation strategies:
+
+```julia
+using MultistateModels: CachedTransformStrategy, DirectTransformStrategy
+
+# Cached strategy (default): precomputes and caches hazard values
+# - Best for repeated simulations with the same parameters
+# - Uses more memory but faster for multiple paths
+path = simulate_path(model, subject_id; strategy=CachedTransformStrategy())
+
+# Direct strategy: computes hazard values on-demand
+# - Lower memory usage
+# - Better for one-off simulations or when parameters change frequently
+path = simulate_path(model, subject_id; strategy=DirectTransformStrategy())
+```
+
+Both strategies produce identical results given the same random seed - the choice affects only computational performance.
+
+## Parameter Scale Conventions
+
+MultistateModels.jl stores parameters on **estimation scale** internally but provides convenience functions for working with **natural scale** parameters:
+
+| Family | Parameter | Estimation Scale | Natural Scale |
+|--------|-----------|-----------------|---------------|
+| Exponential | rate | log(rate) | rate |
+| Weibull | shape | log(shape) | shape |
+| Weibull | scale | log(scale) | scale |
+| Gompertz | shape | shape | shape (unconstrained) |
+| Gompertz | rate | log(rate) | rate |
+| All | covariate β | β | β |
+
+**Note**: Gompertz `shape` is unconstrained (can be negative), so it is stored as-is without log transformation.
+
+```julia
+# Get parameters on natural scale
+natural_params = get_parameters(fitted; scale=:natural)
+
+# Get parameters on estimation (log) scale  
+est_params = get_parameters(fitted; scale=:estimation)
+
+# Set parameters (expects estimation scale)
+set_parameters!(model, (h12 = [log(shape), log(scale), beta],))
+
+# For Gompertz specifically:
+set_parameters!(model, (h12 = [shape, log(rate), beta],))  # shape NOT logged
 ``` 
