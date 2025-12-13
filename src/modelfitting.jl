@@ -825,12 +825,23 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
 - `tol::Float64=1e-2`: tolerance for MLL change in stopping rule
 - `ascent_threshold::Float64=0.1`: standard normal quantile for ascent lower bound
 - `stopping_threshold::Float64=0.1`: standard normal quantile for stopping criterion
-- `ess_increase::Float64=2.0`: ESS inflation factor when more paths needed
+- `ess_growth_factor::Float64=sqrt(2.0)`: multiplicative factor for ESS increase when more paths needed
+- `ess_increase_method::Symbol=:fixed`: method for increasing ESS. Options:
+  - `:fixed` (default): multiply ESS by `ess_growth_factor` each time ascent is not confirmed
+  - `:adaptive`: power-based calculation from Caffo et al. (2005) Equation 15 at iteration start
+    to adaptively set ESS based on Monte Carlo variance; uses `ess_growth_factor` for mid-iteration
+    increases when `ascent_lb < 0`
+- `ascent_alpha::Float64=0.25`: type I error rate for adaptive (Caffo) power calculation
+- `ascent_beta::Float64=0.25`: type II error rate for adaptive (Caffo) power calculation
 - `ess_target_initial::Int=50`: initial effective sample size target per subject
 - `max_ess::Int=10000`: maximum ESS before stopping for non-convergence
 - `max_sampling_effort::Int=20`: maximum factor of ESS for additional path sampling
 - `npaths_additional::Int=10`: increment for additional paths when augmenting
-- `block_hessian_speedup::Float64=2.0`: minimum speedup factor to use block-diagonal Hessian
+- `block_hessian_speedup::Float64=2.0`: minimum theoretical speedup required to use block-diagonal
+  Hessian optimization. The Hessian is block-diagonal because each hazard's parameters only appear
+  in its own cumulative hazard term (∂²L/∂θₐ∂θᵦ = 0 when θₐ, θᵦ belong to different hazards).
+  For models with k hazards of sizes b₁,...,bₖ, block-diagonal inversion is O(Σbᵢ³) vs O(n³) for
+  dense, where n = Σbᵢ. Set higher to prefer dense computation; set to 1.0 to always use blocks
 - `acceleration::Symbol=:none`: acceleration method for MCEM. Options:
   - `:none` (default): standard MCEM without acceleration
   - `:squarem`: SQUAREM acceleration (Varadhan & Roland, 2008), applies quasi-Newton 
@@ -889,7 +900,7 @@ fitted = fit(semimarkov_model; acceleration=:squarem)
 
 See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :none, sir::Symbol = :none, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :none, sir::Symbol = :none, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # Validate acceleration parameter
     if acceleration ∉ (:none, :squarem)
@@ -958,9 +969,25 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         error("max_sampling_effort must be greater than 1.")
     end
 
-    # check that ess_increase is greater than 1
-    if ess_increase <= 1
-        error("ess_increase must be greater than 1.")
+    # check that ess_growth_factor is greater than 1
+    if ess_growth_factor <= 1
+        error("ess_growth_factor must be greater than 1.")
+    end
+
+    # Validate ess_increase_method parameter
+    if ess_increase_method ∉ (:fixed, :adaptive)
+        error("ess_increase_method must be :fixed or :adaptive, got :$ess_increase_method")
+    end
+    if ascent_alpha <= 0 || ascent_alpha >= 1
+        error("ascent_alpha must be in (0,1), got $ascent_alpha")
+    end
+    if ascent_beta <= 0 || ascent_beta >= 1
+        error("ascent_beta must be in (0,1), got $ascent_beta")
+    end
+    use_adaptive_ess = ess_increase_method === :adaptive
+    
+    if verbose && use_adaptive_ess
+        println("Using adaptive (Caffo) power-based ESS increase (α=$ascent_alpha, β=$ascent_beta).\n")
     end
 
     # throw a warning if trying to fit a spline model where the degree is 0 for all splines
@@ -985,6 +1012,13 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
     # initialize ess target
     ess_target = ess_target_initial
+    
+    # Adaptive ESS method: track m_start for each iteration (m_{t,start} in Caffo et al. 2005)
+    # At iteration t+1: m_{t+1,start} = max(m_{t,start}, m_t)
+    adaptive_m_start = Float64(ess_target_initial)
+    
+    # Pre-compute z-quantiles for adaptive (Caffo) power calculation
+    adaptive_z_sum_sq = use_adaptive_ess ? (quantile(Normal(), 1-ascent_alpha) + quantile(Normal(), 1-ascent_beta))^2 : 0.0
 
     # containers for latent sample paths, proposal and target log likelihoods, importance sampling weights
     ess_cur = zeros(nsubj)
@@ -1245,6 +1279,55 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         iter += 1
         
         # =====================================================================
+        # Adaptive ESS (Caffo et al. 2005): Set target ESS at START of iteration using Equation 15
+        # m_k = ceil((z_α + z_β)² * σ̂²_k / Δ²)
+        # where σ̂²_k = ase² is the estimated MC variance and Δ = tol
+        # 
+        # Key insight: Only increase ESS at start of iteration if:
+        # 1. The previous iteration showed positive ascent (ascent_lb > 0)
+        # 2. The ASE is small enough that we're near convergence (ASE < 5*tol)
+        # This prevents aggressive ESS increases early when parameters are volatile.
+        # =====================================================================
+        if use_adaptive_ess && iter > 1 && ase > 0 && tol > 0 && ascent_lb > 0 && ase < 5 * tol
+            adaptive_m_k = ceil(adaptive_z_sum_sq * ase^2 / tol^2)
+            # Cap per-iteration increase to 2x to prevent degenerate behavior
+            adaptive_m_k_capped = min(adaptive_m_k, 2.0 * ess_target)
+            # m_{t+1,start} = max(m_{t,start}, m_t) - ESS never decreases
+            adaptive_m_start = max(adaptive_m_start, ess_target)
+            # New target is max of capped formula and m_start
+            ess_target_new = max(adaptive_m_start, adaptive_m_k_capped)
+            if ess_target_new > ess_target
+                if verbose && adaptive_m_k > adaptive_m_k_capped
+                    println("Adaptive start-of-iteration: m_k=$(Int(adaptive_m_k)) capped to $(Int(adaptive_m_k_capped)) (2x limit).")
+                end
+                ess_target = ess_target_new
+                if verbose
+                    println("Adaptive start-of-iteration: Target ESS set to $(Int(ess_target)) (m_k=$(Int(min(adaptive_m_k, adaptive_m_k_capped))), m_start=$(Int(adaptive_m_start))).\n")
+                end
+                # Update SIR pool target if using SIR
+                if use_sir
+                    new_pool_target = sir_pool_size(ess_target, sir_pool_constant, sir_max_pool)
+                    if new_pool_target == sir_max_pool && !sir_pool_cap_exceeded
+                        sir_pool_cap_exceeded = true
+                        @warn "SIR pool size capped at $sir_max_pool; further ESS increases will reduce SIR effectiveness."
+                    end
+                    sir_pool_target = new_pool_target
+                    
+                    # Resample SIR indices with new ESS target
+                    for i in 1:nsubj
+                        if length(samplepaths[i]) <= 1 || allequal(loglik_surrog[i])
+                            sir_subsample_indices[i] = collect(1:length(samplepaths[i]))
+                        else
+                            sir_subsample_indices[i] = get_sir_subsample_indices(
+                                ImportanceWeights[i], Int(ess_target), sir)
+                        end
+                    end
+                    fill!(ess_cur, Float64(ess_target))
+                end
+            end
+        end
+        
+        # =====================================================================
         # SQUAREM: Save θ₀ at start of cycle (every 2 iterations)
         # =====================================================================
         if use_squarem && squarem_state.step == 0
@@ -1468,11 +1551,13 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             @warn "The maximum number of iterations ($maxiter) has been reached.\n"; break 
         end
 
-        # increase ess is necessary
+        # increase ESS if necessary
         if ascent_lb < 0
-            # increase the target ess for the factor ess_increase
-            ess_target = ceil(ess_increase * ess_target)
-            if verbose  println("Target ESS is increased to $ess_target, because ascent lower bound < 0.\n") end
+            # Multiplicative ESS increase (used by both :fixed and :adaptive methods)
+            ess_target = ceil(ess_growth_factor * ess_target)
+            if verbose
+                println("Target ESS increased to $ess_target (growth factor $(round(ess_growth_factor, digits=3))).\n")
+            end
 
             # Note: No need to clear arrays - DrawSamplePaths! will append only if ess_cur[i] < ess_target
             # The bug was in ComputeImportanceWeightsESS! incorrectly setting ess_cur[i] = ess_target
@@ -1480,12 +1565,23 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             
             # SIR: Update pool target and check for cap
             if use_sir
-                new_pool_target = sir_pool_size(Int(ess_target), sir_pool_constant, sir_max_pool)
+                new_pool_target = sir_pool_size(ess_target, sir_pool_constant, sir_max_pool)
                 if new_pool_target == sir_max_pool && !sir_pool_cap_exceeded
                     sir_pool_cap_exceeded = true
                     @warn "SIR pool size capped at $sir_max_pool; further ESS increases will reduce SIR effectiveness."
                 end
                 sir_pool_target = new_pool_target
+                
+                # Resample SIR indices with new ESS target
+                for i in 1:nsubj
+                    if length(samplepaths[i]) <= 1 || allequal(loglik_surrog[i])
+                        sir_subsample_indices[i] = collect(1:length(samplepaths[i]))
+                    else
+                        sir_subsample_indices[i] = get_sir_subsample_indices(
+                            ImportanceWeights[i], Int(ess_target), sir)
+                    end
+                end
+                fill!(ess_cur, Float64(ess_target))
             end
         end
 

@@ -1,5 +1,92 @@
 # Changelog
 
+## [Unreleased] - SIR Branch
+
+### Sampling Importance Resampling (SIR) for MCEM M-step
+
+**File:** `src/sir.jl` (258 lines)
+
+Added Sampling Importance Resampling (SIR) to accelerate the M-step optimization in MCEM. Instead of computing log-likelihoods over the full importance sampling pool (~1000 paths/subject), SIR resamples a smaller subset (~200 paths/subject) with uniform weights, providing ~5x speedup in M-step optimization with minimal loss in statistical efficiency.
+
+**New Functions:**
+
+```julia
+# Pool size calculation
+sir_pool_size(ess_target, sir_pool_constant, max_pool_size) -> Int
+
+# Resampling methods
+resample_multinomial(weights, n) -> Vector{Int}  # Standard SIR
+resample_lhs(weights, n) -> Vector{Int}          # Latin Hypercube Sampling (lower variance)
+get_sir_subsample_indices(weights, n, method) -> Vector{Int}  # Dispatcher
+
+# Resampling decision
+should_resample(weights, ess_target, min_ess_ratio, max_ess_ratio) -> Bool
+
+# Data structure creation
+create_sir_subsampled_data(samplepaths, sir_indices) -> (paths, weights)
+
+# MLL/ASE computation on resampled paths
+mcem_mll_sir(logliks, sir_indices, SubjectWeights) -> Float64
+mcem_ase_sir(loglik_prop, loglik_cur, sir_indices, SubjectWeights) -> Float64
+```
+
+**New `fit()` Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `sir` | `Symbol` | `:off` | Resampling method: `:off`, `:sir`, or `:lhs` |
+| `sir_pool_constant` | `Float64` | `2.0` | Pool size = c × ESS × log(ESS) |
+| `max_sir_pool_size` | `Int` | `8192` | Maximum pool size per subject |
+
+**Performance:**
+
+With ESS target = 200 and pool size ~1000:
+- **Log-likelihood computation**: ~5x speedup (105ms → 21ms for 50 subjects)
+- **Variance ratio (SIR/LHS)**: ~1.24 (LHS has ~20% lower variance)
+- **Unbiasedness**: Both SIR and LHS are unbiased estimators
+
+**Usage:**
+
+```julia
+# Standard MCEM (no resampling)
+fitted = fit(model; ess_target_initial=200)
+
+# MCEM with SIR resampling (faster M-step)
+fitted = fit(model; ess_target_initial=200, sir=:sir)
+
+# MCEM with LHS resampling (faster + lower variance)
+fitted = fit(model; ess_target_initial=200, sir=:lhs)
+```
+
+### Parameter Renaming
+
+Renamed several MCEM parameters for clarity:
+
+| Old Name | New Name | Description |
+|----------|----------|-------------|
+| `ess_increase` | `ess_growth_factor` | ESS inflation factor when more paths needed |
+| `caffo_c` | *(removed)* | Now uses `ess_growth_factor` for mid-iteration increase |
+| `caffo_alpha` | `ascent_alpha` | Type I error rate for Caffo power calculation |
+| `caffo_beta` | `ascent_beta` | Type II error rate for Caffo power calculation |
+| `:caffo` | `:adaptive` | ESS increase method (Caffo et al. 2005 referenced in docstring) |
+
+**Improved Docstrings:**
+
+- `block_hessian_speedup`: Now explains that it's the minimum speedup factor required to use block-diagonal Hessian approximation instead of full Hessian. Higher values = more conservative (prefer full Hessian).
+
+### New Unit Tests
+
+**File:** `MultistateModelsTests/unit/test_mll_consistency.jl`
+
+Comprehensive tests for MLL consistency across estimation methods:
+- Sample-level and subject-level MLL agreement
+- Variance comparison: Full pool IS (zero variance) vs SIR vs LHS
+- Runtime benchmarks showing ~5x speedup in log-likelihood computation
+- Unbiasedness verification
+- Edge cases (uniform weights, skewed weights)
+
+---
+
 ## [0.2.0] - 2025-01-12
 
 Version 0.2.0 is a comprehensive rewrite of MultistateModels.jl with major improvements across performance, features, and code organization. The source code has grown from approximately 5,500 lines to 27,000 lines across 27 files.
