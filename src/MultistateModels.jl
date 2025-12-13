@@ -188,6 +188,9 @@ include("phasetype.jl")
 # surrogate
 include("surrogates.jl")
 
+# sampling importance resampling
+include("sir.jl")
+
 # model fitting
 include("modelfitting.jl")
 

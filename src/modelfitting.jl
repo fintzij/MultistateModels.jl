@@ -889,7 +889,7 @@ fitted = fit(semimarkov_model; acceleration=:squarem)
 
 See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :none, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_increase = 2.0, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :none, sir::Symbol = :none, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # Validate acceleration parameter
     if acceleration ∉ (:none, :squarem)
@@ -899,6 +899,28 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     
     if verbose && use_squarem
         println("Using SQUAREM acceleration for MCEM.\n")
+    end
+
+    # Validate SIR parameters
+    if sir ∉ (:none, :sir, :lhs)
+        error("sir must be :none, :sir, or :lhs, got :$sir")
+    end
+    if sir_resample ∉ (:always, :degeneracy)
+        error("sir_resample must be :always or :degeneracy, got :$sir_resample")
+    end
+    if sir_pool_constant <= 0
+        error("sir_pool_constant must be positive, got $sir_pool_constant")
+    end
+    if sir_max_pool <= 0
+        error("sir_max_pool must be positive, got $sir_max_pool")
+    end
+    if !(0 < sir_degeneracy_threshold < 1)
+        error("sir_degeneracy_threshold must be in (0,1), got $sir_degeneracy_threshold")
+    end
+    use_sir = sir !== :none
+    
+    if verbose && use_sir
+        println("Using SIR ($sir) with pool constant $sir_pool_constant, max pool $sir_max_pool.\n")
     end
 
     # Resolve proposal configuration
@@ -991,6 +1013,10 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     ImportanceWeights  = [sizehint!(Vector{Float64}(undef, 0), 
         ess_target_initial * max_sampling_effort * 2) for i in 1:nsubj]
 
+    # SIR infrastructure
+    sir_subsample_indices = [Vector{Int}() for _ in 1:nsubj]  # Indices into pool for each subject
+    sir_pool_cap_exceeded = false  # Flag for convergence records warning
+    sir_pool_target = use_sir ? sir_pool_size(ess_target, sir_pool_constant, sir_max_pool) : 0
     # make fbmats if necessary
     if any(model.data.obstype .> 2)
         fbmats = build_fbmats(model)
@@ -1124,8 +1150,13 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
 
     # draw sample paths until the target ess is reached 
     if verbose  println("Initializing sample paths ...\n") end
+    
+    # For SIR: sample pool_target paths instead of ess_target
+    # After sampling, we'll resample ess_target indices from the pool
+    sampling_target = use_sir ? sir_pool_target : ess_target
+    
     DrawSamplePaths!(model; 
-        ess_target = ess_target, 
+        ess_target = sampling_target, 
         ess_cur = ess_cur, 
         max_sampling_effort = max_sampling_effort,
         samplepaths = samplepaths, 
@@ -1155,8 +1186,29 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         expanded_ph_tpm_map = expanded_ph_tpm_map,
         ph_original_row_map = ph_original_row_map)
     
+    # Apply SIR: resample indices from pool and compute uniform weights
+    if use_sir
+        for i in 1:nsubj
+            # Skip subjects with deterministic paths (single path or all equal logliks)
+            if length(samplepaths[i]) <= 1 || allequal(loglik_surrog[i])
+                sir_subsample_indices[i] = collect(1:length(samplepaths[i]))
+            else
+                # Resample ess_target indices from the pool using importance weights
+                sir_subsample_indices[i] = get_sir_subsample_indices(
+                    ImportanceWeights[i], ess_target, sir)
+            end
+        end
+        # For SIR, ESS = subsample size (deterministic)
+        fill!(ess_cur, Float64(ess_target))
+    end
+    
     # get current estimate of marginal log likelihood
-    mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SubjectWeights)
+    # For SIR: use subsampled paths with uniform weights
+    if use_sir
+        mll_cur = mcem_mll_sir(loglik_target_cur, sir_subsample_indices, model.SubjectWeights)
+    else
+        mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SubjectWeights)
+    end
 
     # generate optimization problem
     if isnothing(constraints)
@@ -1201,21 +1253,36 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         end
         
         # solve M-step: use user-specified solver or default Ipopt
+        # For SIR: use subsampled paths with uniform weights
+        if use_sir
+            sir_data = create_sir_subsampled_data(samplepaths, sir_subsample_indices)
+            mstep_data = SMPanelData(model, sir_data.paths, sir_data.weights)
+        else
+            mstep_data = SMPanelData(model, samplepaths, ImportanceWeights)
+        end
+        
         if isnothing(constraints)
             _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), _solver; print_level = 0)
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = mstep_data), _solver; print_level = 0)
         else
             _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = SMPanelData(model, samplepaths, ImportanceWeights)), _solver; print_level = 0)
+            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = mstep_data), _solver; print_level = 0)
         end
         params_prop = params_prop_optim.u
 
-        # calculate the log likelihoods for the proposed parameters
+        # calculate the log likelihoods for the proposed parameters on FULL pool
+        # (needed for importance weight recalculation)
         loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights))
         
         # calculate the marginal log likelihood 
-        mll_cur  = mcem_mll(loglik_target_cur , ImportanceWeights, model.SubjectWeights)
-        mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, model.SubjectWeights)
+        # For SIR: use simple averages on subsampled paths
+        if use_sir
+            mll_cur  = mcem_mll_sir(loglik_target_cur, sir_subsample_indices, model.SubjectWeights)
+            mll_prop = mcem_mll_sir(loglik_target_prop, sir_subsample_indices, model.SubjectWeights)
+        else
+            mll_cur  = mcem_mll(loglik_target_cur , ImportanceWeights, model.SubjectWeights)
+            mll_prop = mcem_mll(loglik_target_prop, ImportanceWeights, model.SubjectWeights)
+        end
 
         # compute the ALB and AUB
         if params_prop != params_cur
@@ -1224,7 +1291,11 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             mll_change = mll_prop - mll_cur
     
             # calculate the ASE for ΔQ
-            ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, model.SubjectWeights)
+            if use_sir
+                ase = mcem_ase_sir(loglik_target_prop, loglik_target_cur, sir_subsample_indices, model.SubjectWeights)
+            else
+                ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, model.SubjectWeights)
+            end
     
             # calculate the lower bound for ΔQ
             ascent_lb = quantile(Normal(mll_change, ase), ascent_threshold)
@@ -1276,11 +1347,13 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
                     
                     # Evaluate likelihood at accelerated point
                     loglik!(params_acc, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights))
-                    mll_acc = mcem_mll(loglik_target_prop, ImportanceWeights, model.SubjectWeights)
-                    
-                    # Decide whether to accept acceleration
-                    # Use mll at θ₀ as reference (start of SQUAREM cycle)
-                    mll_θ0 = mcem_mll(loglik_target_cur, ImportanceWeights, model.SubjectWeights)
+                    if use_sir
+                        mll_acc = mcem_mll_sir(loglik_target_prop, sir_subsample_indices, model.SubjectWeights)
+                        mll_θ0 = mcem_mll_sir(loglik_target_cur, sir_subsample_indices, model.SubjectWeights)
+                    else
+                        mll_acc = mcem_mll(loglik_target_prop, ImportanceWeights, model.SubjectWeights)
+                        mll_θ0 = mcem_mll(loglik_target_cur, ImportanceWeights, model.SubjectWeights)
+                    end
                     
                     if squarem_should_accept(mll_acc, mll_prop, mll_θ0)
                         # Accept accelerated step
@@ -1326,11 +1399,41 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
         # Note: psis_pareto_k > 0.7 indicates unreliable importance weights (Vehtari et al., 2024)
         # The values are stored in the returned convergence_records for diagnostic purposes
 
+        # SIR: Check if resampling should occur based on mode
+        if use_sir
+            n_resampled = 0
+            for i in 1:nsubj
+                # Skip subjects with deterministic paths
+                if length(samplepaths[i]) <= 1 || allequal(loglik_surrog[i])
+                    continue
+                end
+                
+                # Check if resampling is needed based on mode
+                if should_resample(sir_resample, psis_pareto_k[i], sir_degeneracy_threshold)
+                    sir_subsample_indices[i] = get_sir_subsample_indices(
+                        ImportanceWeights[i], ess_target, sir)
+                    n_resampled += 1
+                end
+            end
+            
+            # For SIR, ESS = subsample size (deterministic)
+            fill!(ess_cur, Float64(ess_target))
+            
+            if verbose && n_resampled > 0
+                mean_pareto_k = mean(psis_pareto_k)
+                println("SIR: $n_resampled subjects resampled, mean Pareto-k = $(round(mean_pareto_k; sigdigits=3))")
+            end
+        end
+
         # print update
         if verbose
             println("Iteration: $iter")
             println("Target ESS: $(round(ess_target;digits=2)) per-subject")
-            println("Range of the number of sampled paths per-subject: [$(ceil(ess_target)), $(max(length.(samplepaths)...))]")
+            if use_sir
+                println("Pool sizes per-subject: [$(minimum(length.(samplepaths))), $(maximum(length.(samplepaths)))]")
+            else
+                println("Range of the number of sampled paths per-subject: [$(ceil(ess_target)), $(max(length.(samplepaths)...))]")
+            end
             println("Estimate of the marginal log-likelihood, Q: $(round(mll_cur;digits=3))")
             println("Gain in marginal log-likelihood, ΔQ: $(round(mll_change;sigdigits=3))")
             println("MCEM asymptotic standard error: $(round(ase;sigdigits=3))")
@@ -1374,11 +1477,24 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             # Note: No need to clear arrays - DrawSamplePaths! will append only if ess_cur[i] < ess_target
             # The bug was in ComputeImportanceWeightsESS! incorrectly setting ess_cur[i] = ess_target
             # instead of the actual path count for uniform weights. This has been fixed.
+            
+            # SIR: Update pool target and check for cap
+            if use_sir
+                new_pool_target = sir_pool_size(Int(ess_target), sir_pool_constant, sir_max_pool)
+                if new_pool_target == sir_max_pool && !sir_pool_cap_exceeded
+                    sir_pool_cap_exceeded = true
+                    @warn "SIR pool size capped at $sir_max_pool; further ESS increases will reduce SIR effectiveness."
+                end
+                sir_pool_target = new_pool_target
+            end
         end
 
         # ensure that ess per person is sufficient
+        # For SIR: sample to pool_target instead of ess_target
+        sampling_target = use_sir ? sir_pool_target : ess_target
+        
         DrawSamplePaths!(model; 
-            ess_target = ess_target, 
+            ess_target = sampling_target, 
             ess_cur = ess_cur, 
             max_sampling_effort = max_sampling_effort,
             samplepaths = samplepaths, 
@@ -1407,6 +1523,19 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
             expanded_ph_subjectindices = ph_subjectindices,
             expanded_ph_tpm_map = expanded_ph_tpm_map,
             ph_original_row_map = ph_original_row_map)
+        
+        # SIR: Resample after pool expansion
+        if use_sir
+            for i in 1:nsubj
+                if length(samplepaths[i]) <= 1 || allequal(loglik_surrog[i])
+                    sir_subsample_indices[i] = collect(1:length(samplepaths[i]))
+                else
+                    sir_subsample_indices[i] = get_sir_subsample_indices(
+                        ImportanceWeights[i], Int(ess_target), sir)
+                end
+            end
+            fill!(ess_cur, Float64(ess_target))
+        end
     end # end-while
 
     if !is_converged
@@ -1625,7 +1754,30 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     end
 
     # return convergence records
-    ConvergenceRecords = return_convergence_records ? (mll_trace=mll_trace, ess_trace=ess_trace, path_count_trace=path_count_trace, parameters_trace=parameters_trace, psis_pareto_k = psis_pareto_k) : nothing
+    if return_convergence_records
+        if use_sir
+            ConvergenceRecords = (
+                mll_trace = mll_trace, 
+                ess_trace = ess_trace, 
+                path_count_trace = path_count_trace, 
+                parameters_trace = parameters_trace, 
+                psis_pareto_k = psis_pareto_k,
+                sir_method = sir,
+                sir_resample_mode = sir_resample,
+                sir_pool_cap_exceeded = sir_pool_cap_exceeded
+            )
+        else
+            ConvergenceRecords = (
+                mll_trace = mll_trace, 
+                ess_trace = ess_trace, 
+                path_count_trace = path_count_trace, 
+                parameters_trace = parameters_trace, 
+                psis_pareto_k = psis_pareto_k
+            )
+        end
+    else
+        ConvergenceRecords = nothing
+    end
 
     # return sampled paths and importance weights
     ProposedPaths = return_proposed_paths ? (paths=samplepaths, weights=ImportanceWeights) : nothing
