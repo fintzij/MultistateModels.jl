@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - SIR Branch
+## [0.2.1] - 2025-12-13
 
 ### Sampling Importance Resampling (SIR) for MCEM M-step
 

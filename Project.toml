@@ -1,6 +1,6 @@
 name = "MultistateModels"
 uuid = "0f8f0c3e-0b3a-5b8a-9e9a-0a0a0a0a0a0a"
-version = "0.2.0"
+version = "0.2.1"
 
 [deps]
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
