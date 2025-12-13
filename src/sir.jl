@@ -13,16 +13,17 @@ This follows Li (2006) which shows that pool size should be O(m log m) when impo
 weights have a moment generating function.
 
 # Arguments
-- `ess_target::Int`: Target effective sample size (the subsample size after resampling)
+- `ess_target::Real`: Target effective sample size (the subsample size after resampling)
 - `c::Float64`: Pool size constant (default 2.0 in fit())
 - `max_pool::Int`: Maximum pool size cap
 
 # Returns
 - `Int`: The target pool size
 """
-function sir_pool_size(ess_target::Int, c::Float64, max_pool::Int)
-    ess_target <= 1 && return max(1, ess_target)
-    return min(ceil(Int, c * ess_target * log(ess_target)), max_pool)
+function sir_pool_size(ess_target::Real, c::Float64, max_pool::Int)
+    m = Int(ess_target)
+    m <= 1 && return max(1, m)
+    return min(ceil(Int, c * m * log(m)), max_pool)
 end
 
 """
@@ -104,11 +105,12 @@ Dispatcher for SIR resampling methods.
 # Throws
 - `ErrorException` if method is not `:sir` or `:lhs`
 """
-function get_sir_subsample_indices(weights::AbstractVector{<:Real}, n_resample::Int, method::Symbol)
+function get_sir_subsample_indices(weights::AbstractVector{<:Real}, n_resample::Real, method::Symbol)
+    n = Int(n_resample)  # Convert to Int (e.g., from Float64 ESS target)
     if method == :sir
-        return resample_multinomial(weights, n_resample)
+        return resample_multinomial(weights, n)
     elseif method == :lhs
-        return resample_lhs(weights, n_resample)
+        return resample_lhs(weights, n)
     else
         error("Unknown SIR method: $method. Must be :sir or :lhs")
     end
