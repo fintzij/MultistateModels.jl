@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.2.3] - 2025-12-16
+
+### Internal: Model Struct Consolidation
+
+**Branch:** `package_streamlining`
+
+Major internal refactoring to simplify the type hierarchy. This change is **backward compatible** for user-facing APIs but may affect code that directly accesses internal model types.
+
+#### Changes
+
+**Eliminated model struct variants:**
+- `MultistateMarkovModel` → now alias for `MultistateModel`
+- `MultistateMarkovModelCensored` → eliminated (censoring determined by emission matrix)
+- `MultistateSemiMarkovModel` → eliminated (determined by hazard types)
+- `MultistateSemiMarkovModelCensored` → eliminated
+- `PhaseTypeModel` → eliminated (replaced by `phasetype_expansion` metadata field)
+
+**New trait functions for dispatch:**
+```julia
+is_markov(model)              # true if all hazards are Markov (exponential)
+is_panel_data(model)          # true if any observation has obstype == 2
+has_phasetype_expansion(model) # true if model has phase-type expansion metadata
+```
+
+**Phase-type models:**
+- Phase-type models are now `MultistateModel` instances with a non-nothing `phasetype_expansion` field
+- All phase-type accessors (`get_n_phasetype_transitions`, `get_phasetype_params`, etc.) work unchanged
+- `PhaseTypeExpansion` struct stores expansion metadata (mappings, original specs)
+
+**Simulation `expanded` keyword:**
+```julia
+# For phase-type models, control whether paths are in expanded or observed state space
+simulate(model; expanded=false)        # Default: paths in observed states (collapsed)
+simulate(model; expanded=true)         # Paths in expanded phase-level states
+simulate_paths(model; expanded=false)  # Same for simulate_paths
+simulate_data(model; expanded=false)   # Same for simulate_data
+```
+
+#### Bug Fixes
+
+**Interaction term covariate lookup:**
+- `extract_covariates_lightweight` now handles interaction terms (e.g., `:"trt & age"`)
+- Computes product of component values, matching behavior of `_lookup_covariate_value`
+
+**Phase-type method validation:**
+- `initialize_parameters!(model, :markov)` now correctly throws `ArgumentError` for phase-type models
+- Previously threw `KeyError` after struct consolidation
+
+---
+
 ## [0.2.2] - 2025-06-08
 
 ### Bug Fix: ForwardFiltering for Instantaneous Observations (dt=0)

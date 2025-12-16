@@ -372,6 +372,9 @@ to also receive the underlying continuous-time sample paths.
 - `autotmax::Bool`: If `true` (default) and neither `newdata` nor `tmax` is provided,
   uses `maximum(data.tstop)` as the implicit tmax so all subjects have the same
   observation window. Set to `false` to use each subject's original observation times.
+- `expanded::Bool`: For phase-type models, controls whether results use the expanded
+  (phase-level) state space (`true`) or the original observed state space (`false`).
+  Default is `true`. Has no effect for non-phase-type models.
 
 # Returns
 Depends on `data` and `paths` arguments:
@@ -519,6 +522,7 @@ observed data (no continuous-time paths). Equivalent to calling
 - `newdata::Union{Nothing,DataFrame}`: Optional new data template for simulation (default: nothing)
 - `tmax::Union{Nothing,Float64}`: Optional maximum simulation time (default: nothing)
 - `autotmax::Bool`: Use maximum tstop as implicit tmax (default: true)
+- `expanded::Bool`: For phase-type models, use expanded state space (default: true)
 
 # Returns
 - `Vector{DataFrame}`: array of simulated datasets with dimensions (1, nsim)
@@ -566,6 +570,7 @@ calling `simulate(model; nsim=nsim, data=false, paths=true, ...)`.
 - `newdata::Union{Nothing,DataFrame}`: Optional new data template for simulation (default: nothing)
 - `tmax::Union{Nothing,Float64}`: Optional maximum simulation time (default: nothing)
 - `autotmax::Bool`: Use maximum tstop as implicit tmax (default: true)
+- `expanded::Bool`: For phase-type models, use expanded state space (default: true)
 
 # Returns
 - `Matrix{SamplePath}`: array of sample paths with dimensions (nsubj, nsim)

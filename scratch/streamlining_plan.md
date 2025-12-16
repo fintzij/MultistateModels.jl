@@ -18,6 +18,40 @@
 | Date | Action | Details |
 |------|--------|---------|
 | 2025-12-16 | Deleted `src/types/` | Orphaned draft code (~1,600 lines never integrated) |
+| 2025-12-16 | Struct consolidation | Eliminated 5 model structs → unified `MultistateModel` |
+| 2025-12-16 | Trait-based dispatch | Added `is_markov()`, `is_panel_data()`, `has_phasetype_expansion()` |
+| 2025-12-16 | PhaseTypeModel removal | Replaced with `phasetype_expansion` metadata field |
+| 2025-12-16 | Remove *Censored variants | `MultistateMarkovModelCensored`, `MultistateSemiMarkovModelCensored` eliminated |
+| 2025-12-16 | Phase-type accessor fixes | Updated accessors to use `phasetype_expansion` metadata |
+| 2025-12-16 | `expanded` kwarg | Added to `simulate`, `simulate_paths`, `simulate_data` |
+| 2025-12-16 | Interaction term fix | `extract_covariates_lightweight` now handles interaction terms |
+| 2025-12-16 | Phase-type method validation | `initialize_parameters!` rejects `:markov` for PT models |
+
+---
+
+## REMAINING WORK
+
+### Phase 3.1: Phase-Type Code Reduction (PARTIALLY COMPLETE)
+
+**Goal:** Reduce `phasetype.jl` from 4,586 lines to ~500 lines.
+
+**Completed:**
+- ✅ PhaseTypeModel struct eliminated
+- ✅ Phase-type expansion metadata integrated into MultistateModel
+- ✅ Accessors work with unified model struct
+- ✅ Simulation functions support `expanded` kwarg
+
+**Remaining:**
+- [ ] Remove ~50 redundant PT-specific functions (still using deprecated markers)
+- [ ] Consolidate expansion/collapse code
+- [ ] Move remaining code to `construction/phasetype_expansion.jl`
+
+### Phase 3.2: File Reorganization (NOT STARTED)
+
+The subfolder reorganization plan is documented below but has not been implemented.
+Current files remain in flat `src/` structure.
+
+**Deferred until:** Core functionality validated on main branch
 
 ---
 
