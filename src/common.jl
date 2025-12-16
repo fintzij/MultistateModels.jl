@@ -409,15 +409,47 @@ Abstract type for multistate process.
 """
 abstract type MultistateProcess end
 
-"""
-    Abstract type for multistate Markov process.
-"""
-abstract type MultistateMarkovProcess <: MultistateProcess end
+# =============================================================================
+# Model Classification Traits
+# =============================================================================
+# These traits replace the previous MultistateMarkovProcess/MultistateSemiMarkovProcess
+# abstract types. Behavior is now determined by model content, not struct type.
+# =============================================================================
 
 """
-    Abstract type for multistate semi-Markov process.
+    is_markov(model::MultistateProcess) -> Bool
+
+Check if a model has all Markov (time-homogeneous) hazards.
+
+Returns true if all hazards are `_MarkovHazard` subtypes or degree-0 splines.
+This determines whether the likelihood uses matrix exponentials (Markov panel)
+or path sampling (semi-Markov MCEM).
+
+See also: [`is_panel_data`](@ref), [`has_phasetype_expansion`](@ref)
 """
-abstract type MultistateSemiMarkovProcess <: MultistateProcess end
+function is_markov(model::MultistateProcess)
+    return all(_is_markov_hazard.(model.hazards))
+end
+
+"""
+    is_panel_data(model::MultistateProcess) -> Bool
+
+Check if a model was constructed with panel/interval-censored observation mode.
+
+Returns true if the model uses panel observations (obstype == 2 in data),
+false for exact observation times (obstype == 1).
+
+See also: [`is_markov`](@ref)
+"""
+function is_panel_data(model::MultistateProcess)
+    # Check data directly: obstype 1 = exact, obstype 2 = panel
+    return any(model.data.obstype .== 2)
+end
+
+# Legacy type aliases for backward compatibility (deprecation period)
+# These can be removed in a future version
+const MultistateMarkovProcess = MultistateProcess
+const MultistateSemiMarkovProcess = MultistateProcess
 
 """
     ParametricHazard(haz::StatsModels.FormulaTerm, family::Symbol, statefrom::Int64, stateto::Int64)
@@ -774,7 +806,10 @@ has_phasetype_expansion(m::MultistateProcess) = hasproperty(m, :phasetype_expans
 """
     MultistateModel
 
-Struct that fully specifies a multistate process for simulation or inference, used in the case when sample paths are fully observed. 
+Unified struct for all unfitted multistate models.
+
+Model behavior is determined by content (hazards, observation type) rather than
+struct type, using traits like `is_markov()` and `is_panel_data()` for dispatch.
 
 # Fields
 - `data::DataFrame`: Long-format dataset with observations
@@ -782,39 +817,52 @@ Struct that fully specifies a multistate process for simulation or inference, us
   - `flat::Vector{Float64}` - flat parameter vector for optimizer (log scale for baseline)
   - `nested::NamedTuple` - nested parameters by hazard name with baseline/covariates fields
   - `natural::NamedTuple` - natural scale parameters by hazard name
-  - `unflatten::Function` - function to unflatten flat vector to nested structure
+  - `reconstructor` - reconstructor for unflatten operations
 - `hazards::Vector{_Hazard}`: Cause-specific hazard functions
-- Plus other model specification fields...
+- `totalhazards::Vector{_TotalHazard}`: Total hazard functions per state
+- `tmat::Matrix{Int64}`: Transition matrix (allowed transitions)
+- `emat::Matrix{Float64}`: Emission matrix (for censored observations)
+- `hazkeys::Dict{Symbol, Int64}`: Hazard name to index mapping
+- `subjectindices::Vector{Vector{Int64}}`: Data row indices per subject
+- `SubjectWeights::Vector{Float64}`: Per-subject weights
+- `ObservationWeights::Union{Nothing, Vector{Float64}}`: Per-observation weights
+- `CensoringPatterns::Matrix{Float64}`: Censoring pattern matrix
+- `markovsurrogate::Union{Nothing, MarkovSurrogate}`: MCEM importance sampling surrogate
+- `modelcall::NamedTuple`: Original model construction arguments
+- `phasetype_expansion::Union{Nothing, PhaseTypeExpansion}`: Phase-type expansion metadata
+
+# Traits
+Use these traits for dispatch instead of type checking:
+- `is_markov(model)` - true if all hazards are Markov (for panel likelihood)
+- `is_panel_data(model)` - true if panel observation mode
+- `has_phasetype_expansion(model)` - true if model has phase-type hazards
+
+# Example
+```julia
+# Markov model (exponential hazards, panel data)
+h12 = Hazard(:exp, 1, 2)
+model = multistatemodel(h12; data=data)
+is_markov(model)  # true
+is_panel_data(model)  # true (default for panel data)
+
+# Semi-Markov model (Weibull hazards)
+h12 = Hazard(:wei, 1, 2)
+model = multistatemodel(h12; data=data)
+is_markov(model)  # false
+
+# Phase-type model
+h12 = Hazard(:pt, 1, 2)
+model = multistatemodel(h12; data=data, n_phases=Dict(1=>3))
+is_markov(model)  # true (expanded space is Markov)
+has_phasetype_expansion(model)  # true
+```
+
+See also: [`is_markov`](@ref), [`is_panel_data`](@ref), [`has_phasetype_expansion`](@ref)
 """
 mutable struct MultistateModel <: MultistateProcess
     data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
-    hazards::Vector{_Hazard}
-    totalhazards::Vector{_TotalHazard}
-    tmat::Matrix{Int64}
-    emat::Matrix{Float64}
-    hazkeys::Dict{Symbol, Int64}
-    subjectindices::Vector{Vector{Int64}}
-    SubjectWeights::Vector{Float64}
-    ObservationWeights::Union{Nothing, Vector{Float64}}
-    CensoringPatterns::Matrix{Float64}
-    markovsurrogate::Union{Nothing, MarkovSurrogate}
-    modelcall::NamedTuple
-end
-
-"""
-    MultistateMarkovModel
-
-Struct that fully specifies a multistate Markov process with no censored state, used with panel data.
-Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
-
-If the model was built from phase-type hazards, `phasetype_expansion` contains metadata
-for mapping between the expanded internal state space and the observed state space.
-"""
-mutable struct MultistateMarkovModel <: MultistateMarkovProcess
-    data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
-    hazards::Vector{_MarkovHazard}
+    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, reconstructor)
+    hazards::Vector{<:_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     emat::Matrix{Float64}
@@ -828,43 +876,25 @@ mutable struct MultistateMarkovModel <: MultistateMarkovProcess
     phasetype_expansion::Union{Nothing, PhaseTypeExpansion}  # Phase-type expansion metadata
 end
 
-"""
-    MultistateSemiMarkovModel
-
-Struct that fully specifies a multistate semi-Markov process, used with exact death times.
-Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
-"""
-mutable struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
-    data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
-    hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
-    totalhazards::Vector{_TotalHazard}
-    tmat::Matrix{Int64}
-    emat::Matrix{Float64}
-    hazkeys::Dict{Symbol, Int64}
-    subjectindices::Vector{Vector{Int64}}
-    SubjectWeights::Vector{Float64}
-    ObservationWeights::Union{Nothing, Vector{Float64}}
-    CensoringPatterns::Matrix{Float64}
-    markovsurrogate::Union{Nothing, MarkovSurrogate}
-    modelcall::NamedTuple
-end
+# Legacy type aliases for backward compatibility
+const MultistateMarkovModel = MultistateModel
+const MultistateSemiMarkovModel = MultistateModel
 
 """
     MultistateModelFitted
 
 Struct that fully specifies a fitted multistate model.
-Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
+Parameters are stored in `parameters` as (flat, nested, natural, reconstructor).
 """
 mutable struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
+    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, reconstructor)
     loglik::NamedTuple
     vcov::Union{Nothing,Matrix{Float64}}
     ij_vcov::Union{Nothing,Matrix{Float64}}  # Infinitesimal jackknife variance-covariance
     jk_vcov::Union{Nothing,Matrix{Float64}}  # Jackknife variance-covariance
     subject_gradients::Union{Nothing,Matrix{Float64}}  # Subject-level score vectors (p × n)
-    hazards::Vector{_Hazard}
+    hazards::Vector{<:_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
     emat::Matrix{Float64}
@@ -877,6 +907,7 @@ mutable struct MultistateModelFitted <: MultistateProcess
     ConvergenceRecords::Union{Nothing, NamedTuple, Optim.OptimizationResults, Optim.MultivariateOptimizationResults}
     ProposedPaths::Union{Nothing, NamedTuple}
     modelcall::NamedTuple
+    phasetype_expansion::Union{Nothing, PhaseTypeExpansion}  # Phase-type expansion metadata
 end
 
 """

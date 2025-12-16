@@ -1250,18 +1250,18 @@ repeated hazard function evaluations in `compute_hazmat!`.
 # Arguments
 - `rates_cache::Vector{Vector{Float64}}`: Pre-allocated [pattern][hazard] → rate
 - `pars::NamedTuple`: Unflattened natural-scale parameters
-- `hazards::Vector{<:_MarkovHazard}`: Markov hazard objects (time-invariant)
+- `hazards::Vector{<:_Hazard}`: Hazard objects (must be Markov; time-invariant)
 - `covars_cache::Vector{Vector{NamedTuple}}`: Pre-extracted [pattern][hazard] → covars
 
 # Notes
-- Only valid for `_MarkovHazard` types (exponential, phase-type)
+- Only valid for Markov hazard types (exponential, phase-type)
 - Semi-Markov hazards (Weibull, Gompertz, splines) are time-dependent and cannot be cached
 - Evaluates at t=0 since Markov rates don't depend on time
 """
 function compute_hazard_rates!(rates_cache::Vector{Vector{Float64}},
                                pars::NamedTuple,
-                               hazards::Vector{T},
-                               covars_cache::Vector{Vector{NamedTuple}}) where T <: _MarkovHazard
+                               hazards::Vector{<:_Hazard},
+                               covars_cache::Vector{Vector{NamedTuple}})
     n_patterns = length(rates_cache)
     n_hazards = length(hazards)
     
@@ -1281,15 +1281,6 @@ function compute_hazard_rates!(rates_cache::Vector{Vector{Float64}},
     return nothing
 end
 
-# No-op for non-Markov hazards (rates are time-dependent)
-function compute_hazard_rates!(rates_cache::Vector{Vector{Float64}},
-                               pars::NamedTuple,
-                               hazards::Vector{T},
-                               covars_cache::Vector{Vector{NamedTuple}}) where T <: _Hazard
-    # Do nothing - non-Markov hazards are time-dependent and cannot be pre-computed
-    return nothing
-end
-
 """
     compute_hazmat_from_rates!(Q, rates, hazards)
 
@@ -1299,7 +1290,7 @@ This is the allocation-free path for Markov models with cached rates.
 # Arguments
 - `Q::Matrix{Float64}`: Pre-allocated intensity matrix to fill (will be zeroed)
 - `rates::Vector{Float64}`: Pre-computed hazard rates for this pattern [h] → rate
-- `hazards::Vector{<:_MarkovHazard}`: Markov hazard objects (for statefrom/stateto)
+- `hazards::Vector{<:_Hazard}`: Hazard objects (must be Markov; for statefrom/stateto)
 
 # Performance
 This function is O(n_hazards + n_states) with zero allocations, compared to
@@ -1307,7 +1298,7 @@ This function is O(n_hazards + n_states) with zero allocations, compared to
 """
 function compute_hazmat_from_rates!(Q::Matrix{Float64},
                                     rates::Vector{Float64},
-                                    hazards::Vector{T}) where T <: _MarkovHazard
+                                    hazards::Vector{<:_Hazard})
     # Reset Q to zero
     fill!(Q, 0.0)
     

@@ -1012,14 +1012,9 @@ end
 end
 
 @inline function _model_constructor(mode::Symbol, process::Symbol)
-    if mode == :exact
-        return MultistateModel
-    elseif mode == :panel || mode == :censored
-        # Censored states are encoded in emat, not struct type
-        return process == :markov ? MultistateMarkovModel : MultistateSemiMarkovModel
-    else
-        error("Unknown observation mode $(mode)")
-    end
+    # All unfitted models use MultistateModel now
+    # Behavior is determined by content (hazards, observation type), not struct type
+    return MultistateModel
 end
 
 function _assemble_model(mode::Symbol,
@@ -1028,44 +1023,23 @@ function _assemble_model(mode::Symbol,
                          surrogate::Union{Nothing, MarkovSurrogate},
                          modelcall;
                          phasetype_expansion::Union{Nothing, PhaseTypeExpansion} = nothing)
-    ctor = _model_constructor(mode, process)
-    
-    # For Markov models, include phasetype_expansion field
-    if ctor == MultistateMarkovModel
-        return ctor(
-            components.data,
-            components.parameters,
-            components.hazards,
-            components.totalhazards,
-            components.tmat,
-            components.emat,
-            components.hazkeys,
-            components.subjinds,
-            components.SubjectWeights,
-            components.ObservationWeights,
-            components.CensoringPatterns,
-            surrogate,
-            modelcall,
-            phasetype_expansion,
-        )
-    else
-        # Semi-Markov and exact models don't have phasetype_expansion
-        return ctor(
-            components.data,
-            components.parameters,
-            components.hazards,
-            components.totalhazards,
-            components.tmat,
-            components.emat,
-            components.hazkeys,
-            components.subjinds,
-            components.SubjectWeights,
-            components.ObservationWeights,
-            components.CensoringPatterns,
-            surrogate,
-            modelcall,
-        )
-    end
+    # Single MultistateModel struct handles all cases
+    return MultistateModel(
+        components.data,
+        components.parameters,
+        components.hazards,
+        components.totalhazards,
+        components.tmat,
+        components.emat,
+        components.hazkeys,
+        components.subjinds,
+        components.SubjectWeights,
+        components.ObservationWeights,
+        components.CensoringPatterns,
+        surrogate,
+        modelcall,
+        phasetype_expansion,
+    )
 end
 
 """

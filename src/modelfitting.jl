@@ -1,93 +1,88 @@
 """
-    fit(model::MultistateModel; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
+    fit(model::MultistateModel; kwargs...)
 
-Fit a multistate model to continuously observed (exact) data.
+Fit a multistate model to data.
 
-Uses Ipopt optimization for both constrained and unconstrained problems by default.
+This is the unified entry point for model fitting. The appropriate fitting method is 
+automatically selected based on the model's data type and hazard structure:
 
-# Arguments
-- `model::MultistateModel`: multistate model object with exact observation times
+- **Exact data** (continuously observed): Direct MLE via Ipopt optimization
+- **Panel data + Markov hazards**: Matrix exponential likelihood via Ipopt
+- **Panel data + Semi-Markov hazards**: Monte Carlo EM (MCEM) algorithm
+
+# Common Arguments
 - `constraints`: parameter constraints (see Constraints documentation)
-- `verbose::Bool=true`: print optimization messages
-- `solver`: optimization solver (default: Ipopt for both constrained and unconstrained).
-  See [Optimization Solvers](@ref) for available options.
-- `parallel::Bool=false`: enable parallel likelihood evaluation using Julia threads.
-  Recommended for large datasets (n > 500) with multiple cores available.
-  Uses physical cores (not hyperthreads) for optimal performance.
-- `nthreads::Union{Nothing,Int}=nothing`: number of threads for parallel execution.
-  If nothing, auto-detects based on physical cores (not hyperthreads).
-  Ignored when `parallel=false`.
-- `compute_vcov::Bool=true`: compute model-based variance-covariance matrix (H⁻¹).
-  Useful for diagnostics by comparing to robust variance.
-- `vcov_threshold::Bool=true`: if true, uses adaptive threshold `1/√(log(n)·p)` for pseudo-inverse 
-  of Fisher information; otherwise uses `√eps()`. Helps with near-singular Hessians.
-- `compute_ij_vcov::Bool=true`: compute infinitesimal jackknife (sandwich/robust) variance H⁻¹KH⁻¹.
-  **This is the recommended variance for inference** as it remains valid under model misspecification.
-- `compute_jk_vcov::Bool=false`: compute jackknife variance ((n-1)/n)·Σᵢ ΔᵢΔᵢᵀ
-- `loo_method::Symbol=:direct`: method for computing leave-one-out (LOO) perturbations Δᵢ.
-  **Only affects jackknife variance** (not IJ), since IJ uses Var_IJ = H⁻¹KH⁻¹ directly
-  without computing individual LOO estimates. Options:
-  - `:direct`: approximate H₋ᵢ⁻¹ ≈ H⁻¹, so Δᵢ = H⁻¹gᵢ. O(p²n), faster when n >> p.
-  - `:cholesky`: compute H₋ᵢ⁻¹ exactly via Cholesky rank-k downdates of H = LLᵀ.
-    O(np³), more numerically stable for ill-conditioned problems.
+- `verbose::Bool=true`: print optimization/convergence messages
+- `solver`: optimization solver (default: Ipopt)
+- `compute_vcov::Bool=true`: compute model-based variance-covariance matrix
+- `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse
+- `compute_ij_vcov::Bool=true`: compute infinitesimal jackknife (sandwich) variance
+- `compute_jk_vcov::Bool=false`: compute jackknife variance
+- `loo_method::Symbol=:direct`: method for LOO perturbations (`:direct` or `:cholesky`)
+
+# Exact Data Arguments  
+- `parallel::Bool=false`: enable parallel likelihood evaluation
+- `nthreads::Union{Nothing,Int}=nothing`: number of threads for parallel execution
+
+# Markov Panel Arguments
+- `adbackend::ADBackend=ForwardDiffBackend()`: automatic differentiation backend
+
+# MCEM Arguments (Semi-Markov Panel)
+- `proposal::Union{Symbol,ProposalConfig}=:auto`: proposal distribution (`:markov` or `:phasetype`)
+- `maxiter::Int=100`: maximum MCEM iterations
+- `tol::Float64=0.01`: convergence tolerance
+- `ess_target_initial::Int=50`: initial effective sample size target
+- `max_ess::Int=10000`: maximum ESS
+- See `_fit_mcem` for full argument list
 
 # Returns
-- `MultistateModelFitted`: fitted model object with estimates, standard errors, and diagnostics
+- `MultistateModelFitted`: fitted model with estimates and variance matrices
 
-# Variance Estimation (Default Behavior)
+# Model Type Detection
 
-By default, both model-based and IJ (sandwich) variance are computed:
-- **IJ/Sandwich variance** (`compute_ij_vcov=true`): **Primary for inference**. Robust variance
-  H⁻¹KH⁻¹ that remains valid even under model misspecification.
-- **Model-based variance** (`compute_vcov=true`): **For diagnostics**. Standard MLE variance H⁻¹,
-  valid only under correct model specification. Compare to IJ variance to assess model adequacy.
+The fitting method is selected via traits:
+- `is_panel_data(model)`: true if constructed with panel/interval-censored observations
+- `is_markov(model)`: true if all hazards are Markov (no sojourn time dependence)
 
-Use `compare_variance_estimates(fitted)` to diagnose potential model misspecification.
-
-# Parallelization
-
-When `parallel=true`, likelihood evaluations during optimization use multiple threads.
-This is beneficial for:
-- Large datasets (n > 500 subjects/paths)
-- Models with expensive per-path computations (splines, many covariates)
-- Systems with multiple physical cores
-
-Thread count is auto-detected based on physical cores (not hyperthreads) to avoid
-overhead from hardware threads. Use `nthreads` to override.
-
-Note: Gradient computation always uses sequential ForwardDiff for AD correctness.
-Parallelization applies to objective function evaluation only.
-
-# Example
+# Examples
 ```julia
-# Default fit: computes both model-based and robust (IJ) variance
-fitted = fit(model)
+# Exact data (obstype=1 in data)
+exact_model = multistatemodel(h12, h23; data=exact_data)
+fitted = fit(exact_model)
 
-# Get robust standard errors for inference
-robust_se = sqrt.(diag(get_ij_vcov(fitted)))
+# Panel data with Markov hazards (obstype=2, exponential/Weibull hazards)
+markov_panel = multistatemodel(h12_exp, h23_exp; data=panel_data)
+fitted = fit(markov_panel)
 
-# Compare model-based and robust SEs to check model specification
-result = compare_variance_estimates(fitted)
-# If SE_robust >> SE_model, model may be misspecified
-
-# Fit with model-based variance only (faster, but less robust)
-fitted = fit(model; compute_ij_vcov=false)
-
-# Enable parallel likelihood evaluation (useful for large datasets)
-fitted = fit(model; parallel=true)
-
-# Use exactly 4 threads for parallel evaluation
-fitted = fit(model; parallel=true, nthreads=4)
-
-# Use a custom solver (e.g., BFGS instead of L-BFGS)
-using Optim
-fitted = fit(model; solver=Optim.BFGS())
+# Panel data with semi-Markov hazards (Gompertz or non-Markov)
+semimarkov = multistatemodel(h12_gom, h23_wei; data=panel_data)
+fitted = fit(semimarkov; proposal=:markov, maxiter=50)
 ```
 
 See also: [`get_vcov`](@ref), [`get_ij_vcov`](@ref), [`compare_variance_estimates`](@ref),
-          [`recommended_nthreads`](@ref), [`get_physical_cores`](@ref)
+          [`is_markov`](@ref), [`is_panel_data`](@ref)
 """
-function fit(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing, 
+function fit(model::MultistateModel; kwargs...)
+    # Dispatch based on observation type and model structure
+    if is_panel_data(model)
+        if is_markov(model)
+            return _fit_markov_panel(model; kwargs...)
+        else
+            return _fit_mcem(model; kwargs...)
+        end
+    else
+        return _fit_exact(model; kwargs...)
+    end
+end
+
+"""
+    _fit_exact(model::MultistateModel; kwargs...)
+
+Internal implementation: Fit a multistate model to continuously observed (exact) data.
+
+This is called by `fit()` when `is_panel_data(model) == false`.
+"""
+function _fit_exact(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing, 
              parallel = false, nthreads = nothing,
              compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, 
              compute_jk_vcov = false, loo_method = :direct, kwargs...)
@@ -282,7 +277,8 @@ function fit(model::MultistateModel; constraints = nothing, verbose = true, solv
         model.markovsurrogate,
         (solution = sol,), # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
-        model.modelcall)
+        model.modelcall,
+        model.phasetype_expansion)
 
     # remake splines and calculate risk periods using log-scale parameters
     for i in eachindex(model_fitted.hazards)
@@ -301,75 +297,24 @@ end
 # phasetype_expansion metadata. The standard fit() method handles expansion.
 
 """
-    fit(model::MultistateMarkovModel; constraints = nothing, verbose = true, compute_vcov = true, kwargs...)
+    _fit_markov_panel(model::MultistateModel; kwargs...)
 
-Fit a Markov multistate model to interval-censored or panel data.
+Internal implementation: Fit a Markov model to interval-censored/panel data.
 
-Uses Ipopt optimization for both constrained and unconstrained problems by default.
+This is called by `fit()` when `is_panel_data(model) && is_markov(model)`.
 
 # Arguments
-- `model::MultistateMarkovProcess`: Markov model with panel observations
+- `model::MultistateModel`: Markov model with panel observations
 - `constraints`: parameter constraints (see Constraints documentation)
 - `verbose::Bool=true`: print optimization messages
-- `solver`: optimization solver (default: Ipopt for both constrained and unconstrained).
-  See [Optimization Solvers](@ref) for available options.
-- `adbackend::ADBackend=ForwardDiffBackend()`: automatic differentiation backend.
-  - `ForwardDiffBackend()`: forward-mode AD (default, required for Markov models)
-  - `EnzymeBackend()`: reverse-mode AD (Julia 1.12 not supported)
-  - `MooncakeBackend()`: reverse-mode AD (fails on Markov models - see below)
-  
-  **Important:** Markov panel likelihoods require `ForwardDiffBackend()` because matrix
-  exponential differentiation uses LAPACK calls that reverse-mode AD cannot handle.
-  ChainRules.jl has an rrule for exp(::Matrix), but it also uses LAPACK internally.
-  
-- `compute_vcov::Bool=true`: compute model-based variance-covariance matrix (for diagnostics)
-- `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse of Fisher information
-- `compute_ij_vcov::Bool=true`: compute infinitesimal jackknife (sandwich/robust) variance.
-  **This is the recommended variance for inference.**
-- `compute_jk_vcov::Bool=false`: compute jackknife variance
-- `loo_method::Symbol=:direct`: method for LOO perturbations Δᵢ = θ̂₋ᵢ - θ̂ (jackknife only, not IJ):
-  - `:direct`: Δᵢ = H⁻¹gᵢ (faster, O(p²n))
-  - `:cholesky`: exact H₋ᵢ⁻¹ via Cholesky downdates (stable, O(np³))
-
-# Returns
-- `MultistateModelFitted`: fitted model with estimates and variance matrices
-
-# Variance Estimation (Default Behavior)
-
-By default, both model-based and IJ (sandwich) variance are computed:
-- **IJ variance** (`compute_ij_vcov=true`): Primary for inference (robust to misspecification)
-- **Model-based** (`compute_vcov=true`): For diagnostics (compare SE ratios)
+- `solver`: optimization solver (default: Ipopt)
+- `adbackend::ADBackend=ForwardDiffBackend()`: automatic differentiation backend
 
 # Notes
 - For Markov models, the likelihood involves matrix exponentials of the intensity matrix
 - Censored state observations are handled via marginalization over possible states
-- IJ/JK variance estimation works for both censored and uncensored Markov models
-
-# Example
-```julia
-# Default fit: robust and model-based variance computed
-fitted = fit(markov_model)
-
-# Use robust SEs for inference
-robust_se = sqrt.(diag(get_ij_vcov(fitted)))
-
-# Diagnose model specification
-result = compare_variance_estimates(fitted)
-
-# Use a custom solver
-using Optim
-fitted = fit(markov_model; solver=Optim.BFGS())
-
-# Use Enzyme for reverse-mode AD (useful for large models)
-fitted = fit(markov_model; adbackend=EnzymeBackend())
-
-# Use Mooncake for reverse-mode AD (works on all Julia versions)
-fitted = fit(markov_model; adbackend=MooncakeBackend())
-```
-
-See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::MultistateMarkovProcess; constraints = nothing, verbose = true, solver = nothing, adbackend::ADBackend = ForwardDiffBackend(), compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing, adbackend::ADBackend = ForwardDiffBackend(), compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -524,14 +469,17 @@ function fit(model::MultistateMarkovProcess; constraints = nothing, verbose = tr
         model.markovsurrogate,
         (solution = sol,), # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
-        model.modelcall);
+        model.modelcall,
+        model.phasetype_expansion);
 end
 
 
 """
-    fit(model::MultistateSemiMarkovProcess; kwargs...)
+    _fit_mcem(model::MultistateModel; kwargs...)
 
-Fit a semi-Markov model to panel data via Monte Carlo EM (MCEM).
+Internal implementation: Fit a semi-Markov model to panel data via Monte Carlo EM (MCEM).
+
+This is called by `fit()` when `is_panel_data(model) && !is_markov(model)`.
 
 Uses Ipopt optimization for both constrained and unconstrained M-steps by default.
 
@@ -652,9 +600,9 @@ fitted = fit(semimarkov_model; solver=Optim.BFGS())
 fitted = fit(semimarkov_model; acceleration=:squarem)
 ```
 
-See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
+See also: [`fit`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::MultistateSemiMarkovProcess; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :none, sir::Symbol = :none, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :none, sir::Symbol = :none, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # Validate acceleration parameter
     if acceleration ∉ (:none, :squarem)
@@ -1670,7 +1618,8 @@ function fit(model::MultistateSemiMarkovProcess; proposal::Union{Symbol, Proposa
         surrogate,
         ConvergenceRecords,
         ProposedPaths,
-        model.modelcall)
+        model.modelcall,
+        model.phasetype_expansion)
 
     # remake splines and calculate risk periods using log-scale parameters
     for i in eachindex(model_fitted.hazards)
