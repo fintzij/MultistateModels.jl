@@ -1900,6 +1900,9 @@ end
     extract_covariates_lightweight(subject_covar::SubjectCovarCache, row_idx::Int, covar_names::Vector{Symbol})
 
 Extract covariates from the subject cache without DataFrame row access overhead.
+
+Handles interaction terms (e.g., `Symbol("trt & age")`) by computing the product
+of their component values.
 """
 @inline function extract_covariates_lightweight(subject_covar::SubjectCovarCache, row_idx::Int, covar_names::Vector{Symbol})
     isempty(covar_names) && return NamedTuple()
@@ -1911,9 +1914,35 @@ Extract covariates from the subject cache without DataFrame row access overhead.
         return NamedTuple()
     end
     
-    # Extract values for requested covariates
-    values = Tuple(subject_covar.covar_data[idx, cname] for cname in covar_names)
+    # Extract values for requested covariates, handling interaction terms
+    values = Tuple(_lookup_covar_value_lightweight(subject_covar.covar_data, idx, cname) for cname in covar_names)
     return NamedTuple{Tuple(covar_names)}(values)
+end
+
+"""
+    _lookup_covar_value_lightweight(covar_data::DataFrame, row_idx::Int, cname::Symbol)
+
+Look up a covariate value, handling interaction terms (e.g., `:"trt & age"`).
+
+For interaction terms, computes the product of the component values.
+"""
+@inline function _lookup_covar_value_lightweight(covar_data::DataFrame, row_idx::Int, cname::Symbol)
+    # Direct column access for simple covariates
+    if hasproperty(covar_data, cname)
+        return covar_data[row_idx, cname]
+    end
+    
+    # Handle interaction terms: "trt & age" or "trt:age"
+    cname_str = String(cname)
+    if occursin("&", cname_str)
+        parts = split(cname_str, "&")
+        return prod(_lookup_covar_value_lightweight(covar_data, row_idx, Symbol(strip(part))) for part in parts)
+    elseif occursin(":", cname_str)
+        parts = split(cname_str, ":")
+        return prod(_lookup_covar_value_lightweight(covar_data, row_idx, Symbol(strip(part))) for part in parts)
+    else
+        throw(ArgumentError("column name :$cname not found in covariate data"))
+    end
 end
 
 """

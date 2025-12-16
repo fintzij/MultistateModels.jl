@@ -342,16 +342,30 @@ function initialize_parameters!(model::MultistateProcess;
     # Validate npaths
     npaths > 0 || throw(ArgumentError("npaths must be positive, got $npaths"))
     
+    # Check if model is phase-type (has phasetype_expansion)
+    is_phasetype = has_phasetype_expansion(model)
+    
     # Resolve :auto method based on model type
     actual_method = if method == :auto
-        _is_semimarkov(model) ? :surrogate : :crude
+        if is_phasetype
+            :surrogate  # Phase-type models default to :surrogate
+        elseif _is_semimarkov(model)
+            :surrogate
+        else
+            :crude
+        end
     else
         method
     end
     
-    # Validate method
-    actual_method in (:crude, :markov, :surrogate) || 
-        throw(ArgumentError("method must be :auto, :crude, :markov, or :surrogate, got :$method"))
+    # Validate method - phase-type models only support :crude or :surrogate
+    if is_phasetype
+        actual_method in (:crude, :surrogate) ||
+            throw(ArgumentError("Phase-type models only support :crude or :surrogate methods, got :$method"))
+    else
+        actual_method in (:crude, :markov, :surrogate) || 
+            throw(ArgumentError("method must be :auto, :crude, :markov, or :surrogate, got :$method"))
+    end
     
     # Check constraints compatibility
     if actual_method == :markov && !isnothing(constraints) && isnothing(surrogate_constraints)
