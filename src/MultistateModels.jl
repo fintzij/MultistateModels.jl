@@ -172,57 +172,57 @@ include("common.jl")
 include("helpers.jl")
 
 # shared stats utilities
-include("statsutils.jl")
+include("utilities/stats.jl")
 
 # hazard related functions
 include("hazards.jl")
 
 # crude parameter initialization functions
-include("initialization.jl")
+include("utilities/initialization.jl")
 
 # likelihood functions
-include("likelihoods.jl")
+include("likelihood/loglik.jl")
 
 # Monte Carlo EM functions
-include("mcem.jl")
+include("inference/mcem.jl")
 
 # miscellaneous functions
-include("miscellaneous.jl")
+include("utilities/misc.jl")
 
 # phase-type distributions for improved surrogates
-include("phasetype.jl")
+include("phasetype/expansion.jl")
 
 # surrogate
-include("surrogates.jl")
+include("surrogate/markov.jl")
 
 # sampling importance resampling
-include("sir.jl")
+include("inference/sir.jl")
 
 # model fitting
-include("modelfitting.jl")
+include("inference/fit.jl")
 
 # model generation
-include("modelgeneration.jl")
+include("construction/multistatemodel.jl")
 
 # declarative macros
-include("macros.jl")
+include("hazard/macros.jl")
 
-# model output
-include("modeloutput.jl")
+# model output / accessors
+include("output/accessors.jl")
 
 # path functions
-include("pathfunctions.jl")
+include("simulation/path_utilities.jl")
 
 # sampling functions
-include("sampling.jl")
+include("inference/sampling.jl")
 
 # simulation
-include("simulation.jl")
+include("simulation/simulate.jl")
 
-# smooths
-include("smooths.jl")
+# smooths / spline hazards
+include("hazard/spline.jl")
 
 # cross-validation and robust covariance estimation
-include("crossvalidation.jl")
+include("output/variance.jl")
 
 end
