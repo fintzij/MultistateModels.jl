@@ -488,6 +488,65 @@ src/
 | 2025-12-16 | Singular folder names | `likelihood/`, `simulation/`, etc. |
 | 2025-12-16 | PT target ~500 lines | Down from 4,586 - acceptable |
 | 2025-12-16 | Surrogates separate folder | `surrogate/` subfolder |
+| 2025-12-16 | **Remove PhaseTypeModel** | Internal expansion/collapsing - user never sees expanded states |
+
+---
+
+## PhaseTypeModel Removal Design (NEW)
+
+### User Experience (Unchanged)
+```julia
+# User specifies PT hazard - nothing special required
+h12 = Hazard(:pt, 1, 2)
+model = multistatemodel(h12, h13; data=df, n_phases=Dict(1=>3))
+
+# Returns MultistateMarkovModel (internally expanded)
+# All operations transparent:
+fitted = fit(model)                    # Fits on expanded, reports original params
+sim = simulate(fitted; paths=true)     # Paths in observed states
+get_parameters(fitted)                 # Original PT parameters (λ, μ)
+```
+
+### Internal Implementation
+```julia
+mutable struct MultistateModel <: MultistateProcess
+    # ... standard fields ...
+    
+    # NEW: Optional expansion metadata (nothing for non-PT models)
+    phasetype_expansion::Union{Nothing, PhaseTypeExpansion}
+end
+
+struct PhaseTypeExpansion
+    n_phases_per_state::Vector{Int}      # [1, 3, 1] = state 2 has 3 phases
+    state_to_phases::Vector{UnitRange{Int}}  # Mapping: observed → expanded
+    phase_to_state::Vector{Int}              # Mapping: expanded → observed
+    original_tmat::Matrix{Int}               # Original transition matrix
+    original_hazard_specs::Vector{HazardFunction}  # Original PT specs
+end
+
+# Traits
+has_phasetype_expansion(m::MultistateModel) = !isnothing(m.phasetype_expansion)
+```
+
+### What This Enables
+1. `fit()` - Works on expanded space, stores original PT params in results
+2. `simulate()` - Simulates expanded, collapses paths automatically
+3. `get_parameters()` - Returns PT parameters (λ progression, μ exit), not expanded
+4. `loglik()` - Just `loglik_markov` on expanded space
+5. Accessors - All automatic collapsing
+
+### Lines to Remove
+- `PhaseTypeModel` struct definition (~30 lines)
+- `fit(::PhaseTypeModel)` dispatch (~100 lines)
+- `simulate(::PhaseTypeModel)` and 4 related methods (~200 lines)
+- `get_parameters(::PhaseTypeModel)` family (~150 lines)
+- `set_parameters!(::PhaseTypeModel)` family (~100 lines)
+- `set_crude_init!(::PhaseTypeModel)` (~50 lines)
+- `initialize_parameters!(::PhaseTypeModel)` (~100 lines)
+- Pretty printing for PhaseTypeModel (~100 lines)
+- Plus all internal helpers for dual parameter storage (~600 lines)
+
+**Estimated savings: ~1,400 lines** (more conservative than earlier estimate)
 
 ---
 
