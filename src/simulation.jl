@@ -416,7 +416,8 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
                   solver::AbstractJumpSolver = OptimJumpSolver(),
                   newdata::Union{Nothing,DataFrame} = nothing,
                   tmax::Union{Nothing,Float64} = nothing,
-                  autotmax::Bool = true)
+                  autotmax::Bool = true,
+                  expanded::Bool = true)
 
     # throw an error if neither paths nor data are asked for
     if paths == false && data == false
@@ -467,6 +468,17 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
         # collect subject paths into Vector{Vector{SamplePath}}
         if paths == true
             trajectories = [collect(@view(samplepaths[:, i])) for i in 1:nsim]
+        end
+
+        # Collapse results if expanded=false and model is phase-type
+        if !expanded && has_phasetype_expansion(model)
+            mappings = model.phasetype_expansion.mappings
+            if data == true
+                dat = [_collapse_data(df, mappings) for df in dat]
+            end
+            if paths == true
+                trajectories = [[_collapse_path(p, mappings) for p in pset] for pset in trajectories]
+            end
         end
 
         # return paths and data
@@ -526,10 +538,12 @@ function simulate_data(model::MultistateProcess;
                        solver::AbstractJumpSolver = OptimJumpSolver(),
                        newdata::Union{Nothing,DataFrame} = nothing,
                        tmax::Union{Nothing,Float64} = nothing,
-                       autotmax::Bool = true)
+                       autotmax::Bool = true,
+                       expanded::Bool = true)
     return simulate(model; nsim = nsim, data = true, paths = false,
                     strategy = strategy, solver = solver,
-                    newdata = newdata, tmax = tmax, autotmax = autotmax)
+                    newdata = newdata, tmax = tmax, autotmax = autotmax,
+                    expanded = expanded)
 end
 
 """
@@ -571,10 +585,12 @@ function simulate_paths(model::MultistateProcess;
                         solver::AbstractJumpSolver = OptimJumpSolver(),
                         newdata::Union{Nothing,DataFrame} = nothing,
                         tmax::Union{Nothing,Float64} = nothing,
-                        autotmax::Bool = true)
+                        autotmax::Bool = true,
+                        expanded::Bool = true)
     return simulate(model; nsim = nsim, data = false, paths = true,
                     strategy = strategy, solver = solver,
-                    newdata = newdata, tmax = tmax, autotmax = autotmax)
+                    newdata = newdata, tmax = tmax, autotmax = autotmax,
+                    expanded = expanded)
 end
 
 """
@@ -711,7 +727,8 @@ See also: [`simulate`](@ref), [`simulate_paths`](@ref)
 function simulate_path(model::MultistateProcess, subj::Int64;
                        strategy::AbstractTransformStrategy = CachedTransformStrategy(),
                        solver::AbstractJumpSolver = OptimJumpSolver(),
-                       rng::AbstractRNG = Random.default_rng())
+                       rng::AbstractRNG = Random.default_rng(),
+                       expanded::Bool = true)
 
     # Validate inputs
     1 <= subj <= length(model.subjectindices) || 
@@ -892,7 +909,15 @@ function simulate_path(model::MultistateProcess, subj::Int64;
         end
     end
 
-    return SamplePath(subj, times, states)
+    path = SamplePath(subj, times, states)
+    
+    # Collapse to observed states if expanded=false and model is phase-type
+    if !expanded && has_phasetype_expansion(model)
+        mappings = model.phasetype_expansion.mappings
+        path = _collapse_path(path, mappings)
+    end
+    
+    return path
 end
 
 

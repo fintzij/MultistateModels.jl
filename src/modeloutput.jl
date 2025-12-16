@@ -43,7 +43,9 @@ is_phasetype_fitted(::MultistateProcess) = false
 
 Get phase-type parameters from a fitted phase-type model.
 
-Returns the user-facing phase-type parameterization (λ progression rates, μ exit rates).
+Returns the user-facing phase-type parameterization (λ progression rates, μ exit rates)
+computed from the fitted expanded parameters.
+
 Throws an error if the model is not a fitted phase-type model.
 
 # Arguments
@@ -60,7 +62,7 @@ Throws an error if the model is not a fitted phase-type model.
 ```julia
 fitted = fit(phasetype_model)
 params = get_phasetype_parameters(fitted)
-# (h12 = (λ = [1.2, 0.8], μ = [0.5, 0.3, 0.4]), h23 = [0.6, 0.25])
+# (h12 = [λ₁, μ₁, μ₂], h23 = [rate])
 ```
 
 See also: [`is_phasetype_fitted`](@ref), [`get_expanded_parameters`](@ref)
@@ -71,13 +73,63 @@ function get_phasetype_parameters(model::MultistateModelFitted; scale::Symbol=:n
                            "Use `get_parameters(model)` for standard models."))
     end
     
-    original_params = model.modelcall.original_parameters
+    # Get fitted expanded parameters
+    exp_params = model.parameters.natural  # Expanded params on natural scale
+    
+    # Get original hazard specifications to rebuild user-facing structure
+    original_hazards = model.phasetype_expansion.original_hazards
+    mappings = model.phasetype_expansion.mappings
+    
+    # Build user-facing parameters from fitted expanded parameters
+    result_pairs = Vector{Pair{Symbol, Vector{Float64}}}()
+    
+    for orig_haz in original_hazards
+        orig_name = Symbol("h$(orig_haz.statefrom)$(orig_haz.stateto)")
+        
+        if orig_haz isa MultistateModels.PhaseTypeHazardSpec
+            # Phase-type hazard: collect λ and μ rates from expanded hazards
+            n = orig_haz.n_phases
+            user_params = Float64[]
+            
+            # Collect λ rates (progression: λ₁, λ₂, ..., λₙ₋₁)
+            for i in 1:(n-1)
+                prog_name = Symbol("h$(orig_haz.statefrom)_$(Char('a' + i - 1))$(Char('a' + i))")
+                if haskey(exp_params, prog_name)
+                    push!(user_params, exp_params[prog_name][1])
+                end
+            end
+            
+            # Collect μ rates (exits: μ₁, μ₂, ..., μₙ)
+            for i in 1:n
+                exit_name = Symbol("h$(orig_haz.statefrom)$(orig_haz.stateto)_$(Char('a' + i - 1))")
+                if haskey(exp_params, exit_name)
+                    push!(user_params, exp_params[exit_name][1])
+                end
+            end
+            
+            push!(result_pairs, orig_name => user_params)
+        else
+            # Non-phase-type hazard: use expanded params directly
+            if haskey(exp_params, orig_name)
+                push!(result_pairs, orig_name => exp_params[orig_name])
+            end
+        end
+    end
+    
+    params_natural = NamedTuple(result_pairs)
+    
     if scale == :natural
-        return original_params.natural
+        return params_natural
     elseif scale == :flat || scale == :estimation || scale == :log
-        return original_params.flat
+        # Flatten to log scale
+        return reduce(vcat, [log.(v) for v in values(params_natural)])
     elseif scale == :nested
-        return original_params.nested
+        # Convert to nested format
+        nested_pairs = [
+            name => (baseline = NamedTuple{Tuple([Symbol("p$i") for i in 1:length(v)])}(log.(v)),)
+            for (name, v) in result_pairs
+        ]
+        return NamedTuple(nested_pairs)
     else
         throw(ArgumentError("scale must be :natural, :flat, :estimation, :log, or :nested (got :$scale)"))
     end
@@ -85,59 +137,83 @@ end
 
 """
     get_mappings(model::MultistateModelFitted)
+    get_mappings(model::MultistateModel)
 
-Get the `PhaseTypeMappings` from a fitted phase-type model.
+Get the `PhaseTypeMappings` from a phase-type model.
 
-Throws an error if the model is not a fitted phase-type model.
+Throws an error if the model does not have phase-type expansion.
 
 # Returns
 - `PhaseTypeMappings`: State space translation information
 
-See also: [`is_phasetype_fitted`](@ref), [`PhaseTypeMappings`](@ref)
+See also: [`is_phasetype_fitted`](@ref), [`has_phasetype_expansion`](@ref), [`PhaseTypeMappings`](@ref)
 """
 function get_mappings(model::MultistateModelFitted)
     if !is_phasetype_fitted(model)
         throw(ArgumentError("Model is not a fitted phase-type model."))
     end
-    return model.modelcall.mappings
+    return model.phasetype_expansion.mappings
+end
+
+function get_mappings(model::MultistateModel)
+    if !has_phasetype_expansion(model)
+        throw(ArgumentError("Model does not have phase-type expansion."))
+    end
+    return model.phasetype_expansion.mappings
 end
 
 """
     get_original_data(model::MultistateModelFitted)
+    get_original_data(model::MultistateModel)
 
-Get the original (non-expanded) data from a fitted phase-type model.
+Get the original (non-expanded) data from a phase-type model.
 
-Throws an error if the model is not a fitted phase-type model.
+Throws an error if the model does not have phase-type expansion.
 
 # Returns
 - `DataFrame`: Original data on observed state space
 
-See also: [`is_phasetype_fitted`](@ref)
+See also: [`is_phasetype_fitted`](@ref), [`has_phasetype_expansion`](@ref)
 """
 function get_original_data(model::MultistateModelFitted)
     if !is_phasetype_fitted(model)
         throw(ArgumentError("Model is not a fitted phase-type model."))
     end
-    return model.modelcall.original_data
+    return model.phasetype_expansion.original_data
+end
+
+function get_original_data(model::MultistateModel)
+    if !has_phasetype_expansion(model)
+        throw(ArgumentError("Model does not have phase-type expansion."))
+    end
+    return model.phasetype_expansion.original_data
 end
 
 """
     get_original_tmat(model::MultistateModelFitted)
+    get_original_tmat(model::MultistateModel)
 
-Get the original transition matrix from a fitted phase-type model.
+Get the original transition matrix from a phase-type model.
 
-Throws an error if the model is not a fitted phase-type model.
+Throws an error if the model does not have phase-type expansion.
 
 # Returns
 - `Matrix{Int64}`: Original transition matrix on observed state space
 
-See also: [`is_phasetype_fitted`](@ref)
+See also: [`is_phasetype_fitted`](@ref), [`has_phasetype_expansion`](@ref)
 """
 function get_original_tmat(model::MultistateModelFitted)
     if !is_phasetype_fitted(model)
         throw(ArgumentError("Model is not a fitted phase-type model."))
     end
-    return model.modelcall.original_tmat
+    return model.phasetype_expansion.original_tmat
+end
+
+function get_original_tmat(model::MultistateModel)
+    if !has_phasetype_expansion(model)
+        throw(ArgumentError("Model does not have phase-type expansion."))
+    end
+    return model.phasetype_expansion.original_tmat
 end
 
 """
@@ -145,27 +221,25 @@ end
 
 Check if the model fitting converged.
 
-For phase-type models, returns the convergence status from optimization.
-For other fitted models, checks the convergence records if available.
+Checks the convergence records from optimization.
 
 # Returns
 - `Bool`: Whether the model fitting converged
 """
 function get_convergence(model::MultistateModelFitted)
-    if is_phasetype_fitted(model)
-        return model.modelcall.convergence
-    else
-        # For non-phase-type models, check ConvergenceRecords
-        if !isnothing(model.ConvergenceRecords)
-            if haskey(model.ConvergenceRecords, :retcode)
-                return model.ConvergenceRecords.retcode == :Success
-            elseif haskey(model.ConvergenceRecords, :solution)
-                sol = model.ConvergenceRecords.solution
-                return hasfield(typeof(sol), :retcode) && sol.retcode == ReturnCode.Success
+    # Check ConvergenceRecords for all model types
+    if !isnothing(model.ConvergenceRecords)
+        if haskey(model.ConvergenceRecords, :retcode)
+            return model.ConvergenceRecords.retcode == :Success
+        elseif haskey(model.ConvergenceRecords, :solution)
+            sol = model.ConvergenceRecords.solution
+            if hasfield(typeof(sol), :retcode)
+                # Works with both Symbol and ReturnCode types
+                return sol.retcode == ReturnCode.Success || sol.retcode == :Success
             end
         end
-        return true  # Assume converged if no info
     end
+    return true  # Assume converged if no info
 end
 
 # Deprecated: PhaseTypeFittedModel is no longer used
@@ -190,16 +264,23 @@ function get_loglik(model::MultistateModelFitted; ll = "loglik")
 end
 
 """
-    get_parameters(model::MultistateProcess; scale::Symbol=:natural)
+    get_parameters(model::MultistateProcess; scale::Symbol=:natural, expanded::Bool=false)
 
 Return model parameters on the specified scale.
 
+For phase-type models (unfitted), `expanded=false` (default) returns the user-facing 
+phase-type parameters (λ, μ) from the original hazard specifications.
+Set `expanded=true` to get the internal expanded Markov parameters.
+
+For non-phase-type models, the `expanded` argument is ignored.
+
 # Arguments 
-- `model`: A MultistateProcess (fitted or unfitted)
+- `model`: A MultistateProcess (unfitted)
 - `scale::Symbol=:natural`: Parameter scale
   - `:natural` - Human-readable scale (exp applied to baseline params)
   - `:estimation` or `:log` - Flat vector on log scale (for optimization)
   - `:nested` - Nested NamedTuple with ParameterHandling structure
+- `expanded::Bool=false`: For phase-type models, whether to return expanded parameters
 
 # Returns
 - For `:natural`: `NamedTuple` with parameters per hazard on natural scale
@@ -209,19 +290,36 @@ Return model parameters on the specified scale.
 # Example
 ```julia
 # Get human-readable parameters
-params = get_parameters(fitted_model)  # Same as scale=:natural
-# (h12 = [1.0, 0.3, 0.5], h21 = [1.2, 0.25, 0.3])
+params = get_parameters(model)  # Same as scale=:natural
 
-# Get flat vector for optimization
-params_flat = get_parameters(fitted_model; scale=:estimation)
-# [0.0, -1.2, 0.5, 0.18, -1.39, 0.3]
+# For phase-type models, get user-facing params
+params = get_parameters(model)  # (h12 = [λ, μ₁, μ₂], h23 = [rate])
+
+# Get expanded internal parameters
+params = get_parameters(model; expanded=true)  # (h1_ab = [...], h12_a = [...], ...)
 ```
 
 # See also
 - [`set_parameters!`](@ref) - Set model parameters
 - [`get_parnames`](@ref) - Get parameter names
+- [`get_expanded_parameters`](@ref) - Get expanded parameters
 """
-function get_parameters(model::MultistateProcess; scale::Symbol=:natural)
+function get_parameters(model::MultistateProcess; scale::Symbol=:natural, expanded::Bool=false)
+    # For phase-type models with expanded=false, return user-facing parameters
+    if !expanded && has_phasetype_expansion(model)
+        orig_params = model.phasetype_expansion.original_parameters
+        if scale == :natural
+            return orig_params.natural
+        elseif scale == :estimation || scale == :log || scale == :flat
+            return orig_params.flat
+        elseif scale == :nested
+            return orig_params.nested
+        else
+            throw(ArgumentError("scale must be :natural, :estimation, :log, :flat, or :nested (got :$scale)"))
+        end
+    end
+    
+    # Otherwise, return expanded/internal parameters
     if scale == :natural
         return model.parameters.natural
     elseif scale == :estimation || scale == :log || scale == :flat
@@ -296,8 +394,9 @@ end
 
 """
     get_expanded_parameters(model::MultistateModelFitted; scale::Symbol=:natural)
+    get_expanded_parameters(model::MultistateModel; scale::Symbol=:natural)
 
-Get the expanded (internal) parameters from a fitted model.
+Get the expanded (internal) parameters from a model.
 
 For phase-type models, this returns the internal Markov parameters 
 (progression λ and exit μ rates as separate hazards).
@@ -315,6 +414,20 @@ See also: [`get_parameters`](@ref), [`get_phasetype_parameters`](@ref)
 """
 function get_expanded_parameters(model::MultistateModelFitted; scale::Symbol=:natural)
     return get_parameters(model; scale=scale, expanded=true)
+end
+
+function get_expanded_parameters(model::MultistateModel; scale::Symbol=:natural)
+    # For unfitted models, expanded parameters are just the model's parameters
+    # (which are already on the expanded space for phase-type models)
+    if scale == :natural
+        return model.parameters.natural
+    elseif scale == :estimation || scale == :log || scale == :flat
+        return model.parameters.flat
+    elseif scale == :nested
+        return model.parameters.nested
+    else
+        throw(ArgumentError("scale must be :natural, :estimation, :log, :flat, or :nested (got :$scale)"))
+    end
 end
 
 """

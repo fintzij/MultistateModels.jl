@@ -1874,45 +1874,105 @@ Build parameter structure for the original (user-facing) hazard specifications.
 
 This is used for storing and reporting parameters in terms of the user's
 specification, not the expanded internal representation.
+
+Returns a structure matching the standard model parameters format:
+- `flat`: Vector of log-scale baseline params + covariate coefficients
+- `nested`: NamedTuple per hazard with `baseline` and `covariates` NamedTuples
+- `natural`: NamedTuple per hazard with simple Vector{Float64} of natural-scale values
+- `reconstructor`: ReConstructor for flatten/unflatten operations
 """
 function _build_original_parameters(hazards::Vector{<:HazardFunction}, data::DataFrame)
-    # For now, build a placeholder structure
-    # Will be properly populated during initialization
-    params_list = Vector{Vector{Float64}}()
     hazkeys = Dict{Symbol, Int64}()
+    params_nested_pairs = Vector{Pair{Symbol, NamedTuple}}()
     
     for (idx, h) in enumerate(hazards)
         hazname = Symbol("h$(h.statefrom)$(h.stateto)")
         hazkeys[hazname] = idx
         
         if h isa PhaseTypeHazardSpec
-            # PT hazard: 2n-1 baseline + covariates
+            # PT hazard: 2n-1 baseline params (λ rates + μ exit rates) + covariates
             n = h.n_phases
             npar_baseline = 2 * n - 1
             npar_covar = _count_covariates(h.hazard, data)
-            push!(params_list, zeros(Float64, npar_baseline + npar_covar))
+            
+            # Build baseline parameter names: λ₁, λ₂, ..., μ₁, μ₂, ..., μₙ
+            baseline_names = Symbol[]
+            for i in 1:(n-1)
+                push!(baseline_names, Symbol("$(hazname)_λ$i"))
+            end
+            for i in 1:n
+                push!(baseline_names, Symbol("$(hazname)_μ$i"))
+            end
+            baseline_nt = NamedTuple{Tuple(baseline_names)}(zeros(npar_baseline))
+            
+            # Build covariate parameter names if any
+            if npar_covar > 0
+                covar_names = [Symbol("$(hazname)_covar$i") for i in 1:npar_covar]
+                covar_nt = NamedTuple{Tuple(covar_names)}(zeros(npar_covar))
+                push!(params_nested_pairs, hazname => (baseline = baseline_nt, covariates = covar_nt))
+            else
+                push!(params_nested_pairs, hazname => (baseline = baseline_nt,))
+            end
         else
-            # Other hazards: use their standard parameter count
+            # Non-PT hazard: use standard parameter structure
             npar = _count_hazard_parameters(h, data)
-            push!(params_list, zeros(Float64, npar))
+            npar_covar = _count_covariates(h.hazard, data)
+            npar_baseline = npar - npar_covar
+            
+            baseline_names = [Symbol("$(hazname)_baseline$i") for i in 1:npar_baseline]
+            baseline_nt = NamedTuple{Tuple(baseline_names)}(zeros(npar_baseline))
+            
+            if npar_covar > 0
+                covar_names = [Symbol("$(hazname)_covar$i") for i in 1:npar_covar]
+                covar_nt = NamedTuple{Tuple(covar_names)}(zeros(npar_covar))
+                push!(params_nested_pairs, hazname => (baseline = baseline_nt, covariates = covar_nt))
+            else
+                push!(params_nested_pairs, hazname => (baseline = baseline_nt,))
+            end
         end
     end
     
-    # Build simple parameter structure (will be updated during init)
-    params_nested_pairs = [
-        hazname => (baseline = zeros(1), covariates = Float64[])
-        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
-    ]
-    params_nested = NamedTuple(params_nested_pairs)
+    # Sort by hazard index and build nested structure
+    sorted_pairs = sort(params_nested_pairs, by = p -> hazkeys[p.first])
+    params_nested = NamedTuple(sorted_pairs)
+    
+    # Build reconstructor and flat vector
     reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
     params_flat = flatten(reconstructor, params_nested)
+    
+    # Build natural-scale parameters (simple vectors per hazard)
+    # For phase-type, all baseline params are rates (positive), so exp transform
+    params_natural_pairs = [
+        hazname => _extract_original_natural_vector(params_nested[hazname])
+        for hazname in keys(params_nested)
+    ]
+    params_natural = NamedTuple(params_natural_pairs)
     
     return (
         flat = params_flat,
         nested = params_nested,
-        natural = params_nested,  # Placeholder
+        natural = params_natural,
         reconstructor = reconstructor
     )
+end
+
+"""
+    _extract_original_natural_vector(hazard_params::NamedTuple)
+
+Extract natural-scale parameter vector from original phase-type hazard params.
+All baseline parameters are rates (positive), so apply exp transform.
+Covariate coefficients are unconstrained (kept as-is).
+"""
+function _extract_original_natural_vector(hazard_params::NamedTuple)
+    baseline_vals = collect(values(hazard_params.baseline))
+    baseline_natural = exp.(baseline_vals)
+    
+    if haskey(hazard_params, :covariates)
+        covar_vals = collect(values(hazard_params.covariates))
+        return vcat(baseline_natural, covar_vals)
+    else
+        return baseline_natural
+    end
 end
 
 """
