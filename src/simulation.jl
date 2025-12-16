@@ -1215,10 +1215,10 @@ function _collapse_data(df::DataFrame, mappings)
     
     phase_to_state = mappings.phase_to_state
     
-    # Map states to observed states
+    # Map states to observed states, preserving missing values
     result = copy(df)
-    result.statefrom = [phase_to_state[s] for s in df.statefrom]
-    result.stateto = [phase_to_state[s] for s in df.stateto]
+    result.statefrom = [ismissing(s) ? missing : phase_to_state[s] for s in df.statefrom]
+    result.stateto = [ismissing(s) ? missing : phase_to_state[s] for s in df.stateto]
     
     # Merge consecutive rows with same observed statefrom and stateto
     # Group by subject first

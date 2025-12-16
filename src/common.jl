@@ -497,21 +497,22 @@ Total baseline parameters: 2n - 1
 - `statefrom`: Origin state number
 - `stateto`: Destination state number  
 - `n_phases`: Number of Coxian phases (≥ 1)
-- `structure`: Coxian structure constraint (`:unstructured`, `:allequal`, or `:prop_to_prog`)
+- `structure`: Coxian structure constraint (`:unstructured` or `:sctp`)
 - `metadata`: HazardMetadata for time_transform and linpred_effect
 
 # Structures
 - `:unstructured` (default): All λᵢ and μᵢ are free parameters
-- `:allequal`: All λᵢ equal, all μᵢ equal (2 free parameters + covariates)
-- `:prop_to_prog`: μᵢ = c × λᵢ for i < n (Titman-Sharples constraint)
+- `:sctp`: SCTP (Stationary Conditional Transition Probability) constraints ensuring
+  P(dest | leaving state) is constant across phases
 
 # Example
 ```julia
 # 3-phase Coxian hazard for transition 1 → 2
-h = Hazard(@formula(0 ~ 1 + age), :pt, 1, 2; n_phases=3)
+h12 = Hazard(@formula(0 ~ 1 + age), :pt, 1, 2)
+model = multistatemodel(h12; data=df, n_phases=Dict(1 => 3))
 
-# With all-equal constraint (Erlang-like)
-h = Hazard(:pt, 1, 2; n_phases=3, coxian_structure=:allequal)
+# With SCTP constraint (specified at model level)
+model = multistatemodel(h12; data=df, n_phases=Dict(1 => 3), coxian_structure=:sctp)
 ```
 
 See also: [`PhaseTypeCoxianHazard`](@ref), [`PhaseTypeModel`](@ref)
@@ -522,7 +523,7 @@ struct PhaseTypeHazardSpec <: HazardFunction
     statefrom::Int64
     stateto::Int64
     n_phases::Int                      # number of Coxian phases (≥1)
-    structure::Symbol                  # :unstructured, :allequal, or :prop_to_prog
+    structure::Symbol                  # :unstructured or :sctp
     metadata::HazardMetadata
     
     function PhaseTypeHazardSpec(hazard::StatsModels.FormulaTerm, family::Symbol,
@@ -530,8 +531,8 @@ struct PhaseTypeHazardSpec <: HazardFunction
                                   structure::Symbol, metadata::HazardMetadata)
         family == :pt || throw(ArgumentError("PhaseTypeHazardSpec family must be :pt"))
         n_phases >= 1 || throw(ArgumentError("n_phases must be ≥ 1, got $n_phases"))
-        structure in (:unstructured, :allequal, :prop_to_prog) ||
-            throw(ArgumentError("structure must be :unstructured, :allequal, or :prop_to_prog, got :$structure"))
+        structure in (:unstructured, :sctp) ||
+            throw(ArgumentError("structure must be :unstructured or :sctp, got :$structure"))
         new(hazard, family, statefrom, stateto, n_phases, structure, metadata)
     end
 end

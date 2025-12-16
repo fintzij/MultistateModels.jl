@@ -331,7 +331,7 @@ are then collapsed back to the user-facing phase-type parameterization.
 
 # Example
 ```julia
-h12 = Hazard(@formula(0 ~ 1), "pt", 1, 2; n_phases=3, coxian_structure=:allequal)
+h12 = Hazard(@formula(0 ~ 1), "pt", 1, 2; n_phases=3)
 h23 = Hazard(@formula(0 ~ 1), "exp", 2, 3)
 model = multistatemodel(h12, h23; data=data)
 fitted = fit(model)
@@ -1174,7 +1174,7 @@ function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCe
     #   This is r(Y|θ') in the importance sampling formula:
     #   log f̂(Y|θ) = log r(Y|θ') + Σᵢ log(mean(νᵢ))
     if use_phasetype
-        NormConstantProposal = compute_phasetype_marginal_loglik(
+        NormConstantProposal = compute_phasetype_marginal_loglik_deprecated(
             model, phasetype_surrogate, emat_ph;
             expanded_data = expanded_ph_data,
             expanded_subjectindices = ph_subjectindices)

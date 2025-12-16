@@ -523,7 +523,7 @@ end
 
 """
     _build_coxian_from_rate(n_phases::Int, total_rate::Float64; 
-                            structure::Symbol=:allequal) -> PhaseTypeDistribution
+                            structure::Symbol=:unstructured) -> PhaseTypeDistribution
 
 Build a Coxian phase-type distribution that has approximately the same mean
 sojourn time as an exponential with the given rate.
@@ -550,17 +550,14 @@ Q = [-(r₁ + a₁)    r₁           0        a₁  ]
 - `total_rate::Float64`: Target total exit rate (mean sojourn time ≈ 1/total_rate)
 - `structure::Symbol`: Coxian structure constraint (default: `:unstructured`)
   - `:unstructured`: All rates are independent free parameters (for initialization, uses
-    decreasing progression/increasing absorption pattern to capture typical non-Markov shapes)
-  - `:prop_to_prog`: aᵢ = c × rᵢ for i < n (Titman & Sharples 2010, Section 2)
-  - `:allequal`: r₁ = r₂ = ... = r and a₁ = a₂ = ... = a
-  - `Function`: Custom constraint function `f(n_phases, total_rate) -> S` returning the 
-    n_phases × n_phases subintensity matrix
+    uniform rates across all parameters)
+  - `:sctp`: SCTP (Stationary Conditional Transition Probability) constraint - uses
+    proportional exit rates that maintain constant P(dest | leaving) across phases
+  - `Function`: Custom constraint function `f(n_phases, total_rate) -> Q` returning the 
+    (n_phases + 1) × (n_phases + 1) intensity matrix
 
 # Returns
 - `PhaseTypeDistribution`: Coxian distribution with the specified structure
-
-# References
-- Titman & Sharples (2010) Biometrics 66(3):742-752
 """
 function _build_coxian_from_rate(n_phases::Int, total_rate::Float64; 
                                   structure::Union{Symbol, Function} = :unstructured)
@@ -588,39 +585,12 @@ function _build_coxian_from_rate(n_phases::Int, total_rate::Float64;
     # Build Q matrix: (n_phases + 1) × (n_phases + 1)
     Q = zeros(Float64, n_phases + 1, n_phases + 1)
     
-    if structure == :allequal
-        # All progression rates equal, all absorption rates equal
-        # To match mean ≈ 1/total_rate:
-        # Set absorption_rate = total_rate, progression_rate = (n-1) × total_rate
-        absorption_rate = total_rate
-        progression_rate = (n_phases - 1) * total_rate
-        
-        for i in 1:n_phases
-            if i < n_phases
-                Q[i, i+1] = progression_rate
-                Q[i, n_phases+1] = absorption_rate
-                Q[i, i] = -(progression_rate + absorption_rate)
-            else
-                Q[i, n_phases+1] = absorption_rate
-                Q[i, i] = -absorption_rate
-            end
-        end
-        
-    elseif structure == :prop_to_prog
-        # Absorption rates proportional to progression rates: aᵢ = c × rᵢ
-        # For phases 1 to n-1, set rᵢ = r (same progression rate)
-        # Then aᵢ = c × r for i < n
-        # Last phase has only absorption rate aₙ
+    if structure == :sctp
+        # SCTP constraint: exit rates proportional to progression rates
+        # This ensures P(dest | leaving state) is constant across phases
+        # Use aᵢ = c × rᵢ for i < n (proportionality)
         #
-        # Mean sojourn time calculation for prop_to_prog:
-        # Let r be the common progression rate and c the proportionality constant
-        # Probability of absorbing from phase i: p = c×r / (r + c×r) = c / (1 + c)
-        # Expected phases visited: 1/p = (1 + c) / c
-        # Time per phase: 1/(r(1+c))
-        # Mean = (1+c)/(c × r(1+c)) = 1/(c×r)
-        #
-        # For mean = 1/total_rate: c × r = total_rate
-        # Choose c = 0.5 (reasonable default), then r = 2 × total_rate
+        # For mean = 1/total_rate with proportionality constant c = 0.5:
         c = 0.5  # proportionality constant
         progression_rate = total_rate / c  # so that c × r = total_rate
         absorption_rate_intermediate = c * progression_rate  # = total_rate for phases 1 to n-1
@@ -638,28 +608,24 @@ function _build_coxian_from_rate(n_phases::Int, total_rate::Float64;
         end
         
     elseif structure == :unstructured
-        # Unstructured: all rates can differ
-        # For initialization, use a decreasing pattern for progression rates
-        # and increasing absorption rates (captures common non-Markov shapes)
-        base_rate = total_rate
+        # Unstructured: all rates are free parameters
+        # For initialization, use uniform rates: total_rate / (2n-1) for all
+        n_params = 2 * n_phases - 1
+        uniform_rate = total_rate * n_phases / n_params  # Adjust to get mean ≈ 1/total_rate
         
         for i in 1:n_phases
             if i < n_phases
-                # Decreasing progression rates: r_i = base × (n - i) / n
-                prog_i = base_rate * (n_phases - i) / n_phases
-                # Increasing absorption rates: a_i = base × i / n  
-                abs_i = base_rate * i / n_phases
-                Q[i, i+1] = prog_i
-                Q[i, n_phases+1] = abs_i
-                Q[i, i] = -(prog_i + abs_i)
+                Q[i, i+1] = uniform_rate
+                Q[i, n_phases+1] = uniform_rate
+                Q[i, i] = -2 * uniform_rate
             else
                 # Last phase: only absorption
-                Q[i, n_phases+1] = base_rate
-                Q[i, i] = -base_rate
+                Q[i, n_phases+1] = uniform_rate
+                Q[i, i] = -uniform_rate
             end
         end
     else
-        throw(ArgumentError("Unknown structure: $structure. Use :unstructured, :prop_to_prog, or :allequal"))
+        throw(ArgumentError("Unknown structure: $structure. Use :unstructured or :sctp"))
     end
     # Last row (absorbing state) is already zeros
     

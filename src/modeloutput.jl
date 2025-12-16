@@ -318,30 +318,56 @@ function get_expanded_parameters(model::MultistateModelFitted; scale::Symbol=:na
 end
 
 """
-    get_parnames(model)    
+    get_parnames(model; flatten=false)    
 
 Return the parameter names.
 
 # Arguments
 - `model`: A MultistateProcess or MarkovSurrogate
+- `flatten::Bool = false`: If true, return a single vector of all parameter names.
+  If false (default), return a vector of vectors grouped by hazard.
+
+# Returns
+- If `flatten=false`: Vector of parameter name vectors, one per hazard
+- If `flatten=true`: Single vector of all parameter names (useful for constraints)
+
+# Example
+```julia
+# Per-hazard grouping (default)
+get_parnames(model)  # [[:log_λ_h12], [:log_λ_h21, :log_shape_h21]]
+
+# Flattened for constraint specification
+get_parnames(model; flatten=true)  # [:log_λ_h12, :log_λ_h21, :log_shape_h21]
+```
 """
-function get_parnames(model::MultistateProcess)
-    [x.parnames for x in model.hazards]
+function get_parnames(model::MultistateProcess; flatten::Bool = false)
+    names_per_hazard = [x.parnames for x in model.hazards]
+    if flatten
+        return reduce(vcat, names_per_hazard)
+    else
+        return names_per_hazard
+    end
 end
 
 """
-    get_parnames(surrogate::MarkovSurrogate)
+    get_parnames(surrogate::MarkovSurrogate; flatten=false)
 
 Return the parameter names for a Markov surrogate.
 
 # Arguments
 - `surrogate::MarkovSurrogate`: A Markov surrogate
+- `flatten::Bool = false`: If true, return a single vector of all parameter names.
 
 # Returns
-- Vector of parameter name vectors, one per hazard
+- Vector of parameter name vectors, one per hazard (or flattened if requested)
 """
-function get_parnames(surrogate::MarkovSurrogate)
-    [x.parnames for x in surrogate.hazards]
+function get_parnames(surrogate::MarkovSurrogate; flatten::Bool = false)
+    names_per_hazard = [x.parnames for x in surrogate.hazards]
+    if flatten
+        return reduce(vcat, names_per_hazard)
+    else
+        return names_per_hazard
+    end
 end
 
 """

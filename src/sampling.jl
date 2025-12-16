@@ -248,7 +248,8 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
         # subject data
         subj_tpm_map = view(books[2], subj_inds, :)
         subj_emat    = view(model.emat, subj_inds, :)
-        ForwardFiltering!(fbmats[i], subj_dat, tpm_book_surrogate, subj_tpm_map, subj_emat)
+        ForwardFiltering!(fbmats[i], subj_dat, tpm_book_surrogate, subj_tpm_map, subj_emat;
+                         hazmat_book=hazmat_book_surrogate)
     end
 
     # sample
@@ -282,9 +283,10 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
                 # Store collapsed path for target likelihood evaluation
                 samplepaths[i][j] = path_result.collapsed
                 
-                # Surrogate log-likelihood: unconditional density of expanded path under phase-type CTMC
-                # This is h(Z|θ') in the importance weight formula: ν = f(Z|θ) / h(Z|θ')
-                loglik_surrog[i][j] = loglik_phasetype_expanded(path_result.expanded, phasetype_surrogate)
+                # Surrogate log-likelihood: marginal density of COLLAPSED path under phase-type
+                # This ensures importance weight = f(Z|θ) / q(Z|θ') evaluates the SAME path Z
+                # in both numerator and denominator (essential for correct IS)
+                loglik_surrog[i][j] = loglik_phasetype_path_deprecated(path_result.collapsed, phasetype_surrogate)
             else
                 # Markov proposal: standard sampling
                 samplepaths[i][j] = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, 
@@ -587,7 +589,8 @@ function _draw_paths_for_subject!(
     if any(subj_dat.obstype .∉ Ref([1,2]))
         subj_tpm_map = view(books[2], subj_inds, :)
         subj_emat = view(model.emat, subj_inds, :)
-        ForwardFiltering!(fbmats[i], subj_dat, tpm_book, subj_tpm_map, subj_emat)
+        ForwardFiltering!(fbmats[i], subj_dat, tpm_book, subj_tpm_map, subj_emat;
+                         hazmat_book=hazmat_book)
     end
 
     if adaptive_mode
@@ -1216,7 +1219,8 @@ function reduce_jumpchain_ws(ws::PathWorkspace, subj::Int)
 end
 
 """
-    ForwardFiltering!(subj_fbmats, subj_dat, tpm_book, subj_tpm_map, subj_emat; init_state=nothing)
+    ForwardFiltering!(subj_fbmats, subj_dat, tpm_book, subj_tpm_map, subj_emat; 
+                      init_state=nothing, hazmat_book=nothing)
 
 Computes the forward recursion matrices for the FFBS algorithm. Writes into subj_fbmats.
 
@@ -1230,8 +1234,11 @@ Computes the forward recursion matrices for the FFBS algorithm. Writes into subj
   - `nothing`: uses subj_dat.statefrom[1] (default)
   - `Int`: single state index (point mass)
   - `Vector{Float64}`: distribution over states (for phase-type with uniform phases)
+- `hazmat_book`: Optional hazard rate matrices for instantaneous (dt=0) observations.
+                 Required when data contains instantaneous observations (phase-type expanded data).
 """
-function ForwardFiltering!(subj_fbmats, subj_dat, tpm_book, subj_tpm_map, subj_emat; init_state=nothing)
+function ForwardFiltering!(subj_fbmats, subj_dat, tpm_book, subj_tpm_map, subj_emat; 
+                           init_state=nothing, hazmat_book=nothing)
 
     n_times  = size(subj_fbmats, 1)
     n_states = size(subj_fbmats, 2)
@@ -1248,20 +1255,72 @@ function ForwardFiltering!(subj_fbmats, subj_dat, tpm_book, subj_tpm_map, subj_e
         p0 = init_state
     end
     
+    # Get TPM for first step - handle instantaneous observations
+    tpm = _get_tpm_for_step(1, subj_dat, tpm_book, subj_tpm_map, hazmat_book, n_states)
+    
     # First step: include TPM to account for transition probabilities over the interval.
     # This is essential when init_state is a distribution (e.g., phase-type with panel data)
     # because we need to know which (start_phase, end_phase) pairs are reachable.
     # For point mass init_state, the TPM multiplication is still correct (just filters column j).
-    subj_fbmats[1, :, :] = (p0 * subj_emat[1,:]') .* tpm_book[subj_tpm_map[1,1]][subj_tpm_map[1,2]]
+    subj_fbmats[1, :, :] = (p0 * subj_emat[1,:]') .* tpm
     normalize!(subj_fbmats[1,:,:], 1)
 
     # recurse
     if n_times > 1
         for s in 2:n_times
-            subj_fbmats[s, 1:n_states, 1:n_states] = (sum(subj_fbmats[s-1,:,:], dims = 1)' * subj_emat[s,:]') .* tpm_book[subj_tpm_map[s,1]][subj_tpm_map[s,2]]
+            tpm = _get_tpm_for_step(s, subj_dat, tpm_book, subj_tpm_map, hazmat_book, n_states)
+            subj_fbmats[s, 1:n_states, 1:n_states] = (sum(subj_fbmats[s-1,:,:], dims = 1)' * subj_emat[s,:]') .* tpm
             normalize!(subj_fbmats[s,:,:], 1)
         end
     end
+end
+
+"""
+    _get_tpm_for_step(s, subj_dat, tpm_book, subj_tpm_map, hazmat_book, n_states)
+
+Get transition probability matrix for step s. For dt≈0 (instantaneous observations),
+computes transition probabilities from hazard ratios instead of matrix exponential.
+"""
+function _get_tpm_for_step(s::Int, subj_dat, tpm_book, subj_tpm_map, hazmat_book, n_states::Int)
+    dt = subj_dat.tstop[s] - subj_dat.tstart[s]
+    
+    if dt ≈ 0 && !isnothing(hazmat_book)
+        # Instantaneous observation: compute P[i,j] = h(i,j) / Σ_k h(i,k) from Q matrix
+        # Q[i,j] = h(i,j) for i≠j, Q[i,i] = -Σ_k h(i,k)
+        covar_idx = subj_tpm_map[s, 1]
+        Q = hazmat_book[covar_idx]
+        return _instantaneous_tpm_from_Q(Q, n_states)
+    else
+        # Regular observation: use pre-computed TPM
+        return tpm_book[subj_tpm_map[s,1]][subj_tpm_map[s,2]]
+    end
+end
+
+"""
+    _instantaneous_tpm_from_Q(Q, n_states)
+
+Compute instantaneous transition probabilities from Q matrix.
+For a transition that definitely occurred at time t:
+- P[i,j] = h(i,j) / Σ_k h(i,k) = Q[i,j] / (-Q[i,i]) for i≠j
+- P[i,i] = 0 (cannot stay in same state when transition observed)
+"""
+function _instantaneous_tpm_from_Q(Q::AbstractMatrix, n_states::Int)
+    P = zeros(eltype(Q), n_states, n_states)
+    @inbounds for i in 1:n_states
+        total_haz = -Q[i, i]  # Q[i,i] = -Σ_k h(i,k)
+        if total_haz > 0
+            for j in 1:n_states
+                if i != j
+                    P[i, j] = Q[i, j] / total_haz
+                end
+                # P[i,i] = 0 by default (transition definitely occurred)
+            end
+        else
+            # Absorbing state: stays in place
+            P[i, i] = 1.0
+        end
+    end
+    return P
 end
 
 
@@ -1425,8 +1484,9 @@ For each observation, the emission matrix E[i,j] gives the probability that
 the subject is in phase j given the observation.
 
 # Observation Types
-- obstype 1: Exact observation → phases of stateto have probability 1
-- obstype 2: Panel/right-censored → phases of stateto have probability 1
+- obstype 1: Exact transition → only FIRST phase of stateto has probability 1
+  (In Coxian models, transitions always enter at phase 1 of the destination state)
+- obstype 2: Panel/right-censored → all phases of stateto have equal probability
 - obstype 0: Fully censored → all phases equally likely
 - obstype > 2: Partial censoring → use censoring_patterns matrix
   - For phase-type data expansion, obstype = 2 + s means "in state s, phase unknown"
@@ -1454,9 +1514,19 @@ function build_phasetype_emat_expanded(model, surrogate::PhaseTypeSurrogate;
     for i in 1:n_obs
         obstype = data.obstype[i]
         
-        if obstype == 1 || obstype == 2
-            # Exact or panel observation
-            # Only the phases corresponding to the observed state are possible
+        if obstype == 1
+            # Exact observation - transition always goes to FIRST phase of destination
+            # (In Coxian models, you always enter a state at phase 1)
+            observed_state = data.stateto[i]
+            if observed_state > 0 && observed_state <= n_observed
+                first_phase = first(surrogate.state_to_phases[observed_state])
+                emat[i, first_phase] = 1.0
+            else
+                # Invalid state, allow all phases
+                emat[i, :] .= 1.0
+            end
+        elseif obstype == 2
+            # Panel observation - any phase of observed state is possible
             observed_state = data.stateto[i]
             if observed_state > 0 && observed_state <= n_observed
                 phases = surrogate.state_to_phases[observed_state]
@@ -1725,7 +1795,7 @@ function _draw_samplepath_phasetype_original(subj::Int64, model::MultistateProce
     
     # Run FFBS to sample phase endpoints
     ForwardFiltering!(fbmats_ph[subj], subj_dat, tpm_book_ph, subj_tpm_map, subj_emat_ph;
-                      init_state=init_expanded)
+                      init_state=init_expanded, hazmat_book=hazmat_book_ph)
     
     # Backward sample to get expanded state sequence
     expanded_states = BackwardSampling_expanded(fbmats_ph[subj], n_expanded)
@@ -1842,7 +1912,7 @@ function _draw_samplepath_phasetype_expanded(subj::Int64, model::MultistateProce
     
     # Run FFBS on expanded data to sample phase endpoints
     ForwardFiltering!(fbmats_ph[subj], exp_subj_dat, tpm_book_ph, exp_subj_tpm_map, exp_subj_emat_ph;
-                      init_state=init_expanded)
+                      init_state=init_expanded, hazmat_book=hazmat_book_ph)
     
     # Backward sample to get expanded state sequence for all expanded rows
     exp_expanded_states = BackwardSampling_expanded(fbmats_ph[subj], n_expanded)
@@ -1995,15 +2065,14 @@ end
 
 
 """
-    loglik_phasetype_expanded(expanded_path::SamplePath, surrogate::PhaseTypeSurrogate)
+    loglik_phasetype_expanded_deprecated(expanded_path::SamplePath, surrogate::PhaseTypeSurrogate)
 
-Compute log-likelihood of an expanded sample path under the phase-type surrogate.
+DEPRECATED: Compute log-likelihood of an expanded sample path under the phase-type surrogate.
 
-This computes the CTMC path density in the expanded state space:
+This computes the CTMC path density in the expanded (phase) state space:
   log f(path) = sum of log(survival) + sum of log(hazard at transitions)
 
-For importance sampling:
-  log_weight = loglik_target(collapsed_path) - loglik_phasetype_expanded(expanded_path)
+**WARNING**: This function is DEPRECATED. Use loglik with properly expanded data instead.
 
 # Arguments
 - `expanded_path`: Sample path in the expanded phase state space
@@ -2012,7 +2081,7 @@ For importance sampling:
 # Returns
 - `Float64`: Log-likelihood (density) of the expanded path
 """
-function loglik_phasetype_expanded(expanded_path::SamplePath, surrogate::PhaseTypeSurrogate)
+function loglik_phasetype_expanded_deprecated(expanded_path::SamplePath, surrogate::PhaseTypeSurrogate)
     loglik = 0.0
     Q = surrogate.expanded_Q
     
@@ -2049,151 +2118,115 @@ end
 
 
 """
-    loglik_phasetype_path(path::SamplePath, surrogate::PhaseTypeSurrogate, 
-                          model::MultistateProcess)
+    loglik_phasetype_path_deprecated(path::SamplePath, surrogate::PhaseTypeSurrogate)
 
-Compute log-likelihood of a sample path under the phase-type surrogate.
+DEPRECATED: Compute log-likelihood (density) of a collapsed sample path under the phase-type surrogate.
 
-This computes the **marginal** probability of the collapsed path under the
-phase-type distribution, marginalizing over all possible phase sequences.
-
-For importance sampling:
-  log_weight = loglik_target - loglik_surrogate
-  
-where loglik_surrogate is the marginal probability of the observed transitions.
-
-# Algorithm
-
-For each transition from observed state `s` to state `d` over time `dt`:
-1. Start from the stationary phase distribution within state `s`
-2. Compute probability of ending in any phase of state `d`
-3. This is: π_s' * P_dt * 1_d where π_s is the phase distribution and 1_d sums phases of d
-
-For the first transition, we start in phase 1 of the initial state.
-For subsequent transitions, we use the conditional phase distribution given
-we're in state `s`.
+**WARNING**: This function is DEPRECATED. Use loglik with properly expanded data instead.
 
 # Arguments
-- `path`: Sample path in observed state space
-- `surrogate`: PhaseTypeSurrogate
-- `model`: Original model (for data access)
+- `path::SamplePath`: Sample path in observed (collapsed) state space
+- `surrogate::PhaseTypeSurrogate`: The phase-type surrogate with expanded Q matrix
 
 # Returns
-- `Float64`: Log-likelihood (density, marginal over phases) under phase-type surrogate
+- `Float64`: Log-density of the collapsed path under the phase-type model
 """
-function loglik_phasetype_path(path::SamplePath, surrogate::PhaseTypeSurrogate,
-                                model::MultistateProcess)
+function loglik_phasetype_path_deprecated(path::SamplePath, surrogate::PhaseTypeSurrogate)
     
     loglik = 0.0
     Q = surrogate.expanded_Q
-    n_expanded = surrogate.n_expanded_states
     
     n_transitions = length(path.times) - 1
     if n_transitions == 0
-        return 0.0  # No transitions
+        return 0.0  # No transitions, density = 1 (just conditioning on initial state)
     end
     
-    # The density of a collapsed path under phase-type is computed as follows:
-    # For each observed state sojourn, we compute the marginal density of:
-    # 1. Surviving in that state for duration dt
-    # 2. Transitioning to the next observed state at time t
-    #
-    # This requires integrating over all possible phase sequences within states.
-    # We use the matrix exponential formula for phase-type distributions.
-    
-    # Current distribution over phases - start in first phase of initial state
-    phase_dist = zeros(Float64, n_expanded)
-    init_phases = surrogate.state_to_phases[path.states[1]]
-    phase_dist[first(init_phases)] = 1.0
+    # For Coxian phase-type, we always enter each state in phase 1.
+    # The density of sojourn time τ in state s followed by exit to state d is:
+    #   f(τ; s→d) = π' * exp(S*τ) * r
+    # where π = (1,0,...,0)', S = sub-intensity, r = exit rates to d
     
     for i in 1:n_transitions
         t0 = path.times[i]
         t1 = path.times[i + 1]
-        dt = t1 - t0
+        τ = t1 - t0
         
-        s_obs = path.states[i]
-        d_obs = path.states[i + 1]
+        # Validate sojourn time
+        if τ < 0
+            return -Inf
+        end
         
-        # Get phases for source and destination states
+        s_obs = path.states[i]      # Source observed state
+        d_obs = path.states[i + 1]  # Destination observed state
+        
+        # Get phase indices for source and destination states
         s_phases = surrogate.state_to_phases[s_obs]
         d_phases = surrogate.state_to_phases[d_obs]
-        
-        # Compute the phase-type density contribution for this transition
-        # The density is: π' * exp(S*dt) * s_d
-        # where π is current phase distribution within source state
-        # S is the sub-generator for phases within source state
-        # s_d is the exit rate vector to destination state
-        
-        # Extract sub-generator S for source state
-        # S[i,j] = Q[s_phases[i], s_phases[j]] for within-state transitions
         n_phases_s = length(s_phases)
         
         if n_phases_s == 1
-            # Single phase case (exponential distribution)
+            # Single phase case: exponential distribution
+            # f(τ) = λ_{s→d} * exp(-λ_s * τ)
+            # where λ_s = total exit rate, λ_{s→d} = rate to destination d
+            
             phase_idx = first(s_phases)
             
-            # Total exit rate from this phase to destination state
-            exit_rate_to_dest = sum(Q[phase_idx, d_phases])
+            # Exit rate to destination state d (sum over all phases of d)
+            exit_rate_to_dest = sum(Q[phase_idx, dp] for dp in d_phases)
             
-            # Total exit rate (for survival)
+            # Total exit rate from this phase
             total_exit_rate = -Q[phase_idx, phase_idx]
             
-            # Log-density: survival * exit_rate_to_dest
-            # log f(dt) = -total_exit_rate * dt + log(exit_rate_to_dest)
-            if exit_rate_to_dest > 0
-                loglik += -total_exit_rate * dt + log(exit_rate_to_dest)
-            else
-                return -Inf
+            if exit_rate_to_dest <= 0 || total_exit_rate <= 0
+                return -Inf  # Impossible transition
             end
             
-            # Update phase distribution (now in destination state, first phase)
-            fill!(phase_dist, 0.0)
-            phase_dist[first(d_phases)] = 1.0
-        else
-            # Multi-phase case: need to use matrix exponential
-            # Construct within-state sub-generator and exit rates to destination
-            S_within = zeros(Float64, n_phases_s, n_phases_s)
-            exit_to_dest = zeros(Float64, n_phases_s)
+            # Log-density: log(λ_{s→d}) - λ_s * τ
+            loglik += log(exit_rate_to_dest) - total_exit_rate * τ
             
+        else
+            # Multi-phase Coxian case: use matrix exponential formula
+            # f(τ; s→d) = π' * exp(S*τ) * r
+            
+            # Extract sub-intensity matrix S for phases within state s
+            # S[i,j] = Q[s_phases[i], s_phases[j]]
+            S_within = zeros(Float64, n_phases_s, n_phases_s)
             for (ii, pi) in enumerate(s_phases)
                 for (jj, pj) in enumerate(s_phases)
                     S_within[ii, jj] = Q[pi, pj]
                 end
-                # Exit rate to destination state
-                exit_to_dest[ii] = sum(Q[pi, d_phases])
             end
             
-            # Current distribution over phases within source state
-            pi_s = phase_dist[s_phases]
-            pi_s = pi_s / sum(pi_s)  # Normalize to within-state distribution
+            # Exit rate vector to destination state d
+            # r[i] = Σⱼ Q[s_phases[i], d_phases[j]]
+            exit_to_dest = zeros(Float64, n_phases_s)
+            for (ii, pi) in enumerate(s_phases)
+                exit_to_dest[ii] = sum(Q[pi, dp] for dp in d_phases)
+            end
             
-            # Compute exp(S*dt) * exit_to_dest
-            expSdt = exp(S_within .* dt)
+            # Check if transition is possible
+            if all(exit_to_dest .<= 0)
+                return -Inf  # No exit rate to destination
+            end
             
-            # Density: π' * exp(S*dt) * exit_to_dest
-            density = transpose(pi_s) * expSdt * exit_to_dest
+            # Initial distribution: Coxian always starts in phase 1
+            # π = (1, 0, ..., 0)'
+            π_s = zeros(Float64, n_phases_s)
+            π_s[1] = 1.0
             
-            if density > 0
-                loglik += log(density)
-            else
+            # Compute matrix exponential: exp(S * τ)
+            # Note: S * τ, NOT S .* τ (element-wise would be wrong!)
+            expSτ = exp(S_within * τ)  # LinearAlgebra.exp for matrix exponential
+            
+            # Density: π' * exp(S*τ) * r
+            # = (first row of exp(S*τ)) ⋅ r  (since π has only first element = 1)
+            density = dot(expSτ[1, :], exit_to_dest)
+            
+            if density <= 0
                 return -Inf
             end
             
-            # Update phase distribution: conditional on transitioning to destination
-            # The probability of arriving in each destination phase given we left source
-            # is proportional to the rate of exiting to that phase
-            fill!(phase_dist, 0.0)
-            arrived_dist = expSdt' * pi_s
-            for (ii, pi) in enumerate(s_phases)
-                for dj in d_phases
-                    rate_to_dj = Q[pi, dj]
-                    if rate_to_dj > 0
-                        phase_dist[dj] += arrived_dist[ii] * rate_to_dj
-                    end
-                end
-            end
-            # Normalize
-            phase_dist ./= sum(phase_dist)
+            loglik += log(density)
         end
     end
     

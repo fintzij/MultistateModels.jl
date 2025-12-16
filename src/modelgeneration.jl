@@ -35,9 +35,10 @@ intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yoursel
 - `monotone`: `0` (default) leaves the spline unconstrained, `1` enforces an increasing
     hazard, and `-1` enforces a decreasing hazard.
 - `n_phases::Int`: Number of Coxian phases (only for `family == :pt`, default: 2).
-    Must be ≥ 1. With n phases, the baseline has 2n-1 parameters (n-1 progression rates,
-    n exit rates). n_phases=1 is equivalent to exponential.
-- `time_transform::Bool`: enable Tang-style shared-trajectory caching for this transition.
+    Must be ≥ 1. **Prefer specifying `n_phases` at model construction** via 
+    `multistatemodel(...; n_phases = Dict(state => k))`. When specified in Hazard(), 
+    it serves as a fallback if not provided at model level.
+- `time_transform::Bool`: enable time transformation shared-trajectory caching for this transition.
 - `linpred_effect::Symbol`: `:ph` (default) for proportional hazards or `:aft` for
     accelerated-failure-time behaviour.
 
@@ -45,8 +46,8 @@ intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yoursel
 ```julia
 julia> Hazard(:exp, 1, 2)                        # intercept only
 julia> Hazard(@formula(0 ~ age + trt), :wei, 1, 3)
-julia> Hazard(:pt, 1, 2; n_phases=3)             # 3-phase Coxian
-julia> Hazard(@formula(0 ~ age), :pt, 1, 2; n_phases=2)  # with covariates
+julia> Hazard(:pt, 1, 2)                         # phase-type (n_phases set at model level)
+julia> Hazard(@formula(0 ~ age), :pt, 1, 2)      # phase-type with covariates
 julia> @hazard begin                              # macro front-end uses the same rules
                      family = :gom
                      transition = 2 => 4
@@ -94,7 +95,7 @@ function Hazard(
     
     if family_key == :pt
         @assert n_phases >= 1 "n_phases must be ≥ 1, got $n_phases"
-        @assert coxian_structure in (:unstructured, :allequal, :prop_to_prog) "coxian_structure must be :unstructured, :allequal, or :prop_to_prog, got :$coxian_structure"
+        @assert coxian_structure in (:unstructured, :sctp) "coxian_structure must be :unstructured or :sctp, got :$coxian_structure"
     end
     
     @assert linpred_effect in (:ph, :aft) "linpred_effect must be :ph or :aft, got :$linpred_effect"
@@ -1063,6 +1064,15 @@ will insert the intercept-only design automatically as described in `Hazard`'s d
   If `false`, surrogate parameters remain at default values and will be fitted when `fit()` is called.
   Setting to `true` (default) is recommended as it avoids redundant fitting during initialization.
 - `surrogate_constraints`: optional constraints for surrogate optimization (only used if `fit_surrogate = true`).
+- `n_phases::Union{Nothing, Dict{Int,Int}} = nothing`: number of phases per state for phase-type hazards.
+  Only states with `:pt` hazards should be specified. Example: `Dict(1 => 3, 2 => 2)` means state 1 has
+  3 phases and state 2 has 2 phases. If a state has `:pt` hazards but is not in the dict, an error is thrown.
+  If `n_phases[s] == 1`, the phase-type is coerced to exponential internally.
+- `coxian_structure::Symbol = :unstructured`: constraint structure for phase-type hazards.
+  - `:unstructured` (default): no constraints on progression and absorption rates
+  - `:sctp`: Stationary Conditional Transition Probability - ensures P(r→s | transition out of r) is 
+    constant over time. Automatically generates constraints: `h_{r_j,s} = τ_{r_j} × h_{r_1,s}` where
+    τ parameters (`log_phase_rb`, `log_phase_rc`, ...) are shared across destinations and estimated.
 - `SubjectWeights`: optional per-subject weights (length = number of subjects). Mutually exclusive with `ObservationWeights`.
 - `ObservationWeights`: optional per-observation weights (length = number of rows in data). Mutually exclusive with `SubjectWeights`.
 - `CensoringPatterns`: optional matrix describing which states are compatible with each censoring code. Values in [0,1].
@@ -1087,6 +1097,14 @@ model = multistatemodel(h12_wei, h21_wei; data = df, surrogate = :markov)
 
 # Semi-Markov model - defer surrogate fitting to fit() call
 model = multistatemodel(h12_wei, h21_wei; data = df, surrogate = :markov, fit_surrogate = false)
+
+# Phase-type model with 3 phases on state 1
+h12 = Hazard(@formula(0 ~ 1 + x), "pt", 1, 2)
+h13 = Hazard(@formula(0 ~ 1 + x), "pt", 1, 3)
+model = multistatemodel(h12, h13; data = df, n_phases = Dict(1 => 3))
+
+# Phase-type model with SCTP constraints
+model = multistatemodel(h12, h13; data = df, n_phases = Dict(1 => 3), coxian_structure = :sctp)
 ```
 """
 function multistatemodel(hazards::HazardFunction...; 
@@ -1096,6 +1114,8 @@ function multistatemodel(hazards::HazardFunction...;
                         fit_surrogate::Bool = true,
                         optimize_surrogate::Union{Bool, Nothing} = nothing,  # deprecated
                         surrogate_constraints = nothing,
+                        n_phases::Union{Nothing, Dict{Int,Int}} = nothing,
+                        coxian_structure::Symbol = :unstructured,
                         SubjectWeights::Union{Nothing,Vector{Float64}} = nothing, 
                         ObservationWeights::Union{Nothing,Vector{Float64}} = nothing,
                         CensoringPatterns::Union{Nothing,Matrix{<:Real}} = nothing, 
@@ -1113,6 +1133,11 @@ function multistatemodel(hazards::HazardFunction...;
         error("surrogate must be :none or :markov, got :$surrogate")
     end
     
+    # Validate coxian_structure
+    if coxian_structure ∉ (:unstructured, :sctp)
+        error("coxian_structure must be :unstructured or :sctp, got :$coxian_structure")
+    end
+    
     # Validate inputs
     isempty(hazards) && throw(ArgumentError("At least one hazard must be provided"))
 
@@ -1121,12 +1146,19 @@ function multistatemodel(hazards::HazardFunction...;
         return _build_phasetype_model_from_hazards(hazards;
             data = data,
             constraints = constraints,
+            n_phases = n_phases,
+            coxian_structure = coxian_structure,
             SubjectWeights = SubjectWeights,
             ObservationWeights = ObservationWeights,
             CensoringPatterns = CensoringPatterns,
             EmissionMatrix = EmissionMatrix,
             verbose = verbose
         )
+    end
+    
+    # Validate n_phases not specified for non-phase-type models
+    if !isnothing(n_phases) && !isempty(n_phases)
+        error("n_phases specified but no :pt hazards found. n_phases only applies to phase-type models.")
     end
 
     # catch the model call (includes constraints for use by fit())

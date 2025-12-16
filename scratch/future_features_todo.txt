@@ -2,17 +2,39 @@
 FUTURE FEATURES TODO - MultistateModels.jl
 ================================================================================
 Created: 2025-11-29
-Updated: 2025-12-12
-Branch: infrastructure_changes
+Updated: 2025-12-16
+Branch: SIR
 
 ================================================================================
-COMPLETED FEATURES (as of 2025-12-12)
+VALIDATION TASKS (Priority)
+================================================================================
+
+⚠️ Validate Observation/Subject Weights
+   - Ensure SubjectWeights are correctly propagated through MCEM
+   - Verify weighted likelihood computation in fit()
+   - Test with non-uniform weights
+
+⚠️ Validate Emission Matrices
+   - Verify emission matrix construction for censoring patterns
+   - Test state censoring with various patterns
+   - Ensure consistency between emat and CensoringPatterns in fitted models
+
+================================================================================
+COMPLETED FEATURES (as of 2025-12-16)
 ================================================================================
 
 ✅ Phase-Type Markov Surrogates
    - Titman-Sharples importance sampling for semi-Markov MCEM
    - User-configurable number of phases, Coxian structure options
+   - Mixed hazard types (PT + non-PT from same state) supported
+   - API consolidated: only :unstructured and :sctp options
    - See src/phasetype.jl
+
+✅ SIR (Sampling Importance Resampling)
+   - Multinomial resampling (:sir) and Latin Hypercube (:lhs)
+   - 2.3x speedup on log-likelihood computation in M-step
+   - Variance reduction: SIR variance 0.6× of LHS
+   - See src/sir.jl
 
 ✅ SQUAREM Acceleration for MCEM
    - Quasi-Newton acceleration reducing iterations to convergence
@@ -33,15 +55,8 @@ COMPLETED FEATURES (as of 2025-12-12)
 
 ✅ Test Infrastructure
    - Moved to standalone repo: https://github.com/fintzij/MultistateModelsTests.jl
-   - 11,124+ tests passing across all categories:
-     * Unit tests: 1,149
-     * Exact data fitting: 45
-     * MCEM parametric: 45
-     * MCEM splines: 45
-     * MCEM TVC: 38
-     * Simulation distribution: 65
-     * Simulation TVC: 9,702
-     * Phase-type: 35
+   - 1,235+ unit tests passing
+   - Comprehensive phase-type, SIR, and MLL consistency tests
 
 
 ================================================================================
@@ -239,3 +254,58 @@ Neural ODEs:
 AD/SciML:
 - Moses & Churavy (2020) - Enzyme.jl
 - Innes (2018) - Zygote.jl
+
+
+================================================================================
+CONSIDERATION: OPTIMIZATION/IDENTIFIABILITY WARNINGS
+================================================================================
+
+Status: Not started
+Priority: LOW
+Added: 2025-12-15
+
+MOTIVATION:
+- Phase-type models with many phases/destinations may have identifiability issues
+- Users may not realize when parameters are poorly identified
+
+POTENTIAL WARNINGS TO ADD:
+1. Singular or near-singular covariance matrix after optimization
+2. Optimization fails to converge (already may exist, but verify)
+3. Hessian has negative eigenvalues (non-PSD)
+4. Very large standard errors relative to estimates
+
+DESIGN CONSIDERATIONS:
+- Should be opt-in or opt-out?
+- Info vs warning level?
+- How to detect "near-singular" (condition number threshold?)
+
+NOTES:
+- Don't want to overwhelm users with false positives
+- May be better as a post-fit diagnostic function rather than automatic warning
+================================================================================
+FEATURE: NUMERICAL STABILITY IMPROVEMENTS
+================================================================================
+Added: 2025-12-15
+
+MOTIVATION:
+- Phase-type and complex multistate models can suffer from numerical overflow/underflow
+- Matrix exponentials of large intensity matrices can lose precision
+- Forward algorithm probabilities can underflow for long observation intervals
+- Cumulative hazards can overflow for high-rate transitions
+
+AREAS TO EXPLORE:
+1. Log-scale forward algorithm (log-sum-exp trick) for likelihood computation
+2. Uniformization for matrix exponentials instead of direct expm()
+3. Scaling and squaring improvements for matrix exponentials
+4. Log-probability tracking through TPM computations
+5. Numerical safeguards in phase-type density calculations
+
+SPECIFIC CONCERNS:
+- exp(Q*dt) can overflow/underflow for large rates or long intervals
+- Forward algorithm multiplies many small probabilities
+- Phase-type density π'exp(Sτ)r involves potentially very small exp(Sτ) entries
+
+REFERENCES:
+- Sherlock et al. (2021) for uniformization in HMMs
+- Sidje (1998) Expokit for matrix exponential algorithms
+- Log-domain forward-backward algorithms in HMM literature

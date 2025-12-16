@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.2.2] - 2025-06-08
+
+### Bug Fix: ForwardFiltering for Instantaneous Observations (dt=0)
+
+**Files Modified:**
+- `src/sampling.jl`: Updated `ForwardFiltering!` to handle instantaneous observations
+- `src/likelihoods.jl`: Added special handling for dt≈0 in `_loglik_markov_mutating`
+
+**Problem:**
+Phase-type model fitting with exact observations was failing with `DomainError` during optimization. The root cause was that phase-type data expansion creates "instantaneous" observation rows where `dt = tstop - tstart = 0`. For these rows:
+- The transition probability matrix (TPM) computed via matrix exponential gives the identity matrix
+- But the emission matrix has point mass on the observed destination state
+- The combination yields all-zero forward filtering matrices, which produce NaN after normalization
+
+**Solution:**
+For instantaneous observations (dt≈0), instead of using the standard TPM `exp(Q*dt) = I`, we now compute the **instantaneous transition probability matrix** from the hazard matrix Q:
+- `P[i,j] = Q[i,j] / (-Q[i,i]) = h(i,j) / Σ_k h(i,k)` for i≠j
+- `P[i,i] = 0` (transition definitely occurred at this instant)
+
+**New Helper Functions:**
+```julia
+# Get TPM for forward filtering step, handling dt≈0 case
+_get_tpm_for_step(s, subj_dat, tpm_book, subj_tpm_map, hazmat_book, n_states)
+
+# Compute instantaneous transition probabilities from Q matrix
+_instantaneous_tpm_from_Q(Q, n_states) -> Matrix
+```
+
+**API Changes:**
+- `ForwardFiltering!` now accepts optional `hazmat_book` keyword argument (required for phase-type models with exact observations)
+
 ## [0.2.1] - 2025-12-13
 
 ### Sampling Importance Resampling (SIR) for MCEM M-step

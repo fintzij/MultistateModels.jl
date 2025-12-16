@@ -957,7 +957,7 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                     stateto_i = cols.stateto[i]
                     dt = cols.tstop[i] - cols.tstart[i]
                     
-                    obs_ll = survprob(
+                    obs_ll = dt ≈ 0 ? 0 : survprob(
                         0,
                         dt,
                         pars,
@@ -1038,32 +1038,66 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                     # Use @view for data row
                     row_data = @view data.model.data[i, :]
                     
-                    # compute q(r,s)
-                    for r in 1:S
-                        if isa(data.model.totalhazards[r], _TotalHazardAbsorbing)
-                            q[r,r] = 0.0
-                        else
-                            # survival probability - use pre-computed destinations
-                            dest_states = transient_dests[r]
-                            log_surv = survprob(0, dt, pars, row_data,
-                                data.model.totalhazards[r], hazards; give_log = true)
-                            for dest in dest_states
-                                q[r, dest] = log_surv
-                            end
-                            
-                            # hazard
-                            for s in dest_states
-                                trans_idx = tmat_cache[r, s]
-                                hazard = hazards[trans_idx]
-                                hazard_pars = pars[hazard.hazname]
-                                haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
-                                q[r, s] += log(haz_value)
+                    if dt ≈ 0
+                        # Instantaneous observation (dt=0): use hazard ratios
+                        # This occurs in phase-type expanded data where transitions
+                        # are recorded at a single point in time.
+                        # q[r,s] = h(r,s) / Σ_k h(r,k) = conditional prob of destination s
+                        fill!(q, zero(eltype(q)))
+                        for r in 1:S
+                            if isa(data.model.totalhazards[r], _TotalHazardAbsorbing)
+                                q[r,r] = 1.0  # Absorbing state stays in itself
+                            else
+                                dest_states = transient_dests[r]
+                                # Compute hazards for each destination
+                                total_haz = zero(eltype(q))
+                                for s in dest_states
+                                    trans_idx = tmat_cache[r, s]
+                                    hazard = hazards[trans_idx]
+                                    hazard_pars = pars[hazard.hazname]
+                                    haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
+                                    q[r, s] = haz_value
+                                    total_haz += haz_value
+                                end
+                                # Normalize to get conditional probabilities
+                                if total_haz > 0
+                                    for s in dest_states
+                                        q[r, s] /= total_haz
+                                    end
+                                end
+                                # For instantaneous obs, diagonal is 0 (transition definitely occurred)
+                                q[r, r] = 0.0
                             end
                         end
+                    else
+                        # Regular exact observation (dt > 0)
+                        # compute q(r,s) 
+                        for r in 1:S
+                            if isa(data.model.totalhazards[r], _TotalHazardAbsorbing)
+                                q[r,r] = 0.0 
+                            else
+                                # survival probability - use pre-computed destinations
+                                dest_states = transient_dests[r]
+                                log_surv = survprob(0, dt, pars, row_data,
+                                    data.model.totalhazards[r], hazards; give_log = true)
+                                for dest in dest_states
+                                    q[r, dest] = log_surv
+                                end
+                                
+                                # hazard
+                                for s in dest_states
+                                    trans_idx = tmat_cache[r, s]
+                                    hazard = hazards[trans_idx]
+                                    hazard_pars = pars[hazard.hazname]
+                                    haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
+                                    q[r, s] += log(haz_value)
+                                end
+                            end
 
-                        # pedantic b/c of numerical error
-                        q[r,r] = maximum([1 - exp(logsumexp(q[r, Not(r)])), eps()])
-                        q[r,Not(r)] = exp.(q[r, Not(r)])               
+                            # pedantic b/c of numerical error
+                            q[r,r] = maximum([1 - exp(logsumexp(q[r, Not(r)])), eps()])
+                            q[r,Not(r)] = exp.(q[r, Not(r)])               
+                        end
                     end
                 end # end-compute q
 
@@ -1195,7 +1229,7 @@ function _loglik_markov_functional(parameters, data::MPanelData; neg = true)
                     stateto_i = cols.stateto[i]
                     dt = cols.tstop[i] - cols.tstart[i]
                     
-                    obs_ll = survprob(zero(T), dt, pars, row_data, 
+                    obs_ll = dt ≈ 0 ? 0 : survprob(zero(T), dt, pars, row_data, 
                                      data.model.totalhazards[statefrom_i], hazards; 
                                      give_log = true)
                     
@@ -1265,7 +1299,7 @@ function _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, ::Type{T
             stateto = cols.stateto[i]
             
             # Survival probability + hazard
-            log_surv = survprob(zero(T), dt, pars, row_data,
+            log_surv = dt ≈ 0 ? 0 : survprob(zero(T), dt, pars, row_data,
                                data.model.totalhazards[statefrom], hazards; give_log = true)
             
             if statefrom != stateto
