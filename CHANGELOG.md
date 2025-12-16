@@ -251,7 +251,7 @@ Phase 1 → Phase 2 → ... → Phase n → Absorption
 struct ProposalConfig
     type::Symbol           # :markov or :phasetype
     n_phases::Union{Symbol, Int, Vector{Int}}  # :auto, :heuristic, or manual
-    structure::Symbol      # :unstructured, :prop_to_prog, :allequal
+    structure::Symbol      # :unstructured or :sctp
     max_phases::Int        # Maximum for BIC selection
     optimize::Bool
     parameters::Any
@@ -341,11 +341,11 @@ fitted = fit(model; proposal=PhaseTypeProposal(n_phases=:heuristic))
 fitted = fit(model; proposal=PhaseTypeProposal(n_phases=3))
 fitted = fit(model; proposal=PhaseTypeProposal(n_phases=[2, 3, 1]))
 
-# With Coxian structure constraint
+# With Coxian structure constraint (SCTP = same cumulative transition probability)
 fitted = fit(model; proposal=ProposalConfig(
     type=:phasetype,
     n_phases=3,
-    structure=:allequal  # or :prop_to_prog
+    structure=:sctp  # constrains cumulative absorption probability
 ))
 ```
 
