@@ -693,6 +693,84 @@ struct SurrogateControl
     ginds::Vector{Union{Nothing, Int64}}
 end
 
+# =============================================================================
+# Phase-Type Expansion (internal representation for :pt hazards)
+# =============================================================================
+
+"""
+    PhaseTypeExpansion
+
+Internal metadata for phase-type hazard expansion within a MultistateModel.
+
+When a model contains phase-type hazards, the model's main fields (`data`, `tmat`,
+`hazards`, `parameters`) operate on the **expanded** state space, while this struct
+stores information needed to map back to the **observed** state space.
+
+This design keeps the user-facing API simple: they work with a MultistateMarkovModel
+and the phase-type expansion is handled internally. The `has_phasetype_expansion(m)`
+trait indicates whether a model has this expansion.
+
+# Fields
+- `mappings::PhaseTypeMappings`: Bidirectional state/hazard mappings (observed ↔ expanded)
+- `original_data::DataFrame`: User's original data on observed state space
+- `original_tmat::Matrix{Int}`: Transition matrix on observed state space
+- `original_hazards::Vector{<:HazardFunction}`: User-specified hazard specs
+- `original_parameters::NamedTuple`: Parameters on observed space (for user-facing API)
+
+# Trait-based dispatch
+```julia
+has_phasetype_expansion(m::MultistateProcess) = !isnothing(m.phasetype_expansion)
+```
+
+# Example
+```julia
+# User specifies phase-type hazard
+h12 = Hazard(:pt, 1, 2)  # 3-phase Coxian for transition 1→2
+model = multistatemodel(h12; data=data, n_phases=Dict(1=>3))
+
+# Internally, model is MultistateMarkovModel on expanded space
+# model.phasetype_expansion contains mappings back to observed space
+has_phasetype_expansion(model)  # true
+model.phasetype_expansion.mappings.n_observed  # 2 (original states)
+model.phasetype_expansion.mappings.n_expanded  # 4 (with 3 phases for state 1)
+```
+
+See also: [`PhaseTypeMappings`](@ref), [`has_phasetype_expansion`](@ref)
+"""
+struct PhaseTypeExpansion
+    mappings::Any  # PhaseTypeMappings (defined in phasetype.jl, forward reference)
+    original_data::DataFrame
+    original_tmat::Matrix{Int}
+    original_hazards::Vector{<:HazardFunction}
+    original_parameters::NamedTuple
+end
+
+"""
+    has_phasetype_expansion(m::MultistateProcess) -> Bool
+
+Check if a multistate model has phase-type expansion metadata.
+
+Returns `true` if the model was built from hazard specifications that included
+phase-type (`:pt`) hazards. Such models operate internally on an expanded state
+space but expose the original observed state space to users.
+
+# Example
+```julia
+h12 = Hazard(:pt, 1, 2)
+model = multistatemodel(h12; data=data, n_phases=Dict(1=>3))
+has_phasetype_expansion(model)  # true
+
+h12 = Hazard(:exp, 1, 2)
+model = multistatemodel(h12; data=data)
+has_phasetype_expansion(model)  # false
+```
+"""
+has_phasetype_expansion(m::MultistateProcess) = hasproperty(m, :phasetype_expansion) && !isnothing(m.phasetype_expansion)
+
+# =============================================================================
+# Model Structs
+# =============================================================================
+
 """
     MultistateModel
 
@@ -729,6 +807,9 @@ end
 
 Struct that fully specifies a multistate Markov process with no censored state, used with panel data.
 Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
+
+If the model was built from phase-type hazards, `phasetype_expansion` contains metadata
+for mapping between the expanded internal state space and the observed state space.
 """
 mutable struct MultistateMarkovModel <: MultistateMarkovProcess
     data::DataFrame
@@ -744,6 +825,7 @@ mutable struct MultistateMarkovModel <: MultistateMarkovProcess
     CensoringPatterns::Matrix{Float64}
     markovsurrogate::Union{Nothing, MarkovSurrogate}
     modelcall::NamedTuple
+    phasetype_expansion::Union{Nothing, PhaseTypeExpansion}  # Phase-type expansion metadata
 end
 
 """
@@ -751,6 +833,9 @@ end
 
 Struct that fully specifies a multistate Markov process with some censored states, used with panel data.
 Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
+
+If the model was built from phase-type hazards, `phasetype_expansion` contains metadata
+for mapping between the expanded internal state space and the observed state space.
 """
 mutable struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     data::DataFrame
@@ -766,6 +851,7 @@ mutable struct MultistateMarkovModelCensored <: MultistateMarkovProcess
     CensoringPatterns::Matrix{Float64}
     markovsurrogate::Union{Nothing, MarkovSurrogate}
     modelcall::NamedTuple
+    phasetype_expansion::Union{Nothing, PhaseTypeExpansion}  # Phase-type expansion metadata
 end
 
 """
@@ -802,105 +888,6 @@ mutable struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
-    emat::Matrix{Float64}
-    hazkeys::Dict{Symbol, Int64}
-    subjectindices::Vector{Vector{Int64}}
-    SubjectWeights::Vector{Float64}
-    ObservationWeights::Union{Nothing, Vector{Float64}}
-    CensoringPatterns::Matrix{Float64}
-    markovsurrogate::Union{Nothing, MarkovSurrogate}
-    modelcall::NamedTuple
-end
-
-# =============================================================================
-# Phase-Type Hazard Model (for :pt family hazards)
-# =============================================================================
-
-# Forward declaration for PhaseTypeMappings (defined in phasetype.jl)
-# The actual struct is defined in phasetype.jl and included after common.jl
-
-"""
-    PhaseTypeModel <: MultistateMarkovProcess
-
-A multistate model with phase-type (Coxian) hazards.
-
-This is a wrapper around an expanded Markov model where states with `:pt` hazards
-are split into multiple latent phases. The user interacts with the model in terms
-of the original observed states and phase-type parameters (λ progression rates, 
-μ exit rates), while internally the model operates on the expanded state space.
-
-Phase-type models are classified as Markov processes (`<: MultistateMarkovProcess`)
-because the expanded state space is Markovian - each phase transition follows an
-exponential distribution.
-
-# Fields
-
-**Original (observed) state space:**
-- `data::DataFrame`: Original data on observed states
-- `parameters::NamedTuple`: Parameters in phase-type parameterization (λ, μ)
-- `tmat::Matrix{Int64}`: Original transition matrix
-- `hazards_spec::Vector{<:HazardFunction}`: Original user hazard specifications
-
-**Expanded (internal) state space:**
-- `expanded_data::DataFrame`: Data expanded to phase-level observations
-- `expanded_parameters::NamedTuple`: Parameters for expanded Markov model
-- `expanded_model::MultistateMarkovProcess`: The internal expanded Markov model
-- `mappings::PhaseTypeMappings`: Bidirectional state space mappings
-
-**Model metadata:**
-- `totalhazards::Vector{_TotalHazard}`: Total hazards (on expanded space)
-- `emat::Matrix{Float64}`: Emission matrix (for panel data)
-- `hazkeys::Dict{Symbol, Int64}`: Hazard name → index mapping
-- `subjectindices::Vector{Vector{Int64}}`: Subject data indices
-- `SubjectWeights::Vector{Float64}`: Subject-level weights
-- `ObservationWeights::Union{Nothing, Vector{Float64}}`: Observation weights
-- `CensoringPatterns::Matrix{Float64}`: Censoring pattern matrix
-- `markovsurrogate::Union{Nothing, MarkovSurrogate}`: Markov surrogate (if any)
-- `modelcall::NamedTuple`: Model specification call
-
-# Behavior
-
-- **Fitting**: Uses the expanded Markov model internally; results are translated back
-  to phase-type parameters
-- **Simulation**: Can output paths on expanded or collapsed state space via `expanded` kwarg
-- **Likelihood**: Computed on expanded state space using standard Markov likelihood
-
-# Example
-
-```julia
-# Specify model with phase-type hazard
-h12 = Hazard(@formula(0 ~ 1), :pt, 1, 2; n_phases=3)
-h23 = Hazard(@formula(0 ~ 1), :exp, 2, 3)
-model = multistatemodel(data, (h12, h23))
-
-# Fit (internally uses expanded Markov model)
-fitted = fit(model)
-
-# Simulate (returns collapsed paths by default)
-sim = simulate(model; paths=true)
-sim_expanded = simulate(model; paths=true, expanded=true)
-```
-
-See also: [`PhaseTypeHazardSpec`](@ref), [`PhaseTypeMappings`](@ref), [`PhaseTypeFittedModel`](@ref)
-"""
-mutable struct PhaseTypeModel <: MultistateMarkovProcess
-    # Expanded (internal) state space - these are standard fields for loglik compatibility
-    # Note: `data`, `tmat`, `parameters` MUST contain expanded versions for loglik_markov
-    data::DataFrame                  # Expanded data (phase-type internal states)
-    tmat::Matrix{Int64}              # Expanded transition matrix
-    parameters::NamedTuple           # Expanded parameters (for loglik_markov)
-    expanded_model::Any              # MultistateMarkovProcess (expanded), may be nothing
-    mappings::Any                    # PhaseTypeMappings (defined in phasetype.jl)
-    
-    # Original (observed) state space - user-facing
-    original_data::DataFrame         # Original user data (observed states)
-    original_tmat::Matrix{Int64}     # Original transition matrix
-    original_parameters::NamedTuple  # Phase-type parameterization (λ, μ) for users
-    hazards_spec::Vector{<:HazardFunction}  # Original user hazard specs
-    
-    # Standard model fields (on expanded space for internal operations)
-    hazards::Vector{_MarkovHazard}   # Expanded hazards (all Markov)
-    totalhazards::Vector{_TotalHazard}
     emat::Matrix{Float64}
     hazkeys::Dict{Symbol, Int64}
     subjectindices::Vector{Vector{Int64}}

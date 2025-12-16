@@ -38,7 +38,8 @@ function make_surrogate_model(model::Union{MultistateModel, MultistateMarkovMode
         model.ObservationWeights,
         model.CensoringPatterns,
         markov_surrogate,
-        model.modelcall)
+        model.modelcall,
+        nothing)  # No phasetype_expansion for surrogate
 end
 
 """
@@ -74,7 +75,8 @@ function make_surrogate_model(model::Union{MultistateMarkovModelCensored,Multist
         model.ObservationWeights,
         model.CensoringPatterns,
         markov_surrogate,
-        model.modelcall)
+        model.modelcall,
+        nothing)  # No phasetype_expansion for surrogate
 end
 
 
@@ -672,7 +674,8 @@ function compute_markov_marginal_loglik(model::MultistateProcess, surrogate::Mar
         model.ObservationWeights,
         model.CensoringPatterns,
         surrogate,
-        model.modelcall
+        model.modelcall,
+        nothing  # No phasetype_expansion for surrogate
     )
     
     # Build the bookkeeping structure for MPanelData

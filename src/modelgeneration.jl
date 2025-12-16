@@ -1027,23 +1027,46 @@ function _assemble_model(mode::Symbol,
                          process::Symbol,
                          components::NamedTuple,
                          surrogate::Union{Nothing, MarkovSurrogate},
-                         modelcall)
+                         modelcall;
+                         phasetype_expansion::Union{Nothing, PhaseTypeExpansion} = nothing)
     ctor = _model_constructor(mode, process)
-    return ctor(
-        components.data,
-        components.parameters,
-        components.hazards,
-        components.totalhazards,
-        components.tmat,
-        components.emat,
-        components.hazkeys,
-        components.subjinds,
-        components.SubjectWeights,
-        components.ObservationWeights,
-        components.CensoringPatterns,
-        surrogate,
-        modelcall,
-    )
+    
+    # For Markov models, include phasetype_expansion field
+    if ctor == MultistateMarkovModel || ctor == MultistateMarkovModelCensored
+        return ctor(
+            components.data,
+            components.parameters,
+            components.hazards,
+            components.totalhazards,
+            components.tmat,
+            components.emat,
+            components.hazkeys,
+            components.subjinds,
+            components.SubjectWeights,
+            components.ObservationWeights,
+            components.CensoringPatterns,
+            surrogate,
+            modelcall,
+            phasetype_expansion,
+        )
+    else
+        # Semi-Markov and exact models don't have phasetype_expansion
+        return ctor(
+            components.data,
+            components.parameters,
+            components.hazards,
+            components.totalhazards,
+            components.tmat,
+            components.emat,
+            components.hazkeys,
+            components.subjinds,
+            components.SubjectWeights,
+            components.ObservationWeights,
+            components.CensoringPatterns,
+            surrogate,
+            modelcall,
+        )
+    end
 end
 
 """

@@ -129,7 +129,7 @@ where P is the transition probability matrix computed via matrix exponentials.
 - Handles both fully observed and censored state observations
 - Gradients computed via ForwardDiff through the matrix exponential
 """
-function compute_subject_gradients(params::AbstractVector, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored, PhaseTypeModel}, books::Tuple)
+function compute_subject_gradients(params::AbstractVector, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}, books::Tuple)
     nsubj = length(model.subjectindices)
     nparams = length(params)
     
@@ -286,7 +286,7 @@ Compute subject-level Hessian contributions for Markov panel data.
 
 Returns Vector{Matrix{Float64}} of length n, each matrix is p × p.
 """
-function compute_subject_hessians(params::AbstractVector, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored, PhaseTypeModel}, books::Tuple)
+function compute_subject_hessians(params::AbstractVector, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}, books::Tuple)
     nsubj = length(model.subjectindices)
     nparams = length(params)
     

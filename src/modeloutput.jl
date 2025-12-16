@@ -6,7 +6,7 @@
 """
     is_phasetype_fitted(model::MultistateModelFitted) -> Bool
 
-Check if a fitted model was produced by fitting a `PhaseTypeModel`.
+Check if a fitted model was produced by fitting a model with phase-type hazards.
 
 Phase-type fitted models store additional information in `modelcall`:
 - `is_phasetype`: Flag indicating phase-type origin
@@ -18,8 +18,8 @@ Phase-type fitted models store additional information in `modelcall`:
 # Example
 ```julia
 # Fit a phase-type model
-h12 = Hazard(@formula(0 ~ 1), "pt", 1, 2; n_phases=3)
-model = multistatemodel(h12; data=data)
+h12 = Hazard(:pt, 1, 2)
+model = multistatemodel(h12; data=data, n_phases=Dict(1=>3))
 fitted = fit(model)
 
 # Check if phase-type
@@ -29,7 +29,7 @@ is_phasetype_fitted(fitted)  # true
 params = get_phasetype_parameters(fitted)
 ```
 
-See also: [`get_phasetype_parameters`](@ref), [`get_mappings`](@ref), [`PhaseTypeModel`](@ref)
+See also: [`get_phasetype_parameters`](@ref), [`get_mappings`](@ref), [`PhaseTypeExpansion`](@ref)
 """
 function is_phasetype_fitted(model::MultistateModelFitted)
     haskey(model.modelcall, :is_phasetype) && model.modelcall.is_phasetype === true
@@ -47,7 +47,7 @@ Returns the user-facing phase-type parameterization (λ progression rates, μ ex
 Throws an error if the model is not a fitted phase-type model.
 
 # Arguments
-- `model::MultistateModelFitted`: A fitted model (must be from `PhaseTypeModel`)
+- `model::MultistateModelFitted`: A fitted model (must have phase-type hazards)
 - `scale::Symbol=:natural`: Parameter scale
   - `:natural` - Human-readable scale (rates as positive values)
   - `:flat` or `:estimation` or `:log` - Flat vector on log scale
@@ -1122,82 +1122,8 @@ function Base.show(io::IO, ::MIME"text/plain", model::MultistateModelFitted)
 end
 
 # =============================================================================
-# Pretty printing for PhaseTypeModel (unfitted)
+# NOTE: PhaseTypeModel show methods removed (Package Streamlining)
 # =============================================================================
-
-"""
-    Base.show(io::IO, model::PhaseTypeModel)
-
-Pretty print an unfitted phase-type model showing state space structure.
-"""
-function Base.show(io::IO, model::PhaseTypeModel)
-    println(io, "PhaseTypeModel")
-    println(io, "─" ^ 50)
-    
-    # Basic info
-    n_subj = length(model.subjectindices)
-    n_orig_states = size(model.original_tmat, 1)
-    n_exp_states = size(model.tmat, 1)
-    n_orig_hazards = length(model.hazards_spec)
-    n_exp_hazards = length(model.hazards)
-    
-    println(io, "  Subjects: $n_subj")
-    println(io, "  Observed states: $n_orig_states")
-    println(io, "  Expanded states: $n_exp_states")
-    println(io, "  Original hazards: $n_orig_hazards")
-    println(io, "  Expanded hazards: $n_exp_hazards")
-    
-    # Show phase-type hazards
-    println(io)
-    println(io, "Hazard specifications:")
-    println(io, "─" ^ 50)
-    
-    for (i, haz) in enumerate(model.hazards_spec)
-        trans_str = "$(haz.statefrom)→$(haz.stateto)"
-        
-        if haz isa PhaseTypeHazardSpec
-            structure_str = string(haz.structure)
-            println(io, "  h$(haz.statefrom)$(haz.stateto) ($trans_str, pt):")
-            println(io, "    n_phases: $(haz.n_phases)")
-            println(io, "    structure: $structure_str")
-            println(io, "    parameters: $(2*haz.n_phases - 1) baseline")
-        else
-            family_str = haz.family
-            println(io, "  h$(haz.statefrom)$(haz.stateto) ($trans_str, $family_str)")
-        end
-    end
-    
-    # Show state mappings summary
-    if !isnothing(model.mappings) && hasfield(typeof(model.mappings), :observed_to_expanded)
-        println(io)
-        println(io, "State expansion:")
-        println(io, "─" ^ 50)
-        
-        obs_to_exp = model.mappings.observed_to_expanded
-        for (obs_state, exp_states) in sort(collect(obs_to_exp), by = x -> x[1])
-            if length(exp_states) == 1
-                println(io, "  State $obs_state → state $(exp_states[1])")
-            else
-                println(io, "  State $obs_state → states $(first(exp_states))-$(last(exp_states)) ($(length(exp_states)) phases)")
-            end
-        end
-    end
-    
-    # Parameters status
-    println(io)
-    params = model.original_parameters
-    if haskey(params, :natural) && !isnothing(params.natural)
-        println(io, "  Parameters: initialized")
-    else
-        println(io, "  Parameters: not initialized")
-    end
-end
-
-"""
-    Base.show(io::IO, ::MIME"text/plain", model::PhaseTypeModel)
-
-Extended pretty print for REPL display.
-"""
-function Base.show(io::IO, ::MIME"text/plain", model::PhaseTypeModel)
-    show(io, model)
-end
+# Phase-type hazards are now handled internally via MultistateModel.
+# Standard show() methods handle models with phase-type expansion metadata.
+# =============================================================================

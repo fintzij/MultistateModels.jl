@@ -135,7 +135,8 @@ export
     # Phase-type types (user may receive/inspect)
     # --------------------------------------------------------------------------
     PhaseTypeDistribution,
-    PhaseTypeModel,
+    PhaseTypeExpansion,
+    has_phasetype_expansion,
     
     # --------------------------------------------------------------------------
     # Threading utilities
