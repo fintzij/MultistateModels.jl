@@ -14,9 +14,9 @@ Otherwise, builds surrogate hazards from scratch using the model's hazard specif
 - `model`: multistate model object
 
 # Returns
-- `MultistateMarkovModel` or `MultistateMarkovModelCensored` suitable for fitting as a Markov model
+- `MultistateMarkovModel` suitable for fitting as a Markov model
 """
-function make_surrogate_model(model::Union{MultistateModel, MultistateMarkovModel, MultistateSemiMarkovModel})
+function make_surrogate_model(model::MultistateProcess)
     if isnothing(model.markovsurrogate)
         # Build surrogate hazards from scratch
         surrogate_haz, surrogate_pars, _ = build_hazards(model.modelcall.hazards...; data = model.data, surrogate = true)
@@ -42,46 +42,9 @@ function make_surrogate_model(model::Union{MultistateModel, MultistateMarkovMode
         nothing)  # No phasetype_expansion for surrogate
 end
 
-"""
-    make_surrogate_model(model::Union{MultistateMarkovModelCensored, MultistateSemiMarkovModelCensored})
-
-Create a Markov surrogate model with censored states.
-
-# Arguments
-- `model`: multistate model object with censored observations
-
-# Returns
-- `MultistateMarkovModelCensored` suitable for fitting as a Markov model
-"""
-function make_surrogate_model(model::Union{MultistateMarkovModelCensored,MultistateSemiMarkovModelCensored})
-    if isnothing(model.markovsurrogate)
-        # Build surrogate hazards from scratch
-        surrogate_haz, surrogate_pars, _ = build_hazards(model.modelcall.hazards...; data = model.data, surrogate = true)
-        markov_surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars)
-    else
-        markov_surrogate = model.markovsurrogate
-    end
-    
-    MultistateModels.MultistateMarkovModelCensored(
-        model.data,
-        markov_surrogate.parameters,  # Use surrogate's parameters
-        markov_surrogate.hazards,
-        model.totalhazards,
-        model.tmat,
-        model.emat,
-        model.hazkeys,
-        model.subjectindices,
-        model.SubjectWeights,
-        model.ObservationWeights,
-        model.CensoringPatterns,
-        markov_surrogate,
-        model.modelcall,
-        nothing)  # No phasetype_expansion for surrogate
-end
-
 
 """
-fit_surrogate(model::MultistateSemiMarkovModelCensored)
+fit_surrogate(model::MultistateSemiMarkovProcess)
 
 Fit a Markov surrogate model.
 

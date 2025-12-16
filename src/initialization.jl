@@ -255,7 +255,7 @@ Initialize semi-Markov model parameters by simulating from surrogate and fitting
 - `constraints`: Parameter constraints for exact-data fitting
 - `surrogate_constraints`: Constraints for surrogate fitting
 """
-function _init_from_surrogate_paths!(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored},
+function _init_from_surrogate_paths!(model::MultistateSemiMarkovProcess,
                                       npaths::Int;
                                       constraints = nothing,
                                       surrogate_constraints = nothing)
@@ -372,7 +372,7 @@ function initialize_parameters!(model::MultistateProcess;
         # 1. Must have semi-Markov hazards
         # 2. Must be a model type that has panel/censored observations (not exact data)
         supports_surrogate = _is_semimarkov(model) && 
-                             isa(model, Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored})
+                             isa(model, MultistateSemiMarkovProcess)
         
         if !supports_surrogate
             if !_is_semimarkov(model)

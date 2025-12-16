@@ -1014,10 +1014,9 @@ end
 @inline function _model_constructor(mode::Symbol, process::Symbol)
     if mode == :exact
         return MultistateModel
-    elseif mode == :panel
+    elseif mode == :panel || mode == :censored
+        # Censored states are encoded in emat, not struct type
         return process == :markov ? MultistateMarkovModel : MultistateSemiMarkovModel
-    elseif mode == :censored
-        return process == :markov ? MultistateMarkovModelCensored : MultistateSemiMarkovModelCensored
     else
         error("Unknown observation mode $(mode)")
     end
@@ -1032,7 +1031,7 @@ function _assemble_model(mode::Symbol,
     ctor = _model_constructor(mode, process)
     
     # For Markov models, include phasetype_expansion field
-    if ctor == MultistateMarkovModel || ctor == MultistateMarkovModelCensored
+    if ctor == MultistateMarkovModel
         return ctor(
             components.data,
             components.parameters,

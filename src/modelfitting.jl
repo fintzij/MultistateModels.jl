@@ -308,7 +308,7 @@ Fit a Markov multistate model to interval-censored or panel data.
 Uses Ipopt optimization for both constrained and unconstrained problems by default.
 
 # Arguments
-- `model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}`: Markov model with panel observations
+- `model::MultistateMarkovProcess`: Markov model with panel observations
 - `constraints`: parameter constraints (see Constraints documentation)
 - `verbose::Bool=true`: print optimization messages
 - `solver`: optimization solver (default: Ipopt for both constrained and unconstrained).
@@ -369,7 +369,7 @@ fitted = fit(markov_model; adbackend=MooncakeBackend())
 
 See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::Union{MultistateMarkovModel,MultistateMarkovModelCensored}; constraints = nothing, verbose = true, solver = nothing, adbackend::ADBackend = ForwardDiffBackend(), compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function fit(model::MultistateMarkovProcess; constraints = nothing, verbose = true, solver = nothing, adbackend::ADBackend = ForwardDiffBackend(), compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -529,7 +529,7 @@ end
 
 
 """
-    fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; kwargs...)
+    fit(model::MultistateSemiMarkovProcess; kwargs...)
 
 Fit a semi-Markov model to panel data via Monte Carlo EM (MCEM).
 
@@ -567,7 +567,7 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
 # Arguments
 
 **Model and constraints:**
-- `model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}`: semi-Markov model
+- `model::MultistateSemiMarkovProcess`: semi-Markov model
 - `constraints`: parameter constraints tuple
 
 **Optimization:**
@@ -654,7 +654,7 @@ fitted = fit(semimarkov_model; acceleration=:squarem)
 
 See also: [`fit(::MultistateModel)`](@ref), [`compare_variance_estimates`](@ref)
 """
-function fit(model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :none, sir::Symbol = :none, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function fit(model::MultistateSemiMarkovProcess; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :none, sir::Symbol = :none, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # Validate acceleration parameter
     if acceleration ∉ (:none, :squarem)

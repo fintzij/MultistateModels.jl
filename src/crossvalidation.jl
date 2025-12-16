@@ -107,7 +107,7 @@ function compute_subject_gradients(params::AbstractVector, model::MultistateMode
 end
 
 """
-    compute_subject_gradients(params, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}, books)
+    compute_subject_gradients(params, model::MultistateMarkovProcess, books)
 
 Compute subject-level score vectors (gradients of log-likelihood) for Markov panel data.
 
@@ -119,7 +119,7 @@ where P is the transition probability matrix computed via matrix exponentials.
 
 # Arguments
 - `params::AbstractVector`: parameter vector (flat, on transformed scale)
-- `model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}`: Markov model
+- `model::MultistateMarkovProcess`: Markov model
 - `books::Tuple`: bookkeeping structure for transition probability matrix computation
 
 # Returns
@@ -129,7 +129,7 @@ where P is the transition probability matrix computed via matrix exponentials.
 - Handles both fully observed and censored state observations
 - Gradients computed via ForwardDiff through the matrix exponential
 """
-function compute_subject_gradients(params::AbstractVector, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}, books::Tuple)
+function compute_subject_gradients(params::AbstractVector, model::MultistateMarkovProcess, books::Tuple)
     nsubj = length(model.subjectindices)
     nparams = length(params)
     
@@ -155,7 +155,7 @@ function compute_subject_gradients(params::AbstractVector, model::Union{Multista
 end
 
 """
-    compute_subject_gradients(params, model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}, 
+    compute_subject_gradients(params, model::MultistateSemiMarkovProcess, 
                              samplepaths, ImportanceWeights)
 
 Compute subject-level score vectors (gradients of expected complete-data log-likelihood) for MCEM.
@@ -171,7 +171,7 @@ where:
 
 # Arguments
 - `params::AbstractVector`: parameter vector (flat, on transformed scale)
-- `model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}`: semi-Markov model
+- `model::MultistateSemiMarkovProcess`: semi-Markov model
 - `samplepaths::Vector{Vector{SamplePath}}`: sampled paths for each subject (outer vector over subjects)
 - `ImportanceWeights::Vector{Vector{Float64}}`: normalized importance weights
 
@@ -183,7 +183,7 @@ where:
 - The sum Σᵢ gᵢ should be approximately zero at the MCEM solution
 """
 function compute_subject_gradients(params::AbstractVector, 
-                                   model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored},
+                                   model::MultistateSemiMarkovProcess,
                                    samplepaths::Vector{Vector{SamplePath}},
                                    ImportanceWeights::Vector{Vector{Float64}})
     nsubj = length(model.subjectindices)
@@ -280,13 +280,13 @@ function compute_subject_hessians(params::AbstractVector, model::MultistateModel
 end
 
 """
-    compute_subject_hessians(params, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}, books)
+    compute_subject_hessians(params, model::MultistateMarkovProcess, books)
 
 Compute subject-level Hessian contributions for Markov panel data.
 
 Returns Vector{Matrix{Float64}} of length n, each matrix is p × p.
 """
-function compute_subject_hessians(params::AbstractVector, model::Union{MultistateMarkovModel, MultistateMarkovModelCensored}, books::Tuple)
+function compute_subject_hessians(params::AbstractVector, model::MultistateMarkovProcess, books::Tuple)
     nsubj = length(model.subjectindices)
     nparams = length(params)
     
@@ -488,7 +488,7 @@ The subject-level gradient is then: gᵢ = Σⱼ wᵢⱼ J[j,:]
 - `path_grads::Vector{Matrix{Float64}}`: vector of p × n_paths_i matrices for each subject
 """
 function compute_subject_gradients_batched(params::AbstractVector,
-                                           model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored},
+                                           model::MultistateSemiMarkovProcess,
                                            samplepaths::Vector{Vector{SamplePath}},
                                            ImportanceWeights::Vector{Vector{Float64}})
     nsubj = length(model.subjectindices)
@@ -555,7 +555,7 @@ This gives us:
 NamedTuple with fishinf, subject_grads, subject_hessians
 """
 function compute_fisher_via_mixed_hessian(params::AbstractVector,
-                                          model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored},
+                                          model::MultistateSemiMarkovProcess,
                                           samplepaths::Vector{Vector{SamplePath}},
                                           ImportanceWeights::Vector{Vector{Float64}})
     nsubj = length(model.subjectindices)
@@ -657,7 +657,7 @@ NamedTuple with:
 - `subject_hessians::Vector{Matrix{Float64}}`: length-n vector of subject Fisher contributions
 """
 function compute_subject_fisher_louis_batched(params::AbstractVector,
-                                              model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored},
+                                              model::MultistateSemiMarkovProcess,
                                               samplepaths::Vector{Vector{SamplePath}},
                                               ImportanceWeights::Vector{Vector{Float64}})
     nsubj = length(model.subjectindices)
@@ -719,7 +719,7 @@ end
 # ============================================================================
 
 """
-    compute_subject_hessians(params, model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}, 
+    compute_subject_hessians(params, model::MultistateSemiMarkovProcess, 
                             samplepaths, ImportanceWeights)
 
 Compute subject-level observed Fisher information contributions for MCEM using Louis's identity.
@@ -744,7 +744,7 @@ where:
 
 # Arguments
 - `params::AbstractVector`: parameter vector (flat, on transformed scale)
-- `model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}`: semi-Markov model
+- `model::MultistateSemiMarkovProcess`: semi-Markov model
 - `samplepaths::Vector{Vector{SamplePath}}`: sampled paths for each subject
 - `ImportanceWeights::Vector{Vector{Float64}}`: normalized importance weights
 
@@ -756,7 +756,7 @@ where:
   Journal of the Royal Statistical Society: Series B, 44(2), 226-233.
 """
 function compute_subject_hessians(params::AbstractVector, 
-                                  model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored},
+                                  model::MultistateSemiMarkovProcess,
                                   samplepaths::Vector{Vector{SamplePath}},
                                   ImportanceWeights::Vector{Vector{Float64}})
     nsubj = length(model.subjectindices)
@@ -879,7 +879,7 @@ function compute_fisher_components(params::AbstractVector,
 end
 
 function compute_fisher_components(params::AbstractVector,
-                                   model::Union{MultistateMarkovModel, MultistateMarkovModelCensored},
+                                   model::MultistateMarkovProcess,
                                    books::Tuple;
                                    compute_subject_contributions::Bool = false)
     nparams = length(params)
@@ -913,7 +913,7 @@ function compute_fisher_components(params::AbstractVector,
 end
 
 function compute_fisher_components(params::AbstractVector,
-                                   model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored},
+                                   model::MultistateSemiMarkovProcess,
                                    samplepaths::Vector{Vector{SamplePath}},
                                    ImportanceWeights::Vector{Vector{Float64}};
                                    compute_subject_contributions::Bool = false,
@@ -1299,7 +1299,7 @@ function compute_robust_vcov(params::AbstractVector,
 end
 
 function compute_robust_vcov(params::AbstractVector,
-                            model::Union{MultistateMarkovModel, MultistateMarkovModelCensored},
+                            model::MultistateMarkovProcess,
                             books::Tuple;
                             compute_ij::Bool = true,
                             compute_jk::Bool = false,
@@ -1366,7 +1366,7 @@ function compute_robust_vcov(params::AbstractVector,
 end
 
 """
-    compute_robust_vcov(params, model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored},
+    compute_robust_vcov(params, model::MultistateSemiMarkovProcess,
                        samplepaths, ImportanceWeights; kwargs...)
 
 Compute robust variance estimates for semi-Markov models fitted via MCEM.
@@ -1400,7 +1400,7 @@ The IJ/sandwich estimator remains valid because:
 
 # Arguments
 - `params::AbstractVector`: parameter vector (flat, on transformed scale)
-- `model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored}`: fitted semi-Markov model
+- `model::MultistateSemiMarkovProcess`: fitted semi-Markov model
 - `samplepaths::Vector{Vector{SamplePath}}`: sampled paths for each subject
 - `ImportanceWeights::Vector{Vector{Float64}}`: normalized importance weights
 
@@ -1423,7 +1423,7 @@ NamedTuple with fields:
 - Morsomme, R. et al. (2025). MultistateModels.jl technical supplement.
 """
 function compute_robust_vcov(params::AbstractVector,
-                            model::Union{MultistateSemiMarkovModel, MultistateSemiMarkovModelCensored},
+                            model::MultistateSemiMarkovProcess,
                             samplepaths::Vector{Vector{SamplePath}},
                             ImportanceWeights::Vector{Vector{Float64}};
                             compute_ij::Bool = true,

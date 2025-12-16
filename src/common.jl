@@ -829,60 +829,12 @@ mutable struct MultistateMarkovModel <: MultistateMarkovProcess
 end
 
 """
-    MultistateMarkovModelCensored
-
-Struct that fully specifies a multistate Markov process with some censored states, used with panel data.
-Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
-
-If the model was built from phase-type hazards, `phasetype_expansion` contains metadata
-for mapping between the expanded internal state space and the observed state space.
-"""
-mutable struct MultistateMarkovModelCensored <: MultistateMarkovProcess
-    data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
-    hazards::Vector{_MarkovHazard}
-    totalhazards::Vector{_TotalHazard}
-    tmat::Matrix{Int64}
-    emat::Matrix{Float64}
-    hazkeys::Dict{Symbol, Int64}
-    subjectindices::Vector{Vector{Int64}}
-    SubjectWeights::Vector{Float64}
-    ObservationWeights::Union{Nothing, Vector{Float64}}
-    CensoringPatterns::Matrix{Float64}
-    markovsurrogate::Union{Nothing, MarkovSurrogate}
-    modelcall::NamedTuple
-    phasetype_expansion::Union{Nothing, PhaseTypeExpansion}  # Phase-type expansion metadata
-end
-
-"""
     MultistateSemiMarkovModel
 
 Struct that fully specifies a multistate semi-Markov process, used with exact death times.
 Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
 """
 mutable struct MultistateSemiMarkovModel <: MultistateSemiMarkovProcess
-    data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
-    hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
-    totalhazards::Vector{_TotalHazard}
-    tmat::Matrix{Int64}
-    emat::Matrix{Float64}
-    hazkeys::Dict{Symbol, Int64}
-    subjectindices::Vector{Vector{Int64}}
-    SubjectWeights::Vector{Float64}
-    ObservationWeights::Union{Nothing, Vector{Float64}}
-    CensoringPatterns::Matrix{Float64}
-    markovsurrogate::Union{Nothing, MarkovSurrogate}
-    modelcall::NamedTuple
-end
-
-"""
-    MultistateSemiMarkovModelCensored
-
-Struct that fully specifies a multistate semi-Markov process with some censored states, used with panel data.
-Parameters are stored in `parameters` as (flat, nested, natural, unflatten).
-"""
-mutable struct MultistateSemiMarkovModelCensored <: MultistateSemiMarkovProcess
     data::DataFrame
     parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, unflatten)
     hazards::Vector{_Hazard}  # Can contain both MarkovHazard and SemiMarkovHazard
