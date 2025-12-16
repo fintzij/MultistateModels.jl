@@ -823,31 +823,6 @@ function _build_expanded_hazard_indices(hazards::Vector{<:HazardFunction},
 end
 
 """
-    has_phasetype_hazards(hazards::Vector{<:HazardFunction}) -> Bool
-
-Check if any hazard in the vector is a phase-type specification.
-"""
-function has_phasetype_hazards(hazards::Vector{<:HazardFunction})
-    return any(h -> h isa PhaseTypeHazardSpec, hazards)
-end
-
-"""
-    get_phasetype_n_phases(hazards::Vector{<:HazardFunction}, statefrom::Int)
-
-Get the number of phases for outgoing transitions from a state.
-Returns the maximum n_phases across all :pt hazards from that state, or 1 if none.
-"""
-function get_phasetype_n_phases(hazards::Vector{<:HazardFunction}, statefrom::Int)
-    max_phases = 1
-    for h in hazards
-        if h isa PhaseTypeHazardSpec && h.statefrom == statefrom
-            max_phases = max(max_phases, h.n_phases)
-        end
-    end
-    return max_phases
-end
-
-"""
     _compute_default_n_phases(tmat, hazards)
 
 Compute default number of phases per state based on hazard types.
@@ -1976,50 +1951,6 @@ function _count_hazard_parameters(h::HazardFunction, data::DataFrame)
 end
 
 """
-    _merge_censoring_patterns(user_patterns, phase_patterns, mappings)
-
-Merge user-provided censoring patterns with phase uncertainty patterns.
-
-User patterns are on the observed state space with format:
-- Column 1: pattern code (3, 4, ...)
-- Columns 2:n_observed+1: state indicators/probabilities
-
-This expands them to the phase space with format:
-- Column 1: pattern code (preserved)
-- Columns 2:n_expanded+1: phase indicators/probabilities
-
-Note: This function is deprecated in favor of `_merge_censoring_patterns_with_shift`
-which properly handles code conflicts.
-"""
-function _merge_censoring_patterns(user_patterns::Matrix{<:Real}, 
-                                    phase_patterns::Matrix{Float64},
-                                    mappings::PhaseTypeMappings)
-    n_user = size(user_patterns, 1)
-    n_expanded = mappings.n_expanded
-    
-    # Create expanded patterns with format: [pattern_code, phase1, phase2, ...]
-    # Pattern code in column 1, phase indicators in columns 2:n_expanded+1
-    expanded = zeros(Float64, n_user, n_expanded + 1)
-    
-    for p in 1:n_user
-        expanded[p, 1] = user_patterns[p, 1]  # Preserve the pattern code
-        for s_obs in 1:mappings.n_observed
-            # User patterns have code in column 1, state indicators in columns 2:end
-            obs_prob = user_patterns[p, s_obs + 1]
-            phases = mappings.state_to_phases[s_obs]
-            n_phases = length(phases)
-            # Divide probability mass equally among phases of this observed state
-            # This preserves the total probability mass for each observed state
-            for phase in phases
-                expanded[p, phase + 1] = obs_prob / n_phases  # +1 for pattern code column
-            end
-        end
-    end
-    
-    return expanded
-end
-
-"""
     _merge_censoring_patterns_with_shift(user_patterns, phase_patterns, mappings, data)
 
 Merge user-provided censoring patterns with phase uncertainty patterns,
@@ -2214,57 +2145,6 @@ struct PhaseTypeSurrogate
     phase_to_state::Vector{Int}
     expanded_Q::Matrix{Float64}
     config::PhaseTypeConfig
-end
-
-"""
-    collapse_phases(times::Vector{Float64}, states::Vector{Int}, 
-                    surrogate::PhaseTypeSurrogate)
-
-Collapse an expanded (state, phase) path to observed states only.
-
-# Arguments
-- `times::Vector{Float64}`: Jump times in expanded space
-- `states::Vector{Int}`: State sequence in expanded space (phase indices)
-- `surrogate::PhaseTypeSurrogate`: The phase-type surrogate
-
-# Returns
-- `(collapsed_times, collapsed_states)`: Path with only observed state transitions
-"""
-function collapse_phases(times::Vector{Float64}, states::Vector{Int}, 
-                        surrogate::PhaseTypeSurrogate)
-    collapsed_times = Float64[]
-    collapsed_states = Int[]
-    
-    push!(collapsed_times, times[1])
-    push!(collapsed_states, surrogate.phase_to_state[states[1]])
-    
-    for i in 2:length(times)
-        new_state = surrogate.phase_to_state[states[i]]
-        
-        # Only record if observed state changed
-        if new_state != collapsed_states[end]
-            push!(collapsed_times, times[i])
-            push!(collapsed_states, new_state)
-        end
-    end
-    
-    return collapsed_times, collapsed_states
-end
-
-"""
-    expand_initial_state(observed_state::Int, surrogate::PhaseTypeSurrogate)
-
-Map an observed initial state to its first phase in expanded space.
-
-# Arguments
-- `observed_state::Int`: State in original state space
-- `surrogate::PhaseTypeSurrogate`: The phase-type surrogate
-
-# Returns
-- `Int`: First phase index for this state
-"""
-function expand_initial_state(observed_state::Int, surrogate::PhaseTypeSurrogate)
-    return first(surrogate.state_to_phases[observed_state])
 end
 
 # =============================================================================
