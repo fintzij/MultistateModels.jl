@@ -141,24 +141,43 @@ has_censoring(m::MultistateModel) = !all(m.emat .∈ (0.0, 1.0))
 
 ## RECOMMENDED CONSOLIDATION PATH
 
-Given your preference for aggressive simplification:
+**Decision: Full consolidation to single struct (Option C)**
 
-**Phase 1:** Eliminate `*Censored` variants immediately (Option B partial)
-- Replace `MultistateMarkovModelCensored` → `MultistateMarkovModel`
-- Replace `MultistateSemiMarkovModelCensored` → `MultistateSemiMarkovModel`
-- Update all `Union{X, XCensored}` patterns to just `X`
-- Result: 4 structs instead of 6
+```julia
+# Single model struct with behavior determined by content
+mutable struct MultistateModel <: MultistateProcess
+    data::DataFrame
+    parameters::NamedTuple
+    hazards::Vector{<:_Hazard}
+    totalhazards::Vector{_TotalHazard}
+    tmat::Matrix{Int64}
+    emat::Matrix{Float64}
+    hazkeys::Dict{Symbol, Int64}
+    subjectindices::Vector{Vector{Int64}}
+    SubjectWeights::Vector{Float64}
+    ObservationWeights::Union{Nothing, Vector{Float64}}
+    CensoringPatterns::Matrix{Float64}
+    markovsurrogate::Union{Nothing, MarkovSurrogate}
+    modelcall::NamedTuple
+end
 
-**Phase 2:** With aggressive PT simplification, `PhaseTypeModel` becomes unnecessary
-- PT hazards expand to regular Markov hazards during construction
-- Returns `MultistateMarkovModel` with expanded state space
-- Result: 3 structs
+# Traits for dispatch (computed from content)
+is_markov(m::MultistateModel) = all(h -> h isa _MarkovHazard, m.hazards)
+is_panel_data(m::MultistateModel) = m.modelcall.obstype == :panel
+has_censoring(m::MultistateModel) = any(0 .< m.emat .< 1)  # Partial observability
 
-**Phase 3:** Consider full consolidation to Option A or C
-- This is a larger refactor, may want to stabilize first
-- Could be a separate future branch
+# Fitted model retains separate struct (has additional fields)
+mutable struct MultistateModelFitted <: MultistateProcess
+    # ... existing fields plus loglik, vcov, etc.
+end
+```
 
-**Awaiting your input:** Which consolidation approach do you prefer?
+**Implementation plan:**
+1. Remove `MultistateMarkovModel`, `MultistateMarkovModelCensored`
+2. Remove `MultistateSemiMarkovModel`, `MultistateSemiMarkovModelCensored`  
+3. Remove `PhaseTypeModel` (PT becomes preprocessing)
+4. Update all dispatch to use traits or `MultistateModel`
+5. Keep `MultistateModelFitted` (different purpose - holds results)
 
 ---
 
@@ -208,11 +227,15 @@ Exported symbols (from MultistateModels.jl):
 
 ### 1.4 Known Deprecated Code
 
-| Location | Description | Action |
+| Location | Description | Status |
 |----------|-------------|--------|
-| `phasetype.jl:2883` | Deprecated PT loglik functions | Remove |
-| `sampling.jl:2070` | Deprecated loglik_expanded_phasetype | Remove |
-| `sampling.jl:2123` | Deprecated loglik_collapsed_phasetype | Remove |
+| `phasetype.jl:2883` | `compute_phasetype_marginal_loglik_deprecated` | **STILL IN USE** in modelfitting.jl:1177 |
+| `sampling.jl:2070` | `loglik_phasetype_expanded_deprecated` | **STILL IN USE** in tests |
+| `sampling.jl:2123` | `loglik_phasetype_path_deprecated` | **STILL IN USE** in sampling.jl:289 |
+
+**Key Insight:** These functions are marked "deprecated" aspirationally - the intent was to migrate to standard Markov routines, but the migration never happened. They are production code.
+
+**Action:** As part of aggressive PT simplification, these should be **replaced** not removed. The replacement is exactly what the deprecation notice says: use standard `loglik_markov` on expanded data. This is the core of the PT simplification work.
 
 ### 1.5 Validation Gaps
 
@@ -243,12 +266,63 @@ From `future_features_todo.txt`:
 
 ### 3.1 Phase-Type Simplification (PRIORITY)
 
-**Key insight:** Phase-type models ARE Markov models. The phase-type expansion creates a larger Markov model. Unnecessary specialization should be eliminated.
+**Goal:** Reduce `phasetype.jl` from 4,586 lines to ~500 lines.
 
-Questions to resolve:
-- What methods are truly PT-specific vs just Markov methods called on expanded data?
-- Can PT-specific likelihood functions be replaced by standard Markov loglik on expanded data?
-- What about the FFBS sampler - is it truly specialized or just forward-backward on the expanded state space?
+**Conceptual change:** Phase-type models ARE just Markov models on an expanded state space. The PT "specialization" should be reduced to:
+1. **Expansion** - Convert PT hazard specs → expanded Markov model
+2. **Collapse** - Map expanded results back to observed states
+3. **Nothing else** - All likelihood, fitting, simulation uses standard Markov code
+
+#### Current PT Structs (5 total)
+
+| Struct | Lines | Action | Rationale |
+|--------|-------|--------|-----------|
+| `ProposalConfig` | ~100 | KEEP | General (used for Markov too) |
+| `PhaseTypeDistribution` | ~50 | REMOVE | Math formulas not needed with expanded Markov |
+| `PhaseTypeConfig` | ~80 | KEEP | Configuration for expansion |
+| `PhaseTypeMappings` | ~100 | KEEP | Essential for expand/collapse |
+| `PhaseTypeSurrogate` | ~100 | REPLACE | Use `MarkovSurrogate` on expanded space |
+
+#### Current PT Functions (79 total) - Categorization
+
+**KEEP (~10 functions, ~400 lines) - Core expansion/collapse:**
+- `build_phasetype_mappings` - Build state space mappings
+- `expand_hazards_for_phasetype` - Convert PT hazards to expanded Markov hazards
+- `expand_data_for_phasetype_fitting` - Expand data to phase-level
+- `collapse_phases` - Collapse expanded path to observed states
+- `_build_expanded_tmat` - Build expanded transition matrix
+- `_build_phase_censoring_patterns` - Handle censoring in expansion
+- `has_phasetype_hazards` - Detection helper
+- `needs_phasetype_proposal` - Proposal selection
+- `resolve_proposal_config` - Proposal configuration
+
+**REMOVE (~50 functions, ~3000 lines) - Redundant with standard Markov:**
+- `compute_phasetype_marginal_loglik_deprecated` - Use `loglik_markov` instead
+- `loglik_phasetype_expanded_deprecated` - Use `loglik` instead
+- `loglik_phasetype_path_deprecated` - Use `loglik` instead
+- `build_phasetype_surrogate` - Use `MarkovSurrogate` on expanded model
+- `build_expanded_Q` - Q is just the intensity matrix of expanded Markov
+- `update_expanded_Q` - Standard parameter update
+- `build_phasetype_emission_matrix*` - Use standard emission matrix on expanded states
+- `build_phasetype_model` - No separate model type
+- All `PhaseTypeModel` accessor methods - No separate type
+- All `PhaseTypeModel` parameter methods - No separate type
+
+**MOVE (~19 functions, ~800 lines) - To other modules:**
+- `ProposalConfig`, `MarkovProposal`, `PhaseTypeProposal` → `surrogate/`
+- `PhaseTypeDistribution` methods → DELETE (not needed)
+- Constraint generation → `inference/optimization.jl`
+
+#### Migration Strategy
+
+1. **First:** Make PT models return `MultistateMarkovModel` with expanded state space
+2. **Then:** Update all callers to use standard Markov routines
+3. **Then:** Remove redundant PT-specific functions
+4. **Finally:** Consolidate remaining expansion code to `construction/phasetype_expansion.jl`
+
+**Question for user:** Before I start implementing, do you want me to:
+- A) Do a detailed function-by-function audit first, OR
+- B) Start with the structural changes (folder creation, model consolidation) and audit as we go?
 
 ### 3.2 File Reorganization Plan
 See **Subfolder Reorganization Plan** section below.
@@ -273,11 +347,11 @@ src/
 ├── types/                        # Type definitions (rebuild this properly)
 │   ├── abstract.jl              # Abstract types hierarchy
 │   ├── hazards.jl               # Hazard types (HazardFunction, _Hazard, etc.)
-│   ├── models.jl                # Model types (MultistateModel, etc.)
+│   ├── models.jl                # Model types (MultistateModel - SINGLE struct)
 │   ├── data.jl                  # Data wrapper types (ExactData, MPanelData, etc.)
 │   └── configuration.jl         # Config types (ADBackend, ThreadingConfig, etc.)
 │
-├── hazards/                      # Hazard specification and evaluation
+├── hazard/                       # Hazard specification and evaluation
 │   ├── specification.jl         # Hazard() constructor, @hazard macro
 │   ├── exponential.jl           # Exp/Weibull/Gompertz hazard evaluation
 │   ├── spline.jl                # RuntimeSplineHazard evaluation
@@ -285,7 +359,7 @@ src/
 │
 ├── construction/                 # Model building
 │   ├── multistatemodel.jl       # multistatemodel() main entry point
-│   ├── phasetype_expansion.jl   # PT hazard → expanded Markov conversion
+│   ├── phasetype_expansion.jl   # PT hazard → expanded Markov conversion (~500 lines)
 │   └── data_processing.jl       # Data validation, index building
 │
 ├── likelihood/                   # Likelihood computation
@@ -294,11 +368,15 @@ src/
 │   ├── panel_semimarkov.jl      # Panel semi-Markov likelihood (MCEM)
 │   └── helpers.jl               # Shared likelihood utilities
 │
+├── surrogate/                    # Importance sampling surrogates
+│   ├── markov.jl                # Markov surrogate for path sampling
+│   └── fitting.jl               # Surrogate parameter fitting
+│
 ├── inference/                    # Model fitting
 │   ├── fit.jl                   # fit() entry points
 │   ├── optimization.jl          # Optimizer setup, constraints
 │   ├── mcem.jl                  # MCEM algorithm
-│   ├── sampling.jl              # Path sampling (Markov surrogate)
+│   ├── sampling.jl              # Path sampling
 │   └── sir.jl                   # SIR resampling
 │
 ├── output/                       # Post-fit operations
@@ -323,7 +401,7 @@ src/
 | Current File | Lines | → New Location(s) |
 |--------------|-------|-------------------|
 | `common.jl` | 1,601 | Split: `types/*.jl` |
-| `hazards.jl` | 1,762 | Split: `hazards/*.jl`, `output/predictions.jl` |
+| `hazards.jl` | 1,762 | Split: `hazard/*.jl`, `output/predictions.jl` |
 | `helpers.jl` | 1,965 | Split: `utilities/*.jl`, others as needed |
 | `initialization.jl` | 549 | `utilities/initialization.jl` |
 | `likelihoods.jl` | 2,190 | Split: `likelihood/*.jl` |
@@ -336,12 +414,12 @@ src/
 | `phasetype.jl` | 4,586 | **AGGRESSIVE REDUCTION** → `construction/phasetype_expansion.jl` (~500 lines) |
 | `sampling.jl` | 2,233 | Split: `inference/sampling.jl`, `simulation/path_generation.jl` |
 | `simulation.jl` | 1,289 | Split: `simulation/*.jl` |
-| `smooths.jl` | 928 | `hazards/spline.jl` |
+| `smooths.jl` | 928 | `hazard/spline.jl` |
 | `crossvalidation.jl` | 2,432 | `output/variance.jl` |
-| `macros.jl` | 110 | `hazards/specification.jl` |
+| `macros.jl` | 110 | `hazard/specification.jl` |
 | `sir.jl` | 257 | `inference/sir.jl` |
 | `statsutils.jl` | 44 | `utilities/stats.jl` |
-| `surrogates.jl` | 687 | Split: `inference/sampling.jl` (Markov), delete PT-specific |
+| `surrogates.jl` | 687 | `surrogate/markov.jl`, `surrogate/fitting.jl` |
 
 ### Empty Subfolder Disposition
 
@@ -362,20 +440,13 @@ src/
 2. **Create new folder structure** - empty but ready
 3. **Move types first** (`types/`) - foundational, few dependencies
 4. **Move utilities** (`utilities/`) - low-level, used everywhere
-5. **Move hazards** (`hazards/`) - depends on types
-6. **Move construction** (`construction/`) - depends on hazards, types
-7. **Move likelihood** (`likelihood/`) - depends on types, hazards
-8. **Move inference** (`inference/`) - depends on likelihood
-9. **Move output** (`output/`) - depends on inference
-10. **Move simulation** (`simulation/`) - depends on types, hazards
-
-### Questions Before Proceeding
-
-1. **Folder naming:** Does `likelihood/` vs `likelihoods/` matter? Same for `simulation/` vs `simulations/`? I've used singular.
-
-2. **Phase-type code:** With aggressive simplification, I'm proposing PT code shrinks from 4,586 lines to ~500 lines in `construction/phasetype_expansion.jl`. The rest should become unnecessary. Is this the right target?
-
-3. **Surrogates:** The surrogate concept (Markov surrogate for importance sampling) - should this stay in `inference/` or get its own subfolder?
+5. **Move hazards** (`hazard/`) - depends on types
+6. **Move surrogates** (`surrogate/`) - depends on types
+7. **Move construction** (`construction/`) - depends on hazards, types
+8. **Move likelihood** (`likelihood/`) - depends on types, hazards
+9. **Move inference** (`inference/`) - depends on likelihood, surrogate
+10. **Move output** (`output/`) - depends on inference
+11. **Move simulation** (`simulation/`) - depends on types, hazards
 
 ---
 
@@ -413,15 +484,16 @@ src/
 | 2025-12-16 | Delete `types/` folder | Orphaned draft code, user didn't know it existed |
 | 2025-12-16 | Aggressive PT simplification | User preference - PT becomes preprocessing only |
 | 2025-12-16 | Organize into subfolders | User wants organized structure, not flat |
+| 2025-12-16 | Full struct consolidation | Single struct + traits (Option C) |
+| 2025-12-16 | Singular folder names | `likelihood/`, `simulation/`, etc. |
+| 2025-12-16 | PT target ~500 lines | Down from 4,586 - acceptable |
+| 2025-12-16 | Surrogates separate folder | `surrogate/` subfolder |
 
 ---
 
 ## PENDING DECISIONS (Need User Input)
 
-1. **Model struct consolidation:** Options A/B/C presented above - which approach?
-2. **Subfolder naming:** Singular (`likelihood/`) vs plural (`likelihoods/`)?
-3. **PT code target:** 4,586 → ~500 lines acceptable?
-4. **Surrogates location:** `inference/` or separate folder?
+*None currently - proceeding with implementation*
 
 ---
 
@@ -438,14 +510,20 @@ src/
 - Deleted orphaned `types/` folder (~1,600 lines)
 - Detailed analysis of model struct consolidation options
 - Developed comprehensive subfolder reorganization plan
+- Categorized 79 phasetype.jl functions into KEEP/REMOVE/MOVE
 
 **User decisions received:**
 - Q1: Delete `types/` folder → YES (done)
-- Q2: Model struct consolidation → NEEDS MORE DETAIL (provided)
+- Q2: Model struct consolidation → FULL CONSOLIDATION (single struct + traits)
 - Q3: Phase-type approach → AGGRESSIVE (preprocessing only)
-- Q4: Subfolders → ORGANIZE (plan developed)
+- Q4: Subfolders → ORGANIZE with singular names, surrogates in separate folder
+
+**Key Insights:**
+- "Deprecated" PT functions are actually still in production use
+- PT simplification requires migration, not just deletion
+- 6 model structs → 1 struct + traits
+- ~50 of 79 PT functions can be eliminated
 
 **Next steps:**
-1. Get user input on remaining decisions (model structs, naming, PT target)
-2. Begin Phase 2: Dead code removal (deprecated functions)
-3. Then proceed with reorganization per plan
+1. Get user input: start with structure or detailed audit first?
+2. Then proceed with implementation
