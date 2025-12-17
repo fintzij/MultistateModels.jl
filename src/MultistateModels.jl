@@ -256,6 +256,8 @@ include("inference/mcem.jl")
 include("utilities/misc.jl")
 
 # phase-type distributions for improved surrogates
+include("phasetype/types.jl")
+include("phasetype/surrogate.jl")
 include("phasetype/expansion.jl")
 
 # surrogate
