@@ -2,7 +2,7 @@
 
 **Branch:** `package_streamlining`  
 **Started:** 2025-12-16  
-**Last Updated:** 2025-12-17
+**Last Updated:** 2025-12-18
 
 ## Guiding Principles
 
@@ -27,6 +27,66 @@
 | 2025-12-16 | Interaction term fix | `extract_covariates_lightweight` now handles interaction terms |
 | 2025-12-16 | Phase-type method validation | `initialize_parameters!` rejects `:markov` for PT models |
 | 2025-12-17 | File reorganization | Moved 14 files into logical subfolders (commit 3a25ba2) |
+| 2025-12-17 | types/ split | Split common.jl into 7 files in types/ subfolder |
+| 2025-12-17 | hazard/ split | Split hazards.jl into 7 new files in hazard/ subfolder |
+| 2025-12-18 | utilities/ split | Split helpers.jl (1,966 lines) into 6 files in utilities/ |
+| 2025-12-18 | Deleted old files | Removed common.jl, hazards.jl, helpers.jl (5,292 lines total) |
+
+---
+
+## CURRENT SOURCE STRUCTURE (after reorganization)
+
+```
+src/
+├── MultistateModels.jl          # Main module (275 lines)
+├── types/                        # Type definitions (7 files)
+│   ├── abstract.jl              # Abstract type hierarchy
+│   ├── data_containers.jl       # SamplePath, ExactData, MPanelData
+│   ├── hazard_metadata.jl       # HazardMetadata, HazardCache
+│   ├── hazard_specs.jl          # HazardFunction, Hazard user API
+│   ├── hazard_structs.jl        # Internal _Hazard types
+│   ├── infrastructure.jl        # ADBackend, ThreadingConfig
+│   └── model_structs.jl         # MultistateModel, MultistateModelFitted
+├── hazard/                       # Hazard functions (9 files)
+│   ├── api.jl                   # User-facing: compute_hazard, cumulative_incidence
+│   ├── covariates.jl            # Covariate extraction, linear predictor
+│   ├── evaluation.jl            # eval_hazard, eval_cumhaz
+│   ├── generators.jl            # Runtime code generation
+│   ├── macros.jl                # @hazard macro
+│   ├── spline.jl                # Spline hazard functions
+│   ├── time_transform.jl        # Time transform optimizations
+│   ├── total_hazard.jl          # Total hazard computation
+│   └── tpm.jl                   # Transition probability matrices
+├── utilities/                    # Utility functions (9 files)
+│   ├── books.jl                 # TPM bookkeeping, data containers
+│   ├── flatten.jl               # FlattenTypes, construct_flatten
+│   ├── initialization.jl        # Crude parameter initialization
+│   ├── misc.jl                  # Miscellaneous utilities
+│   ├── parameters.jl            # unflatten, set_parameters!, get_hazard_params
+│   ├── reconstructor.jl         # ReConstructor struct and API
+│   ├── stats.jl                 # Statistical utilities
+│   ├── transforms.jl            # Parameter scale transformations
+│   └── validation.jl            # Data validation (check_data!, etc.)
+├── construction/                 # Model building
+│   └── multistatemodel.jl       # multistatemodel() entry point
+├── inference/                    # Model fitting
+│   ├── fit.jl                   # fit() entry points
+│   ├── mcem.jl                  # MCEM algorithm
+│   ├── sampling.jl              # Path sampling
+│   └── sir.jl                   # SIR resampling
+├── likelihood/                   # Likelihood computation
+│   └── loglik.jl                # All likelihood functions
+├── output/                       # Post-fit operations
+│   ├── accessors.jl             # get_parameters, get_vcov, etc.
+│   └── variance.jl              # Variance estimation
+├── phasetype/                    # Phase-type distributions
+│   └── expansion.jl             # Phase-type expansion logic
+├── simulation/                   # Simulation
+│   ├── path_utilities.jl        # SamplePath operations
+│   └── simulate.jl              # simulate(), simulate_paths()
+└── surrogate/                    # Importance sampling surrogates
+    └── markov.jl                # Markov surrogate
+```
 
 ---
 
