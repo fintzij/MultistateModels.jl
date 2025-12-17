@@ -37,60 +37,21 @@
 Configuration for MCEM path proposals.
 
 # Fields
-- `type::Symbol`: Proposal type - `:markov` (default) or `:phasetype`
-- `n_phases::Union{Symbol, Int, Dict{Int,Int}}`: Number of phases (for `:phasetype` only)
-  - `:auto`: BIC-based selection (fits 1 to max_phases, selects best by BIC)
-  - `:heuristic`: 2 phases for states with non-Markovian transitions, 1 for exponential
-  - `Int`: Same number of phases for all transient states
-  - `Dict{Int,Int}`: Per-state specification, e.g., `Dict(1 => 3, 2 => 2)` for 3 phases
-    on state 1 and 2 phases on state 2. States not in the Dict default to 1 phase.
-- `structure::Symbol`: Coxian structure for phase-type (default: `:unstructured`)
-  - `:unstructured`: All progression rates (r₁, r₂, ...) and absorption rates (a₁, a₂, ..., aₙ) 
-    are free parameters (most flexible, recommended default)
-  - `:sctp`: SCTP (Stationary Conditional Transition Probability) constraints ensuring
-    P(dest | leaving state) is constant across phases
-- `max_phases::Int`: Maximum phases for `:auto` BIC selection (default: 5)
-- `optimize::Bool`: Optimize surrogate parameters (default: true)
-- `parameters`: Manual parameter override (default: nothing)
-- `constraints`: Constraints for surrogate optimization (default: nothing)
+- `type::Symbol`: `:markov` (default) or `:phasetype`
+- `n_phases::Union{Symbol,Int,Dict{Int,Int}}`: `:auto` (BIC), `:heuristic`, `Int`, or `Dict`
+- `structure::Symbol`: `:unstructured` (default) or `:sctp`
+- `max_phases::Int`: Max for BIC selection (default: 5)
+- `optimize::Bool`: Optimize surrogate params (default: true)
+- `parameters`: Manual override (default: nothing)
+- `constraints`: Optimization constraints (default: nothing)
 
-# n_phases Options
-
-| Option | Description | Use case |
-|--------|-------------|----------|
-| `:auto` | Fits models with 1–max_phases and selects by BIC | Best fit, higher computational cost |
-| `:heuristic` | 2 phases for non-Markov states, 1 for exponential | Fast sensible default |
-| `Int` | Same for all transient states | Simple manual control |
-| `Dict{Int,Int}` | Per-state specification (state => n_phases) | Fine-grained control |
-
-# Usage
-
+# Example
 ```julia
-# Default: Markov surrogate (exponential sojourn proposals)
-fit(model)
-
-# Markov surrogate with manual parameters
-fit(model; proposal=ProposalConfig(parameters=my_params, optimize=false))
-
-# Phase-type surrogate with BIC-based auto-selection
 fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=:auto))
-
-# Phase-type with heuristic phases (2 for non-Markov, 1 for exponential)
-fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=:heuristic))
-
-# Phase-type with manual override
-fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=3))
-fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3, 2 => 2)))  # recommended
-
-# Phase-type with SCTP constraint
 fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3), structure=:sctp))
 ```
 
-For backward compatibility, the existing kwargs `optimize_surrogate`,
-`surrogate_parameters`, and `surrogate_constraints` still work when no
-`proposal` is specified.
-
-See also: [`PhaseTypeConfig`](@ref), [`PhaseTypeSurrogate`](@ref), [`PhaseTypeProposal`](@ref)
+See also: [`PhaseTypeConfig`](@ref), [`PhaseTypeSurrogate`](@ref)
 """
 struct ProposalConfig
     type::Symbol
@@ -148,25 +109,10 @@ end
 
 Convenience constructor for Markov (exponential) proposal configuration.
 
-Markov proposals use exponential sojourn times for all states. This is
-the default and simplest option, but may be less efficient for models
-with strongly non-exponential sojourn distributions.
-
-# Arguments
-- `optimize`: Optimize surrogate parameters (default: true)
-- `parameters`: Manual parameter override (default: nothing)
-- `constraints`: Constraints for optimization (default: nothing)
-
-# Examples
+# Example
 ```julia
-# Default Markov proposal
-fit(model; proposal=MarkovProposal())
-
-# Markov proposal with fixed parameters
 fit(model; proposal=MarkovProposal(optimize=false, parameters=my_params))
 ```
-
-See also: [`ProposalConfig`](@ref), [`PhaseTypeProposal`](@ref)
 """
 MarkovProposal(; kwargs...) = ProposalConfig(type=:markov; kwargs...)
 
@@ -175,34 +121,15 @@ MarkovProposal(; kwargs...) = ProposalConfig(type=:markov; kwargs...)
 
 Convenience constructor for phase-type proposal configuration.
 
-Phase-type proposals use expanded Markov chains to better approximate
-non-exponential sojourn time distributions in importance sampling.
-
 # Arguments
-- `n_phases`: Number of latent phases per transient state
-  - `:auto`: BIC-based selection (fits 1–max_phases, selects best)
-  - `:heuristic`: 2 phases for non-Markov states, 1 for exponential
-  - `Int`: Same for all transient states
-  - `Dict{Int,Int}`: Per-state specification, e.g., `Dict(1 => 3, 2 => 2)`
-- `max_phases`: Maximum phases for `:auto` (default: 5)
-- `optimize`: Optimize parameters (default: true)
-- `parameters`: Manual parameter override (default: nothing)
-- `constraints`: Constraints for optimization (default: nothing)
+- `n_phases`: `:auto` (BIC), `:heuristic`, `Int`, or `Dict{Int,Int}`
+- `max_phases`: Max for BIC selection (default: 5)
+- `optimize`, `parameters`, `constraints`: See `ProposalConfig`
 
-# Examples
+# Example
 ```julia
-# BIC-based selection (default)
-fit(model; proposal=PhaseTypeProposal())
-
-# Heuristic: 2 phases for non-Markov, 1 for exponential
-fit(model; proposal=PhaseTypeProposal(n_phases=:heuristic))
-
-# Manual specification
-fit(model; proposal=PhaseTypeProposal(n_phases=3))
 fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3, 2 => 2)))
 ```
-
-See also: [`ProposalConfig`](@ref), [`MarkovProposal`](@ref)
 """
 PhaseTypeProposal(; n_phases::Union{Symbol, Int, Dict{Int,Int}} = :auto, kwargs...) = 
     ProposalConfig(type=:phasetype, n_phases=n_phases; kwargs...)
@@ -267,55 +194,23 @@ resolve_proposal_config(proposal::ProposalConfig, model) = proposal
 """
     PhaseTypeDistribution
 
-Representation of a phase-type distribution for sojourn time approximation.
+Phase-type distribution PH(π, Q) for sojourn time approximation.
 
 # Fields
-- `n_phases::Int`: Number of latent phases (transient states)
-- `Q::Matrix{Float64}`: Full intensity matrix ((p+1) × (p+1)), including absorbing state
-- `initial::Vector{Float64}`: Initial distribution over phases (length p, sums to 1)
+- `n_phases::Int`: Number of latent phases
+- `Q::Matrix{Float64}`: (p+1)×(p+1) intensity matrix with absorbing state
+- `initial::Vector{Float64}`: Initial distribution over phases (sums to 1)
 
-# Mathematical Background
-
-A phase-type distribution PH(π, Q) represents the time until absorption in a 
-finite-state continuous-time Markov chain. The intensity matrix Q has the form:
-
-```
-Q = [ S   s ]
-    [ 0   0 ]
-```
-
-where S is the p×p sub-intensity matrix (transient states), s is the p×1 
-absorption rate vector, and the last row is zeros (absorbing state).
-
-The CDF is:
-```
-F(t) = 1 - π' exp(St) 𝟙
-```
-
-where π is the initial distribution, S is extracted from Q[1:p, 1:p],
-and 𝟙 is a vector of ones.
-
-For a Coxian distribution with p phases:
-```
-Q = [-(r₁+a₁)    r₁        0     ...    a₁  ]
-    [    0    -(r₂+a₂)    r₂     ...    a₂  ]
-    [    ⋮        ⋮        ⋱      ⋱      ⋮   ]
-    [    0        0       ...   -aₚ     aₚ  ]
-    [    0        0       ...     0      0  ]
-```
-
-where rᵢ is the progression rate to phase i+1 and aᵢ is the absorption rate.
+Q has form [S s; 0 0] where S is p×p sub-intensity, s is absorption rates.
+CDF: F(t) = 1 - π' exp(St) 𝟙
 
 # Example
 ```julia
-# 2-phase Coxian distribution with Q matrix
-Q = [-2.0  1.5  0.5;    # Phase 1: prog=1.5, abs=0.5
-      0.0 -1.0  1.0;    # Phase 2: abs=1.0
-      0.0  0.0  0.0]    # Absorbing state
-ph = PhaseTypeDistribution(2, Q, [1.0, 0.0])  # Start in phase 1
+Q = [-2.0 1.5 0.5; 0.0 -1.0 1.0; 0.0 0.0 0.0]  # 2-phase Coxian
+ph = PhaseTypeDistribution(2, Q, [1.0, 0.0])
 ```
 
-See also: [`PhaseTypeConfig`](@ref), [`absorption_rates`](@ref), [`subintensity`](@ref)
+See also: [`PhaseTypeConfig`](@ref), [`subintensity`](@ref), [`absorption_rates`](@ref)
 """
 struct PhaseTypeDistribution
     n_phases::Int
@@ -401,50 +296,19 @@ end
 """
     PhaseTypeConfig
 
-Configuration options for phase-type surrogate model.
+Configuration for phase-type surrogate model.
 
 # Fields
-- `n_phases::Union{Symbol, Int, Dict{Int,Int}}`: Number of phases per state
-  - `:auto`: Select via BIC when building surrogate (requires data)
-  - `:heuristic`: 2 phases for states with non-Markovian transitions, 1 for exponential
-  - `Int`: Same number of phases for all transient states
-  - `Dict{Int,Int}`: Per-state phase counts, e.g., `Dict(1 => 3, 2 => 2)` for 3 phases
-    on state 1 and 2 phases on state 2. States not in the Dict default to 1 phase.
-- `structure::Symbol`: Coxian structure (default: `:unstructured`)
-  - `:unstructured`: All progression rates (r₁, r₂, ...) and absorption rates (a₁, a₂, ..., aₙ) 
-    are free parameters (most flexible, recommended default)
-  - `:sctp`: SCTP (Stationary Conditional Transition Probability) constraints ensuring
-    P(dest | leaving state) is constant across phases
-  
-  Note: This controls initial structure. For MLE fitting with custom constraints, pass
-  `surrogate_constraints` to `fit()` or `set_surrogate!()` which will supersede these defaults.
+- `n_phases::Union{Symbol,Int,Dict{Int,Int}}`: `:auto`, `:heuristic`, `Int`, or `Dict{Int,Int}`
+- `structure::Symbol`: `:unstructured` (default) or `:sctp`
 - `constraints::Bool`: Apply Titman-Sharples constraints (default: true)
-- `max_phases::Int`: Maximum phases to consider when n_phases=:auto (default: 5)
+- `max_phases::Int`: Max for `:auto` BIC selection (default: 5)
 
-For **inference** (fitting phase-type hazard models), you must explicitly specify
-`n_phases` as an `Int` or `Dict{Int,Int}`.
-
-For **MCEM proposals** (building surrogates):
-- Use `:auto` to select the number of phases via BIC comparison
-- Use `:heuristic` for a fast sensible default without fitting multiple models
+For inference: specify `n_phases` explicitly. For MCEM surrogates: use `:auto` or `:heuristic`.
 
 # Example
 ```julia
-# For inference - explicit specification required
-config = PhaseTypeConfig(n_phases=3)
-config = PhaseTypeConfig(n_phases=Dict(1 => 3, 2 => 2))
-
-# For MCEM surrogates - auto-selection via BIC
-config = PhaseTypeConfig(n_phases=:auto)
-surrogate = build_phasetype_surrogate(tmat, config; data=my_data)
-
-# For MCEM surrogates - heuristic defaults without BIC fitting
-config = PhaseTypeConfig(n_phases=:heuristic)
-surrogate = build_phasetype_surrogate(tmat, config; hazards=model.hazards)
-
-# Different Coxian structures
-config = PhaseTypeConfig(n_phases=Dict(1 => 3), structure=:sctp)  # SCTP constraint
-config = PhaseTypeConfig(n_phases=3, structure=:unstructured)     # Free parameters
+config = PhaseTypeConfig(n_phases=Dict(1 => 3, 2 => 2), structure=:sctp)
 ```
 """
 struct PhaseTypeConfig
@@ -485,48 +349,18 @@ end
 """
     PhaseTypeMappings
 
-Bidirectional mappings between observed and expanded state spaces for phase-type hazard models.
-
-This struct is used when building a model with `:pt` (phase-type) hazards. It provides
-the infrastructure to map between the original observed state space and the expanded
-Markov state space where each state with phase-type hazards is split into multiple phases.
+Bidirectional mappings between observed and expanded state spaces for phase-type models.
 
 # Fields
-
-**State space dimensions:**
-- `n_observed::Int`: Number of observed (original) states
-- `n_expanded::Int`: Number of expanded states (sum of phases across all states)
-
-**Per-state phase information:**
-- `n_phases_per_state::Vector{Int}`: Number of phases for each observed state
-- `state_to_phases::Vector{UnitRange{Int}}`: Observed state → expanded phase indices
-- `phase_to_state::Vector{Int}`: Expanded phase index → observed state
-
-**Transition structure:**
-- `expanded_tmat::Matrix{Int}`: Transition matrix on expanded state space
-- `original_tmat::Matrix{Int}`: Original transition matrix (for reference)
-
-**Hazard tracking:**
-- `original_hazards::Vector{<:HazardFunction}`: Original user-specified hazards
-- `pt_hazard_indices::Vector{Int}`: Indices of hazards that are phase-type
-- `expanded_hazard_indices::Dict{Symbol, Vector{Int}}`: Maps original hazard name to
-  expanded hazard indices (e.g., :h12 → [1, 2, 3] for λ₁, λ₂, μ₁ hazards)
-
-# Example
-
-For a 3-state model (states 1, 2, 3) with 2-phase Coxian on transition 1→2:
-
-```
-Original: State 1 ──h12──> State 2 ──h23──> State 3
-
-Expanded: Phase 1.1 ──λ₁──> Phase 1.2 ──μ₂──> Phase 2.1 ──h23──> State 3
-              │                                    │
-              └────────────μ₁─────────────────────>│
-```
-
-- `n_phases_per_state = [2, 1, 1]` (state 1 has 2 phases)
-- `state_to_phases = [1:2, 3:3, 4:4]`
-- `phase_to_state = [1, 1, 2, 3]`
+- `n_observed::Int`, `n_expanded::Int`: State space dimensions
+- `n_phases_per_state::Vector{Int}`: Phases per observed state
+- `state_to_phases::Vector{UnitRange{Int}}`: Observed state → phase indices
+- `phase_to_state::Vector{Int}`: Phase index → observed state
+- `expanded_tmat::Matrix{Int}`: Transition matrix on expanded space
+- `original_tmat::Matrix{Int}`: Original transition matrix
+- `original_hazards::Vector`: Original hazard specifications
+- `pt_hazard_indices::Vector{Int}`: Indices of phase-type hazards
+- `expanded_hazard_indices::Dict{Symbol,Vector{Int}}`: Original hazard name → expanded indices
 
 See also: [`PhaseTypeHazardSpec`](@ref), [`PhaseTypeExpansion`](@ref)
 """
@@ -585,37 +419,22 @@ end
 """
     build_phasetype_mappings(hazards, tmat, n_phases_per_state) -> PhaseTypeMappings
 
-Build state space mappings from hazard specifications and phase counts.
-
-Builds bidirectional mappings between the original observed state space and the 
-expanded phase-type state space based on the specified number of phases per state.
-
-# Algorithm
-
-1. Validate n_phases_per_state consistency
-2. Build state_to_phases and phase_to_state mappings
-3. Construct expanded transition matrix with internal phase transitions
-4. Track which original hazards map to which expanded hazard indices
+Build bidirectional mappings between observed and expanded phase-type state spaces.
 
 # Arguments
-- `hazards::Vector{<:HazardFunction}`: User-specified hazard specifications
+- `hazards`: User-specified hazard specifications
 - `tmat::Matrix{Int}`: Original transition matrix
-- `n_phases_per_state::Vector{Int}`: Number of phases for each state (from model-level n_phases)
+- `n_phases_per_state::Vector{Int}`: Phases per state
 
 # Returns
-- `PhaseTypeMappings`: Complete bidirectional mappings
+`PhaseTypeMappings` with state mappings, expanded tmat, and hazard index tracking.
 
 # Example
 ```julia
-h12 = Hazard(:pt, 1, 2)
-h23 = Hazard(:exp, 2, 3)
-tmat = [0 1 0; 0 0 1; 0 0 0]
-n_phases_per_state = [3, 1, 1]  # State 1 has 3 phases
-mappings = build_phasetype_mappings([h12, h23], tmat, n_phases_per_state)
-# n_expanded = 5  # Total phases
+mappings = build_phasetype_mappings([Hazard(:pt, 1, 2)], tmat, [3, 1, 1])
 ```
 
-See also: [`PhaseTypeMappings`](@ref), [`build_expanded_tmat`](@ref)
+See also: [`PhaseTypeMappings`](@ref)
 """
 function build_phasetype_mappings(hazards::Vector{<:HazardFunction}, 
                                    tmat::Matrix{Int},
@@ -683,29 +502,13 @@ end
 """
     _build_expanded_tmat(original_tmat, n_phases_per_state, state_to_phases, hazards)
 
-Build the expanded transition matrix for the phase-type state space.
+Build expanded transition matrix for phase-type state space.
 
-# Structure
-
-For a state s with n phases and outgoing transition to state d:
-
-```
-Within state s (progression):
-  Phase 1 → Phase 2 → ... → Phase n  (rates λ₁, ..., λₙ₋₁)
-
-Exit transitions (to first phase of destination d):
-  Phase 1 → d.Phase 1  (rate μ₁)
-  Phase 2 → d.Phase 1  (rate μ₂)
-  ...
-  Phase n → d.Phase 1  (rate μₙ)
-```
-
-The expanded tmat uses positive integers to index hazards:
-- Internal progressions: indexed sequentially
-- Exit transitions: indexed after progressions
+For state s with n phases: Phase 1 → Phase 2 → ... → Phase n (progression),
+plus exit transitions from each phase to destination states.
 
 # Returns
-- `Matrix{Int}`: Expanded transition matrix with hazard indices
+`Matrix{Int}` with hazard indices (progressions indexed first, then exits).
 """
 function _build_expanded_tmat(original_tmat::Matrix{Int}, 
                                n_phases_per_state::Vector{Int},
@@ -898,46 +701,23 @@ end
 # =============================================================================
 
 """
-    expand_hazards_for_phasetype(hazards, mappings, data) -> Vector{_Hazard}
+    expand_hazards_for_phasetype(hazards, mappings, data) -> (Vector{_Hazard}, Vector{Vector{Float64}})
 
-Convert user hazard specifications to runtime hazards on the expanded phase-type state space.
+Convert user hazard specs to runtime hazards on expanded phase-type state space.
 
-This function transforms the user's hazard specifications into the internal hazard
-representations needed for the expanded Markov model. Each original hazard maps to
-one or more hazards in the expanded space.
-
-# Expansion Logic
-
-For each original hazard `s → d`:
-
-**Phase-type hazards (`:pt`)**:
-Creates multiple `MarkovHazard` instances:
-- `n - 1` progression hazards (λ): phase i → phase i+1 within state s
-- `n` exit hazards (μ): phase i → first phase of destination d
-
-**Exponential hazards (`:exp`)**:
-- Creates one `MarkovHazard` per source phase, all sharing the same rate
-
-**Semi-Markov hazards (`:wei`, `:gom`, `:sp`)**:
-- Creates the appropriate hazard type on the expanded space
-- All source phases share the same hazard (approximation for phase-type fitting)
+- **:pt hazards**: (n-1) progression hazards (λ) + n exit hazards (μ)
+- **:exp hazards**: One MarkovHazard per source phase, shared rate
+- **Semi-Markov**: Appropriate hazard type on expanded space
 
 # Arguments
-- `hazards::Vector{<:HazardFunction}`: User-specified hazard specifications
-- `mappings::PhaseTypeMappings`: State space mappings from `build_phasetype_mappings`
-- `data::DataFrame`: Model data for parameter schema resolution
+- `hazards`: User-specified hazard specifications
+- `mappings::PhaseTypeMappings`: State space mappings
+- `data::DataFrame`: Model data for schema resolution
 
 # Returns
-- `Vector{_Hazard}`: Runtime hazard objects for the expanded model
-- `Vector{Vector{Float64}}`: Initial parameters for each hazard
+Tuple of expanded hazards and initial parameters.
 
-# Example
-```julia
-mappings = build_phasetype_mappings(hazards, tmat)
-expanded_hazards, expanded_params = expand_hazards_for_phasetype(hazards, mappings, data)
-```
-
-See also: [`build_phasetype_mappings`](@ref), [`PhaseTypeCoxianHazard`](@ref)
+See also: [`build_phasetype_mappings`](@ref)
 """
 function expand_hazards_for_phasetype(hazards::Vector{<:HazardFunction}, 
                                        mappings::PhaseTypeMappings,
@@ -1275,44 +1055,19 @@ function _build_shared_phase_hazard(base_haz::_Hazard, from_phase::Int, to_phase
 end
 
 """
-    expand_data_for_phasetype_fitting(data, mappings) -> (expanded_data, censoring_patterns)
+    expand_data_for_phasetype_fitting(data, mappings) -> (DataFrame, Matrix{Float64})
 
 Expand observation data to handle phase uncertainty during phase-type model fitting.
 
-When fitting a phase-type model, the latent phase of each observation is unknown.
-This function prepares the data for the forward-backward algorithm by mapping
-observed states to their corresponding phase ranges in the expanded space.
-
-# Phase Uncertainty
-
-For an observation in observed state `s` with `n` phases:
-- The subject could be in any of phases `1, 2, ..., n` of state `s`
-- The emission matrix will encode this uncertainty
-- Forward-backward will marginalize over the unknown phase
-
-# Data Transformation
-
-The function:
-1. Maps `statefrom` and `stateto` to their first phases (conservative)
-2. Builds censoring patterns that allow any phase of the observed state
-3. Preserves all covariates and timing information
-
-For exact observations (obstype=1), we split into sojourn + transition intervals
-to correctly marginalize over phase uncertainty using the forward algorithm.
+Maps observed states to phase ranges, builds censoring patterns for phase uncertainty,
+and splits exact observations for forward-backward marginalization.
 
 # Arguments
-- `data::DataFrame`: Original observation data with observed state indices
+- `data::DataFrame`: Original observation data
 - `mappings::PhaseTypeMappings`: State space mappings
 
 # Returns
-- `expanded_data::DataFrame`: Data with phase-space state indices, exact obs split
-- `censoring_patterns::Matrix{Float64}`: Emission patterns for phase uncertainty
-
-# Example
-```julia
-mappings = build_phasetype_mappings(hazards, tmat)
-exp_data, cens_pats = expand_data_for_phasetype_fitting(data, mappings)
-```
+Tuple of expanded data and censoring patterns matrix.
 
 See also: [`build_phasetype_mappings`](@ref), [`expand_data_for_phasetype`](@ref)
 """
@@ -1421,45 +1176,17 @@ end
 """
     _generate_sctp_constraints(expanded_hazards, mappings, pt_states) -> NamedTuple
 
-Generate SCTP (Stationary Conditional Transition Probability) constraints for phase-type models.
+Generate SCTP constraints ensuring P(dest | leaving state) is constant across phases.
 
-SCTP ensures that P(r→s | transition out of r) is constant over time, regardless of which
-phase the subject is in. This is achieved by constraining exit rates such that:
-
-    h_{r_j, s} = τ_j × h_{r_1, s}
-
-where τ_j is the phase effect (shared across all destinations from state r).
-
-# Implementation
-
-Rather than introducing explicit τ parameters, we enforce equality of phase effects
-across destinations via linear constraints:
-
-    (h_{r_j, d1} - h_{r_1, d1}) - (h_{r_j, d2} - h_{r_1, d2}) = 0
-
-This reduces model complexity by (n_phases - 1) × (n_destinations - 1) constraints
-per phase-type state.
+Implements: (h_{r_j,d1} - h_{r_1,d1}) - (h_{r_j,d2} - h_{r_1,d2}) = 0
 
 # Arguments
-- `expanded_hazards::Vector{<:_Hazard}`: Expanded hazards from phase-type model
+- `expanded_hazards`: Expanded hazards from phase-type model
 - `mappings::PhaseTypeMappings`: State-to-phase mappings
 - `pt_states::Set{Int}`: States with phase-type hazards
 
 # Returns
-- `NamedTuple` with fields:
-  - `cons::Vector{Expr}`: Constraint expressions
-  - `lcons::Vector{Float64}`: Lower bounds (all zeros for equality)
-  - `ucons::Vector{Float64}`: Upper bounds (all zeros for equality)
-  
-Returns `nothing` if no constraints are needed.
-
-# Example
-For state 1 with 3 phases exiting to states 2 and 3:
-- Free parameters: log_λ_h12_a, log_λ_h13_a, log_λ_h12_b, log_λ_h12_c
-- Constrained: log_λ_h13_b, log_λ_h13_c (via equality with τ effects)
-- Constraints: 
-  - log_λ_h13_b - log_λ_h13_a - (log_λ_h12_b - log_λ_h12_a) = 0
-  - log_λ_h13_c - log_λ_h13_a - (log_λ_h12_c - log_λ_h12_a) = 0
+NamedTuple with `cons`, `lcons`, `ucons` fields, or `nothing` if no constraints needed.
 
 See also: [`_build_phasetype_model_from_hazards`](@ref)
 """
@@ -1584,34 +1311,20 @@ end
 """
     _build_phasetype_model_from_hazards(hazards, data; kwargs...) -> MultistateMarkovModel
 
-Internal function to build a MultistateMarkovModel with phase-type expansion from user hazard specifications.
+Build a MultistateMarkovModel with phase-type expansion from user hazard specs.
 
-This is called by `multistatemodel()` when any hazard is a `PhaseTypeHazardSpec`.
-It builds the expanded state space model and stores the expansion metadata in
-the `phasetype_expansion` field.
-
-# Algorithm
-
-1. Build state mappings from :pt hazards (`build_phasetype_mappings`)
-2. Expand hazards to internal representation (`expand_hazards_for_phasetype`)
-3. Expand data for phase uncertainty (`expand_data_for_phasetype_fitting`)
-4. Build the internal Markov model on expanded space
-5. Store expansion metadata in `PhaseTypeExpansion` struct
+Called by `multistatemodel()` when any hazard is `:pt`. Builds expanded state space,
+expands hazards and data, and stores metadata in `phasetype_expansion` field.
 
 # Arguments
-- `hazards::Tuple{Vararg{HazardFunction}}`: User hazard specifications (some :pt)
+- `hazards::Tuple`: User hazard specifications (some :pt)
 - `data::DataFrame`: Observation data
-- `constraints`: Optional parameter constraints
-- `SubjectWeights`, `ObservationWeights`: Optional weights
-- `CensoringPatterns`: Optional censoring patterns
-- `EmissionMatrix`: Optional emission matrix
-- `n_phases::Union{Nothing, Dict{Int,Int}}`: Number of phases per state. If nothing, uses 
-  n_phases from PhaseTypeHazardSpec (legacy) or defaults to 2.
-- `coxian_structure::Symbol`: Constraint structure (:unstructured or :sctp)
-- `verbose`: Print progress information
+- `n_phases::Union{Nothing,Dict{Int,Int}}`: Phases per state (default: 2)
+- `coxian_structure::Symbol`: `:unstructured` or `:sctp`
+- Other kwargs: `constraints`, `SubjectWeights`, `CensoringPatterns`, etc.
 
 # Returns
-- `MultistateMarkovModel`: Model on expanded state space with `phasetype_expansion` metadata
+`MultistateMarkovModel` on expanded state space with `phasetype_expansion` metadata.
 
 See also: [`PhaseTypeExpansion`](@ref), [`build_phasetype_mappings`](@ref)
 """
@@ -2129,27 +1842,14 @@ end
 """
     build_coxian_intensity(λ::Vector{Float64}, μ::Vector{Float64})
 
-Build the full intensity matrix Q for a Coxian phase-type distribution.
+Build (p+1)×(p+1) intensity matrix Q for p-phase Coxian distribution.
 
 # Arguments
-- `λ::Vector{Float64}`: Progression rates between consecutive phases (length p-1)
-- `μ::Vector{Float64}`: Absorption rates from each phase (length p)
+- `λ`: Progression rates between phases (length p-1)
+- `μ`: Absorption rates from each phase (length p)
 
 # Returns
-- `Q::Matrix{Float64}`: (p+1) × (p+1) intensity matrix (including absorbing state)
-
-# Structure
-For a p-phase Coxian, the (p+1)×(p+1) intensity matrix Q is:
-```
-Q = [-(λ₁+μ₁)    λ₁        0    ...    0      μ₁  ]
-    [    0    -(λ₂+μ₂)    λ₂   ...    0      μ₂  ]
-    [    ⋮        ⋮        ⋱    ⋱      ⋮       ⋮   ]
-    [    0        0       ...  -(λₚ₋₁+μₚ₋₁) λₚ₋₁  μₚ₋₁]
-    [    0        0       ...     0     -μₚ    μₚ  ]
-    [    0        0       ...     0      0      0  ]
-```
-
-The last row is the absorbing state (all zeros).
+Intensity matrix Q with absorbing state in last row/column.
 """
 function build_coxian_intensity(λ::Vector{Float64}, μ::Vector{Float64})
     p = length(μ)
@@ -2183,26 +1883,14 @@ build_coxian_subintensity(λ::Vector{Float64}, μ::Vector{Float64}) =
 """
     PhaseTypeSurrogate
 
-A phase-type augmented surrogate model for improved importance sampling.
-
-This extends the Markov surrogate by replacing each transient state with
-multiple latent phases. The expanded state space allows better approximation
-of non-exponential sojourn distributions.
+Phase-type augmented surrogate for importance sampling.
 
 # Fields
-- `phasetype_dists::Dict{Int, PhaseTypeDistribution}`: PH distribution per observed state
-- `n_observed_states::Int`: Number of observed states
-- `n_expanded_states::Int`: Total expanded states (sum of phases)
-- `state_to_phases::Vector{UnitRange{Int}}`: Mapping observed state → phase indices
-- `phase_to_state::Vector{Int}`: Mapping phase index → observed state
+- `phasetype_dists::Dict{Int,PhaseTypeDistribution}`: PH per observed state
+- `n_observed_states::Int`, `n_expanded_states::Int`: State counts
+- `state_to_phases::Vector{UnitRange{Int}}`, `phase_to_state::Vector{Int}`: Mappings
 - `expanded_Q::Matrix{Float64}`: Expanded intensity matrix
-- `config::PhaseTypeConfig`: Configuration used to build this surrogate
-
-# Example
-```julia
-config = PhaseTypeConfig(n_phases=3)
-surrogate = build_phasetype_surrogate(model, config)
-```
+- `config::PhaseTypeConfig`: Configuration
 
 See also: [`PhaseTypeConfig`](@ref), [`build_phasetype_surrogate`](@ref)
 """
@@ -2221,49 +1909,24 @@ end
 # =============================================================================
 
 """
-    build_phasetype_surrogate(tmat::Matrix{Int64}, config::PhaseTypeConfig;
-                              data::Union{Nothing, DataFrame}=nothing,
-                              hazards::Union{Nothing, Vector}=nothing,
-                              verbose::Bool=true)
+    build_phasetype_surrogate(tmat, config; data=nothing, hazards=nothing, verbose=true)
 
-Construct a PhaseTypeSurrogate from a transition matrix and configuration.
+Construct a PhaseTypeSurrogate from transition matrix and configuration.
 
 # Arguments
-- `tmat::Matrix{Int64}`: Transition matrix where tmat[i,j] > 0 indicates transition i→j is allowed
-- `config::PhaseTypeConfig`: Configuration specifying number of phases per state
-- `data::Union{Nothing, DataFrame}=nothing`: Required when config.n_phases=:auto for BIC selection
-- `hazards::Union{Nothing, Vector}=nothing`: Required when config.n_phases=:heuristic
-- `verbose::Bool=true`: Print selection results when using :auto or :heuristic
+- `tmat::Matrix{Int64}`: Transition matrix (tmat[i,j] > 0 means i→j allowed)
+- `config::PhaseTypeConfig`: Phase count and structure specification
+- `data`: Required for `n_phases=:auto` (BIC selection)
+- `hazards`: Required for `n_phases=:heuristic`
+- `verbose::Bool`: Print selection results
 
 # Returns
-- `PhaseTypeSurrogate`: Surrogate with expanded state space and mappings
-
-# Structure
-For each transient observed state, we expand into multiple latent phases.
-Absorbing states remain as single states. The expanded Q matrix has structure:
-
-```
-Observed states:  1 (transient)  →  2 (transient)  →  3 (absorbing)
-                    ↓                  ↓
-Expanded:        [1a→1b→1c]     →  [2a→2b]        →  [3]
-                 (3 phases)        (2 phases)        (1 phase)
-```
+`PhaseTypeSurrogate` with expanded state space and Q matrix.
 
 # Example
 ```julia
-tmat = [0 1 1; 0 0 1; 0 0 0]  # 1→2, 1→3, 2→3
-
-# With explicit n_phases (for inference)
-config = PhaseTypeConfig(n_phases=3)
-surrogate = build_phasetype_surrogate(tmat, config)
-
-# With BIC-based auto-selection (for MCEM proposals)
 config = PhaseTypeConfig(n_phases=:auto)
 surrogate = build_phasetype_surrogate(tmat, config; data=my_data)
-
-# With heuristic defaults based on hazard types (faster, no model fitting)
-config = PhaseTypeConfig(n_phases=:heuristic)
-surrogate = build_phasetype_surrogate(tmat, config; hazards=model.hazards)
 ```
 
 See also: [`PhaseTypeConfig`](@ref), [`PhaseTypeSurrogate`](@ref)
@@ -2455,30 +2118,12 @@ end
     build_expanded_Q(tmat, n_phases_per_state, state_to_phases, phase_to_state,
                      phasetype_dists, n_expanded)
 
-Construct the expanded intensity matrix Q for the phase-type augmented model.
+Construct expanded intensity matrix Q for phase-type augmented model.
 
-The expanded Q matrix combines:
-1. Within-state phase transitions (from PH sub-intensity matrices)
-2. Between-state transitions (at absorption from last phase or any phase with absorption)
-
-# Structure for Coxian PH
-For a state with p phases and transitions to states j₁, j₂, ...:
-- Phases 1 to p-1 can transition to next phase OR absorb (→ transition to another state)
-- Phase p must absorb (→ transition to another state)
-- Absorption rates are distributed among destination states proportionally
-
-# Arguments
-- `tmat`: Original transition matrix
-- `n_phases_per_state`: Number of phases per observed state
-- `state_to_phases`: Mapping from observed state to phase indices
-- `phase_to_state`: Mapping from phase index to observed state
-- `phasetype_dists`: Dictionary of PhaseTypeDistribution per transient state
-- `n_expanded`: Total number of expanded states
-- `transition_rates`: Optional dictionary mapping (statefrom, stateto) → rate for 
-   weighted distribution of absorption rates among destinations
+Combines within-state phase transitions and between-state absorption transitions.
 
 # Returns
-- `Matrix{Float64}`: Expanded intensity matrix (n_expanded × n_expanded)
+`Matrix{Float64}`: n_expanded × n_expanded intensity matrix.
 """
 function build_expanded_Q(tmat::Matrix{Int64}, 
                           n_phases_per_state::Vector{Int},
@@ -2745,55 +2390,23 @@ end
 
 Expand data for phase-type forward-backward sampling.
 
-Exact observations (obstype=1) are split into two rows:
-1. A sojourn interval [tstart, tstop) where the subject is in `statefrom` but phase is unknown
-2. An instantaneous exact observation at tstop of the transition to `stateto`
-
-This ensures the forward-backward algorithm properly accounts for phase
-uncertainty during sojourn times.
+Splits exact observations (obstype=1) into:
+1. Sojourn interval [tstart, tstop) with censored state
+2. Instantaneous exact observation at tstop
 
 # Arguments
-- `data::DataFrame`: Original data with columns id, tstart, tstop, statefrom, stateto, obstype
-- `n_states::Int`: Number of observed states (used to generate censoring patterns)
+- `data::DataFrame`: Original data with id, tstart, tstop, statefrom, stateto, obstype
+- `n_states::Int`: Number of observed states
 
 # Returns
-- `NamedTuple` with fields:
-  - `expanded_data::DataFrame`: Data with exact observations expanded
-  - `censoring_patterns::Matrix{Float64}`: Censoring patterns for the expanded obstypes
-  - `original_row_map::Vector{Int}`: Maps expanded row index to original row index
+NamedTuple with:
+- `expanded_data::DataFrame`: Data with exact obs expanded
+- `censoring_patterns::Matrix{Float64}`: Patterns for phase uncertainty
+- `original_row_map::Vector{Int}`: Maps expanded → original row indices
 
-# Censoring Pattern Convention
-For each observed state s, we create a censoring pattern with obstype = 2 + s
-that indicates "subject is known to be in state s (but phase is unknown)".
+Censoring patterns: obstype = 2 + s indicates "subject in state s, phase unknown".
 
-The censoring patterns matrix has structure:
-  - Row 1 (obstype=3): state 1 possible (1.0 in column 2, 0.0 elsewhere)
-  - Row 2 (obstype=4): state 2 possible (1.0 in column 3, 0.0 elsewhere)
-  - ...
-  - Row n (obstype=2+n): state n possible
-
-# Example
-```julia
-# Original exact data
-data = DataFrame(
-    id = [1, 1],
-    tstart = [0.0, 1.0],
-    tstop = [1.0, 2.0],
-    statefrom = [1, 2],
-    stateto = [2, 3],
-    obstype = [1, 1]  # Both exact observations
-)
-
-result = expand_data_for_phasetype(data, 3)
-
-# Expanded data has 4 rows:
-# Row 1: id=1, [0.0, 1.0), statefrom=1, stateto=0, obstype=3 (censored to state 1)
-# Row 2: id=1, [1.0, 1.0], statefrom=0, stateto=2, obstype=1 (exact obs at t=1.0)
-# Row 3: id=1, [1.0, 2.0), statefrom=2, stateto=0, obstype=4 (censored to state 2)
-# Row 4: id=1, [2.0, 2.0], statefrom=0, stateto=3, obstype=1 (exact obs at t=2.0)
-```
-
-See also: [`build_phasetype_emat`](@ref), [`build_phasetype_emat_expanded`](@ref)
+See also: [`build_phasetype_emat`](@ref)
 """
 function expand_data_for_phasetype(data::DataFrame, n_states::Int)
     
