@@ -286,7 +286,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
                 # Surrogate log-likelihood: marginal density of COLLAPSED path under phase-type
                 # This ensures importance weight = f(Z|θ) / q(Z|θ') evaluates the SAME path Z
                 # in both numerator and denominator (essential for correct IS)
-                loglik_surrog[i][j] = loglik_phasetype_path(path_result.collapsed, phasetype_surrogate)
+                loglik_surrog[i][j] = loglik_phasetype_collapsed_path(path_result.collapsed, phasetype_surrogate)
             else
                 # Markov proposal: standard sampling
                 samplepaths[i][j] = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, 
@@ -2065,7 +2065,7 @@ end
 
 
 """
-    loglik_expanded_path(expanded_path::SamplePath, Q::Matrix{Float64})
+    loglik_phasetype_expanded_path(expanded_path::SamplePath, Q::Matrix{Float64})
 
 Compute log-density of a sample path under a CTMC with intensity matrix Q.
 
@@ -2076,13 +2076,16 @@ where qₛ = -Q[s,s] is the total exit rate from state s, and q_{s,d} = Q[s,d] i
 transition rate from s to d.
 
 # Arguments
-- `expanded_path::SamplePath`: Sample path with states indexing into Q
-- `Q::Matrix{Float64}`: CTMC intensity matrix
+- `expanded_path::SamplePath`: Sample path in expanded phase space (states index into Q)
+- `Q::Matrix{Float64}`: CTMC intensity matrix in expanded phase space
 
 # Returns
 - `Float64`: Log-likelihood (density) of the path
+
+# See also
+- [`loglik_phasetype_collapsed_path`](@ref): For paths in observed (collapsed) state space
 """
-function loglik_expanded_path(expanded_path::SamplePath, Q::Matrix{Float64})
+function loglik_phasetype_expanded_path(expanded_path::SamplePath, Q::Matrix{Float64})
     loglik = 0.0
     
     n_transitions = length(expanded_path.times) - 1
@@ -2117,12 +2120,12 @@ function loglik_expanded_path(expanded_path::SamplePath, Q::Matrix{Float64})
 end
 
 # Convenience method using PhaseTypeSurrogate
-loglik_expanded_path(expanded_path::SamplePath, surrogate::PhaseTypeSurrogate) = 
-    loglik_expanded_path(expanded_path, surrogate.expanded_Q)
+loglik_phasetype_expanded_path(expanded_path::SamplePath, surrogate::PhaseTypeSurrogate) = 
+    loglik_phasetype_expanded_path(expanded_path, surrogate.expanded_Q)
 
 
 """
-    loglik_phasetype_path(path::SamplePath, surrogate::PhaseTypeSurrogate)
+    loglik_phasetype_collapsed_path(path::SamplePath, surrogate::PhaseTypeSurrogate)
 
 Compute log-density of a collapsed sample path under the phase-type surrogate.
 
@@ -2131,14 +2134,20 @@ The density of sojourn time τ in state s followed by exit to state d is:
   f(τ; s→d) = π' * exp(S*τ) * r
 where π = (1,0,...,0)', S = sub-intensity, r = exit rates to d
 
+This function analytically integrates over all possible phase-level paths
+that could produce the observed collapsed path.
+
 # Arguments
 - `path::SamplePath`: Sample path in observed (collapsed) state space
 - `surrogate::PhaseTypeSurrogate`: The phase-type surrogate with expanded Q matrix
 
 # Returns
 - `Float64`: Log-density of the collapsed path under the phase-type model
+
+# See also
+- [`loglik_phasetype_expanded_path`](@ref): For paths in expanded phase space
 """
-function loglik_phasetype_path(path::SamplePath, surrogate::PhaseTypeSurrogate)
+function loglik_phasetype_collapsed_path(path::SamplePath, surrogate::PhaseTypeSurrogate)
     
     loglik = 0.0
     Q = surrogate.expanded_Q

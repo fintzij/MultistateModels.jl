@@ -636,23 +636,62 @@ function expand_data_for_phasetype_fitting(data::DataFrame, mappings::PhaseTypeM
     expansion_result = expand_data_for_phasetype(data, n_observed)
     expanded_data = expansion_result.expanded_data
     
+    # Build censoring patterns for phase uncertainty FIRST (needed for obstype mapping)
+    # Each observed state maps to a set of possible phases
+    # Row s corresponds to obstype = s + 2
+    censoring_patterns = _build_phase_censoring_patterns(mappings)
+    
     # Now map state indices to phase indices in expanded space
-    # statefrom: map to first phase of the state
-    # stateto: map to first phase of the destination state
+    # For statefrom: map to first phase of the state (always unambiguous - we know 
+    # which phase we're starting from based on previous observation)
     # Handle special case: statefrom=0 (from censored interval) stays 0
-    #                      stateto=0 (censored destination) stays 0
     expanded_data.statefrom = [
         s == 0 ? 0 : first(mappings.state_to_phases[s]) 
         for s in expanded_data.statefrom
     ]
-    expanded_data.stateto = [
-        s == 0 ? 0 : first(mappings.state_to_phases[s]) 
-        for s in expanded_data.stateto
-    ]
     
-    # Build censoring patterns for phase uncertainty
-    # Each observed state maps to a set of possible phases
-    censoring_patterns = _build_phase_censoring_patterns(mappings)
+    # For stateto: handle based on observation type and phase uncertainty
+    # - obstype=1 (exact): instantaneous transition, map to first phase (will be refined by hazard ratios)
+    # - obstype=2 (panel): destination state has phase uncertainty, use censoring pattern
+    # - obstype=4 (sojourn): stateto=0, stays 0
+    # - other obstypes: already censored, stays 0
+    n_rows = nrow(expanded_data)
+    new_stateto = Vector{Int}(undef, n_rows)
+    new_obstype = copy(expanded_data.obstype)
+    
+    for i in 1:n_rows
+        s = expanded_data.stateto[i]
+        obstype_i = expanded_data.obstype[i]
+        
+        if s == 0
+            # Already censored (sojourn intervals, etc.) - keep as is
+            new_stateto[i] = 0
+        elseif obstype_i == 2
+            # Panel observation: destination state has phase uncertainty
+            # The observation says "in state s at time t" but we don't know which phase
+            # Use censoring pattern to allow all phases of state s
+            n_phases_in_state = length(mappings.state_to_phases[s])
+            if n_phases_in_state > 1
+                # Multiple phases: use censoring pattern (obstype = s + 2)
+                # This triggers build_emat to use censoring_patterns[s, :]
+                new_obstype[i] = s + 2
+                new_stateto[i] = 0  # Triggers forward algorithm with emission matrix
+            else
+                # Single phase: no uncertainty, map directly
+                new_stateto[i] = first(mappings.state_to_phases[s])
+            end
+        elseif obstype_i == 1
+            # Exact observation (instantaneous transition): map to first phase
+            # The exact destination phase will be determined by hazard ratios in loglik_markov
+            new_stateto[i] = first(mappings.state_to_phases[s])
+        else
+            # Other observation types: keep stateto as is (already handled)
+            new_stateto[i] = s == 0 ? 0 : first(mappings.state_to_phases[s])
+        end
+    end
+    
+    expanded_data.stateto = new_stateto
+    expanded_data.obstype = new_obstype
     
     return expanded_data, censoring_patterns
 end
