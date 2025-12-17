@@ -2,17 +2,18 @@
 FUTURE FEATURES TODO - MultistateModels.jl
 ================================================================================
 Created: 2025-11-29
-Updated: 2025-12-16
+Updated: 2025-06-28
 Branch: SIR
 
 ================================================================================
 VALIDATION TASKS (Priority)
 ================================================================================
 
-⚠️ Validate Observation/Subject Weights
-   - Ensure SubjectWeights are correctly propagated through MCEM
-   - Verify weighted likelihood computation in fit()
-   - Test with non-uniform weights
+✅ Validate Observation/Subject Weights (2025-06-28)
+   - Verified SubjectWeights propagation through MCEM (mcem_mll, mcem_ase, mcem_mll_sir)
+   - Tested weighted vs duplicated data equivalence
+   - Confirmed subject-level scaling in loglik_markov
+   - Tests in MultistateModelsTests/unit/test_subject_weights.jl
 
 ⚠️ Validate Emission Matrices
    - Verify emission matrix construction for censoring patterns
