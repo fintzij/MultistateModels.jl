@@ -3336,45 +3336,6 @@ function build_phasetype_model(tmat::Matrix{Int64}, config::PhaseTypeConfig;
     )
 end
 
-"""
-    phasetype_parameters_to_Q(fitted_model, surrogate::PhaseTypeSurrogate)
-
-Extract fitted parameters and construct the intensity matrix Q.
-
-After fitting a phase-type model, this converts the fitted hazard parameters
-back to an intensity matrix on the expanded state space.
-
-# Arguments
-- `fitted_model`: Result from `fit(model)` where model was built by `build_phasetype_model`
-- `surrogate::PhaseTypeSurrogate`: The surrogate used to build the model
-
-# Returns
-- `Matrix{Float64}`: Fitted intensity matrix Q on expanded state space
-"""
-function phasetype_parameters_to_Q(fitted_model, surrogate::PhaseTypeSurrogate)
-    n_expanded = surrogate.n_expanded_states
-    Q = zeros(Float64, n_expanded, n_expanded)
-    
-    # Get fitted parameters (on natural/positive scale)
-    pars = fitted_model.parameters
-    hazards = fitted_model.model.hazards
-    
-    # Fill in Q matrix from fitted hazard rates
-    for (idx, haz) in enumerate(hazards)
-        # Get intercept parameter (baseline rate on natural scale)
-        # pars[idx] is a NamedTuple: (baseline = (param_name = ...,),)
-        rate = exp(only(values(pars[idx].baseline)))  # Parameters stored on log scale
-        Q[haz.statefrom, haz.stateto] = rate
-    end
-    
-    # Set diagonal elements
-    for i in 1:n_expanded
-        Q[i, i] = -sum(Q[i, j] for j in 1:n_expanded if j != i)
-    end
-    
-    return Q
-end
-
 # =============================================================================
 # NOTE: Phase-Type Model Methods Removed (Package Streamlining)
 # =============================================================================
