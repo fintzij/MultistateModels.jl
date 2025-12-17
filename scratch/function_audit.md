@@ -1,8 +1,8 @@
 # Function Audit - Phase-Type Module
 
-**Updated:** 2025-12-17  
-**Status:** Complete audit of split phasetype/ module (with consolidation)  
-**Files:** types.jl (365), surrogate.jl (284), expansion.jl (1773) = 2,422 lines total
+**Updated:** 2025-12-18  
+**Status:** Complete audit of split phasetype/ module (with consolidation and legacy removal)  
+**Files:** types.jl (365), surrogate.jl (280), expansion.jl (1,759) = 2,404 lines total
 
 ---
 
@@ -11,9 +11,9 @@
 | File | Lines | Purpose | Functions | Types |
 |------|-------|---------|-----------|-------|
 | `types.jl` | 365 | Core type definitions | 7 | 5 |
-| `surrogate.jl` | 284 | Surrogate building | 5 | 0 |
-| `expansion.jl` | 1,773 | State space expansion, model building | 28 | 0 |
-| **Total** | **2,422** | | **40** | **5** |
+| `surrogate.jl` | 280 | Surrogate building | 5 | 0 |
+| `expansion.jl` | 1,759 | State space expansion, model building | 27 | 0 |
+| **Total** | **2,404** | | **39** | **5** |
 
 ---
 
