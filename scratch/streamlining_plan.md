@@ -31,6 +31,9 @@
 | 2025-12-17 | hazard/ split | Split hazards.jl into 7 new files in hazard/ subfolder |
 | 2025-12-18 | utilities/ split | Split helpers.jl (1,966 lines) into 6 files in utilities/ |
 | 2025-12-18 | Deleted old files | Removed common.jl, hazards.jl, helpers.jl (5,292 lines total) |
+| 2025-12-18 | phasetype/ docstring trim | Removed ~1,175 lines of obsolete docstrings (commit 7538ab5) |
+| 2025-12-18 | phasetype/ file split | Split phasetype.jl into types.jl, surrogate.jl, expansion.jl (commit 4ac0fbd) |
+| 2025-12-18 | phasetype/ consolidation | Eliminated duplicate functions using existing helpers (commit e0461ce) |
 
 ---
 
@@ -79,8 +82,10 @@ src/
 ├── output/                       # Post-fit operations
 │   ├── accessors.jl             # get_parameters, get_vcov, etc.
 │   └── variance.jl              # Variance estimation
-├── phasetype/                    # Phase-type distributions
-│   └── expansion.jl             # Phase-type expansion logic
+├── phasetype/                    # Phase-type distributions (3 files, 2,443 lines)
+│   ├── types.jl                 # ProposalConfig, PhaseTypeDistribution, etc. (365)
+│   ├── surrogate.jl             # Coxian construction, surrogate building (288)
+│   └── expansion.jl             # State space expansion, model building (1,790)
 ├── simulation/                   # Simulation
 │   ├── path_utilities.jl        # SamplePath operations
 │   └── simulate.jl              # simulate(), simulate_paths()
