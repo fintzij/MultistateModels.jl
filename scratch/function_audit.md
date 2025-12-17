@@ -2,7 +2,7 @@
 
 **Updated:** 2025-12-17  
 **Status:** Complete audit of split phasetype/ module (with consolidation)  
-**Files:** types.jl (365), surrogate.jl (288), expansion.jl (1790) = 2,443 lines total
+**Files:** types.jl (365), surrogate.jl (284), expansion.jl (1773) = 2,422 lines total
 
 ---
 
@@ -11,9 +11,9 @@
 | File | Lines | Purpose | Functions | Types |
 |------|-------|---------|-----------|-------|
 | `types.jl` | 365 | Core type definitions | 7 | 5 |
-| `surrogate.jl` | 288 | Surrogate building | 6 | 0 |
-| `expansion.jl` | 1,790 | State space expansion, model building | 29 | 0 |
-| **Total** | **2,443** | | **42** | **5** |
+| `surrogate.jl` | 284 | Surrogate building | 5 | 0 |
+| `expansion.jl` | 1,773 | State space expansion, model building | 28 | 0 |
+| **Total** | **2,422** | | **40** | **5** |
 
 ---
 
@@ -78,7 +78,7 @@
 | Line | Function | Purpose | Callers | Tests | Recommendation |
 |------|----------|---------|---------|-------|----------------|
 | 29 | `build_coxian_intensity()` | Build Q matrix | _build_default_phasetype | ✅ | KEEP |
-| 48 | `build_coxian_subintensity()` | Legacy alias | backward compat | ⚠️ | KEEP (alias) |
+| - | ~~`build_coxian_subintensity()`~~ | ~~Legacy alias~~ | - | - | **REMOVED** (unused) |
 
 ### 2.2 Surrogate Building (Lines 65-125)
 
@@ -109,8 +109,8 @@
 | Line | Function | Purpose | Callers | Tests | Recommendation |
 |------|----------|---------|---------|-------|----------------|
 | 49 | `build_phasetype_mappings()` | Build state mappings | _build_phasetype_model_from_hazards | ✅ | KEEP |
-| 96 | `build_phasetype_mappings()` | Legacy (no n_phases) | backward compat | ⚠️ | KEEP |
-| 123 | `_build_expanded_tmat()` | Build expanded tmat | build_phasetype_mappings | ✅ | KEEP |
+| - | ~~`build_phasetype_mappings()` (2-arg)~~ | ~~Legacy (no n_phases)~~ | - | - | **REMOVED** (unused) |
+| 101 | `_build_expanded_tmat()` | Build expanded tmat | build_phasetype_mappings | ✅ | KEEP |
 | 196 | `_build_expanded_hazard_indices()` | Hazard → expanded map | build_phasetype_mappings | ✅ | KEEP |
 | 264 | `_compute_default_n_phases()` | Default phase heuristic | build_phasetype_surrogate | ✅ | KEEP |
 
