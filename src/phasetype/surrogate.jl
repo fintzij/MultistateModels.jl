@@ -198,6 +198,79 @@ function _build_default_phasetype(n_phases::Int)
 end
 
 # =============================================================================
+# Log-likelihood for Expanded Paths
+# =============================================================================
+
+"""
+    loglik_expanded_path(path::SamplePath, surrogate::PhaseTypeSurrogate)
+
+Compute the log-likelihood of an expanded sample path under the phase-type surrogate.
+
+For a continuous-time Markov chain path with transitions at times t₀, t₁, ..., tₙ
+through states (phases) s₀, s₁, ..., sₙ, the log-likelihood is:
+
+    log L = Σᵢ [Q[sᵢ, sᵢ] × (tᵢ₊₁ - tᵢ) + log(Q[sᵢ, sᵢ₊₁])]
+
+This function computes:
+- Sojourn time contribution: diagonal element times sojourn duration
+- Transition contribution: log of off-diagonal rate for each jump
+
+# Arguments
+- `path::SamplePath`: Sample path with times and states on the expanded (phase) space
+- `surrogate::PhaseTypeSurrogate`: Phase-type surrogate containing the expanded Q matrix
+
+# Returns
+- `Float64`: Log-likelihood of the path under the surrogate Q matrix.
+  Returns 0.0 for paths with no transitions (length(states) ≤ 1).
+  Returns -Inf for impossible transitions (rate = 0).
+
+# Example
+```julia
+# 2-state model with 1 → 2 (absorbing)
+tmat = [0 1; 0 0]
+config = PhaseTypeConfig(n_phases=1)
+surrogate = build_phasetype_surrogate(tmat, config)
+
+# Set rate = 2.0 for transition 1→2
+surrogate.expanded_Q[1, 1] = -2.0
+surrogate.expanded_Q[1, 2] = 2.0
+
+# Path: state 1 for time 0.5, then to state 2
+path = SamplePath(1, [0.0, 0.5], [1, 2])
+
+ll = loglik_expanded_path(path, surrogate)
+# ≈ -2.0 * 0.5 + log(2.0) = -1.0 + 0.693 = -0.307
+```
+"""
+function loglik_expanded_path(path::SamplePath, surrogate::PhaseTypeSurrogate)
+    n_transitions = length(path.states) - 1
+    
+    # No transitions → log-likelihood is 0
+    n_transitions >= 1 || return 0.0
+    
+    Q = surrogate.expanded_Q
+    ll = 0.0
+    
+    for i in 1:n_transitions
+        state_from = path.states[i]
+        state_to = path.states[i + 1]
+        sojourn_time = path.times[i + 1] - path.times[i]
+        
+        # Sojourn time contribution: diagonal element (negative rate) × time
+        ll += Q[state_from, state_from] * sojourn_time
+        
+        # Transition contribution: log of off-diagonal rate
+        rate = Q[state_from, state_to]
+        if rate <= 0.0
+            return -Inf  # Impossible transition
+        end
+        ll += log(rate)
+    end
+    
+    return ll
+end
+
+# =============================================================================
 # Expanded Q Matrix Construction
 # =============================================================================
 
