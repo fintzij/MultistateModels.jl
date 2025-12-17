@@ -44,10 +44,6 @@ function build_coxian_intensity(λ::Vector{Float64}, μ::Vector{Float64})
     return Q
 end
 
-# Legacy alias for backward compatibility
-build_coxian_subintensity(λ::Vector{Float64}, μ::Vector{Float64}) = 
-    build_coxian_intensity(λ, μ)[1:end-1, 1:end-1]
-
 # =============================================================================
 # Building Phase-Type Surrogates
 # =============================================================================

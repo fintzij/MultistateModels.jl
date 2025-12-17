@@ -80,23 +80,6 @@ function build_phasetype_mappings(hazards::Vector{<:HazardFunction},
     )
 end
 
-# Legacy method for backward compatibility (computes n_phases from hazards)
-function build_phasetype_mappings(hazards::Vector{<:HazardFunction}, 
-                                   tmat::Matrix{Int})
-    n_observed = size(tmat, 1)
-    
-    # Determine n_phases per state from :pt hazards (legacy behavior)
-    n_phases_per_state = ones(Int, n_observed)
-    for h in hazards
-        if h isa PhaseTypeHazardSpec
-            s = h.statefrom
-            n_phases_per_state[s] = max(n_phases_per_state[s], h.n_phases)
-        end
-    end
-    
-    return build_phasetype_mappings(hazards, tmat, n_phases_per_state)
-end
-
 """
     _build_expanded_tmat(original_tmat, n_phases_per_state, state_to_phases, hazards)
 
