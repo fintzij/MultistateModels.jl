@@ -17,3 +17,6 @@ test/testcoverage_files/
 
 # External test package (separate repo: https://github.com/fintzij/MultistateModelsTests.jl)
 MultistateModelsTests/
+
+# JSS paper (separate private repo: https://github.com/fintzij/MultistateModels_JSS_Paper)
+docs/jss_paper/
