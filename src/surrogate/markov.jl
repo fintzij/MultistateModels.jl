@@ -69,7 +69,7 @@ function fit_surrogate(model::MultistateProcess;
     # New unified API parameters
     type::Symbol = :markov,
     method::Symbol = :mle,
-    n_phases::Union{Int, Vector{Int}, Symbol} = 2)
+    n_phases::Union{Int, Dict{Int,Int}, Symbol} = 2)
     
     # Check if using new API (type or method specified non-default)
     using_new_api = (type !== :markov) || 
@@ -227,7 +227,7 @@ Internal function to fit a phase-type surrogate.
 """
 function _fit_phasetype_surrogate(model;
     method::Symbol = :mle,
-    n_phases::Union{Int, Vector{Int}, Symbol} = 2,
+    n_phases::Union{Int, Dict{Int,Int}, Symbol} = 2,
     surrogate_parameters = nothing,
     surrogate_constraints = nothing,
     verbose = true)
@@ -271,16 +271,14 @@ function _build_phasetype_from_markov(model, markov_surrogate::MarkovSurrogate;
         n_phases_vec = _compute_default_n_phases(model.tmat, model.hazards)
     elseif n_phases isa Int
         n_phases_vec = [is_absorbing[s] ? 1 : n_phases for s in 1:n_states]
-    else
-        # Per-state specification (Vector{Int})
+    elseif n_phases isa Dict{Int,Int}
+        # Per-state specification via Dict - states not in Dict default to 1 phase
         n_phases_vec = zeros(Int, n_states)
-        transient_idx = 1
         for s in 1:n_states
             if is_absorbing[s]
                 n_phases_vec[s] = 1
             else
-                n_phases_vec[s] = n_phases[transient_idx]
-                transient_idx += 1
+                n_phases_vec[s] = get(n_phases, s, 1)
             end
         end
     end
@@ -322,8 +320,10 @@ function _build_phasetype_from_markov(model, markov_surrogate::MarkovSurrogate;
                                   phase_to_state, phasetype_dists, n_expanded;
                                   transition_rates = transition_rates)
     
-    # Create PhaseTypeConfig for storage
-    ph_config = PhaseTypeConfig(n_phases = n_phases_vec, structure = structure,
+    # Create PhaseTypeConfig for storage (convert n_phases_vec back to Dict)
+    # Only include states with n_phases > 1 (absorbing states always have 1)
+    n_phases_dict = Dict{Int,Int}(s => n_phases_vec[s] for s in 1:n_states if n_phases_vec[s] > 1)
+    ph_config = PhaseTypeConfig(n_phases = n_phases_dict, structure = structure,
                                 max_phases = config.max_phases)
     
     surrogate = PhaseTypeSurrogate(
@@ -418,7 +418,7 @@ See also: [`is_surrogate_fitted`](@ref), [`fit_surrogate`](@ref), [`multistatemo
 function set_surrogate!(model::MultistateProcess; 
     type::Symbol = :markov,
     method::Symbol = :mle,
-    n_phases::Union{Int, Vector{Int}, Symbol} = 2,
+    n_phases::Union{Int, Dict{Int,Int}, Symbol} = 2,
     surrogate_parameters = nothing, 
     surrogate_constraints = nothing, 
     verbose = true,

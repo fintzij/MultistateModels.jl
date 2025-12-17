@@ -165,8 +165,31 @@ export
     paths_to_dataset,
     summary
 
-# typedefs
-include("common.jl")
+# =============================================================================
+# Type Definitions (from types/ subfolder)
+# =============================================================================
+# Order matters: abstract types first, then concrete types that depend on them
+
+# Abstract type hierarchy
+include("types/abstract.jl")
+
+# Hazard metadata and caching types
+include("types/hazard_metadata.jl")
+
+# Hazard struct definitions (internal runtime types)
+include("types/hazard_structs.jl")
+
+# User-facing hazard specification types
+include("types/hazard_specs.jl")
+
+# Model struct definitions (MultistateModel, MultistateModelFitted, etc.)
+include("types/model_structs.jl")
+
+# Data container types (SamplePath, ExactData, MPanelData, etc.)
+include("types/data_containers.jl")
+
+# Infrastructure types (AD backends, threading config)
+include("types/infrastructure.jl")
 
 # helpers
 include("helpers.jl")
@@ -174,8 +197,31 @@ include("helpers.jl")
 # shared stats utilities
 include("utilities/stats.jl")
 
-# hazard related functions
-include("hazards.jl")
+# =============================================================================
+# Hazard Functions (from hazard/ subfolder)
+# =============================================================================
+# Order matters: covariates first, then transforms, generators, evaluation
+
+# Covariate extraction and linear predictor
+include("hazard/covariates.jl")
+
+# Time transform optimizations
+include("hazard/time_transform.jl")
+
+# Hazard generator functions (runtime code generation)
+include("hazard/generators.jl")
+
+# Callable hazard interface and eval_hazard/eval_cumhaz API
+include("hazard/evaluation.jl")
+
+# Total hazard and survival probability functions
+include("hazard/total_hazard.jl")
+
+# Transition probability matrix functions
+include("hazard/tpm.jl")
+
+# User-facing API (cumulative_incidence, compute_hazard, etc.)
+include("hazard/api.jl")
 
 # crude parameter initialization functions
 include("utilities/initialization.jl")

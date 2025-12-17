@@ -2,7 +2,7 @@
 
 **Branch:** `package_streamlining`  
 **Started:** 2025-12-16  
-**Last Updated:** 2025-12-16
+**Last Updated:** 2025-12-17
 
 ## Guiding Principles
 
@@ -26,14 +26,15 @@
 | 2025-12-16 | `expanded` kwarg | Added to `simulate`, `simulate_paths`, `simulate_data` |
 | 2025-12-16 | Interaction term fix | `extract_covariates_lightweight` now handles interaction terms |
 | 2025-12-16 | Phase-type method validation | `initialize_parameters!` rejects `:markov` for PT models |
+| 2025-12-17 | File reorganization | Moved 14 files into logical subfolders (commit 3a25ba2) |
 
 ---
 
 ## REMAINING WORK
 
-### Phase 3.1: Phase-Type Code Reduction (PARTIALLY COMPLETE)
+### Phase 3.1: Phase-Type Code Reduction (DEFERRED)
 
-**Goal:** Reduce `phasetype.jl` from 4,586 lines to ~500 lines.
+**Goal:** Reduce `phasetype/expansion.jl` from 3,622 lines to ~500 lines.
 
 **Completed:**
 - ✅ PhaseTypeModel struct eliminated
@@ -41,12 +42,13 @@
 - ✅ Accessors work with unified model struct
 - ✅ Simulation functions support `expanded` kwarg
 
-**Remaining:**
-- [ ] Remove ~50 redundant PT-specific functions (still using deprecated markers)
-- [ ] Consolidate expansion/collapse code
-- [ ] Move remaining code to `construction/phasetype_expansion.jl`
+**Deferred:**
+- ⏸️ Remove ~50 redundant PT-specific functions - **requires migration, not deletion**
+  - `compute_phasetype_marginal_loglik_deprecated` still called in `inference/fit.jl:879`
+  - `loglik_phasetype_path_deprecated` still called in `inference/sampling.jl:289`
+  - These need to be replaced with calls to standard `loglik_markov` on expanded data
 
-### Phase 3.2: File Reorganization (NOT STARTED)
+### Phase 3.2: File Reorganization ✅ COMPLETE (commit 3a25ba2)
 
 The subfolder reorganization plan is documented below but has not been implemented.
 Current files remain in flat `src/` structure.

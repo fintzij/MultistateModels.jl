@@ -876,7 +876,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     #   This is r(Y|θ') in the importance sampling formula:
     #   log f̂(Y|θ) = log r(Y|θ') + Σᵢ log(mean(νᵢ))
     if use_phasetype
-        NormConstantProposal = compute_phasetype_marginal_loglik_deprecated(
+        NormConstantProposal = compute_phasetype_marginal_loglik(
             model, phasetype_surrogate, emat_ph;
             expanded_data = expanded_ph_data,
             expanded_subjectindices = ph_subjectindices)

@@ -38,11 +38,12 @@ Configuration for MCEM path proposals.
 
 # Fields
 - `type::Symbol`: Proposal type - `:markov` (default) or `:phasetype`
-- `n_phases::Union{Symbol, Int, Vector{Int}}`: Number of phases (for `:phasetype` only)
+- `n_phases::Union{Symbol, Int, Dict{Int,Int}}`: Number of phases (for `:phasetype` only)
   - `:auto`: BIC-based selection (fits 1 to max_phases, selects best by BIC)
   - `:heuristic`: 2 phases for states with non-Markovian transitions, 1 for exponential
   - `Int`: Same number of phases for all transient states
-  - `Vector{Int}`: Per-state specification (length = number of transient states)
+  - `Dict{Int,Int}`: Per-state specification, e.g., `Dict(1 => 3, 2 => 2)` for 3 phases
+    on state 1 and 2 phases on state 2. States not in the Dict default to 1 phase.
 - `structure::Symbol`: Coxian structure for phase-type (default: `:unstructured`)
   - `:unstructured`: All progression rates (r₁, r₂, ...) and absorption rates (a₁, a₂, ..., aₙ) 
     are free parameters (most flexible, recommended default)
@@ -60,7 +61,7 @@ Configuration for MCEM path proposals.
 | `:auto` | Fits models with 1–max_phases and selects by BIC | Best fit, higher computational cost |
 | `:heuristic` | 2 phases for non-Markov states, 1 for exponential | Fast sensible default |
 | `Int` | Same for all transient states | Simple manual control |
-| `Vector{Int}` | Per-state specification | Fine-grained control |
+| `Dict{Int,Int}` | Per-state specification (state => n_phases) | Fine-grained control |
 
 # Usage
 
@@ -79,10 +80,10 @@ fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=:heuristic))
 
 # Phase-type with manual override
 fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=3))
-fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=[2, 3, 1]))
+fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3, 2 => 2)))  # recommended
 
 # Phase-type with SCTP constraint
-fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=3, structure=:sctp))
+fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3), structure=:sctp))
 ```
 
 For backward compatibility, the existing kwargs `optimize_surrogate`,
@@ -93,7 +94,7 @@ See also: [`PhaseTypeConfig`](@ref), [`PhaseTypeSurrogate`](@ref), [`PhaseTypePr
 """
 struct ProposalConfig
     type::Symbol
-    n_phases::Union{Symbol, Int, Vector{Int}}
+    n_phases::Union{Symbol, Int, Dict{Int,Int}}
     structure::Symbol
     max_phases::Int
     optimize::Bool
@@ -102,7 +103,7 @@ struct ProposalConfig
     
     function ProposalConfig(;
             type::Symbol = :markov,
-            n_phases::Union{Symbol, Int, Vector{Int}} = :auto,
+            n_phases::Union{Symbol, Int, Dict{Int,Int}} = :auto,
             structure::Symbol = :unstructured,
             max_phases::Int = 5,
             optimize::Bool = true,
@@ -119,8 +120,11 @@ struct ProposalConfig
                 throw(ArgumentError("n_phases symbol must be :auto or :heuristic, got :$n_phases"))
         elseif n_phases isa Int
             n_phases >= 1 || throw(ArgumentError("n_phases must be >= 1"))
-        else
-            all(n >= 1 for n in n_phases) || throw(ArgumentError("all n_phases must be >= 1"))
+        elseif n_phases isa Dict{Int,Int}
+            all(v >= 1 for v in values(n_phases)) || 
+                throw(ArgumentError("all n_phases values must be >= 1"))
+            all(k >= 1 for k in keys(n_phases)) || 
+                throw(ArgumentError("all n_phases keys (state indices) must be >= 1"))
         end
         
         # Validate structure
@@ -179,7 +183,7 @@ non-exponential sojourn time distributions in importance sampling.
   - `:auto`: BIC-based selection (fits 1–max_phases, selects best)
   - `:heuristic`: 2 phases for non-Markov states, 1 for exponential
   - `Int`: Same for all transient states
-  - `Vector{Int}`: Per-state specification
+  - `Dict{Int,Int}`: Per-state specification, e.g., `Dict(1 => 3, 2 => 2)`
 - `max_phases`: Maximum phases for `:auto` (default: 5)
 - `optimize`: Optimize parameters (default: true)
 - `parameters`: Manual parameter override (default: nothing)
@@ -195,12 +199,12 @@ fit(model; proposal=PhaseTypeProposal(n_phases=:heuristic))
 
 # Manual specification
 fit(model; proposal=PhaseTypeProposal(n_phases=3))
-fit(model; proposal=PhaseTypeProposal(n_phases=[2, 3, 1]))
+fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3, 2 => 2)))
 ```
 
 See also: [`ProposalConfig`](@ref), [`MarkovProposal`](@ref)
 """
-PhaseTypeProposal(; n_phases::Union{Symbol, Int, Vector{Int}} = :auto, kwargs...) = 
+PhaseTypeProposal(; n_phases::Union{Symbol, Int, Dict{Int,Int}} = :auto, kwargs...) = 
     ProposalConfig(type=:phasetype, n_phases=n_phases; kwargs...)
 
 """
@@ -400,11 +404,12 @@ end
 Configuration options for phase-type surrogate model.
 
 # Fields
-- `n_phases::Union{Symbol, Int, Vector{Int}}`: Number of phases per state
+- `n_phases::Union{Symbol, Int, Dict{Int,Int}}`: Number of phases per state
   - `:auto`: Select via BIC when building surrogate (requires data)
   - `:heuristic`: 2 phases for states with non-Markovian transitions, 1 for exponential
   - `Int`: Same number of phases for all transient states
-  - `Vector{Int}`: Per-state phase counts (length = n_transient_states)
+  - `Dict{Int,Int}`: Per-state phase counts, e.g., `Dict(1 => 3, 2 => 2)` for 3 phases
+    on state 1 and 2 phases on state 2. States not in the Dict default to 1 phase.
 - `structure::Symbol`: Coxian structure (default: `:unstructured`)
   - `:unstructured`: All progression rates (r₁, r₂, ...) and absorption rates (a₁, a₂, ..., aₙ) 
     are free parameters (most flexible, recommended default)
@@ -417,7 +422,7 @@ Configuration options for phase-type surrogate model.
 - `max_phases::Int`: Maximum phases to consider when n_phases=:auto (default: 5)
 
 For **inference** (fitting phase-type hazard models), you must explicitly specify
-`n_phases` as an `Int` or `Vector{Int}`.
+`n_phases` as an `Int` or `Dict{Int,Int}`.
 
 For **MCEM proposals** (building surrogates):
 - Use `:auto` to select the number of phases via BIC comparison
@@ -427,6 +432,7 @@ For **MCEM proposals** (building surrogates):
 ```julia
 # For inference - explicit specification required
 config = PhaseTypeConfig(n_phases=3)
+config = PhaseTypeConfig(n_phases=Dict(1 => 3, 2 => 2))
 
 # For MCEM surrogates - auto-selection via BIC
 config = PhaseTypeConfig(n_phases=:auto)
@@ -437,18 +443,18 @@ config = PhaseTypeConfig(n_phases=:heuristic)
 surrogate = build_phasetype_surrogate(tmat, config; hazards=model.hazards)
 
 # Different Coxian structures
-config = PhaseTypeConfig(n_phases=3, structure=:sctp)          # SCTP constraint
-config = PhaseTypeConfig(n_phases=3, structure=:unstructured)  # Free parameters
+config = PhaseTypeConfig(n_phases=Dict(1 => 3), structure=:sctp)  # SCTP constraint
+config = PhaseTypeConfig(n_phases=3, structure=:unstructured)     # Free parameters
 ```
 """
 struct PhaseTypeConfig
-    n_phases::Union{Symbol, Int, Vector{Int}}
+    n_phases::Union{Symbol, Int, Dict{Int,Int}}
     structure::Symbol
     constraints::Bool
     max_phases::Int
     
     function PhaseTypeConfig(; 
-            n_phases::Union{Symbol, Int, Vector{Int}} = 2,
+            n_phases::Union{Symbol, Int, Dict{Int,Int}} = 2,
             structure::Symbol = :unstructured,
             constraints::Bool = true,
             max_phases::Int = 5)
@@ -458,8 +464,11 @@ struct PhaseTypeConfig
                 throw(ArgumentError("n_phases symbol must be :auto or :heuristic, got :$n_phases"))
         elseif n_phases isa Int
             n_phases >= 1 || throw(ArgumentError("n_phases must be >= 1"))
-        else
-            all(n_phases .>= 1) || throw(ArgumentError("all n_phases must be >= 1"))
+        elseif n_phases isa Dict{Int,Int}
+            all(v >= 1 for v in values(n_phases)) || 
+                throw(ArgumentError("all n_phases values must be >= 1"))
+            all(k >= 1 for k in keys(n_phases)) || 
+                throw(ArgumentError("all n_phases keys (state indices) must be >= 1"))
         end
         structure in (:unstructured, :sctp) ||
             throw(ArgumentError("structure must be :unstructured or :sctp, got :$structure"))
@@ -2325,13 +2334,19 @@ end
     _get_n_phases_per_state(n_states, is_absorbing, config)
 
 Determine number of phases for each observed state based on configuration.
+
+Handles three input formats for `config.n_phases`:
+- `Symbol` (`:auto`, `:heuristic`): defaults to 2 phases for transient states
+- `Int`: same number for all transient states
+- `Dict{Int,Int}`: per-state specification (state index => n_phases)
+  States not in the Dict default to 1 phase.
 """
 function _get_n_phases_per_state(n_states::Int, is_absorbing::Vector{Bool}, 
                                  config::PhaseTypeConfig)
     n_phases_per_state = zeros(Int, n_states)
     
     if config.n_phases isa Symbol
-        # :auto - default to 2 phases for transient states
+        # :auto or :heuristic - default to 2 phases for transient states
         for s in 1:n_states
             n_phases_per_state[s] = is_absorbing[s] ? 1 : 2
         end
@@ -2340,15 +2355,14 @@ function _get_n_phases_per_state(n_states::Int, is_absorbing::Vector{Bool},
         for s in 1:n_states
             n_phases_per_state[s] = is_absorbing[s] ? 1 : config.n_phases
         end
-    else
-        # Per-state specification (Vector{Int})
-        transient_idx = 1
+    elseif config.n_phases isa Dict{Int,Int}
+        # Per-state specification via Dict
+        # States not in the Dict default to 1 phase
         for s in 1:n_states
             if is_absorbing[s]
                 n_phases_per_state[s] = 1
             else
-                n_phases_per_state[s] = config.n_phases[transient_idx]
-                transient_idx += 1
+                n_phases_per_state[s] = get(config.n_phases, s, 1)
             end
         end
     end
@@ -2821,18 +2835,36 @@ function collapse_emission_matrix(emat_expanded::Matrix{Float64},
 end
 
 # =============================================================================
-# DEPRECATED: Phase-Type Log-Likelihood Functions
+# Phase-Type Log-Likelihood Functions
 # =============================================================================
-# These functions are deprecated and will be removed in a future version.
-# Phase-type models should use loglik_markov with properly expanded data instead.
+# These functions compute likelihoods for phase-type surrogates used in MCEM.
+# They use the forward algorithm on the expanded state space with proper
+# emission matrix handling for censoring.
 # =============================================================================
 
 """
-    compute_phasetype_marginal_loglik_deprecated(...)
+    compute_phasetype_marginal_loglik(model, surrogate, emat_ph; kwargs...)
 
-DEPRECATED: Use loglik_markov with expanded data instead.
+Compute the marginal log-likelihood of observed data under the phase-type surrogate.
+
+This is used as the normalizing constant r(Y|θ') in importance sampling:
+    log f̂(Y|θ) = log r(Y|θ') + Σᵢ log(mean(νᵢ))
+
+Uses the forward algorithm on the expanded phase state space.
+
+# Arguments
+- `model::MultistateProcess`: The multistate model containing the data
+- `surrogate::PhaseTypeSurrogate`: The fitted phase-type surrogate
+- `emat_ph::Matrix{Float64}`: Expanded emission matrix for phase states
+
+# Keyword Arguments
+- `expanded_data`: Optional expanded data for exact observations
+- `expanded_subjectindices`: Subject indices for expanded data
+
+# Returns
+- `Float64`: The marginal log-likelihood under the phase-type surrogate
 """
-function compute_phasetype_marginal_loglik_deprecated(model::MultistateProcess, 
+function compute_phasetype_marginal_loglik(model::MultistateProcess, 
                                            surrogate::PhaseTypeSurrogate,
                                            emat_ph::Matrix{Float64};
                                            expanded_data::Union{Nothing, DataFrame} = nothing,

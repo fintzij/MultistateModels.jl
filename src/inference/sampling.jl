@@ -286,7 +286,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
                 # Surrogate log-likelihood: marginal density of COLLAPSED path under phase-type
                 # This ensures importance weight = f(Z|θ) / q(Z|θ') evaluates the SAME path Z
                 # in both numerator and denominator (essential for correct IS)
-                loglik_surrog[i][j] = loglik_phasetype_path_deprecated(path_result.collapsed, phasetype_surrogate)
+                loglik_surrog[i][j] = loglik_phasetype_path(path_result.collapsed, phasetype_surrogate)
             else
                 # Markov proposal: standard sampling
                 samplepaths[i][j] = draw_samplepath(i, model, tpm_book_surrogate, hazmat_book_surrogate, 
@@ -2065,25 +2065,25 @@ end
 
 
 """
-    loglik_phasetype_expanded_deprecated(expanded_path::SamplePath, surrogate::PhaseTypeSurrogate)
+    loglik_expanded_path(expanded_path::SamplePath, Q::Matrix{Float64})
 
-DEPRECATED: Compute log-likelihood of an expanded sample path under the phase-type surrogate.
+Compute log-density of a sample path under a CTMC with intensity matrix Q.
 
-This computes the CTMC path density in the expanded (phase) state space:
-  log f(path) = sum of log(survival) + sum of log(hazard at transitions)
+This computes the CTMC path density directly:
+  log f(path) = Σᵢ [-qₛᵢ * Δtᵢ + log(qₛᵢ,dᵢ)]
 
-**WARNING**: This function is DEPRECATED. Use loglik with properly expanded data instead.
+where qₛ = -Q[s,s] is the total exit rate from state s, and q_{s,d} = Q[s,d] is the 
+transition rate from s to d.
 
 # Arguments
-- `expanded_path`: Sample path in the expanded phase state space
-- `surrogate`: PhaseTypeSurrogate with the expanded Q matrix
+- `expanded_path::SamplePath`: Sample path with states indexing into Q
+- `Q::Matrix{Float64}`: CTMC intensity matrix
 
 # Returns
-- `Float64`: Log-likelihood (density) of the expanded path
+- `Float64`: Log-likelihood (density) of the path
 """
-function loglik_phasetype_expanded_deprecated(expanded_path::SamplePath, surrogate::PhaseTypeSurrogate)
+function loglik_expanded_path(expanded_path::SamplePath, Q::Matrix{Float64})
     loglik = 0.0
-    Q = surrogate.expanded_Q
     
     n_transitions = length(expanded_path.times) - 1
     if n_transitions == 0
@@ -2116,13 +2116,20 @@ function loglik_phasetype_expanded_deprecated(expanded_path::SamplePath, surroga
     return loglik
 end
 
+# Convenience method using PhaseTypeSurrogate
+loglik_expanded_path(expanded_path::SamplePath, surrogate::PhaseTypeSurrogate) = 
+    loglik_expanded_path(expanded_path, surrogate.expanded_Q)
+
 
 """
-    loglik_phasetype_path_deprecated(path::SamplePath, surrogate::PhaseTypeSurrogate)
+    loglik_phasetype_path(path::SamplePath, surrogate::PhaseTypeSurrogate)
 
-DEPRECATED: Compute log-likelihood (density) of a collapsed sample path under the phase-type surrogate.
+Compute log-density of a collapsed sample path under the phase-type surrogate.
 
-**WARNING**: This function is DEPRECATED. Use loglik with properly expanded data instead.
+For Coxian phase-type models, we always enter each state in phase 1.
+The density of sojourn time τ in state s followed by exit to state d is:
+  f(τ; s→d) = π' * exp(S*τ) * r
+where π = (1,0,...,0)', S = sub-intensity, r = exit rates to d
 
 # Arguments
 - `path::SamplePath`: Sample path in observed (collapsed) state space
@@ -2131,7 +2138,7 @@ DEPRECATED: Compute log-likelihood (density) of a collapsed sample path under th
 # Returns
 - `Float64`: Log-density of the collapsed path under the phase-type model
 """
-function loglik_phasetype_path_deprecated(path::SamplePath, surrogate::PhaseTypeSurrogate)
+function loglik_phasetype_path(path::SamplePath, surrogate::PhaseTypeSurrogate)
     
     loglik = 0.0
     Q = surrogate.expanded_Q
