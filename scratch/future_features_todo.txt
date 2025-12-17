@@ -14,11 +14,16 @@ VALIDATION TASKS (Priority)
    - Tested weighted vs duplicated data equivalence
    - Confirmed subject-level scaling in loglik_markov
    - Tests in MultistateModelsTests/unit/test_subject_weights.jl
+   
+   - Verified ObservationWeights in panel and exact data (loglik_markov)
+   - Tests in MultistateModelsTests/unit/test_observation_weights_emat.jl
 
-⚠️ Validate Emission Matrices
-   - Verify emission matrix construction for censoring patterns
-   - Test state censoring with various patterns
-   - Ensure consistency between emat and CensoringPatterns in fitted models
+✅ Validate Emission Matrices (2025-06-28)
+   - Verified CensoringPatterns construction of emat (obstype > 2, stateto=0)
+   - Verified EmissionMatrix direct specification and validation
+   - Tested forward algorithm with censored observations
+   - Verified censored likelihood = log(sum of allowed state probabilities)
+   - Tests in MultistateModelsTests/unit/test_observation_weights_emat.jl
 
 ================================================================================
 COMPLETED FEATURES (as of 2025-12-16)
