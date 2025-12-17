@@ -611,6 +611,51 @@ function _build_shared_phase_hazard(base_haz::_Hazard, from_phase::Int, to_phase
 end
 
 """
+    expand_emission_matrix(EmissionMatrix, original_row_map, mappings)
+
+Expand a user-supplied emission matrix (n_obs x n_observed) to the expanded state space
+(n_expanded_obs x n_expanded_states).
+
+# Arguments
+- `EmissionMatrix`: User-supplied emission matrix
+- `original_row_map`: Mapping from expanded rows to original rows
+- `mappings`: Phase-type mappings
+
+# Returns
+Expanded emission matrix.
+"""
+function expand_emission_matrix(EmissionMatrix::Matrix{Float64}, 
+                                original_row_map::Vector{Int}, 
+                                mappings::PhaseTypeMappings)
+    n_expanded_obs = length(original_row_map)
+    n_expanded_states = mappings.n_expanded
+    n_observed = mappings.n_observed
+    
+    # Validate input dimensions
+    if size(EmissionMatrix, 2) != n_observed
+        error("EmissionMatrix must have \$(n_observed) columns (one per observed state).")
+    end
+    
+    expanded_emat = zeros(Float64, n_expanded_obs, n_expanded_states)
+    
+    for i in 1:n_expanded_obs
+        orig_row = original_row_map[i]
+        
+        # For each observed state k, map its probability to all its phases
+        for k in 1:n_observed
+            prob = EmissionMatrix[orig_row, k]
+            if prob > 0
+                for p in mappings.state_to_phases[k]
+                    expanded_emat[i, p] = prob
+                end
+            end
+        end
+    end
+    
+    return expanded_emat
+end
+
+"""
     expand_data_for_phasetype_fitting(data, mappings) -> (DataFrame, Matrix{Float64})
 
 Expand observation data to handle phase uncertainty during phase-type model fitting.
@@ -635,6 +680,7 @@ function expand_data_for_phasetype_fitting(data::DataFrame, mappings::PhaseTypeM
     # This handles the sojourn + transition split correctly
     expansion_result = expand_data_for_phasetype(data, n_observed)
     expanded_data = expansion_result.expanded_data
+    original_row_map = expansion_result.original_row_map
     
     # Build censoring patterns for phase uncertainty FIRST (needed for obstype mapping)
     # Each observed state maps to a set of possible phases
@@ -670,6 +716,9 @@ function expand_data_for_phasetype_fitting(data::DataFrame, mappings::PhaseTypeM
             # Panel observation: destination state has phase uncertainty
             # The observation says "in state s at time t" but we don't know which phase
             # Use censoring pattern to allow all phases of state s
+            if s > length(mappings.state_to_phases)
+                error("State $s found in data but not in model (max state: $(length(mappings.state_to_phases))).")
+            end
             n_phases_in_state = length(mappings.state_to_phases[s])
             if n_phases_in_state > 1
                 # Multiple phases: use censoring pattern (obstype = s + 2)
@@ -683,17 +732,30 @@ function expand_data_for_phasetype_fitting(data::DataFrame, mappings::PhaseTypeM
         elseif obstype_i == 1
             # Exact observation (instantaneous transition): map to first phase
             # The exact destination phase will be determined by hazard ratios in loglik_markov
-            new_stateto[i] = first(mappings.state_to_phases[s])
+            # Check if s is a valid state index (could be > n_observed if using custom states, but here s is from data)
+            if s <= length(mappings.state_to_phases)
+                new_stateto[i] = first(mappings.state_to_phases[s])
+            else
+                # This might happen if data contains states not in the model definition
+                # But validation should have caught this.
+                # For now, assume it's a valid state or handle gracefully
+                new_stateto[i] = s
+            end
         else
             # Other observation types: keep stateto as is (already handled)
-            new_stateto[i] = s == 0 ? 0 : first(mappings.state_to_phases[s])
+            # Check if s is a valid state index
+            if s > 0 && s <= length(mappings.state_to_phases)
+                new_stateto[i] = first(mappings.state_to_phases[s])
+            else
+                new_stateto[i] = s
+            end
         end
     end
     
     expanded_data.stateto = new_stateto
     expanded_data.obstype = new_obstype
     
-    return expanded_data, censoring_patterns
+    return expanded_data, censoring_patterns, original_row_map
 end
 
 """
@@ -1027,7 +1089,7 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
     end
     
     # Step 4: Expand data for phase uncertainty
-    expanded_data, phase_censoring_patterns = expand_data_for_phasetype_fitting(data, mappings)
+    expanded_data, phase_censoring_patterns, original_row_map = expand_data_for_phasetype_fitting(data, mappings)
     
     # Step 5: Build expanded hazkeys
     # Use hazard_to_params_idx to map to parameter indices (handles shared hazards)
@@ -1063,7 +1125,13 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
     _validate_inputs!(expanded_data, mappings.expanded_tmat, CensoringPatterns_final, SubjectWeights, ObservationWeights; verbose = verbose)
     
     # Step 10: Build emission matrix
-    emat = build_emat(expanded_data, CensoringPatterns_final, EmissionMatrix, mappings.expanded_tmat)
+    if !isnothing(EmissionMatrix)
+        # Expand user-supplied emission matrix to expanded state space
+        expanded_emat = expand_emission_matrix(EmissionMatrix, original_row_map, mappings)
+        emat = build_emat(expanded_data, CensoringPatterns_final, expanded_emat, mappings.expanded_tmat)
+    else
+        emat = build_emat(expanded_data, CensoringPatterns_final, nothing, mappings.expanded_tmat)
+    end
     
     # Step 11: Build total hazards on expanded space
     expanded_totalhazards = build_totalhazards(expanded_hazards, mappings.expanded_tmat)

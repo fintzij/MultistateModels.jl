@@ -1,0 +1,561 @@
+% MultistateModels.jl JSS Paper References
+
+% ============================================================================
+% Core Methodology
+% ============================================================================
+
+@article{morsomme2025semimarkov,
+  title = {Assessing Treatment Efficacy for Interval-Censored Endpoints Using Multistate Semi-{M}arkov Models Fit to Multiple Data Streams},
+  author = {Morsomme, Raphael and Xu, Jason and Schiemsky, Tom and Beck, Andrew and Roychoudhury, Satrajit and Fintz, Jon},
+  journal = {arXiv preprint arXiv:2501.14097v3},
+  year = {2025},
+  url = {https://arxiv.org/abs/2501.14097}
+}
+
+@article{alaa2018hasmm,
+  title = {A Hidden Absorbing Semi-{M}arkov Model for Informatively Censored Temporal Data: Learning and Inference},
+  author = {Alaa, Ahmed M and van der Schaar, Mihaela},
+  journal = {Journal of Machine Learning Research},
+  volume = {19},
+  number = {4},
+  pages = {1--62},
+  year = {2018},
+  url = {https://www.jmlr.org/papers/v19/16-656.html}
+}
+
+@article{wei1990mcem,
+  title = {A {M}onte {C}arlo Implementation of the {EM} Algorithm and the Poor Man's Data Augmentation Algorithms},
+  author = {Wei, Greg CG and Tanner, Martin A},
+  journal = {Journal of the American Statistical Association},
+  volume = {85},
+  number = {411},
+  pages = {699--704},
+  year = {1990},
+  publisher = {Taylor \& Francis}
+}
+
+@article{varadhan2008squarem,
+  title = {Simple and Globally Convergent Methods for Accelerating the Convergence of Any {EM} Algorithm},
+  author = {Varadhan, Ravi and Roland, Christophe},
+  journal = {Scandinavian Journal of Statistics},
+  volume = {35},
+  number = {2},
+  pages = {335--353},
+  year = {2008},
+  publisher = {Wiley}
+}
+
+@article{caffo2005ascent,
+  title = {Ascent-Based {M}onte {C}arlo Expectation-Maximization},
+  author = {Caffo, Brian S and Jank, Wolfgang and Jones, Galin L},
+  journal = {Journal of the Royal Statistical Society: Series B},
+  volume = {67},
+  number = {2},
+  pages = {235--251},
+  year = {2005},
+  publisher = {Wiley}
+}
+
+@article{booth1999maximizing,
+  title = {Maximizing Generalized Linear Mixed Model Likelihoods with an Automated {M}onte {C}arlo {EM} Algorithm},
+  author = {Booth, James G and Hobert, James P},
+  journal = {Journal of the Royal Statistical Society: Series B},
+  volume = {61},
+  number = {1},
+  pages = {265--285},
+  year = {1999},
+  publisher = {Wiley}
+}
+
+% ============================================================================
+% Phase-Type Distributions
+% ============================================================================
+
+@book{neuts1981matrixgeometric,
+  title = {Matrix-Geometric Solutions in Stochastic Models: An Algorithmic Approach},
+  author = {Neuts, Marcel F},
+  year = {1981},
+  publisher = {Johns Hopkins University Press},
+  address = {Baltimore}
+}
+
+@article{asmussen1996fitting,
+  title = {Fitting Phase-Type Distributions via the {EM} Algorithm},
+  author = {Asmussen, S{\o}ren and Nerman, Olle and Olsson, Marita},
+  journal = {Scandinavian Journal of Statistics},
+  volume = {23},
+  number = {4},
+  pages = {419--441},
+  year = {1996},
+  publisher = {Wiley}
+}
+
+@book{bladt2017matrixexponential,
+  title = {Matrix-Exponential Distributions in Applied Probability},
+  author = {Bladt, Mogens and Nielsen, Bo Friis},
+  year = {2017},
+  publisher = {Springer},
+  series = {Probability Theory and Stochastic Modelling},
+  volume = {81}
+}
+
+@article{cumani1982canonical,
+  title = {On the Canonical Representation of Homogeneous {M}arkov Processes Modelling Failure-Time Distributions},
+  author = {Cumani, Antonio},
+  journal = {Microelectronics Reliability},
+  volume = {22},
+  number = {3},
+  pages = {583--602},
+  year = {1982},
+  publisher = {Elsevier}
+}
+
+% ============================================================================
+% Existing Software
+% ============================================================================
+
+@article{jackson2011msm,
+  title = {Multi-State Models for Panel Data: The \pkg{msm} Package for \proglang{R}},
+  author = {Jackson, Christopher H},
+  journal = {Journal of Statistical Software},
+  volume = {38},
+  number = {8},
+  pages = {1--28},
+  year = {2011},
+  doi = {10.18637/jss.v038.i08}
+}
+
+@book{therneau2000survival,
+  title = {Modeling Survival Data: Extending the {C}ox Model},
+  author = {Therneau, Terry M and Grambsch, Patricia M},
+  year = {2000},
+  publisher = {Springer},
+  address = {New York},
+  note = {R package survival available at \url{https://CRAN.R-project.org/package=survival}}
+}
+
+@article{putter2007tutorial,
+  title = {Tutorial in Biostatistics: Competing Risks and Multi-State Models},
+  author = {Putter, Hein and Fiocco, Marta and Geskus, Ronald B},
+  journal = {Statistics in Medicine},
+  volume = {26},
+  number = {11},
+  pages = {2389--2430},
+  year = {2007},
+  publisher = {Wiley}
+}
+
+@article{krol2015semimarkov,
+  title = {\pkg{SemiMarkov}: An \proglang{R} Package for Parametric Estimation in Multi-State Semi-{M}arkov Models},
+  author = {Krol, Agnieszka and Saint-Pierre, Philippe},
+  journal = {Journal of Statistical Software},
+  volume = {66},
+  number = {6},
+  pages = {1--16},
+  year = {2015},
+  doi = {10.18637/jss.v066.i06}
+}
+
+@article{jackson2016flexsurv,
+  title = {\pkg{flexsurv}: A Platform for Parametric Survival Modeling in \proglang{R}},
+  author = {Jackson, Christopher H},
+  journal = {Journal of Statistical Software},
+  volume = {70},
+  number = {8},
+  pages = {1--33},
+  year = {2016},
+  doi = {10.18637/jss.v070.i08}
+}
+
+@article{gomon2024icmstate,
+  title = {Nonparametric Estimation of Interval-Censored Multi-State Models},
+  author = {Gomon, Daniel and Putter, Hein},
+  journal = {arXiv preprint arXiv:2409.07176},
+  year = {2024},
+  url = {https://arxiv.org/abs/2409.07176}
+}
+
+@article{allignol2011etm,
+  title = {Empirical Transition Matrix of Multi-State Models: The \pkg{etm} Package},
+  author = {Allignol, Arthur and Schumacher, Martin and Beyersmann, Jan},
+  journal = {Journal of Statistical Software},
+  volume = {38},
+  number = {4},
+  pages = {1--15},
+  year = {2011},
+  doi = {10.18637/jss.v038.i04}
+}
+
+@article{titman2011flexible,
+  title = {Flexible Nonhomogeneous {M}arkov Models for Panel Observed Data},
+  author = {Titman, Andrew C and Sharples, Linda D},
+  journal = {Biometrics},
+  volume = {67},
+  number = {3},
+  pages = {780--787},
+  year = {2011},
+  publisher = {Wiley}
+}
+
+% ============================================================================
+% Variance Estimation
+% ============================================================================
+
+@article{louis1982observed,
+  title = {Finding the Observed Information Matrix When Using the {EM} Algorithm},
+  author = {Louis, Thomas A},
+  journal = {Journal of the Royal Statistical Society: Series B},
+  volume = {44},
+  number = {2},
+  pages = {226--233},
+  year = {1982},
+  publisher = {Wiley}
+}
+
+@article{efron1978observed,
+  title = {Assessing the Accuracy of the Maximum Likelihood Estimator: Observed Versus Expected {F}isher Information},
+  author = {Efron, Bradley and Hinkley, David V},
+  journal = {Biometrika},
+  volume = {65},
+  number = {3},
+  pages = {457--483},
+  year = {1978},
+  publisher = {Oxford University Press}
+}
+
+@techreport{jaeckel1972infinitesimal,
+  title = {The Infinitesimal Jackknife},
+  author = {Jaeckel, Louis A},
+  institution = {Bell Laboratories},
+  type = {Memorandum},
+  number = {MM 72-1215-11},
+  year = {1972}
+}
+
+@article{oakes1999direct,
+  title = {Direct Calculation of the Information Matrix via the {EM} Algorithm},
+  author = {Oakes, David},
+  journal = {Journal of the Royal Statistical Society: Series B},
+  volume = {61},
+  number = {2},
+  pages = {479--482},
+  year = {1999},
+  publisher = {Wiley}
+}
+
+@article{meilijson1989fast,
+  title = {A Fast Improvement to the {EM} Algorithm on Its Own Terms},
+  author = {Meilijson, Isaac},
+  journal = {Journal of the Royal Statistical Society: Series B},
+  volume = {51},
+  number = {1},
+  pages = {127--138},
+  year = {1989},
+  publisher = {Wiley}
+}
+
+% ============================================================================
+% Importance Sampling and PSIS
+% ============================================================================
+
+@article{vehtari2017psis,
+  title = {Practical {B}ayesian Model Evaluation Using Leave-One-Out Cross-Validation and {WAIC}},
+  author = {Vehtari, Aki and Gelman, Andrew and Gabry, Jonah},
+  journal = {Statistics and Computing},
+  volume = {27},
+  number = {5},
+  pages = {1413--1432},
+  year = {2017},
+  publisher = {Springer}
+}
+
+@article{vehtari2024psis,
+  title = {Pareto Smoothed Importance Sampling},
+  author = {Vehtari, Aki and Simpson, Daniel and Gelman, Andrew and Yao, Yuling and Gabry, Jonah},
+  journal = {Journal of Machine Learning Research},
+  volume = {25},
+  number = {72},
+  pages = {1--58},
+  year = {2024}
+}
+
+@article{ionides2008truncated,
+  title = {Truncated Importance Sampling},
+  author = {Ionides, Edward L},
+  journal = {Journal of Computational and Graphical Statistics},
+  volume = {17},
+  number = {2},
+  pages = {295--311},
+  year = {2008},
+  publisher = {Taylor \& Francis}
+}
+
+% ============================================================================
+% Numerical Methods
+% ============================================================================
+
+@article{sidje1998expokit,
+  title = {\pkg{Expokit}: A Software Package for Computing Matrix Exponentials},
+  author = {Sidje, Roger B},
+  journal = {ACM Transactions on Mathematical Software},
+  volume = {24},
+  number = {1},
+  pages = {130--156},
+  year = {1998},
+  publisher = {ACM}
+}
+
+@article{jensen1953markoff,
+  title = {{M}arkoff Chains as an Aid in the Study of {M}arkoff Processes},
+  author = {Jensen, Arne},
+  journal = {Scandinavian Actuarial Journal},
+  volume = {1953},
+  number = {sup1},
+  pages = {87--91},
+  year = {1953},
+  publisher = {Taylor \& Francis}
+}
+
+@article{hobolth2009simulation,
+  title = {Simulation from Endpoint-Conditioned, Continuous-Time {M}arkov Chains on a Finite State Space, with Applications to Molecular Evolution},
+  author = {Hobolth, Asger and Stone, Eric A},
+  journal = {The Annals of Applied Statistics},
+  volume = {3},
+  number = {3},
+  pages = {1204--1231},
+  year = {2009},
+  publisher = {Institute of Mathematical Statistics}
+}
+
+@article{moler2003nineteen,
+  title = {Nineteen Dubious Ways to Compute the Exponential of a Matrix, Twenty-Five Years Later},
+  author = {Moler, Cleve and Van Loan, Charles},
+  journal = {SIAM Review},
+  volume = {45},
+  number = {1},
+  pages = {3--49},
+  year = {2003},
+  publisher = {SIAM}
+}
+
+% ============================================================================
+% Julia Ecosystem
+% ============================================================================
+
+@article{bezanson2017julia,
+  title = {\proglang{Julia}: A Fresh Approach to Numerical Computing},
+  author = {Bezanson, Jeff and Edelman, Alan and Karpinski, Stefan and Shah, Viral B},
+  journal = {SIAM Review},
+  volume = {59},
+  number = {1},
+  pages = {65--98},
+  year = {2017},
+  publisher = {SIAM}
+}
+
+@article{revels2016forwarddiff,
+  title = {Forward-Mode Automatic Differentiation in \proglang{Julia}},
+  author = {Revels, Jarrett and Lubin, Miles and Papamarkou, Theodore},
+  journal = {arXiv preprint arXiv:1607.07892},
+  year = {2016},
+  url = {https://arxiv.org/abs/1607.07892}
+}
+
+@article{rackauckas2017differentialequations,
+  title = {\pkg{DifferentialEquations.jl}--A Performant and Feature-Rich Ecosystem for Solving Differential Equations in \proglang{Julia}},
+  author = {Rackauckas, Christopher and Nie, Qing},
+  journal = {Journal of Open Research Software},
+  volume = {5},
+  number = {1},
+  year = {2017},
+  publisher = {Ubiquity Press}
+}
+
+@article{mogensen2018optim,
+  title = {\pkg{Optim}: A Mathematical Optimization Package for \proglang{Julia}},
+  author = {Mogensen, Patrick Kofod and Riseth, Asbj{\o}rn Nilsen},
+  journal = {Journal of Open Source Software},
+  volume = {3},
+  number = {24},
+  pages = {615},
+  year = {2018}
+}
+
+% ============================================================================
+% Multistate Model Theory
+% ============================================================================
+
+@book{andersen1993statistical,
+  title = {Statistical Models Based on Counting Processes},
+  author = {Andersen, Per Kragh and Borgan, {\O}rnulf and Gill, Richard D and Keiding, Niels},
+  year = {1993},
+  publisher = {Springer},
+  address = {New York}
+}
+
+@book{cook2018multistate,
+  title = {Multistate Models for the Analysis of Life History Data},
+  author = {Cook, Richard J and Lawless, Jerald F},
+  year = {2018},
+  publisher = {Chapman and Hall/CRC},
+  address = {Boca Raton}
+}
+
+@article{hougaard1999multistate,
+  title = {Multi-State Models: A Review},
+  author = {Hougaard, Philip},
+  journal = {Lifetime Data Analysis},
+  volume = {5},
+  number = {3},
+  pages = {239--264},
+  year = {1999},
+  publisher = {Springer}
+}
+
+@article{meira2009multistate,
+  title = {Multi-State Models for Panel Data: The \pkg{msm} Package for \proglang{R}},
+  author = {Meira-Machado, Lu{\'\i}s and de U{\~n}a-{\'A}lvarez, Jacobo and Cadarso-Su{\'a}rez, Carmen and Andersen, Per K},
+  journal = {Journal of Statistical Software},
+  volume = {38},
+  number = {8},
+  pages = {1--28},
+  year = {2009}
+}
+
+% ============================================================================
+% Survival Analysis Foundations
+% ============================================================================
+
+@book{kalbfleisch2002statistical,
+  title = {The Statistical Analysis of Failure Time Data},
+  author = {Kalbfleisch, John D and Prentice, Ross L},
+  year = {2002},
+  edition = {2nd},
+  publisher = {John Wiley \& Sons},
+  address = {Hoboken, NJ}
+}
+
+@book{klein2003survival,
+  title = {Survival Analysis: Techniques for Censored and Truncated Data},
+  author = {Klein, John P and Moeschberger, Melvin L},
+  year = {2003},
+  edition = {2nd},
+  publisher = {Springer},
+  address = {New York}
+}
+
+@article{cox1972regression,
+  title = {Regression Models and Life-Tables},
+  author = {Cox, David R},
+  journal = {Journal of the Royal Statistical Society: Series B},
+  volume = {34},
+  number = {2},
+  pages = {187--202},
+  year = {1972},
+  publisher = {Wiley}
+}
+
+% ============================================================================
+% Splines
+% ============================================================================
+
+@article{eilers1996flexible,
+  title = {Flexible Smoothing with \textit{B}-Splines and Penalties},
+  author = {Eilers, Paul HC and Marx, Brian D},
+  journal = {Statistical Science},
+  volume = {11},
+  number = {2},
+  pages = {89--121},
+  year = {1996},
+  publisher = {Institute of Mathematical Statistics}
+}
+
+@book{deboor2001practical,
+  title = {A Practical Guide to Splines},
+  author = {de Boor, Carl},
+  year = {2001},
+  edition = {Revised},
+  publisher = {Springer},
+  address = {New York}
+}
+
+@article{royston2002flexible,
+  title = {Flexible Parametric Proportional-Hazards and Proportional-Odds Models for Censored Survival Data, with Application to Prognostic Modelling and Estimation of Treatment Effects},
+  author = {Royston, Patrick and Parmar, Mahesh KB},
+  journal = {Statistics in Medicine},
+  volume = {21},
+  number = {15},
+  pages = {2175--2197},
+  year = {2002},
+  publisher = {Wiley}
+}
+
+% ============================================================================
+% Hidden Markov Models
+% ============================================================================
+
+@book{cappe2005inference,
+  title = {Inference in Hidden {M}arkov Models},
+  author = {Capp{\'e}, Olivier and Moulines, Eric and Ryd{\'e}n, Tobias},
+  year = {2005},
+  publisher = {Springer},
+  address = {New York}
+}
+
+@article{rabiner1989tutorial,
+  title = {A Tutorial on Hidden {M}arkov Models and Selected Applications in Speech Recognition},
+  author = {Rabiner, Lawrence R},
+  journal = {Proceedings of the IEEE},
+  volume = {77},
+  number = {2},
+  pages = {257--286},
+  year = {1989},
+  publisher = {IEEE}
+}
+
+% ============================================================================
+% Clinical Applications
+% ============================================================================
+
+@article{gentleman1994multistate,
+  title = {Multi-State {M}arkov Models for Analysing Incomplete Disease History Data with Illustrations for {HIV} Disease},
+  author = {Gentleman, Robert C and Lawless, Jerald F and Lindsey, James C and Yan, Ping},
+  journal = {Statistics in Medicine},
+  volume = {13},
+  number = {8},
+  pages = {805--821},
+  year = {1994},
+  publisher = {Wiley}
+}
+
+@article{sharples2001use,
+  title = {Use of the {G}ibbs Sampler to Estimate Transition Rates Between Grades of Coronary Disease Following Cardiac Transplantation},
+  author = {Sharples, Linda D},
+  journal = {Statistics in Medicine},
+  volume = {12},
+  number = {12},
+  pages = {1155--1169},
+  year = {1993},
+  publisher = {Wiley}
+}
+
+% ============================================================================
+% Neural ODEs (for future work)
+% ============================================================================
+
+@inproceedings{chen2018neural,
+  title = {Neural Ordinary Differential Equations},
+  author = {Chen, Ricky TQ and Rubanova, Yulia and Bettencourt, Jesse and Duvenaud, David K},
+  booktitle = {Advances in Neural Information Processing Systems},
+  volume = {31},
+  year = {2018}
+}
+
+@article{tang2022soden,
+  title = {{SODEN}: A Scalable Continuous-Time Survival Model through Ordinary Differential Equation Networks},
+  author = {Tang, Weijing and Zhao, Jiaqi and Sun, Jieping},
+  journal = {Journal of Machine Learning Research},
+  volume = {23},
+  pages = {1--29},
+  year = {2022}
+}

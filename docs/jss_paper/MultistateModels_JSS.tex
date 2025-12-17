@@ -1,0 +1,1580 @@
+% Options for packages loaded elsewhere
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\PassOptionsToPackage{dvipsnames,svgnames,x11names}{xcolor}
+%
+\documentclass[
+  article]{jss}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+% Make \paragraph and \subparagraph free-standing
+\makeatletter
+\ifx\paragraph\undefined\else
+  \let\oldparagraph\paragraph
+  \renewcommand{\paragraph}{
+    \@ifstar
+      \xxxParagraphStar
+      \xxxParagraphNoStar
+  }
+  \newcommand{\xxxParagraphStar}[1]{\oldparagraph*{#1}\mbox{}}
+  \newcommand{\xxxParagraphNoStar}[1]{\oldparagraph{#1}\mbox{}}
+\fi
+\ifx\subparagraph\undefined\else
+  \let\oldsubparagraph\subparagraph
+  \renewcommand{\subparagraph}{
+    \@ifstar
+      \xxxSubParagraphStar
+      \xxxSubParagraphNoStar
+  }
+  \newcommand{\xxxSubParagraphStar}[1]{\oldsubparagraph*{#1}\mbox{}}
+  \newcommand{\xxxSubParagraphNoStar}[1]{\oldsubparagraph{#1}\mbox{}}
+\fi
+\makeatother
+
+\usepackage{color}
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+% Add ',fontsize=\small' for more characters per line
+\usepackage{framed}
+\definecolor{shadecolor}{RGB}{241,243,245}
+\newenvironment{Shaded}{\begin{snugshade}}{\end{snugshade}}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{#1}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.40,0.45,0.13}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\BuiltInTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.13,0.47,0.30}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{#1}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{\textit{#1}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{\textit{#1}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\ExtensionTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.28,0.35,0.67}{#1}}
+\newcommand{\ImportTok}[1]{\textcolor[rgb]{0.00,0.46,0.62}{#1}}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{#1}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{#1}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.68,0.00,0.00}{#1}}
+\newcommand{\RegionMarkerTok}[1]{\textcolor[rgb]{0.00,0.23,0.31}{#1}}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{#1}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.13,0.47,0.30}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.13,0.47,0.30}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.07,0.07,0.07}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.13,0.47,0.30}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.37,0.37,0.37}{\textit{#1}}}
+
+\usepackage{longtable,booktabs,array}
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+% Allow footnotes in longtable head/foot
+\IfFileExists{footnotehyper.sty}{\usepackage{footnotehyper}}{\usepackage{footnote}}
+\makesavenoteenv{longtable}
+\usepackage{graphicx}
+\makeatletter
+\newsavebox\pandoc@box
+\newcommand*\pandocbounded[1]{% scales image to fit in text height/width
+  \sbox\pandoc@box{#1}%
+  \Gscale@div\@tempa{\textheight}{\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax}%
+  \Gscale@div\@tempb{\linewidth}{\wd\pandoc@box}%
+  \ifdim\@tempb\p@<\@tempa\p@\let\@tempa\@tempb\fi% select the smaller of both
+  \ifdim\@tempa\p@<\p@\scalebox{\@tempa}{\usebox\pandoc@box}%
+  \else\usebox{\pandoc@box}%
+  \fi%
+}
+% Set default figure placement to htbp
+\def\fps@figure{htbp}
+\makeatother
+
+
+
+
+
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+
+
+ 
+\usepackage[]{natbib}
+\bibliographystyle{plainnat}
+
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{booktabs}
+\usepackage{longtable}
+\makeatletter
+\@ifpackageloaded{caption}{}{\usepackage{caption}}
+\AtBeginDocument{%
+\ifdefined\contentsname
+  \renewcommand*\contentsname{Table of contents}
+\else
+  \newcommand\contentsname{Table of contents}
+\fi
+\ifdefined\listfigurename
+  \renewcommand*\listfigurename{List of Figures}
+\else
+  \newcommand\listfigurename{List of Figures}
+\fi
+\ifdefined\listtablename
+  \renewcommand*\listtablename{List of Tables}
+\else
+  \newcommand\listtablename{List of Tables}
+\fi
+\ifdefined\figurename
+  \renewcommand*\figurename{Figure}
+\else
+  \newcommand\figurename{Figure}
+\fi
+\ifdefined\tablename
+  \renewcommand*\tablename{Table}
+\else
+  \newcommand\tablename{Table}
+\fi
+}
+\@ifpackageloaded{float}{}{\usepackage{float}}
+\floatstyle{ruled}
+\@ifundefined{c@chapter}{\newfloat{codelisting}{h}{lop}}{\newfloat{codelisting}{h}{lop}[chapter]}
+\floatname{codelisting}{Listing}
+\newcommand*\listoflistings{\listof{codelisting}{List of Listings}}
+\makeatother
+\makeatletter
+\makeatother
+\makeatletter
+\@ifpackageloaded{caption}{}{\usepackage{caption}}
+\@ifpackageloaded{subcaption}{}{\usepackage{subcaption}}
+\makeatother
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+\hypersetup{
+  pdftitle={MultistateModels.jl: Fitting Semi-Markov Multistate Models to Panel Data in Julia},
+  pdfauthor={Jon Fintz; Raphael Morsomme; Jason Liang; Allyson Mateja},
+  pdfkeywords={multistate models, semi-Markov, panel data, interval
+censoring, Monte Carlo EM, Julia},
+  colorlinks=true,
+  linkcolor={blue},
+  filecolor={Maroon},
+  citecolor={Blue},
+  urlcolor={Blue},
+  pdfcreator={LaTeX via pandoc}}
+
+
+\title{MultistateModels.jl: Fitting Semi-Markov Multistate Models to
+Panel Data in Julia}
+\author{Jon Fintz \and Raphael Morsomme \and Jason Liang \and Allyson Mateja}
+\date{}
+\begin{document}
+\maketitle
+\begin{abstract}
+We present \textbf{MultistateModels.jl}, a Julia package for fitting
+continuous-time multistate models to exact and interval-censored (panel)
+data. The package implements and extends the methods of
+\citet{morsomme2025semimarkov}, providing a unified interface for Markov
+and semi-Markov multistate models with flexible hazard specifications
+including exponential, Weibull, Gompertz, B-spline, and phase-type
+(Coxian) distributions. A key innovation is the Monte Carlo
+Expectation-Maximization (MCEM) algorithm that enables fitting
+semi-Markov models to panel data---a capability not available in
+existing software. The package supports proportional hazards models with
+time-varying covariates, multiple variance estimation methods
+(model-based, infinitesimal jackknife, and jackknife), and efficient
+importance sampling with Pareto-smoothed diagnostics. We demonstrate the
+package through clinical examples and provide systematic comparisons
+with existing R packages including \textbf{msm}, \textbf{mstate},
+\textbf{SemiMarkov}, and \textbf{flexsurv}.
+\end{abstract}
+
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{\#| echo: false}
+\NormalTok{\#| output: false}
+\NormalTok{\#| eval: false}
+\NormalTok{using MultistateModels}
+\NormalTok{using DataFrames}
+\NormalTok{using Random}
+\NormalTok{using Statistics}
+\end{Highlighting}
+\end{Shaded}
+
+\section{Introduction}\label{sec-introduction}
+
+Multistate models provide a powerful framework for analyzing event
+history data where individuals transition between discrete states over
+time. These models are ubiquitous in biomedical research, including
+disease progression studies, treatment response evaluation, and health
+services research. The defining characteristic of multistate models is
+their ability to capture the temporal dynamics of state occupancy,
+competing risks, and the effects of covariates on transition
+intensities.
+
+\subsection{Motivation}\label{motivation}
+
+In many practical applications, the exact times of state transitions are
+not observed. Instead, an individual's state is recorded only at
+discrete observation times---a data structure known as \emph{panel data}
+or \emph{interval-censored observations}. For example, in clinical
+trials, a patient's disease status may be assessed at scheduled clinic
+visits (e.g., every 3 months), but the precise timing of disease
+progression between visits is unknown.
+
+The standard approach to analyzing panel data is to assume the
+underlying process is \emph{Markov}, meaning that future transitions
+depend only on the current state, not on how long the process has been
+in that state. Under this assumption, the likelihood can be computed
+efficiently using matrix exponentials of the transition intensity matrix
+\citep{jackson2011msm}. However, the Markov assumption implies
+exponentially distributed sojourn times, which may be inappropriate when
+the hazard of leaving a state increases or decreases with time spent in
+that state.
+
+\emph{Semi-Markov} models relax this assumption by allowing transition
+intensities to depend on the \emph{sojourn time} (time since entering
+the current state). This enables more flexible modeling of holding time
+distributions, but creates a fundamental computational challenge: the
+likelihood for panel data requires marginalizing over all possible
+latent paths between observation times, an intractable high-dimensional
+integral.
+
+\begin{figure}
+
+\centering{
+
+\pandocbounded{\includegraphics[keepaspectratio]{figures/panel_data.pdf}}
+
+}
+
+\caption{\label{fig-panel-data}Exact path vs.~panel observations. The
+true process (black line) transitions continuously between states, but
+is only observed at discrete time points (red dots). The likelihood
+requires integrating over all possible paths consistent with these
+observations.}
+
+\end{figure}%
+
+\subsection{Existing Software}\label{existing-software}
+
+Several software packages implement multistate models, but none provides
+the combination of semi-Markov dynamics and panel data support offered
+by \textbf{MultistateModels.jl}. Table~\ref{tbl-software-comparison}
+summarizes the capabilities of existing packages.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.1071}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.1190}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.1786}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.1190}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.1548}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.3214}}@{}}
+\caption{Comparison of multistate modeling software. IC =
+interval-censored.}\label{tbl-software-comparison}\tabularnewline
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Package
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Language
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Primary Focus
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Panel/IC
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Semi-Markov
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Parametric/Semi-parametric
+\end{minipage} \\
+\midrule\noalign{}
+\endfirsthead
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Package
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Language
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Primary Focus
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Panel/IC
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Semi-Markov
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Parametric/Semi-parametric
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{survival} \citep{therneau2000survival} & R & Cox regression,
+Kaplan-Meier & ✗ & ✗ & Semi-parametric (Cox) \\
+\textbf{msm} \citep{jackson2011msm} & R & Markov, HMM panel data & ✓ & ✗
+& Parametric \\
+\textbf{mstate} \citep{putter2007tutorial} & R & Non-parametric,
+Aalen-Johansen & ✗ & ✗ & Non-parametric \\
+\textbf{etm} \citep{allignol2011etm} & R & Non-parametric empirical
+transitions & ✗ & ✗ & Non-parametric \\
+\textbf{SemiMarkov} \citep{krol2015semimarkov} & R & Semi-Markov
+parametric & ✗ & ✓ & Parametric \\
+\textbf{flexsurv} \citep{jackson2016flexsurv} & R & Parametric, splines
+& ✗ & ✓ & Parametric + semi-parametric \\
+\textbf{icmstate} \citep{gomon2024icmstate} & R & Non-parametric panel
+data & ✓ & ✗ & Non-parametric \\
+\textbf{MultistateModels.jl} & Julia &
+\textbf{Parametric/semi-parametric semi-Markov + panel} & \textbf{✓} &
+\textbf{✓} & \textbf{Parametric + semi-parametric} \\
+\end{longtable}
+
+The \textbf{msm} package \citep{jackson2011msm} is widely used for
+fitting continuous-time Markov models to panel data, with support for
+hidden Markov models and time-varying covariates. However, it is
+restricted to the Markov assumption and cannot accommodate semi-Markov
+dynamics.
+
+The \textbf{SemiMarkov} package \citep{krol2015semimarkov} fits
+semi-Markov models with Weibull or exponentiated Weibull sojourn
+distributions, but it \textbf{requires exact observation of transition
+times}---it cannot handle panel data where transition times are
+interval-censored.
+
+The foundational \textbf{survival} package \citep{therneau2000survival}
+provides Cox regression for single-endpoint and competing risks models,
+along with Kaplan-Meier and Nelson-Aalen estimators. While not
+specifically designed for multistate models, it is the standard tool for
+semi-parametric survival analysis in R.
+
+The \textbf{mstate} package \citep{putter2007tutorial} extends survival
+analysis to multistate models, providing non-parametric (Aalen-Johansen)
+and Cox regression-based methods for estimating transition probabilities
+and cumulative hazards. The \textbf{etm} package \citep{allignol2011etm}
+provides efficient computation of empirical transition matrices. Both
+require exact transition times and do not support fully parametric
+inference. \textbf{flexsurv} \citep{jackson2016flexsurv} offers flexible
+parametric and spline-based hazards for semi-Markov multistate models,
+but requires exactly observed event times.
+
+The recent \textbf{icmstate} package \citep{gomon2024icmstate} addresses
+interval-censored multistate models using non-parametric methods, but is
+limited to Markov models and does not support parametric or
+semi-parametric inference.
+
+\subsection{Related Work}\label{related-work}
+
+Our methodology builds on the hidden semi-Markov model literature.
+\citet{alaa2018hasmm} developed the Hidden Absorbing Semi-Markov Model
+(HASMM) for electronic health record data, using a forward-filtering
+backward-sampling (FFBS) Monte Carlo EM algorithm similar to our
+approach. Their work focused on hidden states and informative censoring
+in clinical risk prognosis, while our package targets the classical
+multistate model setting with observed state occupancy at panel times.
+
+The theoretical foundations of our MCEM algorithm are established in
+\citet{morsomme2025semimarkov}, which provides convergence guarantees
+and develops the importance sampling strategies implemented in this
+package.
+
+\subsection{Package Contributions}\label{package-contributions}
+
+\textbf{MultistateModels.jl} makes the following contributions:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Unified interface}: A single \texttt{fit()} function
+  automatically selects the appropriate inference method (direct MLE,
+  matrix exponential, or MCEM) based on the model and data
+  characteristics.
+\item
+  \textbf{Semi-Markov models for panel data}: The first software
+  implementation enabling parametric and semi-parametric (B-spline)
+  semi-Markov models to be fit to interval-censored observations via
+  MCEM.
+\item
+  \textbf{Flexible hazard specifications}: Support for exponential,
+  Weibull, Gompertz, B-spline, and phase-type (Coxian) hazard functions,
+  all with optional covariate effects.
+\item
+  \textbf{Multiple variance estimators}: Model-based (observed Fisher
+  information), infinitesimal jackknife (sandwich), and jackknife
+  variance estimation.
+\item
+  \textbf{Efficient implementation}: Julia's multiple dispatch and
+  just-in-time compilation provide performance comparable to compiled
+  languages while maintaining high-level expressiveness.
+\end{enumerate}
+
+\subsection{Paper Organization}\label{paper-organization}
+
+The remainder of this paper is organized as follows.
+Section~\ref{sec-framework} presents the mathematical framework for
+multistate models, including Markov and semi-Markov formulations.
+Section~\ref{sec-construction} describes model construction in
+\textbf{MultistateModels.jl}. Section~\ref{sec-simulation} covers the
+simulation functionality. Section~\ref{sec-inference} details the
+inference algorithms, including the MCEM procedure for semi-Markov
+models with panel data. Section~\ref{sec-model-selection} discusses
+model selection approaches. Section~\ref{sec-computational} provides
+computational details. Section~\ref{sec-outputs} describes model outputs
+and diagnostics. Section~\ref{sec-examples} presents worked examples.
+Section~\ref{sec-comparison} provides detailed comparisons with existing
+software. Section~\ref{sec-conclusion} concludes.
+
+\section{Mathematical Framework}\label{sec-framework}
+
+\subsection{Multistate Processes}\label{multistate-processes}
+
+A multistate process \(\{X(t) : t \geq 0\}\) is a continuous-time
+stochastic process taking values in a finite state space
+\(\mathcal{S} = \{1, 2, \ldots, K\}\). Some states may be
+\emph{absorbing} (e.g., death), meaning no transitions out of that state
+are possible. The process is characterized by its transition intensities
+or \emph{hazard functions}.
+
+For a subject currently in state \(j\) at time \(t\), the
+\emph{cause-specific hazard} for transition to state \(k \neq j\) is:
+\begin{equation}\phantomsection\label{eq-hazard-def}{
+\lambda_{jk}(t \mid \mathcal{H}_t) = \lim_{h \downarrow 0} 
+\frac{P(X(t+h) = k \mid X(t) = j, \mathcal{H}_t)}{h}
+}\end{equation} where \(\mathcal{H}_t\) denotes the history of the
+process up to time \(t\).
+
+The \emph{total hazard} of leaving state \(j\) is: \[
+\lambda_j(t \mid \mathcal{H}_t) = \sum_{k \neq j} \lambda_{jk}(t \mid \mathcal{H}_t)
+\]
+
+\subsection{Markov vs.~Semi-Markov
+Models}\label{markov-vs.-semi-markov-models}
+
+In a \textbf{Markov} multistate model, the hazards depend only on the
+current state and calendar time \(t\): \[
+\lambda_{jk}(t \mid \mathcal{H}_t) = \lambda_{jk}(t)
+\] This implies that the sojourn time in any state follows an
+exponential distribution (possibly with time-varying rate), and the
+process is memoryless given the current state.
+
+In a \textbf{semi-Markov} model, the hazards depend on the \emph{sojourn
+time} \(u\)---the time elapsed since entering the current state:
+\begin{equation}\phantomsection\label{eq-semimarkov-hazard}{
+\lambda_{jk}(u) = \lim_{h \downarrow 0} 
+\frac{P(\text{transition to } k \text{ in } (u, u+h] \mid \text{in state } j \text{ for time } u)}{h}
+}\end{equation} The clock ``resets'' at each transition, allowing
+flexible modeling of state-specific holding time distributions.
+
+\subsection{Parametric Hazard
+Families}\label{parametric-hazard-families}
+
+\textbf{MultistateModels.jl} supports several parametric families for
+the baseline hazard functions:
+
+\textbf{Exponential} (\texttt{:exp}): Constant hazard, yielding
+exponentially distributed sojourn times: \[
+\lambda(t) = \exp(\beta_0)
+\]
+
+\textbf{Weibull} (\texttt{:wei}): Shape-scale parameterization allowing
+increasing (\(\kappa > 1\)) or decreasing (\(\kappa < 1\)) hazards: \[
+\lambda(t) = \frac{\kappa}{\sigma}\left(\frac{t}{\sigma}\right)^{\kappa-1}
+\] with log-parameterization \((\log \kappa, \log \sigma)\) for
+unconstrained optimization.
+
+\textbf{Gompertz} (\texttt{:gom}): Exponentially increasing or
+decreasing hazard: \[
+\lambda(t) = \exp(\beta_0 + \beta_1 t)
+\]
+
+\textbf{B-Spline} (\texttt{:sp}): Flexible semi-parametric hazard using
+spline basis functions: \[
+\lambda(t) = \exp\left(\sum_{j=1}^{J} \beta_j B_j(t)\right)
+\] where \(B_j(t)\) are B-spline basis functions. Monotonicity
+constraints can be imposed using I-spline representations.
+
+\textbf{Phase-Type} (\texttt{:pt}): Coxian phase-type distributions that
+can approximate any sojourn distribution through a latent Markov chain
+on ``phases.'' See Section~\ref{sec-phasetype} for details.
+
+\begin{figure}
+
+\centering{
+
+\pandocbounded{\includegraphics[keepaspectratio]{figures/hazards.pdf}}
+
+}
+
+\caption{\label{fig-hazards}Flexible hazard specifications supported by
+MultistateModels.jl. The package supports standard parametric families
+like Weibull (monotonic) as well as flexible B-splines (non-monotonic)
+and phase-type distributions.}
+
+\end{figure}%
+
+\subsection{Covariate Effects}\label{covariate-effects}
+
+Covariates enter the model through the proportional hazards formulation:
+\begin{equation}\phantomsection\label{eq-prop-hazards}{
+\lambda_{jk}(t \mid \mathbf{x}) = \lambda_{jk,0}(t) \exp(\boldsymbol{\beta}_{jk}^\top \mathbf{x})
+}\end{equation} where \(\lambda_{jk,0}(t)\) is the baseline hazard and
+\(\mathbf{x}\) is a vector of covariates. Time-varying covariates are
+supported through piecewise-constant approximations.
+
+\subsection{Likelihood Formulations}\label{likelihood-formulations}
+
+\subsubsection{Exact Data}\label{exact-data}
+
+When transition times are exactly observed, the likelihood for subject
+\(i\) with path
+\((j_1, t_1) \to (j_2, t_2) \to \cdots \to (j_{M_i}, t_{M_i})\) is:
+\begin{equation}\phantomsection\label{eq-exact-lik}{
+\mathcal{L}_i(\theta) = \prod_{m=1}^{M_i-1} \lambda_{j_m j_{m+1}}(u_m) 
+\exp\left(-\int_0^{u_m} \lambda_{j_m}(s) ds\right)
+}\end{equation} where \(u_m = t_{m+1} - t_m\) is the sojourn time in
+state \(j_m\).
+
+\subsubsection{Panel Data (Markov)}\label{panel-data-markov}
+
+For panel data where state is observed at times
+\(0 = t_0 < t_1 < \cdots < t_M\), but transitions between observations
+are unobserved, the likelihood under the Markov assumption is:
+\begin{equation}\phantomsection\label{eq-panel-markov-lik}{
+\mathcal{L}_i(\theta) = \prod_{m=1}^{M_i} P_{j_{m-1} j_m}(t_{m-1}, t_m; \theta)
+}\end{equation} where
+\(P_{jk}(s, t; \theta) = P(X(t) = k \mid X(s) = j)\) is the transition
+probability, computed via matrix exponential: \[
+\mathbf{P}(s, t) = \exp\left(\int_s^t \mathbf{Q}(u) du\right)
+\] with \(\mathbf{Q}(t)\) the intensity matrix having off-diagonal
+elements \(Q_{jk}(t) = \lambda_{jk}(t)\) and diagonal elements
+\(Q_{jj}(t) = -\lambda_j(t)\).
+
+\subsubsection{Panel Data (Semi-Markov)}\label{panel-data-semi-markov}
+
+For semi-Markov models with panel data, the likelihood requires
+integrating over all possible latent paths:
+\begin{equation}\phantomsection\label{eq-panel-semimarkov-lik}{
+\mathcal{L}_i(\theta) = \sum_{\text{paths } \pi} P(\pi \mid \theta) 
+\cdot \mathbf{1}[\pi \text{ compatible with observations}]
+}\end{equation} This integral is generally intractable, motivating the
+MCEM approach described in Section~\ref{sec-mcem}.
+
+\subsection{Phase-Type Distributions}\label{sec-phasetype}
+
+Phase-type distributions provide a flexible class of sojourn
+distributions through latent Markov structure. A \emph{Coxian}
+phase-type distribution represents the sojourn time as absorption time
+in a Markov chain on phases \(\{1, 2, \ldots, n\}\) with:
+
+\begin{itemize}
+\tightlist
+\item
+  Initial state: always phase 1
+\item
+  Transitions: phase \(i\) can transition to phase \(i+1\) or absorb
+  (exit)
+\item
+  Absorption represents completion of the sojourn
+\end{itemize}
+
+The hazard function for a Coxian distribution can approximate any
+continuous hazard arbitrarily well as the number of phases increases
+\citep{asmussen1996fitting}. This provides a non-parametric approach to
+sojourn time modeling while maintaining the Markov property at the phase
+level---enabling efficient likelihood computation even for panel data.
+
+\section{Model Construction}\label{sec-construction}
+
+\subsection{The Hazard Constructor}\label{the-hazard-constructor}
+
+Hazard specifications are created using the \texttt{Hazard()} function:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Exponential hazard for transition 1→2}
+\NormalTok{h12 }\OperatorTok{=} \FunctionTok{Hazard}\NormalTok{(}\OperatorTok{:}\NormalTok{exp, }\FloatTok{1}\NormalTok{, }\FloatTok{2}\NormalTok{)}
+
+\CommentTok{\# Weibull hazard for transition 1→3 with covariates}
+\NormalTok{h13 }\OperatorTok{=} \FunctionTok{Hazard}\NormalTok{(}\PreprocessorTok{@formula}\NormalTok{(}\FloatTok{0} \OperatorTok{\textasciitilde{}}\NormalTok{ age }\OperatorTok{+}\NormalTok{ treatment), }\OperatorTok{:}\NormalTok{wei, }\FloatTok{1}\NormalTok{, }\FloatTok{3}\NormalTok{)}
+
+\CommentTok{\# Spline hazard with monotonicity constraint}
+\NormalTok{h23 }\OperatorTok{=} \FunctionTok{Hazard}\NormalTok{(}\OperatorTok{:}\NormalTok{sp, }\FloatTok{2}\NormalTok{, }\FloatTok{3}\NormalTok{; degree}\OperatorTok{=}\FloatTok{3}\NormalTok{, knots}\OperatorTok{=}\NormalTok{[}\FloatTok{1.0}\NormalTok{, }\FloatTok{2.0}\NormalTok{, }\FloatTok{5.0}\NormalTok{], monotone}\OperatorTok{=}\FloatTok{1}\NormalTok{)}
+
+\CommentTok{\# Phase{-}type hazard (n\_phases specified at model level)}
+\NormalTok{h12\_pt }\OperatorTok{=} \FunctionTok{Hazard}\NormalTok{(}\OperatorTok{:}\NormalTok{pt, }\FloatTok{1}\NormalTok{, }\FloatTok{2}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+The first argument is an optional \texttt{@formula} specifying
+covariates that act multiplicatively on the baseline hazard. When
+omitted, an intercept-only model is assumed. The \texttt{family}
+argument specifies the hazard family (\texttt{:exp}, \texttt{:wei},
+\texttt{:gom}, \texttt{:sp}, or \texttt{:pt}), and
+\texttt{statefrom}/\texttt{stateto} define the transition.
+
+\subsubsection{Spline Hazards}\label{spline-hazards}
+
+For spline hazards, additional keyword arguments control the basis:
+
+\begin{itemize}
+\tightlist
+\item
+  \texttt{degree}: Polynomial degree (default 3 for cubic splines)
+\item
+  \texttt{knots}: Interior knot locations
+\item
+  \texttt{boundaryknots}: Boundary knot locations (default to data
+  range)
+\item
+  \texttt{natural\_spline}: Use natural spline boundary conditions
+  (default \texttt{true})
+\item
+  \texttt{monotone}: Monotonicity constraint (-1 decreasing, 0 none, 1
+  increasing)
+\end{itemize}
+
+\subsubsection{Phase-Type Hazards}\label{phase-type-hazards}
+
+Phase-type hazards are specified with \texttt{family\ =\ :pt}. The
+number of phases is typically set at the model level:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{model }\OperatorTok{=} \FunctionTok{multistatemodel}\NormalTok{(h12\_pt, h23; data}\OperatorTok{=}\NormalTok{df, }
+\NormalTok{                        n\_phases}\OperatorTok{=}\FunctionTok{Dict}\NormalTok{(}\FloatTok{1} \OperatorTok{=\textgreater{}} \FloatTok{3}\NormalTok{, }\FloatTok{2} \OperatorTok{=\textgreater{}} \FloatTok{2}\NormalTok{))}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{The multistatemodel
+Function}\label{the-multistatemodel-function}
+
+Models are assembled using \texttt{multistatemodel()}:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{model }\OperatorTok{=} \FunctionTok{multistatemodel}\NormalTok{(h12, h13, h23; }
+\NormalTok{                        data }\OperatorTok{=}\NormalTok{ panel\_data,}
+\NormalTok{                        surrogate }\OperatorTok{=} \OperatorTok{:}\NormalTok{markov)}
+\end{Highlighting}
+\end{Shaded}
+
+Key arguments:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Hazard specifications}: Variable number of \texttt{Hazard}
+  objects
+\item
+  \texttt{data}: A \texttt{DataFrame} with required columns
+\item
+  \texttt{surrogate}: Surrogate model for MCEM (\texttt{:markov} or
+  \texttt{:phasetype})
+\item
+  \texttt{n\_phases}: Phase counts for phase-type hazards
+\end{itemize}
+
+\subsection{Data Format}\label{data-format}
+
+The data \texttt{DataFrame} must contain:
+
+\begin{longtable}[]{@{}ll@{}}
+\caption{Required data columns.}\label{tbl-data-format}\tabularnewline
+\toprule\noalign{}
+Column & Description \\
+\midrule\noalign{}
+\endfirsthead
+\toprule\noalign{}
+Column & Description \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{id} & Subject identifier \\
+\texttt{tstart} & Interval start time \\
+\texttt{tstop} & Interval end time \\
+\texttt{statefrom} & State at \texttt{tstart} \\
+\texttt{stateto} & State at \texttt{tstop} (0 for censored) \\
+\texttt{obstype} & Observation type: 1=exact, 2=panel, 3=censored \\
+\end{longtable}
+
+Additional columns for covariates are included as needed.
+
+\textbf{Observation types:}
+
+\begin{itemize}
+\tightlist
+\item
+  \texttt{obstype\ =\ 1}: Exact transition observed at \texttt{tstop}
+\item
+  \texttt{obstype\ =\ 2}: Panel observation---state at \texttt{tstop}
+  known, but intervening transitions unobserved
+\item
+  \texttt{obstype\ =\ 3}: Right-censored---subject in state
+  \texttt{statefrom} at \texttt{tstart}, censored thereafter
+\end{itemize}
+
+\section{Simulation}\label{sec-simulation}
+
+\subsection{Path Simulation}\label{path-simulation}
+
+The \texttt{simulate()} function generates sample paths from a fitted or
+parameterized model:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Set parameters}
+\FunctionTok{set\_parameters!}\NormalTok{(model, (}
+\NormalTok{    h12 }\OperatorTok{=}\NormalTok{ [}\FunctionTok{log}\NormalTok{(}\FloatTok{0.1}\NormalTok{)],        }\CommentTok{\# Exponential rate}
+\NormalTok{    h13 }\OperatorTok{=}\NormalTok{ [}\FunctionTok{log}\NormalTok{(}\FloatTok{1.2}\NormalTok{), }\FunctionTok{log}\NormalTok{(}\FloatTok{0.5}\NormalTok{), }\FloatTok{0.3}\NormalTok{, }\OperatorTok{{-}}\FloatTok{0.2}\NormalTok{],  }\CommentTok{\# Weibull + covariates}
+\NormalTok{    h23 }\OperatorTok{=}\NormalTok{ [}\FunctionTok{log}\NormalTok{(}\FloatTok{0.2}\NormalTok{)]}
+\NormalTok{))}
+
+\CommentTok{\# Simulate paths}
+\NormalTok{sim\_result }\OperatorTok{=} \FunctionTok{simulate}\NormalTok{(model; nsim}\OperatorTok{=}\FloatTok{1000}\NormalTok{, paths}\OperatorTok{=}\ConstantTok{true}\NormalTok{, data}\OperatorTok{=}\ConstantTok{false}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+The simulation uses Gillespie's algorithm for exact stochastic
+simulation of the multistate process:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  Given current state \(j\) and entry time, sample sojourn time \(U\)
+  from the holding time distribution
+\item
+  Sample destination state \(k\) from the conditional distribution given
+  transition occurred
+\item
+  Update state to \(k\) and repeat until absorption or censoring
+\end{enumerate}
+
+\subsection{Generating Panel Data}\label{generating-panel-data}
+
+To generate panel data (interval-censored observations):
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Create observation schedule template}
+\NormalTok{template }\OperatorTok{=} \FunctionTok{DataFrame}\NormalTok{(}
+\NormalTok{    id }\OperatorTok{=} \FunctionTok{repeat}\NormalTok{(}\FloatTok{1}\OperatorTok{:}\FloatTok{100}\NormalTok{, inner}\OperatorTok{=}\FloatTok{5}\NormalTok{),}
+\NormalTok{    tstart }\OperatorTok{=} \FunctionTok{repeat}\NormalTok{([}\FloatTok{0.0}\NormalTok{, }\FloatTok{1.0}\NormalTok{, }\FloatTok{2.0}\NormalTok{, }\FloatTok{3.0}\NormalTok{, }\FloatTok{4.0}\NormalTok{], }\FloatTok{100}\NormalTok{),}
+\NormalTok{    tstop }\OperatorTok{=} \FunctionTok{repeat}\NormalTok{([}\FloatTok{1.0}\NormalTok{, }\FloatTok{2.0}\NormalTok{, }\FloatTok{3.0}\NormalTok{, }\FloatTok{4.0}\NormalTok{, }\FloatTok{5.0}\NormalTok{], }\FloatTok{100}\NormalTok{),}
+\NormalTok{    statefrom }\OperatorTok{=} \FloatTok{1}\NormalTok{,}
+\NormalTok{    stateto }\OperatorTok{=} \FloatTok{1}\NormalTok{,}
+\NormalTok{    obstype }\OperatorTok{=} \FloatTok{2}
+\NormalTok{)}
+
+\NormalTok{model }\OperatorTok{=} \FunctionTok{multistatemodel}\NormalTok{(h12, h13, h23; data}\OperatorTok{=}\NormalTok{template)}
+\FunctionTok{set\_parameters!}\NormalTok{(model, params)}
+
+\CommentTok{\# Simulate data at observation times}
+\NormalTok{sim\_data }\OperatorTok{=} \FunctionTok{simulate}\NormalTok{(model; nsim}\OperatorTok{=}\FloatTok{1}\NormalTok{, paths}\OperatorTok{=}\ConstantTok{false}\NormalTok{, data}\OperatorTok{=}\ConstantTok{true}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\section{Inference}\label{sec-inference}
+
+\subsection{The fit Function}\label{the-fit-function}
+
+Model fitting uses a unified interface:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{fitted }\OperatorTok{=} \FunctionTok{fit}\NormalTok{(model;}
+\NormalTok{    verbose }\OperatorTok{=} \ConstantTok{true}\NormalTok{,}
+\NormalTok{    compute\_vcov }\OperatorTok{=} \ConstantTok{true}\NormalTok{,}
+\NormalTok{    vcov\_type }\OperatorTok{=} \OperatorTok{:}\NormalTok{ij,}
+\NormalTok{    maxiter }\OperatorTok{=} \FloatTok{100}\NormalTok{,}
+\NormalTok{    tol }\OperatorTok{=} \FloatTok{1e{-}4}
+\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+The function automatically dispatches to the appropriate algorithm based
+on model and data characteristics:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Exact data}: Direct maximum likelihood via gradient-based
+  optimization
+\item
+  \textbf{Panel data, Markov model}: Matrix exponential likelihood
+\item
+  \textbf{Panel data, semi-Markov model}: Monte Carlo EM algorithm
+\end{itemize}
+
+\subsection{Direct Maximum Likelihood}\label{direct-maximum-likelihood}
+
+For exactly observed data, the log-likelihood
+(Equation~\ref{eq-exact-lik}) is maximized directly using L-BFGS with
+gradients computed via automatic differentiation
+\citep{revels2016forwarddiff}.
+
+When hazards are \emph{separable} (no shared parameters across
+transitions), each transition-specific likelihood is optimized
+independently, improving computational efficiency.
+
+\subsection{Matrix Exponential
+Likelihood}\label{matrix-exponential-likelihood}
+
+For Markov models with panel data, the transition probability matrix is
+computed via matrix exponential. \textbf{MultistateModels.jl} uses
+uniformization \citep{jensen1953markoff} for numerical stability: \[
+\exp(\mathbf{Q} \Delta t) = e^{-\mu \Delta t} \sum_{n=0}^{\infty} 
+\frac{(\mu \Delta t)^n}{n!} \mathbf{R}^n
+\] where \(\mu \geq \max_j |Q_{jj}|\) and
+\(\mathbf{R} = \mathbf{I} + \mathbf{Q}/\mu\) is a valid transition
+matrix.
+
+\subsection{Monte Carlo EM for Semi-Markov Models}\label{sec-mcem}
+
+For semi-Markov models with panel data, we implement the MCEM algorithm
+of \citet{morsomme2025semimarkov}. The key insight is to treat the
+unobserved state transitions as missing data and iterate:
+
+\textbf{E-step}: Sample latent paths \(\{\pi^{(m)}\}_{m=1}^M\) from the
+conditional distribution given observations and current parameters
+\(\theta^{(t)}\).
+
+\textbf{M-step}: Update parameters by maximizing the expected
+complete-data log-likelihood:
+\begin{equation}\phantomsection\label{eq-mstep}{
+\theta^{(t+1)} = \arg\max_\theta \sum_{m=1}^M w^{(m)} \log p(\pi^{(m)} \mid \theta)
+}\end{equation} where \(w^{(m)}\) are importance weights.
+
+\subsubsection{Importance Sampling}\label{importance-sampling}
+
+Direct sampling from the conditional path distribution is challenging.
+Instead, we use importance sampling with a proposal distribution
+\(q(\pi \mid \theta^{(t)})\):
+
+\textbf{Markov proposal} (\texttt{MarkovProposal}): Sample from a Markov
+surrogate model fitted to match marginal transition probabilities.
+Efficient but may have high variance for strongly non-Markov processes.
+
+\textbf{Phase-type proposal} (\texttt{PhaseTypeProposal}): Expand the
+state space using phase-type distributions that better approximate the
+semi-Markov dynamics. Provides lower-variance importance weights at
+increased computational cost.
+
+\subsubsection{Forward-Filtering
+Backward-Sampling}\label{forward-filtering-backward-sampling}
+
+Paths are sampled using the FFBS algorithm
+\citep{cappe2005inference, alaa2018hasmm}:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{Forward pass}: Compute filtering distributions
+  \(P(X(t_m) \mid Y_{1:m})\) at each observation time using
+  uniformization
+\item
+  \textbf{Backward pass}: Sample state trajectory in reverse time,
+  conditioning on future sampled states
+\end{enumerate}
+
+This produces exact samples from the proposal distribution, with
+importance weights correcting for the discrepancy from the target
+semi-Markov model.
+
+\subsubsection{Sampling Importance
+Resampling}\label{sampling-importance-resampling}
+
+To improve sample diversity and reduce weight degeneracy, we employ
+Sampling Importance Resampling (SIR) with Pareto-smoothed importance
+sampling (PSIS) diagnostics \citep{vehtari2024psis}:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  Generate initial pool of \(N_{\text{pool}}\) weighted paths
+\item
+  Compute PSIS-smoothed weights and diagnostic \(\hat{k}\)
+\item
+  Resample using Latin hypercube sampling for diversity
+\item
+  Adjust pool size adaptively based on effective sample size
+\end{enumerate}
+
+The Pareto-\(\hat{k}\) diagnostic indicates proposal quality: -
+\(\hat{k} < 0.5\): Excellent proposal - \(0.5 \leq \hat{k} < 0.7\): Good
+proposal\\
+- \(0.7 \leq \hat{k} < 1.0\): Acceptable but monitor -
+\(\hat{k} \geq 1.0\): Poor proposal, consider alternatives
+
+\subsubsection{SQUAREM Acceleration}\label{squarem-acceleration}
+
+We accelerate EM convergence using the SQUAREM algorithm
+\citep{varadhan2008squarem}, which applies a quasi-Newton step based on
+two successive EM updates. This typically reduces iteration count by
+50-80\% compared to standard EM.
+
+\begin{figure}
+
+\centering{
+
+\pandocbounded{\includegraphics[keepaspectratio]{figures/convergence.pdf}}
+
+}
+
+\caption{\label{fig-convergence}MCEM convergence diagnostics. Top: Trace
+plots of parameter estimates showing stabilization. Bottom:
+Log-likelihood ascent over iterations.}
+
+\end{figure}%
+
+\subsection{Variance Estimation}\label{sec-variance}
+
+\subsubsection{Model-Based Variance}\label{model-based-variance}
+
+The asymptotic variance-covariance matrix is estimated via the observed
+information matrix: \[
+\widehat{\text{Var}}(\hat{\theta}) = \left[-\nabla^2 \log \mathcal{L}(\hat{\theta})\right]^{-1}
+\]
+
+For MCEM, we use Louis' formula \citep{louis1982observed} to account for
+the missing data: \[
+\mathcal{I}_{\text{obs}}(\theta) = \mathcal{I}_{\text{comp}}(\theta) - 
+\mathcal{I}_{\text{miss}}(\theta)
+\]
+
+\subsubsection{Infinitesimal Jackknife (Sandwich)
+Variance}\label{infinitesimal-jackknife-sandwich-variance}
+
+The infinitesimal jackknife provides a robust variance estimate
+\citep{jaeckel1972infinitesimal}: \[
+\widehat{\text{Var}}_{\text{IJ}}(\hat{\theta}) = 
+\mathbf{H}^{-1} \left(\sum_{i=1}^n \mathbf{s}_i \mathbf{s}_i^\top\right) \mathbf{H}^{-1}
+\] where \(\mathbf{H}\) is the Hessian and \(\mathbf{s}_i\) is the score
+contribution from subject \(i\). This is equivalent to the sandwich
+estimator and provides valid inference under model misspecification.
+
+\subsubsection{Jackknife Variance}\label{jackknife-variance}
+
+Leave-one-out jackknife variance estimation is also available: \[
+\widehat{\text{Var}}_{\text{JK}}(\hat{\theta}) = \frac{n-1}{n} 
+\sum_{i=1}^n (\hat{\theta}_{(-i)} - \bar{\theta})(\hat{\theta}_{(-i)} - \bar{\theta})^\top
+\] where \(\hat{\theta}_{(-i)}\) is the estimate with subject \(i\)
+removed.
+
+\section{Model Selection and Regularization}\label{sec-model-selection}
+
+\subsection{Information Criteria}\label{information-criteria}
+
+Standard information criteria are available:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\FunctionTok{AIC}\NormalTok{(fitted)}
+\FunctionTok{BIC}\NormalTok{(fitted)}
+\end{Highlighting}
+\end{Shaded}
+
+For MCEM, the marginal log-likelihood is estimated using importance
+sampling weights from the final iteration.
+
+\subsection{Cross-Validation (Planned)}\label{cross-validation-planned}
+
+\emph{K-fold cross-validation for multistate models is planned for a
+future release. The implementation will account for the longitudinal
+structure through blocked CV schemes that keep each subject's
+observations together.}
+
+\subsection{Penalized Splines
+(Planned)}\label{penalized-splines-planned}
+
+\emph{Integration with penalized spline (P-spline) methods is planned,
+enabling automatic smoothing parameter selection through restricted
+maximum likelihood (REML) or cross-validation.}
+
+\subsection{Neural ODE Hazards
+(Planned)}\label{neural-ode-hazards-planned}
+
+\emph{Future versions will support neural ordinary differential equation
+(ODE) hazard specifications, allowing highly flexible hazard functions
+learned from data while maintaining interpretable integration with the
+multistate framework.}
+
+\section{Computational Details}\label{sec-computational}
+
+\subsection{Julia Implementation}\label{julia-implementation}
+
+\textbf{MultistateModels.jl} is implemented in Julia
+\citep{bezanson2017julia}, chosen for:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Performance}: JIT compilation provides C-like speed
+\item
+  \textbf{Expressiveness}: High-level syntax for complex algorithms
+\item
+  \textbf{Automatic differentiation}: Native AD via ForwardDiff.jl
+  \citep{revels2016forwarddiff}
+\item
+  \textbf{Package ecosystem}: Integration with Optim.jl
+  \citep{mogensen2018optim}, DifferentialEquations.jl
+  \citep{rackauckas2017differentialequations}
+\end{itemize}
+
+\subsection{Key Dependencies}\label{key-dependencies}
+
+\begin{itemize}
+\tightlist
+\item
+  \texttt{ForwardDiff.jl}: Forward-mode automatic differentiation for
+  gradients
+\item
+  \texttt{Optim.jl}: Optimization algorithms (L-BFGS, Newton)
+\item
+  \texttt{BSplineKit.jl}: B-spline basis functions
+\item
+  \texttt{DataFrames.jl}: Tabular data handling
+\item
+  \texttt{StatsModels.jl}: Formula interface for covariates
+\end{itemize}
+
+\subsection{Numerical Stability}\label{numerical-stability}
+
+Several techniques ensure numerical stability:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Log-space arithmetic}: All likelihood computations use
+  log-probabilities
+\item
+  \textbf{Uniformization}: Matrix exponentials computed via
+  probabilistic interpretation
+\item
+  \textbf{Underflow protection}: Automatic rescaling of small
+  probabilities
+\end{itemize}
+
+\subsection{Parallel Computing}\label{parallel-computing}
+
+Subject-level likelihood contributions are computed in parallel using
+Julia's threading:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{fitted }\OperatorTok{=} \FunctionTok{fit}\NormalTok{(model; parallel}\OperatorTok{=}\ConstantTok{true}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\section{Model Outputs and Diagnostics}\label{sec-outputs}
+
+\subsection{Extracting Results}\label{extracting-results}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Parameter estimates}
+\NormalTok{params }\OperatorTok{=} \FunctionTok{get\_parameters}\NormalTok{(fitted)}
+\NormalTok{params\_flat }\OperatorTok{=} \FunctionTok{get\_parameters\_flat}\NormalTok{(fitted)}
+
+\CommentTok{\# Variance{-}covariance matrix}
+\NormalTok{vcov }\OperatorTok{=} \FunctionTok{get\_vcov}\NormalTok{(fitted)}
+
+\CommentTok{\# Confidence intervals}
+\FunctionTok{confint}\NormalTok{(fitted, level}\OperatorTok{=}\FloatTok{0.95}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Convergence Diagnostics}\label{convergence-diagnostics}
+
+For MCEM fits, convergence diagnostics are available:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Access convergence records}
+\NormalTok{records }\OperatorTok{=}\NormalTok{ fitted.ConvergenceRecords}
+
+\CommentTok{\# Pareto{-}k diagnostics}
+\NormalTok{records.psis\_pareto\_k}
+
+\CommentTok{\# ESS trajectory}
+\NormalTok{records.ess\_history}
+
+\CommentTok{\# Parameter trace}
+\NormalTok{records.parameter\_history}
+\end{Highlighting}
+\end{Shaded}
+
+Good convergence is indicated by: - Stabilized parameter estimates -
+Pareto-\(\hat{k} < 0.7\) for most iterations - ESS close to target
+
+\section{Examples}\label{sec-examples}
+
+\subsection{Illness-Death Model with Panel
+Data}\label{illness-death-model-with-panel-data}
+
+We demonstrate fitting a semi-Markov illness-death model with Weibull
+hazards to panel data.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{\#| eval: false}
+\NormalTok{using MultistateModels}
+\NormalTok{using DataFrames}
+\NormalTok{using Random}
+
+\NormalTok{Random.seed!(12345)}
+
+\NormalTok{\# Define hazards}
+\NormalTok{h12 = Hazard(:wei, 1, 2)  \# Healthy → Ill}
+\NormalTok{h23 = Hazard(:wei, 2, 3)  \# Ill → Dead  }
+\NormalTok{h13 = Hazard(:wei, 1, 3)  \# Healthy → Dead}
+
+\NormalTok{\# Generate panel data template}
+\NormalTok{n\_subjects = 200}
+\NormalTok{obs\_times = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]}
+\NormalTok{n\_obs = length(obs\_times) {-} 1}
+
+\NormalTok{panel\_template = DataFrame(}
+\NormalTok{    id = repeat(1:n\_subjects, inner=n\_obs),}
+\NormalTok{    tstart = repeat(obs\_times[1:end{-}1], n\_subjects),}
+\NormalTok{    tstop = repeat(obs\_times[2:end], n\_subjects),}
+\NormalTok{    statefrom = 1,}
+\NormalTok{    stateto = 1,}
+\NormalTok{    obstype = 2}
+\NormalTok{)}
+
+\NormalTok{\# Create model for simulation}
+\NormalTok{sim\_model = multistatemodel(h12, h23, h13; }
+\NormalTok{                            data=panel\_template, }
+\NormalTok{                            surrogate=:markov)}
+
+\NormalTok{\# Set true parameters (log{-}shape, log{-}scale for Weibull)}
+\NormalTok{set\_parameters!(sim\_model, (}
+\NormalTok{    h12 = [log(1.5), log(5.0)],   \# Shape=1.5, Scale=5.0}
+\NormalTok{    h23 = [log(1.8), log(3.0)],   \# Shape=1.8, Scale=3.0}
+\NormalTok{    h13 = [log(1.2), log(10.0)]   \# Shape=1.2, Scale=10.0}
+\NormalTok{))}
+
+\NormalTok{\# Simulate data}
+\NormalTok{sim\_result = simulate(sim\_model; nsim=1, paths=false, data=true)}
+\NormalTok{panel\_data = sim\_result[1, 1]}
+
+\NormalTok{\# Fit model using MCEM}
+\NormalTok{fit\_model = multistatemodel(h12, h23, h13;}
+\NormalTok{                            data=panel\_data,}
+\NormalTok{                            surrogate=:markov)}
+
+\NormalTok{fitted = fit(fit\_model;}
+\NormalTok{    verbose = true,}
+\NormalTok{    compute\_vcov = true,}
+\NormalTok{    vcov\_type = :ij,}
+\NormalTok{    maxiter = 50,}
+\NormalTok{    tol = 0.01,}
+\NormalTok{    ess\_target\_initial = 50}
+\NormalTok{)}
+
+\NormalTok{\# Results}
+\NormalTok{println("Fitted parameters:")}
+\NormalTok{println(get\_parameters(fitted))}
+\NormalTok{println("\textbackslash{}nStandard errors:")}
+\NormalTok{println(sqrt.(diag(get\_vcov(fitted))))}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Model with Covariates}\label{model-with-covariates}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{\#| eval: false}
+\NormalTok{\# Hazard with treatment effect}
+\NormalTok{h12\_cov = Hazard(@formula(0 \textasciitilde{} treatment), :wei, 1, 2)}
+\NormalTok{h23\_cov = Hazard(@formula(0 \textasciitilde{} treatment), :wei, 2, 3)}
+\NormalTok{h13\_cov = Hazard(@formula(0 \textasciitilde{} treatment), :wei, 1, 3)}
+
+\NormalTok{\# Data must include treatment column}
+\NormalTok{panel\_data.treatment = repeat([0, 1], inner=n\_subjects÷2 * n\_obs)}
+
+\NormalTok{model\_cov = multistatemodel(h12\_cov, h23\_cov, h13\_cov;}
+\NormalTok{                            data=panel\_data,}
+\NormalTok{                            surrogate=:markov)}
+
+\NormalTok{fitted\_cov = fit(model\_cov; verbose=true, compute\_vcov=true)}
+
+\NormalTok{\# Treatment hazard ratios}
+\NormalTok{params = get\_parameters(fitted\_cov)}
+\NormalTok{hr\_12 = exp(params.h12[end])  \# Last parameter is treatment effect}
+\NormalTok{println("Treatment HR for 1→2: ", round(hr\_12, digits=3))}
+\end{Highlighting}
+\end{Shaded}
+
+\section{Comparison with Existing Software}\label{sec-comparison}
+
+\subsection{Feature Comparison}\label{feature-comparison}
+
+Table~\ref{tbl-detailed-comparison} provides a detailed feature
+comparison.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.1000}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.2333}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.1111}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.0556}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.0889}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.0556}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.1333}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.1111}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.1111}}@{}}
+\caption{Detailed feature comparison. --- indicates not applicable for
+non-parametric methods.}\label{tbl-detailed-comparison}\tabularnewline
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Feature
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+MultistateModels.jl
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+survival
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+msm
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+mstate
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+etm
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+SemiMarkov
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+flexsurv
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+icmstate
+\end{minipage} \\
+\midrule\noalign{}
+\endfirsthead
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Feature
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+MultistateModels.jl
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+survival
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+msm
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+mstate
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+etm
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+SemiMarkov
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+flexsurv
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+icmstate
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Data Types} & & & & & & & & \\
+Exact observations & ✓ & ✓ & ✓ & ✓ & ✓ & ✓ & ✓ & ✗ \\
+Panel/interval-censored & ✓ & ✗ & ✓ & ✗ & ✗ & ✗ & ✗ & ✓ \\
+Right censoring & ✓ & ✓ & ✓ & ✓ & ✓ & ✓ & ✓ & ✓ \\
+\textbf{Model Types} & & & & & & & & \\
+Markov multistate & ✓ & ✗† & ✓ & ✓ & ✓ & ✗ & ✓ & ✓ \\
+Semi-Markov multistate & ✓ & ✗† & ✗ & ✗ & ✗ & ✓ & ✓ & ✗ \\
+Hidden Markov & ✗ & ✗ & ✓ & ✗ & ✗ & ✗ & ✗ & ✗ \\
+\textbf{Inference Approach} & & & & & & & & \\
+Non-parametric & ✗ & ✓ & ✗ & ✓ & ✓ & ✗ & ✗ & ✓ \\
+Parametric & ✓ & ✗ & ✓ & ✗ & ✗ & ✓ & ✓ & ✗ \\
+Semi-parametric (splines/Cox) & ✓ & ✓ & ✗ & ✓ & ✗ & ✗ & ✓ & ✗ \\
+\textbf{Hazard Families} & & & & & & & & \\
+Exponential & ✓ & ✓ & --- & --- & ✓ & ✓ & --- & \\
+Weibull & ✓ & ✓ & --- & --- & ✓ & ✓ & --- & \\
+Gompertz & ✓ & ✓ & --- & --- & ✗ & ✓ & --- & \\
+Splines & ✓ & ✗ & --- & --- & ✗ & ✓ & --- & \\
+Phase-type & ✓ & ✗ & --- & --- & ✗ & ✗ & --- & \\
+\textbf{Covariate Effects} & & & & & & & & \\
+Proportional hazards & ✓ & ✓ & ✓ & ✗ & ✓ & ✓ & ✗ & \\
+Time-varying covariates & ✓ & ✓ & ✓ & ✗ & ✓ & ✓ & ✗ & \\
+\textbf{Variance Estimation} & & & & & & & & \\
+Model-based & ✓ & ✓ & ✓ & ✓ & ✓ & ✓ & ✓ & \\
+Sandwich/IJ & ✓ & ✗ & ✗ & ✗ & ✗ & ✗ & ✗ & \\
+Jackknife & ✓ & ✓ & ✗ & ✗ & ✗ & ✗ & ✗ & \\
+\end{longtable}
+
+\subsection{Methodological
+Distinctions}\label{methodological-distinctions}
+
+\textbf{vs.~msm}: While \textbf{msm} is the standard tool for panel data
+multistate models, it is fundamentally limited to the Markov assumption.
+Our package extends the panel data capability to semi-Markov models
+through MCEM. For Markov models with panel data, both packages should
+give equivalent results.
+
+\textbf{vs.~survival}: The \textbf{survival} package is the standard for
+semi-parametric (Cox regression) and non-parametric (Kaplan-Meier)
+survival analysis. While it handles competing risks, it is not designed
+for general multistate models and cannot accommodate
+panel/interval-censored data.
+
+\textbf{vs.~mstate and etm}: These packages provide non-parametric
+estimation (Aalen-Johansen estimator, Nelson-Aalen cumulative hazard)
+and Cox regression-based inference for multistate models with exact
+transition times. They excel when model-free estimation is desired and
+sample sizes are sufficient. However, they cannot be used with
+panel/interval-censored data and do not provide the efficiency gains of
+fully parametric methods. \textbf{MultistateModels.jl} focuses on
+parametric and semi-parametric (B-spline) inference, complementing
+rather than replacing these tools.
+
+\textbf{vs.~SemiMarkov}: The \textbf{SemiMarkov} package fits
+semi-Markov models but \textbf{requires exact observation of transition
+times}. This is a fundamental limitation---it cannot be used when only
+the state at scheduled observation times is known, which is the common
+situation in clinical studies.
+
+\textbf{vs.~flexsurv}: The \textbf{flexsurv} package offers excellent
+flexibility for parametric survival models including semi-Markov
+multistate models with spline-based hazards and clock-reset (sojourn
+time) formulations. However, it \textbf{requires exact transition times}
+and cannot handle panel/interval-censored observations where the timing
+of state changes is unknown.
+
+\subsection{When to Use Each Package}\label{when-to-use-each-package}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Use survival} for Cox regression or Kaplan-Meier estimation
+  with single-endpoint or competing risks data
+\item
+  \textbf{Use mstate or etm} for non-parametric or Cox regression-based
+  multistate models with exact transition times, especially for
+  exploratory analysis or when avoiding parametric distributional
+  assumptions is critical
+\item
+  \textbf{Use msm} for Markov models with panel data when the
+  exponential sojourn assumption is reasonable, or for hidden Markov
+  models
+\item
+  \textbf{Use SemiMarkov} for semi-Markov models with exact times when
+  Weibull or exponentiated Weibull distributions are appropriate
+\item
+  \textbf{Use flexsurv} for semi-Markov or Markov models with exact
+  transition times, especially when flexible spline-based hazards are
+  desired
+\item
+  \textbf{Use icmstate} for non-parametric Markov models with
+  panel/interval-censored data
+\item
+  \textbf{Use MultistateModels.jl} for parametric/semi-parametric
+  semi-Markov models with panel data, phase-type distributions, or when
+  robust variance estimation (sandwich, jackknife) is needed
+\end{itemize}
+
+\section{Summary and Future Directions}\label{sec-conclusion}
+
+\subsection{Summary}\label{summary}
+
+\textbf{MultistateModels.jl} provides a comprehensive framework for
+fitting parametric and semi-parametric multistate models in Julia, with
+particular strength in handling semi-Markov models with panel data---a
+capability not available in existing software. The package implements
+the MCEM methodology of \citet{morsomme2025semimarkov} with efficient
+importance sampling, SQUAREM acceleration, and multiple variance
+estimation approaches.
+
+\subsection{Limitations}\label{limitations}
+
+Current limitations include:
+
+\begin{itemize}
+\tightlist
+\item
+  No hidden state support (all states assumed observable at panel times)
+\item
+  Single initial state assumed (though easily modified)
+\item
+  No Bayesian inference (frequentist MLE only)
+\end{itemize}
+
+\subsection{Future Directions}\label{future-directions}
+
+Planned extensions include:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{Penalized splines} with automatic smoothing selection
+\item
+  \textbf{Cross-validation} framework for model selection
+\item
+  \textbf{Neural ODE hazards} for highly flexible specifications
+\item
+  \textbf{Bayesian inference} via Hamiltonian Monte Carlo
+\item
+  \textbf{GPU acceleration} for large-scale applications
+\end{enumerate}
+
+\subsection{Availability}\label{availability}
+
+\textbf{MultistateModels.jl} is available at
+\url{https://github.com/fintzij/MultistateModels.jl} under the MIT
+license.
+
+\section{Acknowledgments}\label{acknowledgments}
+
+We thank Tom Schiemsky and Andrew Beck for contributions to the
+methodology and testing.
+
+\section*{References}\label{references}
+\addcontentsline{toc}{section}{References}
+
+\renewcommand{\bibsection}{}
+\bibliography{references.bib}
+
+\section{Appendix A: Uniformization
+Algorithm}\label{sec-appendix-uniformization}
+
+The uniformization algorithm computes the matrix exponential
+\(\mathbf{P}(\Delta t) = \exp(\mathbf{Q} \Delta t)\) via:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  Choose uniformization rate \(\mu \geq \max_j |Q_{jj}|\)
+\item
+  Construct transition matrix
+  \(\mathbf{R} = \mathbf{I} + \mathbf{Q}/\mu\)
+\item
+  Compute truncated sum: \[
+  \mathbf{P}(\Delta t) \approx e^{-\mu \Delta t} \sum_{n=0}^{N} 
+  \frac{(\mu \Delta t)^n}{n!} \mathbf{R}^n
+  \] where \(N\) is chosen so the Poisson tail probability is below
+  tolerance.
+\end{enumerate}
+
+This representation interprets the continuous-time chain as a
+discrete-time chain \(\mathbf{R}\) with Poisson-distributed number of
+jumps.
+
+\section{Appendix B: FFBS Algorithm}\label{sec-appendix-ffbs}
+
+\textbf{Forward Filtering:}
+
+For each observation time \(t_m\), compute: \[
+\alpha_m(j) = P(X(t_m) = j \mid Y_{1:m})
+\] recursively using: \[
+\alpha_m(j) \propto \sum_{i} \alpha_{m-1}(i) P_{ij}(t_{m-1}, t_m) e_j(Y_m)
+\] where \(e_j(Y_m)\) is the emission probability (1 if \(Y_m = j\), 0
+otherwise for exact observations).
+
+\textbf{Backward Sampling:}
+
+Sample \(X(t_M) \sim \alpha_M\), then for \(m = M-1, \ldots, 1\): \[
+X(t_m) \sim P(X(t_m) = j \mid X(t_{m+1}), Y_{1:m}) \propto 
+\alpha_m(j) P_{j, X(t_{m+1})}(t_m, t_{m+1})
+\]
+
+Within-interval paths are sampled using endpoint-conditioned
+uniformization \citep{hobolth2009simulation}.
+
+\section{Appendix C: Phase-Type
+Distributions}\label{sec-appendix-phasetype}
+
+A Coxian distribution with \(n\) phases has intensity matrix: \[
+\mathbf{S} = \begin{pmatrix}
+-\lambda_1 & p_1 \lambda_1 & 0 & \cdots & 0 \\
+0 & -\lambda_2 & p_2 \lambda_2 & \cdots & 0 \\
+\vdots & & \ddots & & \vdots \\
+0 & 0 & \cdots & -\lambda_{n-1} & p_{n-1}\lambda_{n-1} \\
+0 & 0 & \cdots & 0 & -\lambda_n
+\end{pmatrix}
+\]
+
+with absorption rates
+\(\mathbf{s} = ((1-p_1)\lambda_1, \ldots, (1-p_{n-1})\lambda_{n-1}, \lambda_n)^\top\).
+
+The density, survival, and hazard functions are: \[
+f(t) = \boldsymbol{\pi} e^{\mathbf{S}t} \mathbf{s}, \quad
+S(t) = \boldsymbol{\pi} e^{\mathbf{S}t} \mathbf{1}, \quad
+h(t) = \frac{f(t)}{S(t)}
+\] where \(\boldsymbol{\pi} = (1, 0, \ldots, 0)\) for Coxian
+distributions starting in phase 1.
+
+\section{Appendix D: Variance Estimation
+Details}\label{sec-appendix-variance}
+
+\subsection{Louis' Formula}\label{louis-formula}
+
+For the observed information in EM: \[
+\mathcal{I}_{\text{obs}}(\theta) = -E_{\theta}[\nabla^2 \log p(Y, Z \mid \theta) \mid Y] 
+- \text{Var}_{\theta}[\nabla \log p(Y, Z \mid \theta) \mid Y]
+\]
+
+The first term is the expected complete-data information; the second
+measures information loss due to missing data.
+
+\subsection{Infinitesimal Jackknife}\label{infinitesimal-jackknife}
+
+For subject \(i\), the influence function is: \[
+\mathbf{IC}_i = \mathbf{H}^{-1} \mathbf{s}_i
+\] where
+\(\mathbf{s}_i = \nabla_\theta \log \mathcal{L}_i(\hat{\theta})\).
+
+The IJ variance is: \[
+\widehat{\text{Var}}_{\text{IJ}} = \sum_{i=1}^n \mathbf{IC}_i \mathbf{IC}_i^\top
+= \mathbf{H}^{-1} \left(\sum_{i=1}^n \mathbf{s}_i \mathbf{s}_i^\top\right) \mathbf{H}^{-1}
+\]
+
+This equals the sandwich estimator and is consistent even under model
+misspecification.
+
+
+
+
+
+\end{document}

@@ -977,11 +977,27 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                     subj_ll += obs_ll * obs_weight
 
                 else # panel data (obstype == 2)
+                    # Forward algorithm for single observation:
+                    # L = Σ_s P(X=s | X_0=statefrom) * P(Y | X=s)
+                    #   = Σ_s TPM[statefrom, s] * emat[i, s]
+                    #
+                    # When emat[i, stateto] = 1 and emat[i, other] = 0 (default for exact observations),
+                    # this reduces to TPM[statefrom, stateto].
+                    # When EmissionMatrix provides soft evidence, this properly weights all states.
                     statefrom_i = cols.statefrom[i]
-                    stateto_i = cols.stateto[i]
                     book_idx1 = cols.tpm_map_col1[i]
                     book_idx2 = cols.tpm_map_col2[i]
-                    subj_ll += log(tpm_book[book_idx1][book_idx2][statefrom_i, stateto_i]) * obs_weight
+                    tpm = tpm_book[book_idx1][book_idx2]
+                    
+                    # Compute likelihood: Σ_s P(transition to s) * P(observation | s)
+                    prob_sum = zero(T)
+                    for s in 1:S
+                        emission_prob = data.model.emat[i, s]
+                        if emission_prob > 0
+                            prob_sum += tpm[statefrom_i, s] * emission_prob
+                        end
+                    end
+                    subj_ll += log(prob_sum) * obs_weight
                 end
             end
 
@@ -1101,23 +1117,20 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                     end
                 end # end-compute q
 
-                # compute the set of possible "states to" and their emission probabilities
-                # For exact observations (stateto > 0), only that state is possible with probability 1
-                # For censored observations, use the emission matrix
-                stateto_i = cols.stateto[i]
-                if stateto_i > 0
-                    # Exact observation - only one state possible
-                    for r in 1:S
-                        lmat[stateto_i, ind] += q[r, stateto_i] * lmat[r, ind - 1]
-                    end
-                else
-                    # Censored observation - weight by emission probabilities
-                    for s in 1:S
-                        emission_prob = data.model.emat[i, s]
-                        if emission_prob > 0
-                            for r in 1:S
-                                lmat[s, ind] += q[r, s] * lmat[r, ind - 1] * emission_prob
-                            end
+                # Forward algorithm update: α_i(s) = e_{is} * Σ_r Q_{rs} * α_{i-1}(r)
+                # where e_{is} = P(Y_i | X_i = s) is the emission probability.
+                #
+                # The emission matrix is constructed by build_emat():
+                # - For exact observations: e[i, stateto] = 1, e[i, other] = 0
+                # - For censored observations: e[i, :] from CensoringPatterns
+                # - For user-supplied EmissionMatrix: uses provided soft evidence
+                #
+                # This unified approach enables soft evidence for any observation type.
+                for s in 1:S
+                    emission_prob = data.model.emat[i, s]
+                    if emission_prob > 0
+                        for r in 1:S
+                            lmat[s, ind] += q[r, s] * lmat[r, ind - 1] * emission_prob
                         end
                     end
                 end
@@ -1243,12 +1256,23 @@ function _loglik_markov_functional(parameters, data::MPanelData; neg = true)
                     
                     obs_ll * obs_weight
                 else  # panel data (obstype == 2)
+                    # Forward algorithm for single observation:
+                    # L = Σ_s P(X=s | X_0=statefrom) * P(Y | X=s)
+                    #   = Σ_s TPM[statefrom, s] * emat[i, s]
                     statefrom_i = cols.statefrom[i]
-                    stateto_i = cols.stateto[i]
                     book_idx1 = cols.tpm_map_col1[i]
                     book_idx2 = cols.tpm_map_col2[i]
                     P = tpm_dict[(book_idx1, book_idx2)]
-                    log(P[statefrom_i, stateto_i]) * obs_weight
+                    
+                    # Compute likelihood: Σ_s P(transition to s) * P(observation | s)
+                    prob_sum = zero(T)
+                    for s in 1:n_states
+                        emission_prob = data.model.emat[i, s]
+                        if emission_prob > zero(T)
+                            prob_sum += P[statefrom_i, s] * emission_prob
+                        end
+                    end
+                    log(prob_sum) * obs_weight
                 end
             end
             
@@ -1326,25 +1350,21 @@ function _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, ::Type{T
             # Matrix-vector product (non-mutating)
             α = P' * α  # transpose because α is a column vector
             
-            # Apply emission probabilities for censored observations
-            stateto_i = cols.stateto[i]
-            if stateto_i > 0
-                # Exact observation at panel time - concentrate on observed state
-                prob = α[stateto_i]
-                new_α = zeros(T, n_states)
-                new_α = setindex_immutable_vec(new_α, prob, stateto_i)
-                α = new_α
-            elseif obstype_i > 2
-                # Censored observation - weight by emission probabilities
-                new_α = zeros(T, n_states)
-                for s in 1:n_states
-                    emission_prob = data.model.emat[i, s]
-                    if emission_prob > zero(T)
-                        new_α = setindex_immutable_vec(new_α, new_α[s] + α[s] * emission_prob, s)
-                    end
+            # Apply emission probabilities: α_i(s) = e_{is} * α_i(s)
+            # The emission matrix is constructed by build_emat():
+            # - For exact observations: e[i, stateto] = 1, e[i, other] = 0
+            # - For censored observations: e[i, :] from CensoringPatterns
+            # - For user-supplied EmissionMatrix: uses provided soft evidence
+            #
+            # This unified approach enables soft evidence for any observation type.
+            new_α = zeros(T, n_states)
+            for s in 1:n_states
+                emission_prob = data.model.emat[i, s]
+                if emission_prob > zero(T)
+                    new_α = setindex_immutable_vec(new_α, new_α[s] + α[s] * emission_prob, s)
                 end
-                α = new_α
             end
+            α = new_α
         end
     end
     
