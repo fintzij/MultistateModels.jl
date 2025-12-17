@@ -191,11 +191,31 @@ include("types/data_containers.jl")
 # Infrastructure types (AD backends, threading config)
 include("types/infrastructure.jl")
 
-# helpers
-include("helpers.jl")
+# =============================================================================
+# Utilities (from utilities/ subfolder)
+# =============================================================================
+# Order matters: type definitions first, then functions that depend on them
+
+# Parameter flattening type system and construction functions
+include("utilities/flatten.jl")
+
+# ReConstructor struct and flatten/unflatten API
+include("utilities/reconstructor.jl")
 
 # shared stats utilities
 include("utilities/stats.jl")
+
+# Parameter scale transformations (estimation <-> natural)
+include("utilities/transforms.jl")
+
+# Parameter manipulation functions (unflatten, set/get, build)
+include("utilities/parameters.jl")
+
+# Data and parameter validation functions
+include("utilities/validation.jl")
+
+# TPM bookkeeping, data containers, and data manipulation
+include("utilities/books.jl")
 
 # =============================================================================
 # Hazard Functions (from hazard/ subfolder)
