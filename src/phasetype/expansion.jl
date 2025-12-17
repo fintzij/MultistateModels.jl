@@ -63,20 +63,8 @@ function build_phasetype_mappings(hazards::Vector{<:HazardFunction},
         end
     end
     
-    # Build state_to_phases mapping
-    n_expanded = sum(n_phases_per_state)
-    state_to_phases = Vector{UnitRange{Int}}(undef, n_observed)
-    phase_to_state = Vector{Int}(undef, n_expanded)
-    
-    phase_idx = 1
-    for s in 1:n_observed
-        n_phases = n_phases_per_state[s]
-        state_to_phases[s] = phase_idx:(phase_idx + n_phases - 1)
-        for p in 1:n_phases
-            phase_to_state[phase_idx + p - 1] = s
-        end
-        phase_idx += n_phases
-    end
+    # Build state_to_phases mapping (reuse helper from surrogate.jl)
+    state_to_phases, phase_to_state, n_expanded = _build_state_mappings(n_observed, n_phases_per_state)
     
     # Build expanded transition matrix
     expanded_tmat = _build_expanded_tmat(tmat, n_phases_per_state, state_to_phases, hazards)
@@ -486,7 +474,7 @@ function _build_exit_hazard(pt_spec::PhaseTypeHazardSpec,
     # Get covariate info from original specification
     schema = StatsModels.schema(pt_spec.hazard, data)
     hazschema = apply_schema(pt_spec.hazard, schema)
-    rhs_names = _phasetype_rhs_names(hazschema)
+    rhs_names = _hazard_rhs_names(hazschema)
     
     # Build parameter names
     covar_labels = length(rhs_names) > 1 ? rhs_names[2:end] : String[]
@@ -542,32 +530,7 @@ function _generate_exit_hazard_fns(parnames::Vector{Symbol}, linpred_effect::Sym
     return hazard_fn, cumhaz_fn
 end
 
-"""
-    _phasetype_rhs_names(hazschema)
-
-Extract RHS names from a hazard formula schema (helper for phase-type expansion).
-"""
-function _phasetype_rhs_names(hazschema)
-    has_intercept = _phasetype_formula_has_intercept(hazschema.rhs)
-    coef_names = StatsModels.coefnames(hazschema.rhs)
-    coef_vec = coef_names isa AbstractVector ? collect(coef_names) : [coef_names]
-    return has_intercept ? coef_vec : vcat("(Intercept)", coef_vec)
-end
-
-"""
-    _phasetype_formula_has_intercept(rhs_term)
-
-Check if formula RHS includes an intercept term.
-Uses the same logic as _hazard_formula_has_intercept in modelgeneration.jl.
-"""
-@inline function _phasetype_formula_has_intercept(rhs_term)
-    rhs_term isa StatsModels.ConstantTerm && return true
-    rhs_term isa StatsModels.InterceptTerm && return true
-    if rhs_term isa StatsModels.MatrixTerm
-        return any(_phasetype_formula_has_intercept, rhs_term.terms)
-    end
-    return false
-end
+# NOTE: Use _hazard_rhs_names from construction/multistatemodel.jl instead of duplicating here
 
 """
     _build_expanded_hazard(h, observed_from, observed_to, from_phase, to_phase, data)
@@ -592,7 +555,7 @@ function _build_expanded_hazard(h::HazardFunction,
     schema = StatsModels.schema(h.hazard, data)
     hazschema = apply_schema(h.hazard, schema)
     modelcols(hazschema, data)  # validate
-    rhs_names = _phasetype_rhs_names(hazschema)
+    rhs_names = _hazard_rhs_names(hazschema)
     shared_key = shared_baseline_key(h, family)
     
     ctx = HazardBuildContext(
@@ -1315,7 +1278,7 @@ Count the number of covariate parameters in a hazard formula.
 function _count_covariates(formula::FormulaTerm, data::DataFrame)
     schema = StatsModels.schema(formula, data)
     hazschema = apply_schema(formula, schema)
-    rhs_names = _phasetype_rhs_names(hazschema)
+    rhs_names = _hazard_rhs_names(hazschema)
     # Subtract 1 for intercept
     return max(0, length(rhs_names) - 1)
 end
