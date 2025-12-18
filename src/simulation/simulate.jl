@@ -374,7 +374,7 @@ to also receive the underlying continuous-time sample paths.
   observation window. Set to `false` to use each subject's original observation times.
 - `expanded::Bool`: For phase-type models, controls whether results use the expanded
   (phase-level) state space (`true`) or the original observed state space (`false`).
-  Default is `true`. Has no effect for non-phase-type models.
+  Default is `false`. Has no effect for non-phase-type models.
 
 # Returns
 Depends on `data` and `paths` arguments:
@@ -453,10 +453,8 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
                   newdata::Union{Nothing,DataFrame} = nothing,
                   tmax::Union{Nothing,Float64} = nothing,
                   autotmax::Bool = true,
-                  expanded::Bool = true,
-                  obstype_by_transition::Union{Nothing,Dict{Int,Int}} = nothing,
-                  censoring_matrix::Union{Nothing,AbstractMatrix{Int}} = nothing,
-                  censoring_pattern::Union{Nothing,Int} = nothing)
+                  expanded::Bool = false,
+                  obstype_by_transition::Union{Nothing,Dict{Int,Int}} = nothing)
 
     # throw an error if neither paths nor data are asked for
     if paths == false && data == false
@@ -464,16 +462,10 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
     end
 
     # Validate per-transition observation parameters
-    if obstype_by_transition !== nothing || censoring_matrix !== nothing
+    if obstype_by_transition !== nothing
         tmat = model.tmat
         trans_map = transition_index_map(tmat)
-        
-        if obstype_by_transition !== nothing
-            validate_obstype_by_transition(obstype_by_transition, tmat)
-        end
-        if censoring_matrix !== nothing
-            validate_censoring_matrix(censoring_matrix, tmat)
-        end
+        validate_obstype_by_transition(obstype_by_transition, tmat)
     else
         trans_map = nothing
     end
@@ -511,8 +503,6 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
                 if data == true
                     datasets[j, i] = observe_path(samplepath, model;
                                                    obstype_by_transition = obstype_by_transition,
-                                                   censoring_matrix = censoring_matrix,
-                                                   censoring_pattern = censoring_pattern,
                                                    trans_map = trans_map)
                 end
             end
@@ -577,10 +567,8 @@ observed data (no continuous-time paths). Equivalent to calling
 - `newdata::Union{Nothing,DataFrame}`: Optional new data template for simulation (default: nothing)
 - `tmax::Union{Nothing,Float64}`: Optional maximum simulation time (default: nothing)
 - `autotmax::Bool`: Use maximum tstop as implicit tmax (default: true)
-- `expanded::Bool`: For phase-type models, use expanded state space (default: true)
+- `expanded::Bool`: For phase-type models, use expanded state space (default: false)
 - `obstype_by_transition::Union{Nothing,Dict{Int,Int}}`: Per-transition observation types (default: nothing)
-- `censoring_matrix::Union{Nothing,AbstractMatrix{Int}}`: Censoring codes for transitions (default: nothing)
-- `censoring_pattern::Union{Nothing,Int}`: Row of censoring_matrix to use (default: nothing)
 
 # Returns
 - `Vector{DataFrame}`: array of simulated datasets with dimensions (1, nsim)
@@ -606,17 +594,13 @@ function simulate_data(model::MultistateProcess;
                        newdata::Union{Nothing,DataFrame} = nothing,
                        tmax::Union{Nothing,Float64} = nothing,
                        autotmax::Bool = true,
-                       expanded::Bool = true,
-                       obstype_by_transition::Union{Nothing,Dict{Int,Int}} = nothing,
-                       censoring_matrix::Union{Nothing,AbstractMatrix{Int}} = nothing,
-                       censoring_pattern::Union{Nothing,Int} = nothing)
+                       expanded::Bool = false,
+                       obstype_by_transition::Union{Nothing,Dict{Int,Int}} = nothing)
     return simulate(model; nsim = nsim, data = true, paths = false,
                     strategy = strategy, solver = solver,
                     newdata = newdata, tmax = tmax, autotmax = autotmax,
                     expanded = expanded,
-                    obstype_by_transition = obstype_by_transition,
-                    censoring_matrix = censoring_matrix,
-                    censoring_pattern = censoring_pattern)
+                    obstype_by_transition = obstype_by_transition)
 end
 
 """
@@ -639,7 +623,7 @@ calling `simulate(model; nsim=nsim, data=false, paths=true, ...)`.
 - `newdata::Union{Nothing,DataFrame}`: Optional new data template for simulation (default: nothing)
 - `tmax::Union{Nothing,Float64}`: Optional maximum simulation time (default: nothing)
 - `autotmax::Bool`: Use maximum tstop as implicit tmax (default: true)
-- `expanded::Bool`: For phase-type models, use expanded state space (default: true)
+- `expanded::Bool`: For phase-type models, use expanded state space (default: false)
 
 # Returns
 - `Matrix{SamplePath}`: array of sample paths with dimensions (nsubj, nsim)
@@ -660,7 +644,7 @@ function simulate_paths(model::MultistateProcess;
                         newdata::Union{Nothing,DataFrame} = nothing,
                         tmax::Union{Nothing,Float64} = nothing,
                         autotmax::Bool = true,
-                        expanded::Bool = true)
+                        expanded::Bool = false)
     return simulate(model; nsim = nsim, data = false, paths = true,
                     strategy = strategy, solver = solver,
                     newdata = newdata, tmax = tmax, autotmax = autotmax,

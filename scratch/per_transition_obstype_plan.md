@@ -3,13 +3,17 @@
 ## Status: IMPLEMENTED ✅
 
 **Implementation Date**: 2024
-**Test Status**: All 110 tests passing
+**Test Status**: All 99 tests passing
 **Files Modified**:
 - `src/utilities/transition_helpers.jl` (NEW)
 - `src/simulation/path_utilities.jl` (modified `observe_path`)
 - `src/simulation/simulate.jl` (added kwargs to `simulate`, `simulate_data`)
 - `src/MultistateModels.jl` (exports)
 - `MultistateModelsTests/unit/test_per_transition_obstype.jl` (NEW)
+
+**API Changes**:
+- `expanded` default changed from `true` to `false` for phase-type models
+- `obstype_by_transition::Dict{Int,Int}` kwarg added to `simulate`, `simulate_data`
 
 ## Overview
 
@@ -64,7 +68,6 @@ Add capability to specify observation types (exact, panel, censored) on a per-tr
 Allow users to specify observation type per transition via:
 
 1. **Direct mapping**: `Dict{Int,Int}` mapping transition index → obstype code
-2. **Censoring patterns**: Matrix-based patterns for systematic censoring schemes
 
 ### Transition Indexing
 
@@ -96,8 +99,10 @@ simulate(model::MultistateProcess;
     newdata = nothing,
     tmax = nothing,
     autotmax = true,
-    expanded = true,
+    expanded = false,  # Changed default from true to false
     # NEW ARGUMENTS:
+    obstype_by_transition::Union{Nothing,Dict{Int,Int}} = nothing
+)
     obstype_by_transition::Union{Nothing,Dict{Int,Int}} = nothing,
     censoring_matrix::Union{Nothing,AbstractMatrix{Int}} = nothing,
     censoring_pattern::Union{Nothing,Int} = nothing

@@ -1,7 +1,6 @@
 """
     observe_path(samplepath::SamplePath, model::MultistateProcess;
-                 obstype_by_transition=nothing, censoring_matrix=nothing, 
-                 censoring_pattern=nothing, trans_map=nothing) 
+                 obstype_by_transition=nothing, trans_map=nothing) 
 
 Return `statefrom` and `stateto` for a jump chain observed at `tstart` and `tstop`.
 
@@ -9,10 +8,7 @@ Return `statefrom` and `stateto` for a jump chain observed at `tstart` and `tsto
 - `samplepath::SamplePath`: Continuous-time sample path
 - `model::MultistateProcess`: Model containing data with observation scheme
 - `obstype_by_transition::Union{Nothing,Dict{Int,Int}}`: Optional mapping from
-  transition index to observation type code. Takes precedence over censoring_matrix.
-- `censoring_matrix::Union{Nothing,AbstractMatrix{Int}}`: Optional matrix of
-  censoring codes (n_transitions × n_patterns)
-- `censoring_pattern::Union{Nothing,Int}`: Column index in censoring_matrix to use
+  transition index to observation type code.
 - `trans_map::Union{Nothing,Dict{Tuple{Int,Int},Int}}`: Pre-computed transition map
   (for efficiency when calling repeatedly)
 
@@ -28,12 +24,10 @@ function observe_path(
     samplepath::SamplePath, 
     model::MultistateProcess;
     obstype_by_transition::Union{Nothing,Dict{Int,Int}} = nothing,
-    censoring_matrix::Union{Nothing,AbstractMatrix{Int}} = nothing,
-    censoring_pattern::Union{Nothing,Int} = nothing,
     trans_map::Union{Nothing,Dict{Tuple{Int,Int},Int}} = nothing
 )
     # Check if per-transition logic is needed
-    use_per_transition = !isnothing(obstype_by_transition) || !isnothing(censoring_matrix)
+    use_per_transition = !isnothing(obstype_by_transition)
     
     # Build transition map if needed and not provided
     if use_per_transition && isnothing(trans_map)
@@ -50,8 +44,7 @@ function observe_path(
     # Pre-compute row counts for allocation
     # This is more complex with per-transition obstypes
     nrows = _count_observation_rows(samplepath, subj_dat, use_per_transition, 
-                                    trans_map, obstype_by_transition, 
-                                    censoring_matrix, censoring_pattern)
+                                    trans_map, obstype_by_transition)
 
     # indices for panel data
     panel_inds = [1; map(x -> searchsortedlast(samplepath.times, x), subj_dat[:,:tstop])]
@@ -71,7 +64,7 @@ function observe_path(
             rowind = _process_exact_interval!(
                 obsdat, rowind, r, samplepath, subj_dat, 
                 use_per_transition, trans_map, 
-                obstype_by_transition, censoring_matrix, censoring_pattern
+                obstype_by_transition
             )
         else
             # Panel/censored interval: preserve original behavior
@@ -112,7 +105,7 @@ end
 
 """
     _count_observation_rows(samplepath, subj_dat, use_per_transition, trans_map,
-                            obstype_by_transition, censoring_matrix, censoring_pattern)
+                            obstype_by_transition)
 
 Count the number of rows needed for observation data with per-transition obstypes.
 """
@@ -121,9 +114,7 @@ function _count_observation_rows(
     subj_dat,
     use_per_transition::Bool,
     trans_map::Union{Nothing,Dict{Tuple{Int,Int},Int}},
-    obstype_by_transition::Union{Nothing,Dict{Int,Int}},
-    censoring_matrix::Union{Nothing,AbstractMatrix{Int}},
-    censoring_pattern::Union{Nothing,Int}
+    obstype_by_transition::Union{Nothing,Dict{Int,Int}}
 )
     nrows = 0
     for r in Base.OneTo(nrow(subj_dat))
@@ -141,7 +132,7 @@ function _count_observation_rows(
             # Exact interval with per-transition logic
             nrows += _count_per_transition_rows(
                 samplepath, subj_dat.tstart[r], subj_dat.tstop[r],
-                trans_map, obstype_by_transition, censoring_matrix, censoring_pattern
+                trans_map, obstype_by_transition
             )
         end            
     end
@@ -149,8 +140,7 @@ function _count_observation_rows(
 end
 
 """
-    _count_per_transition_rows(samplepath, tstart, tstop, trans_map,
-                               obstype_by_transition, censoring_matrix, censoring_pattern)
+    _count_per_transition_rows(samplepath, tstart, tstop, trans_map, obstype_by_transition)
 
 Count rows for an exact interval with per-transition observation types.
 
@@ -163,9 +153,7 @@ function _count_per_transition_rows(
     tstart::Float64,
     tstop::Float64,
     trans_map::Dict{Tuple{Int,Int},Int},
-    obstype_by_transition::Union{Nothing,Dict{Int,Int}},
-    censoring_matrix::Union{Nothing,AbstractMatrix{Int}},
-    censoring_pattern::Union{Nothing,Int}
+    obstype_by_transition::Dict{Int,Int}
 )
     # Find jumps in interval
     jump_inds = findall(tstart .< samplepath.times .< tstop)
@@ -186,8 +174,7 @@ function _count_per_transition_rows(
         statefrom == stateto && continue
         
         obtype = _get_transition_obstype(
-            statefrom, stateto, trans_map,
-            obstype_by_transition, censoring_matrix, censoring_pattern
+            statefrom, stateto, trans_map, obstype_by_transition
         )
         
         if obtype == 1
@@ -201,8 +188,7 @@ end
 
 """
     _process_exact_interval!(obsdat, rowind, r, samplepath, subj_dat, 
-                            use_per_transition, trans_map,
-                            obstype_by_transition, censoring_matrix, censoring_pattern)
+                            use_per_transition, trans_map, obstype_by_transition)
 
 Process an exact observation interval, potentially with per-transition obstypes.
 Returns the updated row index.
@@ -222,9 +208,7 @@ function _process_exact_interval!(
     subj_dat,
     use_per_transition::Bool,
     trans_map::Union{Nothing,Dict{Tuple{Int,Int},Int}},
-    obstype_by_transition::Union{Nothing,Dict{Int,Int}},
-    censoring_matrix::Union{Nothing,AbstractMatrix{Int}},
-    censoring_pattern::Union{Nothing,Int}
+    obstype_by_transition::Union{Nothing,Dict{Int,Int}}
 )
     right_ind = searchsortedlast(samplepath.times, subj_dat.tstop[r])
     jump_inds = findall(subj_dat.tstart[r] .< samplepath.times .< subj_dat.tstop[r])
@@ -267,8 +251,7 @@ function _process_exact_interval!(
         statefrom == stateto && continue
         
         obtype = _get_transition_obstype(
-            statefrom, stateto, trans_map,
-            obstype_by_transition, censoring_matrix, censoring_pattern
+            statefrom, stateto, trans_map, obstype_by_transition
         )
         
         if obtype == 1

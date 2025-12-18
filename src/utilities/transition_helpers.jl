@@ -178,87 +178,26 @@ function validate_obstype_by_transition(obstype_dict::Dict{Int,Int}, tmat::Abstr
     return validate_obstype_by_transition(obstype_dict, n_transitions)
 end
 
-"""
-    validate_censoring_matrix(censoring_matrix::AbstractMatrix{Int}, n_transitions::Int, pattern::Union{Nothing,Int})
-
-Validate a censoring matrix and pattern index.
-
-Throws `ArgumentError` if:
-- Number of rows doesn't equal `n_transitions`
-- Pattern index is outside valid column range
-- Any value in the matrix is less than 1
-
-# Arguments
-- `censoring_matrix::AbstractMatrix{Int}`: Matrix of size `(n_transitions, n_patterns)`
-- `n_transitions::Int`: Expected number of rows (transitions)
-- `pattern::Union{Nothing,Int}`: Column index to use (1-based), or nothing
-"""
-function validate_censoring_matrix(
-    censoring_matrix::AbstractMatrix{Int},
-    n_transitions::Int,
-    pattern::Union{Nothing,Int}
-)
-    nrows, ncols = size(censoring_matrix)
-    
-    if nrows != n_transitions
-        throw(ArgumentError(
-            "Censoring matrix must have $n_transitions rows (one per transition), " *
-            "got $nrows rows. Use print_transition_map(model) to see transitions."
-        ))
-    end
-    
-    if !isnothing(pattern)
-        if pattern < 1 || pattern > ncols
-            throw(ArgumentError(
-                "Censoring pattern index $pattern out of range [1, $ncols]."
-            ))
-        end
-    end
-    
-    # Validate all values are valid obstype codes
-    if any(censoring_matrix .< 1)
-        throw(ArgumentError(
-            "All censoring matrix values must be >= 1 (valid obstype codes). " *
-            "Valid codes: 1=exact, 2=panel, 3+=censored."
-        ))
-    end
-    
-    return nothing
-end
-
-# Convenience method accepting tmat
-function validate_censoring_matrix(
-    censoring_matrix::AbstractMatrix{Int},
-    tmat::AbstractMatrix,
-    pattern::Union{Nothing,Int} = nothing
-)
-    n_transitions = length(enumerate_transitions(tmat))
-    return validate_censoring_matrix(censoring_matrix, n_transitions, pattern)
-end
-
 # =============================================================================
 # Internal Helpers for observe_path
 # =============================================================================
 
 """
     _get_transition_obstype(statefrom::Int, stateto::Int, trans_map::Dict{Tuple{Int,Int},Int},
-                            obstype_by_transition::Union{Nothing,Dict{Int,Int}},
-                            censoring_matrix::Union{Nothing,AbstractMatrix{Int}},
-                            censoring_pattern::Union{Nothing,Int}) -> Int
+                            obstype_by_transition::Dict{Int,Int}) -> Int
 
 Get the observation type for a specific transition.
 
-Priority: obstype_by_transition > censoring_matrix > default (1)
+Returns the obstype code from the dictionary, or 1 (exact) if not specified.
 
-Returns the obstype code (1=exact, 2=panel, 3+=censored).
+# Returns
+- obstype code: 1=exact, 2=panel, 3+=censored
 """
 function _get_transition_obstype(
     statefrom::Int, 
     stateto::Int, 
     trans_map::Dict{Tuple{Int,Int},Int},
-    obstype_by_transition::Union{Nothing,Dict{Int,Int}},
-    censoring_matrix::Union{Nothing,AbstractMatrix{Int}},
-    censoring_pattern::Union{Nothing,Int}
+    obstype_by_transition::Dict{Int,Int}
 )
     trans_idx = get(trans_map, (statefrom, stateto), nothing)
     
@@ -267,12 +206,6 @@ function _get_transition_obstype(
         return 1
     end
     
-    # Priority: obstype_by_transition > censoring_matrix > default (1)
-    if !isnothing(obstype_by_transition) && haskey(obstype_by_transition, trans_idx)
-        return obstype_by_transition[trans_idx]
-    elseif !isnothing(censoring_matrix) && !isnothing(censoring_pattern)
-        return censoring_matrix[trans_idx, censoring_pattern]
-    else
-        return 1  # Default to exact
-    end
+    # Return specified obstype or default to exact
+    return get(obstype_by_transition, trans_idx, 1)
 end
