@@ -976,7 +976,7 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                     
                     subj_ll += obs_ll * obs_weight
 
-                else # panel data (obstype == 2)
+                else # panel data (obstype == 2, since we're in all_exact_or_panel branch)
                     # Forward algorithm for single observation:
                     # L = Σ_s P(X=s | X_0=statefrom) * P(Y | X=s)
                     #   = Σ_s TPM[statefrom, s] * emat[i, s]
@@ -1255,7 +1255,7 @@ function _loglik_markov_functional(parameters, data::MPanelData; neg = true)
                     end
                     
                     obs_ll * obs_weight
-                else  # panel data (obstype == 2)
+                else  # panel data (obstype == 2, since we're in all_exact_or_panel branch)
                     # Forward algorithm for single observation:
                     # L = Σ_s P(X=s | X_0=statefrom) * P(Y | X=s)
                     #   = Σ_s TPM[statefrom, s] * emat[i, s]

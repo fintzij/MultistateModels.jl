@@ -1,6 +1,30 @@
 # Changelog
 
-## [0.2.3] - 2025-12-16
+## [0.2.3] - 2025-12-18
+
+### Adaptive SIR Switching for MCEM
+
+The `sir` parameter now supports adaptive modes that start with standard importance sampling and automatically switch to SIR/LHS when cost-effective:
+
+| Value | Behavior |
+|-------|----------|
+| `:none` | Standard importance sampling without resampling |
+| `:sir` | Multinomial SIR from iteration 1 |
+| `:lhs` | Latin Hypercube SIR from iteration 1 |
+| `:adaptive_sir` | Start with IS, switch to SIR when cost-effective |
+| `:adaptive_lhs` | **(default)** Start with IS, switch to LHS when cost-effective |
+
+**New Parameters:**
+- `sir_adaptive_threshold::Float64=2.0`: Switch when avg path ratio exceeds threshold
+- `sir_adaptive_min_iters::Int=3`: Minimum iterations before considering switch
+
+**Convergence Records (for adaptive modes):**
+- `adaptive_sir_switched::Bool`: Whether switching occurred
+- `adaptive_sir_switch_iter::Int`: Iteration when switching happened
+- `adaptive_sir_final_path_ratio::Float64`: Final weighted average path ratio
+
+**Decision Logic:**
+The switch decision is based on the ratio `(mean paths per subject) / ESS target`, weighted by optimizer iterations. When this ratio exceeds the threshold, the M-step cost savings from SIR justify the switch.
 
 ### Internal: Model Struct Consolidation
 
@@ -20,7 +44,7 @@ Major internal refactoring to simplify the type hierarchy. This change is **back
 **New trait functions for dispatch:**
 ```julia
 is_markov(model)              # true if all hazards are Markov (exponential)
-is_panel_data(model)          # true if any observation has obstype == 2
+is_panel_data(model)          # true if any observation has obstype >= 2 (panel or censored)
 has_phasetype_expansion(model) # true if model has phase-type expansion metadata
 ```
 
@@ -115,9 +139,9 @@ mcem_ase_sir(loglik_prop, loglik_cur, sir_indices, SubjectWeights) -> Float64
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `sir` | `Symbol` | `:off` | Resampling method: `:off`, `:sir`, or `:lhs` |
+| `sir` | `Symbol` | `:adaptive_lhs` | Resampling method (see v0.2.3 for full options) |
 | `sir_pool_constant` | `Float64` | `2.0` | Pool size = c × ESS × log(ESS) |
-| `max_sir_pool_size` | `Int` | `8192` | Maximum pool size per subject |
+| `sir_max_pool` | `Int` | `8192` | Maximum pool size per subject |
 
 **Performance:**
 
@@ -129,14 +153,20 @@ With ESS target = 200 and pool size ~1000:
 **Usage:**
 
 ```julia
+# Default: Adaptive LHS (starts with IS, switches to LHS when cost-effective)
+fitted = fit(model)
+
 # Standard MCEM (no resampling)
-fitted = fit(model; ess_target_initial=200)
+fitted = fit(model; sir=:none)
 
-# MCEM with SIR resampling (faster M-step)
-fitted = fit(model; ess_target_initial=200, sir=:sir)
+# MCEM with SIR resampling from iteration 1
+fitted = fit(model; sir=:sir)
 
-# MCEM with LHS resampling (faster + lower variance)
-fitted = fit(model; ess_target_initial=200, sir=:lhs)
+# MCEM with LHS resampling from iteration 1 (lower variance than SIR)
+fitted = fit(model; sir=:lhs)
+
+# Adaptive SIR with custom threshold
+fitted = fit(model; sir=:adaptive_sir, sir_adaptive_threshold=3.0)
 ```
 
 ### Parameter Renaming

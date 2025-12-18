@@ -147,10 +147,17 @@ end
 Baseline Gompertz cumulative hazard: H₀(t) = (rate/shape) * (exp(shape*t) - 1)
 Special case for shape ≈ 0: H₀(t) = rate * t (exponential)
 """
-@inline function _gompertz_baseline_cumhaz(shape::Float64, rate::Float64, lb::Real, ub::Real)
-    if abs(shape) < 1e-10
-        # Exponential limit: H(t) = rate * t
-        return rate * (ub - lb)
+@inline function _gompertz_baseline_cumhaz(shape::Real, rate::Real, lb::Real, ub::Real)
+    if abs(shape) < 1e-6
+        # Taylor expansion around shape = 0
+        # (exp(shape*t) - 1)/shape = t + shape*t^2/2 + shape^2*t^3/6 + ...
+        # H(lb, ub) = rate * [ (ub - lb) + shape/2 * (ub^2 - lb^2) + shape^2/6 * (ub^3 - lb^3) ]
+        
+        term1 = ub - lb
+        term2 = (ub^2 - lb^2) / 2
+        term3 = (ub^3 - lb^3) / 6
+        
+        return rate * (term1 + shape * term2 + shape^2 * term3)
     else
         # Gompertz: H(lb,ub) = (rate/shape) * (exp(shape*ub) - exp(shape*lb))
         return (rate / shape) * (exp(shape * ub) - exp(shape * lb))
@@ -191,11 +198,7 @@ pars = [shape, rate] on NATURAL scale
         time_scale = exp(-linpred)
         scaled_shape = shape * time_scale
         scaled_rate = rate * time_scale
-        if abs(scaled_shape) < 1e-10
-            return scaled_rate * (ub - lb)
-        else
-            return (scaled_rate / scaled_shape) * (exp(scaled_shape * ub) - exp(scaled_shape * lb))
-        end
+        return _gompertz_baseline_cumhaz(scaled_shape, scaled_rate, lb, ub)
     else
         base = _gompertz_baseline_cumhaz(shape, rate, lb, ub)
         return base * exp(linpred)

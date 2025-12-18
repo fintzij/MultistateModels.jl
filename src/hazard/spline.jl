@@ -22,10 +22,6 @@ quantile values to avoid degenerate spline bases.
 - Quantile levels are spaced evenly on (0, 1): k/(nknots+1) for k = 1, ..., nknots
 - When ties occur, knots are equally spaced between unique quantile values
 - Returns empty vector if nknots ≤ 0 or insufficient unique sojourns
-
-# References
-- survextrap methods: https://chjackson.github.io/survextrap/articles/methods.html
-- Tang et al. (2022): floor(n^(1/5)) interior knots at quantiles
 """
 function place_interior_knots(sojourns::AbstractVector{<:Real}, nknots::Integer;
                               lower_bound::Real=0.0, upper_bound::Real=Inf)
@@ -39,7 +35,6 @@ function place_interior_knots(sojourns::AbstractVector{<:Real}, nknots::Integer;
     lb = lower_bound
     
     # Compute quantile levels: evenly spaced on (0, 1)
-    # Following Tang et al.: k/(nknots+1) for k = 1, ..., nknots
     quantile_levels = [(k / (nknots + 1)) for k in 1:nknots]
     
     # Get raw quantile locations
@@ -144,8 +139,6 @@ end
 """
     default_nknots(n_observations::Integer)
 
-Compute default number of interior knots following Tang et al. (2022) convention.
-
 Uses floor(n^(1/5)) for sieve estimation. For typical survival data sizes:
 - n = 100: 2-3 knots
 - n = 500: 3-4 knots  
@@ -187,7 +180,7 @@ and uses the simulated transition times to determine knot locations.
 - `nknots`: Number of interior knots. Can be:
   - `Int`: Number of interior knots for all hazards
   - `NamedTuple`: Per-hazard counts, e.g., `(h12 = 3, h23 = 2)`
-  - `nothing` (default): Use `floor(n^(1/5))` following Tang et al. (2022)
+  - `nothing` (default): Use `floor(n^(1/5))`
 - `n_paths::Int=1000`: Number of paths to sample per subject (panel data only)
 - `min_ess::Int=100`: Minimum effective sample size for importance sampling (panel data only)
 - `verbose::Bool=true`: Print info about knot placement
@@ -636,47 +629,24 @@ Rebuild model parameter structure after spline hazard modification.
 
 When spline hazards are rebuilt with different knot counts, the number of
 basis functions changes. This function rebuilds the parameter structure
-to match the new hazard dimensions.
+to match the new hazard dimensions, using the same `rebuild_parameters` function
+that `set_parameters!` uses to ensure consistency.
+
+# Notes
+- Parameters are initialized to zero on log scale (rates = 1.0)
+- The resulting parameter structure includes a proper `reconstructor` field
+  for AD-compatible flatten/unflatten operations
 """
 function _rebuild_model_parameters!(model::MultistateProcess)
-    # Collect new parameter structure from hazards
-    flat_params = Float64[]
-    nested_data = Dict{Symbol, NamedTuple}()
-    
-    for haz in model.hazards
-        hazname = haz.hazname
-        npar = haz.npar_total
-        
-        # Initialize at zero (log scale)
-        haz_params = zeros(Float64, npar)
-        append!(flat_params, haz_params)
-        
-        # Build nested structure
-        npar_baseline = haz.npar_baseline
-        baseline = haz_params[1:npar_baseline]
-        covariates = npar > npar_baseline ? haz_params[(npar_baseline+1):end] : Float64[]
-        nested_data[hazname] = (baseline=baseline, covariates=covariates)
+    # Build new parameter vectors (zeros on log scale) for each hazard
+    new_param_vectors = Vector{Vector{Float64}}(undef, length(model.hazards))
+    for i in eachindex(model.hazards)
+        haz = model.hazards[i]
+        new_param_vectors[i] = zeros(Float64, haz.npar_total)
     end
     
-    # Build unflatten function
-    nested_tuple = NamedTuple(nested_data)
-    unflatten = _build_unflatten_function(model.hazards)
-    
-    # Natural scale parameters (exp of baseline for splines)
-    natural_data = Dict{Symbol, NamedTuple}()
-    for haz in model.hazards
-        hazname = haz.hazname
-        nested_haz = nested_data[hazname]
-        if haz isa RuntimeSplineHazard
-            natural_data[hazname] = (baseline=exp.(nested_haz.baseline), covariates=nested_haz.covariates)
-        else
-            natural_data[hazname] = nested_haz
-        end
-    end
-    natural_tuple = NamedTuple(natural_data)
-    
-    # Update model parameters
-    model.parameters = (flat=flat_params, nested=nested_tuple, natural=natural_tuple, unflatten=unflatten)
+    # Use rebuild_parameters to create proper parameter structure with reconstructor
+    model.parameters = rebuild_parameters(new_param_vectors, model)
     
     return nothing
 end

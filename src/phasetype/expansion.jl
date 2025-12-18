@@ -988,6 +988,7 @@ See also: [`PhaseTypeExpansion`](@ref), [`build_phasetype_mappings`](@ref)
 function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunction}};
                                               data::DataFrame,
                                               constraints = nothing,
+                                              initialize::Bool = true,
                                               n_phases::Union{Nothing, Dict{Int,Int}} = nothing,
                                               coxian_structure::Symbol = :unstructured,
                                               SubjectWeights::Union{Nothing,Vector{Float64}} = nothing,
@@ -1190,6 +1191,11 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
         modelcall,
         phasetype_expansion
     )
+    
+    # Step 16: Initialize parameters (phase-type models use :crude like other Markov models)
+    if initialize
+        initialize_parameters!(model; constraints = final_constraints)
+    end
     
     if verbose
         println("  MultistateMarkovModel (phase-type) created successfully")

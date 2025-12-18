@@ -15,7 +15,7 @@
 # =============================================================================
 
 """
-    set_crude_init!(model::MultistateProcess; constraints = nothing)
+    set_crude_init!(model::MultistateProcess; constraints = nothing) -> Bool
 
 Set parameter values to crude rate estimates from observed data.
 
@@ -24,33 +24,53 @@ transition type, then log-transformed for use as initial parameter values.
 
 # Arguments
 - `model::MultistateProcess`: Model to initialize
-- `constraints`: Must be `nothing` (crude init doesn't support constraints)
+- `constraints`: Optional parameter constraints. If provided and the crude 
+  initialization violates them, a warning is issued but parameters are still set.
 
-# Throws
-- `ErrorException`: If constraints are provided
+# Returns
+- `true` if initialization was applied and constraints (if any) are satisfied
+- `false` if initialization was applied but violates constraints (warning issued)
 """
 function set_crude_init!(model::MultistateProcess; constraints = nothing)
-
-    if !isnothing(constraints)
-        error("Cannot initialize parameters to crude estimates when there are parameter constraints.")
     
-    elseif isnothing(constraints)
-        
-        crude_par = calculate_crude(model)
+    crude_par = calculate_crude(model)
 
-        for i in model.hazards
-            set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
-            set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
-        end
+    for i in model.hazards
+        set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
+        set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
+    end
 
-        for i in eachindex(model.hazards)
-            if isa(model.hazards[i], _SplineHazard)
-                log_params = get_estimation_scale_params(model.parameters)
-                remake_splines!(model.hazards[i], log_params[i])
-                set_riskperiod!(model.hazards[i])
-            end
+    for i in eachindex(model.hazards)
+        if isa(model.hazards[i], _SplineHazard)
+            log_params = get_estimation_scale_params(model.parameters)
+            remake_splines!(model.hazards[i], log_params[i])
+            set_riskperiod!(model.hazards[i])
         end
     end
+    
+    # Check constraints if provided
+    if !isnothing(constraints)
+        if !_check_constraints_satisfied(model, constraints)
+            @warn "Crude initialization violates constraints. Parameters initialized but may need manual adjustment before fitting."
+            return false
+        end
+    end
+    
+    return true
+end
+
+"""
+    _check_constraints_satisfied(model, constraints) -> Bool
+
+Check if current model parameters satisfy the given constraints.
+"""
+function _check_constraints_satisfied(model::MultistateProcess, constraints)
+    _constraints = deepcopy(constraints)
+    consfun = parse_constraints(_constraints.cons, model.hazards; consfun_name = :consfun_check)
+    params = get_parameters_flat(model)
+    cons_values = consfun(zeros(length(constraints.cons)), params, nothing)
+    badcons = findall(cons_values .< constraints.lcons .|| cons_values .> constraints.ucons)
+    return isempty(badcons)
 end
 
 # =============================================================================
@@ -163,17 +183,18 @@ function _transfer_parameters!(target_model::MultistateProcess, source_model)
     # Get flat parameters from source
     source_params = get_parameters_flat(source_model)
     
-    # Set on target model using flat vector
-    copyto!(target_model.parameters.flat, source_params)
-    
-    # Handle splines if needed
-    for i in eachindex(target_model.hazards)
-        if isa(target_model.hazards[i], _SplineHazard)
-            log_params = get_estimation_scale_params(target_model.parameters)
-            remake_splines!(target_model.hazards[i], log_params[i])
-            set_riskperiod!(target_model.hazards[i])
-        end
+    # Build vectors per hazard for set_parameters!
+    n_hazards = length(target_model.hazards)
+    param_vectors = Vector{Vector{Float64}}(undef, n_hazards)
+    offset = 1
+    for i in 1:n_hazards
+        npar = target_model.hazards[i].npar_total
+        param_vectors[i] = source_params[offset:(offset + npar - 1)]
+        offset += npar
     end
+    
+    # Use set_parameters! which properly rebuilds flat, nested, and natural
+    set_parameters!(target_model, param_vectors)
 end
 
 """
@@ -280,13 +301,15 @@ function _init_from_surrogate_paths!(model::MultistateSemiMarkovProcess,
     _interpolate_covariates!(exact_data, model.data)
     
     # Step 5: Create model with exact data (same hazard specs)
+    # IMPORTANT: initialize=false to avoid recursive initialization
     exact_model = multistatemodel(model.modelcall.hazards...; 
                                    data = exact_data,
+                                   initialize = false,  # We initialize manually below
                                    SubjectWeights = nothing,  # All subjects weighted equally
                                    CensoringPatterns = nothing)
     
-    # Step 6: Initialize exact model with :markov method (quick starting point)
-    _init_from_surrogate_rates!(exact_model; surrogate_constraints = surrogate_constraints)
+    # Step 6: Initialize exact model with :crude method (quick starting point)
+    set_crude_init!(exact_model)
     
     # Step 7: Fit exact model (fast - exact likelihood, no MCEM)
     exact_fitted = fit(exact_model; constraints = constraints, 
@@ -346,22 +369,22 @@ function initialize_parameters!(model::MultistateProcess;
     is_phasetype = has_phasetype_expansion(model)
     
     # Resolve :auto method based on model type
+    # Phase-type models are Markov models, so they use :crude like other Markov models
     actual_method = if method == :auto
-        if is_phasetype
-            :surrogate  # Phase-type models default to :surrogate
-        elseif _is_semimarkov(model)
-            :surrogate
+        if is_phasetype || !_is_semimarkov(model)
+            :crude  # Markov and phase-type models default to :crude
         else
-            :crude
+            :surrogate  # Semi-Markov models default to :surrogate
         end
     else
         method
     end
     
-    # Validate method - phase-type models only support :crude or :surrogate
+    # Validate method
     if is_phasetype
-        actual_method in (:crude, :surrogate) ||
-            throw(ArgumentError("Phase-type models only support :crude or :surrogate methods, got :$method"))
+        # Phase-type models only support :crude (they are Markov)
+        actual_method == :crude ||
+            throw(ArgumentError("Phase-type models only support :crude initialization (they are Markov models), got :$method"))
     else
         actual_method in (:crude, :markov, :surrogate) || 
             throw(ArgumentError("method must be :auto, :crude, :markov, or :surrogate, got :$method"))
@@ -374,7 +397,7 @@ function initialize_parameters!(model::MultistateProcess;
     
     # Dispatch on method
     if actual_method == :crude
-        set_crude_init!(model; constraints = constraints)
+        set_crude_init!(model; constraints = constraints)  # Will warn if constraints violated
         
     elseif actual_method == :markov
         _init_from_surrogate_rates!(model; 

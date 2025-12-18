@@ -1,6 +1,6 @@
 name = "MultistateModels"
 uuid = "0f8f0c3e-0b3a-5b8a-9e9a-0a0a0a0a0a0a"
-version = "0.2.1"
+version = "0.2.3"
 
 [deps]
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
@@ -58,7 +58,8 @@ OptimizationOptimJL = "0.4.7"
 QuasiMonteCarlo = "0.3.3"
 
 [extras]
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["Logging", "Test"]

@@ -950,11 +950,11 @@ function build_emat(data::DataFrame, CensoringPatterns::Matrix{Float64}, Emissio
     emat = zeros(Float64, n_obs, n_states)
 
     for i in 1:n_obs
-        if data.obstype[i] ∈ [1, 2] # observation not censored
+        if data.obstype[i] ∈ [1, 2] # state known (exact or panel): stateto observed
             emat[i,data.stateto[i]] = 1.0
-        elseif data.obstype[i] == 0 # observation censored, all states are possible
+        elseif data.obstype[i] == 0 # state fully censored: all states possible
             emat[i,:] .= 1.0
-        else
+        else # state partially censored (obstype > 2): use censoring pattern
             emat[i,:] .= CensoringPatterns[data.obstype[i] - 2, 2:n_states+1]
         end 
     end
@@ -1053,6 +1053,10 @@ will insert the intercept-only design automatically as described in `Hazard`'s d
 - `data`: long-format `DataFrame` with at least `:subject`, `:statefrom`, `:stateto`, `:time`, `:obstype`.
 - `constraints`: optional parameter constraints (see `make_constraints`). When provided at model creation,
   constraints are validated at parameter setting time and used as defaults in `fit()`.
+- `initialize::Bool = true`: whether to initialize parameters at model creation. Uses `:crude` method
+  for Markov and phase-type models (crude rates from data), `:surrogate` method for semi-Markov panel
+  models (simulate paths, fit to exact data). If `false`, parameters remain at defaults (all rates = 1).
+  Set to `false` if you want to manually set parameters before fitting.
 - `surrogate::Symbol = :none`: surrogate model for importance sampling in MCEM.
   - `:none` (default): no surrogate created (for Markov models or exact data)
   - `:markov`: create a Markov surrogate (required for semi-Markov MCEM fitting)
@@ -1094,6 +1098,10 @@ model = multistatemodel(h12_wei, h21_wei; data = df, surrogate = :markov)
 # Semi-Markov model - defer surrogate fitting to fit() call
 model = multistatemodel(h12_wei, h21_wei; data = df, surrogate = :markov, fit_surrogate = false)
 
+# Model without automatic initialization (set parameters manually)
+model = multistatemodel(h12, h21; data = df, initialize = false)
+set_parameters!(model, (h12 = [log(0.5)], h21 = [log(0.3)]))
+
 # Phase-type model with 3 phases on state 1
 h12 = Hazard(@formula(0 ~ 1 + x), "pt", 1, 2)
 h13 = Hazard(@formula(0 ~ 1 + x), "pt", 1, 3)
@@ -1106,6 +1114,7 @@ model = multistatemodel(h12, h13; data = df, n_phases = Dict(1 => 3), coxian_str
 function multistatemodel(hazards::HazardFunction...; 
                         data::DataFrame, 
                         constraints = nothing,
+                        initialize::Bool = true,
                         surrogate::Symbol = :none,
                         fit_surrogate::Bool = true,
                         optimize_surrogate::Union{Bool, Nothing} = nothing,  # deprecated
@@ -1142,6 +1151,7 @@ function multistatemodel(hazards::HazardFunction...;
         return _build_phasetype_model_from_hazards(hazards;
             data = data,
             constraints = constraints,
+            initialize = initialize,
             n_phases = n_phases,
             coxian_structure = coxian_structure,
             SubjectWeights = SubjectWeights,
@@ -1211,6 +1221,12 @@ function multistatemodel(hazards::HazardFunction...;
     process = _process_class(_hazards)
 
     model = _assemble_model(mode, process, components, markov_surrogate, modelcall)
+    
+    # Initialize parameters (default: true)
+    # Uses :auto method which selects :crude for Markov/phase-type, :surrogate for semi-Markov
+    if initialize
+        initialize_parameters!(model; constraints = constraints)
+    end
     
     # Fit surrogate at model creation time (default: true)
     if fit_surrogate && surrogate === :markov

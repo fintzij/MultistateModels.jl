@@ -34,14 +34,16 @@ end
 
 Check if a model was constructed with panel/interval-censored observation mode.
 
-Returns true if the model uses panel observations (obstype == 2 in data),
-false for exact observation times (obstype == 1).
+Returns true if the model uses panel observations (obstype >= 2 in data):
+- obstype 1 = exact (continuously observed transitions)
+- obstype 2 = panel (endpoint state observed)
+- obstype > 2 = state censoring (endpoint state partially/not observed)
 
 See also: [`is_markov`](@ref)
 """
 function is_panel_data(model::MultistateProcess)
-    # Check data directly: obstype 1 = exact, obstype 2 = panel
-    return any(model.data.obstype .== 2)
+    # Check data directly: obstype 1 = exact, obstype >= 2 = panel/censored
+    return any(model.data.obstype .>= 2)
 end
 
 # Legacy type aliases for backward compatibility (deprecation period)

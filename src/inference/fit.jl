@@ -118,17 +118,9 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
              compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # initialize array of sample paths
-
     samplepaths = extract_paths(model)
 
-    # Initialize parameters to crude estimates for better optimizer starting point
-    # This is especially important for Gompertz/Weibull hazards where poor initialization
-    # can lead to degenerate local optima
-    if isnothing(constraints)
-        set_crude_init!(model)
-    end
-
-    # extract and initialize model parameters
+    # extract model parameters
     # Phase 3: Use ParameterHandling.jl flat parameters (log scale)
     parameters = get_parameters_flat(model)
 
@@ -347,14 +339,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
 
-    # Initialize parameters to crude estimates for better optimizer starting point
-    # This is especially important for Gompertz/Weibull hazards where poor initialization
-    # can lead to degenerate local optima
-    if isnothing(constraints)
-        set_crude_init!(model)
-    end
-
-    # extract and initialize model parameters
+    # extract model parameters
     # Phase 3: Use ParameterHandling.jl flat parameters (log scale)
     parameters = get_parameters_flat(model)
 
@@ -575,6 +560,24 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
   - `:squarem`: SQUAREM acceleration (Varadhan & Roland, 2008), applies quasi-Newton 
     extrapolation every 2 iterations to speed up convergence
 
+**Sampling Importance Resampling (SIR):**
+- `sir::Symbol=:adaptive_lhs`: SIR resampling method. Options:
+  - `:none`: standard importance sampling without resampling
+  - `:sir`: multinomial resampling from importance weights (from iteration 1)
+  - `:lhs`: Latin Hypercube Sampling on the CDF, variance-reduced (from iteration 1)
+  - `:adaptive_sir`: start with IS, switch to SIR when cost-effective
+  - `:adaptive_lhs` (default): start with IS, switch to LHS when cost-effective
+- `sir_pool_constant::Float64=2.0`: pool size multiplier (pool = c × m × log(m))
+- `sir_max_pool::Int=8192`: maximum pool size cap
+- `sir_resample::Symbol=:always`: when to resample. Options:
+  - `:always`: resample every iteration
+  - `:degeneracy`: resample only when Pareto-k exceeds threshold
+- `sir_degeneracy_threshold::Float64=0.7`: Pareto-k threshold for `:degeneracy` mode
+- `sir_adaptive_threshold::Float64=2.0`: for adaptive modes, minimum ratio of 
+  (mean paths / ESS target) weighted by optimizer iterations before switching
+- `sir_adaptive_min_iters::Int=3`: for adaptive modes, minimum iterations before 
+  considering switch (allows stable ratio estimates)
+
 **Output control:**
 - `verbose::Bool=true`: print progress messages
 - `return_convergence_records::Bool=true`: save iteration history
@@ -628,7 +631,7 @@ fitted = fit(semimarkov_model; acceleration=:squarem)
 
 See also: [`fit`](@ref), [`compare_variance_estimates`](@ref)
 """
-function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :none, sir::Symbol = :none, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :squarem, sir::Symbol = :adaptive_lhs, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, sir_adaptive_threshold::Float64 = 2.0, sir_adaptive_min_iters::Int = 3, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
 
     # Validate acceleration parameter
     if acceleration ∉ (:none, :squarem)
@@ -641,8 +644,8 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     end
 
     # Validate SIR parameters
-    if sir ∉ (:none, :sir, :lhs)
-        error("sir must be :none, :sir, or :lhs, got :$sir")
+    if sir ∉ (:none, :sir, :lhs, :adaptive_sir, :adaptive_lhs)
+        error("sir must be :none, :sir, :lhs, :adaptive_sir, or :adaptive_lhs, got :$sir")
     end
     if sir_resample ∉ (:always, :degeneracy)
         error("sir_resample must be :always or :degeneracy, got :$sir_resample")
@@ -656,10 +659,25 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     if !(0 < sir_degeneracy_threshold < 1)
         error("sir_degeneracy_threshold must be in (0,1), got $sir_degeneracy_threshold")
     end
-    use_sir = sir !== :none
+    if sir_adaptive_threshold <= 0
+        error("sir_adaptive_threshold must be positive, got $sir_adaptive_threshold")
+    end
+    if sir_adaptive_min_iters < 1
+        error("sir_adaptive_min_iters must be at least 1, got $sir_adaptive_min_iters")
+    end
+    
+    # Derive SIR mode flags from sir parameter
+    # use_sir: whether SIR is currently active (starts false for adaptive modes)
+    # sir_adaptive: whether adaptive switching is enabled
+    # sir_target_method: the SIR method to use (:sir or :lhs)
+    sir_adaptive = sir in (:adaptive_sir, :adaptive_lhs)
+    sir_target_method = sir in (:sir, :adaptive_sir) ? :sir : :lhs
+    use_sir = sir in (:sir, :lhs)  # Immediate SIR, not adaptive
     
     if verbose && use_sir
         println("Using SIR ($sir) with pool constant $sir_pool_constant, max pool $sir_max_pool.\n")
+    elseif verbose && sir_adaptive
+        println("Using adaptive SIR (will switch to $sir_target_method when cost-effective).\n")
     end
 
     # Resolve proposal configuration
@@ -779,6 +797,15 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     sir_subsample_indices = [Vector{Int}() for _ in 1:nsubj]  # Indices into pool for each subject
     sir_pool_cap_exceeded = false  # Flag for convergence records warning
     sir_pool_target = use_sir ? sir_pool_size(ess_target, sir_pool_constant, sir_max_pool) : 0
+    
+    # Adaptive SIR state: track path evaluation ratios to decide when to switch
+    # The key metric is: (mean paths per subject) / ess_target weighted by optimizer iterations
+    # When this ratio exceeds threshold, switching to SIR reduces M-step cost
+    adaptive_sir_switched = false           # Has switch occurred?
+    adaptive_sir_switch_iter = 0            # Iteration when switch occurred
+    adaptive_sir_cumul_path_ratio = 0.0     # Cumulative path ratio (weighted by optim iters)
+    adaptive_sir_cumul_optim_iters = 0      # Cumulative optimizer iterations
+    
     # make fbmats if necessary
     if any(model.data.obstype .> 2)
         fbmats = build_fbmats(model)
@@ -1079,6 +1106,26 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
             solver
         )
         params_prop = params_prop_optim.u
+        
+        # =====================================================================
+        # Adaptive SIR: Track M-step path evaluation ratio
+        # The key metric is (mean paths per subject) / ess_target, weighted by optimizer iterations
+        # Each optimizer iteration evaluates the objective on all paths, so total evals ∝ n_iters × n_paths
+        # With SIR, we'd evaluate on ess_target paths per subject instead
+        # =====================================================================
+        if sir_adaptive && !use_sir && !adaptive_sir_switched
+            n_optim_iters = max(1, params_prop_optim.stats.iterations)  # At least 1
+            mean_paths = mean(length.(samplepaths))
+            # Ratio of M-step evaluations: current vs. what it would be with SIR
+            # Current: n_optim_iters × total_paths
+            # With SIR: n_optim_iters × (nsubj × ess_target)
+            # Ratio per subject = mean_paths / ess_target
+            path_ratio = mean_paths / ess_target
+            
+            # Accumulate weighted by optimizer iterations (more iterations = more cost savings)
+            adaptive_sir_cumul_path_ratio += path_ratio * n_optim_iters
+            adaptive_sir_cumul_optim_iters += n_optim_iters
+        end
 
         # calculate the log likelihoods for the proposed parameters on FULL pool
         # (needed for importance weight recalculation)
@@ -1261,6 +1308,45 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         push!(mll_trace, mll_cur)
         append!(ess_trace, ess_cur)
         append!(path_count_trace, length.(samplepaths))
+        
+        # =====================================================================
+        # Adaptive SIR: Check if we should switch to LHS/SIR
+        # Decision based on average ratio of path evaluations (current vs SIR)
+        # weighted by optimizer iterations across all iterations so far
+        # =====================================================================
+        if sir_adaptive && !use_sir && !adaptive_sir_switched && iter >= sir_adaptive_min_iters
+            # Compute average path ratio weighted by optimizer iterations
+            avg_path_ratio = adaptive_sir_cumul_path_ratio / adaptive_sir_cumul_optim_iters
+            
+            if avg_path_ratio > sir_adaptive_threshold
+                # Switch to LHS (or SIR if specified)
+                use_sir = true
+                sir = sir_target_method
+                adaptive_sir_switched = true
+                adaptive_sir_switch_iter = iter
+                
+                # Initialize SIR pool target
+                sir_pool_target = sir_pool_size(ess_target, sir_pool_constant, sir_max_pool)
+                
+                # Initialize subsample indices from existing paths
+                for i in 1:nsubj
+                    if length(samplepaths[i]) <= 1 || allequal(loglik_surrog[i])
+                        sir_subsample_indices[i] = collect(1:length(samplepaths[i]))
+                    else
+                        sir_subsample_indices[i] = get_sir_subsample_indices(
+                            ImportanceWeights[i], Int(ess_target), sir)
+                    end
+                end
+                fill!(ess_cur, Float64(ess_target))
+                
+                if verbose
+                    println("\n[Adaptive SIR] Switching to $(uppercase(string(sir))) at iteration $iter")
+                    println("  Average M-step path ratio: $(round(avg_path_ratio; digits=2)) (threshold: $sir_adaptive_threshold)")
+                    println("  Mean paths/subject: $(round(mean(length.(samplepaths)); digits=1)), ESS target: $(Int(ess_target))")
+                    println("  SIR pool target: $sir_pool_target\n")
+                end
+            end
+        end
 
         # check for convergence
         if ascent_ub < tol
@@ -1578,26 +1664,37 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
 
     # return convergence records
     if return_convergence_records
+        # Base convergence records
+        base_records = (
+            mll_trace = mll_trace, 
+            ess_trace = ess_trace, 
+            path_count_trace = path_count_trace, 
+            parameters_trace = parameters_trace, 
+            psis_pareto_k = psis_pareto_k
+        )
+        
+        # Add SIR-specific records if SIR was used (either from start or via adaptive switching)
         if use_sir
-            ConvergenceRecords = (
-                mll_trace = mll_trace, 
-                ess_trace = ess_trace, 
-                path_count_trace = path_count_trace, 
-                parameters_trace = parameters_trace, 
-                psis_pareto_k = psis_pareto_k,
+            sir_records = (
                 sir_method = sir,
                 sir_resample_mode = sir_resample,
                 sir_pool_cap_exceeded = sir_pool_cap_exceeded
             )
-        else
-            ConvergenceRecords = (
-                mll_trace = mll_trace, 
-                ess_trace = ess_trace, 
-                path_count_trace = path_count_trace, 
-                parameters_trace = parameters_trace, 
-                psis_pareto_k = psis_pareto_k
-            )
+            base_records = merge(base_records, sir_records)
         end
+        
+        # Add adaptive SIR records if adaptive switching was enabled
+        if sir_adaptive || adaptive_sir_switched
+            adaptive_records = (
+                adaptive_sir_switched = adaptive_sir_switched,
+                adaptive_sir_switch_iter = adaptive_sir_switched ? adaptive_sir_switch_iter : nothing,
+                adaptive_sir_final_path_ratio = adaptive_sir_cumul_optim_iters > 0 ? 
+                    adaptive_sir_cumul_path_ratio / adaptive_sir_cumul_optim_iters : nothing
+            )
+            base_records = merge(base_records, adaptive_records)
+        end
+        
+        ConvergenceRecords = base_records
     else
         ConvergenceRecords = nothing
     end
