@@ -163,7 +163,14 @@ export
     make_constraints,
     path_to_dataframe,
     paths_to_dataset,
-    summary
+    summary,
+    
+    # --------------------------------------------------------------------------
+    # Transition enumeration (for per-transition obstype in simulation)
+    # --------------------------------------------------------------------------
+    enumerate_transitions,
+    transition_index_map,
+    print_transition_map
 
 # =============================================================================
 # Type Definitions (from types/ subfolder)
@@ -213,6 +220,9 @@ include("utilities/parameters.jl")
 
 # Data and parameter validation functions
 include("utilities/validation.jl")
+
+# Transition enumeration and per-transition obstype validation
+include("utilities/transition_helpers.jl")
 
 # TPM bookkeeping, data containers, and data manipulation
 include("utilities/books.jl")

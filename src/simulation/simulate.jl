@@ -410,9 +410,42 @@ datasets = simulate(model; nsim = 10, strategy = DirectTransformStrategy())
 
 # Use Optim.jl solver with custom tolerances
 datasets = simulate(model; nsim = 10, solver = OptimJumpSolver(rel_tol = 1e-6))
+
+# Per-transition observation types (some exact, some panel, some censored)
+print_transition_map(model)  # See transition indices
+obstype_map = Dict(1 => 1, 2 => 2, 3 => 3)  # trans 1 exact, 2 panel, 3 censored
+datasets = simulate(model; nsim = 100, obstype_by_transition = obstype_map)
 ```
 
-See also: [`simulate_data`](@ref), [`simulate_paths`](@ref), [`simulate_path`](@ref)
+# Per-Transition Observation Types
+
+Control observation type on a per-transition basis using `obstype_by_transition`:
+
+```julia
+print_transition_map(model)
+# Output:
+# Index | From → To
+# ------|----------
+#     1 | 1 → 2
+#     2 | 1 → 3
+#     3 | 2 → 3
+
+obstype_map = Dict(1 => 1, 2 => 2, 3 => 3)
+datasets = simulate(model; nsim=100, obstype_by_transition=obstype_map)
+```
+
+Observation type codes:
+- `1`: Exact (transition time and states fully observed)
+- `2`: Panel (only endpoint state at interval boundary observed)
+- `3+`: Censored (endpoint state unknown/missing)
+
+When transitions with different observation types occur in the same interval:
+- Exact transitions emit rows with true transition times
+- Non-exact transitions contribute to one interval-level row
+- Interval-level row has `obstype = max(codes)` among non-exact transitions
+
+See also: [`simulate_data`](@ref), [`simulate_paths`](@ref), [`simulate_path`](@ref),
+[`enumerate_transitions`](@ref), [`print_transition_map`](@ref)
 """
 function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false, 
                   strategy::AbstractTransformStrategy = CachedTransformStrategy(),
@@ -420,11 +453,29 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
                   newdata::Union{Nothing,DataFrame} = nothing,
                   tmax::Union{Nothing,Float64} = nothing,
                   autotmax::Bool = true,
-                  expanded::Bool = true)
+                  expanded::Bool = true,
+                  obstype_by_transition::Union{Nothing,Dict{Int,Int}} = nothing,
+                  censoring_matrix::Union{Nothing,AbstractMatrix{Int}} = nothing,
+                  censoring_pattern::Union{Nothing,Int} = nothing)
 
     # throw an error if neither paths nor data are asked for
     if paths == false && data == false
         error("Why are you calling `simulate` if you don't want sample paths or data? Stop wasting my time.")
+    end
+
+    # Validate per-transition observation parameters
+    if obstype_by_transition !== nothing || censoring_matrix !== nothing
+        tmat = model.tmat
+        trans_map = transition_index_map(tmat)
+        
+        if obstype_by_transition !== nothing
+            validate_obstype_by_transition(obstype_by_transition, tmat)
+        end
+        if censoring_matrix !== nothing
+            validate_censoring_matrix(censoring_matrix, tmat)
+        end
+    else
+        trans_map = nothing
     end
 
     # Prepare simulation data (handles newdata, tmax, autotmax priority)
@@ -458,7 +509,11 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
 
                 # observe path 
                 if data == true
-                    datasets[j, i] = observe_path(samplepath, model)
+                    datasets[j, i] = observe_path(samplepath, model;
+                                                   obstype_by_transition = obstype_by_transition,
+                                                   censoring_matrix = censoring_matrix,
+                                                   censoring_pattern = censoring_pattern,
+                                                   trans_map = trans_map)
                 end
             end
         end
@@ -523,6 +578,9 @@ observed data (no continuous-time paths). Equivalent to calling
 - `tmax::Union{Nothing,Float64}`: Optional maximum simulation time (default: nothing)
 - `autotmax::Bool`: Use maximum tstop as implicit tmax (default: true)
 - `expanded::Bool`: For phase-type models, use expanded state space (default: true)
+- `obstype_by_transition::Union{Nothing,Dict{Int,Int}}`: Per-transition observation types (default: nothing)
+- `censoring_matrix::Union{Nothing,AbstractMatrix{Int}}`: Censoring codes for transitions (default: nothing)
+- `censoring_pattern::Union{Nothing,Int}`: Row of censoring_matrix to use (default: nothing)
 
 # Returns
 - `Vector{DataFrame}`: array of simulated datasets with dimensions (1, nsim)
@@ -532,6 +590,11 @@ observed data (no continuous-time paths). Equivalent to calling
 model = multistatemodel(...)
 datasets = simulate_data(model; nsim = 100)
 datasets = simulate_data(model; nsim = 100, tmax = 15.0)
+
+# Per-transition observation types
+print_transition_map(model)  # See transition indices
+obstype_map = Dict(1 => 1, 2 => 2)  # transition 1 exact, transition 2 panel
+datasets = simulate_data(model; nsim = 100, obstype_by_transition = obstype_map)
 ```
 
 See also: [`simulate`](@ref), [`simulate_paths`](@ref)
@@ -543,11 +606,17 @@ function simulate_data(model::MultistateProcess;
                        newdata::Union{Nothing,DataFrame} = nothing,
                        tmax::Union{Nothing,Float64} = nothing,
                        autotmax::Bool = true,
-                       expanded::Bool = true)
+                       expanded::Bool = true,
+                       obstype_by_transition::Union{Nothing,Dict{Int,Int}} = nothing,
+                       censoring_matrix::Union{Nothing,AbstractMatrix{Int}} = nothing,
+                       censoring_pattern::Union{Nothing,Int} = nothing)
     return simulate(model; nsim = nsim, data = true, paths = false,
                     strategy = strategy, solver = solver,
                     newdata = newdata, tmax = tmax, autotmax = autotmax,
-                    expanded = expanded)
+                    expanded = expanded,
+                    obstype_by_transition = obstype_by_transition,
+                    censoring_matrix = censoring_matrix,
+                    censoring_pattern = censoring_pattern)
 end
 
 """
