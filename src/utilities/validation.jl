@@ -222,10 +222,10 @@ function check_CensoringPatterns(CensoringPatterns::Matrix{T}, tmat::Matrix) whe
             error("Censoring pattern $i has no allowed state.")
         end
         if all(CensoringPatterns[i,2:ncol] .== 1)
-            println("All states are allowed in censoring pattern $(2+i).")
+            @debug "All states are allowed in censoring pattern $(2+i)."
         end
         if sum(CensoringPatterns[i,2:ncol] .> 0) .== 1
-            println("Censoring pattern $i has only one allowed state; if these observations are not censored there is no need to use a censoring pattern.")
+            @debug "Censoring pattern $i has only one allowed state; if these observations are not censored there is no need to use a censoring pattern."
         end
     end
 end

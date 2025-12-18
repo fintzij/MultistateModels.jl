@@ -62,6 +62,36 @@ fitted = fit(semimarkov; proposal=:markov, maxiter=50)
 See also: [`get_vcov`](@ref), [`get_ij_vcov`](@ref), [`compare_variance_estimates`](@ref),
           [`is_markov`](@ref), [`is_panel_data`](@ref)
 """
+
+# =============================================================================
+# Internal helpers for solver-agnostic optimization
+# =============================================================================
+
+"""
+    _is_ipopt_solver(solver)
+
+Check if solver is Ipopt (supports print_level option).
+"""
+_is_ipopt_solver(solver) = isnothing(solver) || solver isa Ipopt.Optimizer
+
+"""
+    _solve_optimization(prob, solver)
+
+Solve optimization problem with solver-appropriate options.
+Ipopt supports print_level, but Optim.jl and others don't.
+"""
+function _solve_optimization(prob, solver)
+    _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
+    if _is_ipopt_solver(solver)
+        return solve(prob, _solver; print_level = 0)
+    else
+        # Optim.jl and other solvers don't support print_level
+        return solve(prob, _solver)
+    end
+end
+
+# =============================================================================
+
 function fit(model::MultistateModel; kwargs...)
     # Dispatch based on observation type and model structure
     if is_panel_data(model)
@@ -135,8 +165,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
 
         # solve with user-specified solver or default Ipopt
-        _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
-        sol  = solve(prob, _solver; print_level = 0)
+        sol = _solve_optimization(prob, solver)
 
         # rectify spline coefs
         if any(isa.(model.hazards, _SplineHazard))
@@ -187,8 +216,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths), lcons = constraints.lcons, ucons = constraints.ucons)
         
         # solve with user-specified solver or default Ipopt
-        _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
-        sol  = solve(prob, _solver; print_level = 0)
+        sol = _solve_optimization(prob, solver)
 
         # rectify spline coefs
         if any(isa.(model.hazards, _SplineHazard))
@@ -354,8 +382,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
         
         # solve with user-specified solver or default Ipopt
-        _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
-        sol  = solve(prob, _solver; print_level = 0)
+        sol = _solve_optimization(prob, solver)
 
         # get vcov
         if compute_vcov && (sol.retcode == ReturnCode.Success)
@@ -394,8 +421,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         prob = OptimizationProblem(optf, parameters, MPanelData(model, books), lcons = constraints.lcons, ucons = constraints.ucons)
         
         # solve with user-specified solver or default Ipopt
-        _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
-        sol  = solve(prob, _solver; print_level = 0)
+        sol = _solve_optimization(prob, solver)
 
         # no hessian when there are constraints
         if compute_vcov == true
@@ -1046,13 +1072,12 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
             mstep_data = SMPanelData(model, samplepaths, ImportanceWeights)
         end
         
-        if isnothing(constraints)
-            _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = mstep_data), _solver; print_level = 0)
-        else
-            _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
-            params_prop_optim = solve(remake(prob, u0 = Vector(params_cur), p = mstep_data), _solver; print_level = 0)
-        end
+        # Note: constraints handling happens in prob definition earlier
+        # This if-else currently does the same thing - kept for future differentiation
+        params_prop_optim = _solve_optimization(
+            remake(prob, u0 = Vector(params_cur), p = mstep_data), 
+            solver
+        )
         params_prop = params_prop_optim.u
 
         # calculate the log likelihoods for the proposed parameters on FULL pool
