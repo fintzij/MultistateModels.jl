@@ -183,6 +183,11 @@ function _transfer_parameters!(target_model::MultistateProcess, source_model)
     # Get flat parameters from source
     source_params = get_parameters_flat(source_model)
     
+    # Sanitize parameters: replace Inf/-Inf with finite values to prevent optimization failures
+    # -Inf (log(0)) -> -20.0 (exp(-20) ≈ 2e-9)
+    # Inf -> 20.0 (exp(20) ≈ 4.8e8)
+    replace!(source_params, -Inf => -20.0, Inf => 20.0)
+    
     # Build vectors per hazard for set_parameters!
     n_hazards = length(target_model.hazards)
     param_vectors = Vector{Vector{Float64}}(undef, n_hazards)

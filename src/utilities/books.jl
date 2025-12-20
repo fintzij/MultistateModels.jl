@@ -166,25 +166,33 @@ function collapse_data(data::DataFrame; SubjectWeights::Vector{Float64} = ones(F
 end
 
 """
-    initialize_surrogate!(model::MultistateSemiMarkovProcess; surrogate_parameters = nothing, surrogate_constraints = nothing, crude_inits = true, verbose = true)
+    initialize_surrogate!(model::MultistateProcess; method=:mle, surrogate_parameters=nothing, surrogate_constraints=nothing, verbose=true)
 
-Populate the field for the markov surrogate in semi-Markov models.
-If the model does not have a markovsurrogate, builds and fits one.
-If it exists, updates its parameters with fitted values.
+Populate the field for the Markov surrogate in semi-Markov models.
+Fits a new surrogate and stores it in `model.markovsurrogate`.
+
+# Arguments
+- `model`: Multistate model to initialize
+- `method::Symbol = :mle`: Fitting method (`:mle` or `:heuristic`)
+- `surrogate_parameters = nothing`: Optional fixed parameters (skips fitting)
+- `surrogate_constraints = nothing`: Optional constraints for MLE fitting
+- `verbose = true`: Print progress information
 """
-function initialize_surrogate!(model::MultistateProcess; surrogate_parameters = nothing, surrogate_constraints = nothing, crude_inits = true, verbose = true)
+function initialize_surrogate!(model::MultistateProcess; 
+    method::Symbol = :mle,
+    surrogate_parameters = nothing, 
+    surrogate_constraints = nothing, 
+    verbose = true)
 
-    # fit surrogate model
-    surrogate_fitted = fit_surrogate(model; surrogate_parameters=surrogate_parameters, surrogate_constraints=surrogate_constraints, crude_inits=crude_inits, verbose=verbose)
+    # fit_surrogate now always returns MarkovSurrogate
+    surrogate = fit_surrogate(model; 
+        method = method,
+        surrogate_parameters = surrogate_parameters, 
+        surrogate_constraints = surrogate_constraints, 
+        verbose = verbose)
 
-    # Update model's markovsurrogate with fitted surrogate
-    if isnothing(model.markovsurrogate)
-        # Create new surrogate
-        model.markovsurrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters)
-    else
-        # Update existing surrogate parameters
-        copyto!(model.markovsurrogate.parameters.flat, surrogate_fitted.parameters.flat)
-    end
+    # Store the surrogate directly (already a MarkovSurrogate)
+    model.markovsurrogate = surrogate
 end
 
 """

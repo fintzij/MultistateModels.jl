@@ -351,10 +351,11 @@ Phase-type augmented surrogate for importance sampling.
 - `state_to_phases::Vector{UnitRange{Int}}`, `phase_to_state::Vector{Int}`: Mappings
 - `expanded_Q::Matrix{Float64}`: Expanded intensity matrix
 - `config::PhaseTypeConfig`: Configuration
+- `fitted::Bool`: Whether the surrogate has been fitted (required by AbstractSurrogate)
 
-See also: [`PhaseTypeConfig`](@ref), [`build_phasetype_surrogate`](@ref)
+See also: [`PhaseTypeConfig`](@ref), [`build_phasetype_surrogate`](@ref), [`AbstractSurrogate`](@ref)
 """
-struct PhaseTypeSurrogate
+struct PhaseTypeSurrogate <: AbstractSurrogate
     phasetype_dists::Dict{Int, PhaseTypeDistribution}
     n_observed_states::Int
     n_expanded_states::Int
@@ -362,4 +363,13 @@ struct PhaseTypeSurrogate
     phase_to_state::Vector{Int}
     expanded_Q::Matrix{Float64}
     config::PhaseTypeConfig
+    fitted::Bool
+    
+    # Default constructor with fitted=true (phase-type surrogates are built from fitted Markov)
+    function PhaseTypeSurrogate(phasetype_dists, n_observed, n_expanded, 
+                                 state_to_phases, phase_to_state, expanded_Q, config;
+                                 fitted::Bool=true)
+        new(phasetype_dists, n_observed, n_expanded, state_to_phases, 
+            phase_to_state, expanded_Q, config, fitted)
+    end
 end

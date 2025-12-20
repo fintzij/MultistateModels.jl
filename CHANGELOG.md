@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.2.4] - 2025-12-19
+
+### Refactor: NCV -> PIJCV
+
+Renamed "Neighbourhood Cross-Validation" (NCV) to "Predictive Infinitesimal Jackknife Cross-Validation" (PIJCV) throughout the codebase to more accurately reflect the specific approximation method used (Wood 2024).
+
+- `NCVState` -> `PIJCVState`
+- `ncv_criterion` -> `pijcv_criterion`
+- `ncv_est` -> `pijcv_est`
+- `compute_ncv_perturbations!` -> `compute_pijcv_perturbations!`
+
+### Breaking Change: Standardized `fit_surrogate` Return Type
+
+The `fit_surrogate` function now **always** returns lightweight surrogate structs (`MarkovSurrogate` or `PhaseTypeSurrogate`) instead of sometimes returning `MultistateModelFitted`.
+
+**Before:**
+```julia
+surrogate = fit_surrogate(model)  # Could return MultistateModelFitted or MarkovSurrogate
+surrogate.loglik  # Worked only if MultistateModelFitted
+```
+
+**After:**
+```julia
+surrogate = fit_surrogate(model)  # Always returns MarkovSurrogate
+surrogate isa MarkovSurrogate  # true
+# Use compute_markov_marginal_loglik(model, surrogate) for log-likelihood
+```
+
+**Migration Guide:**
+
+| Old Pattern | New Pattern |
+|-------------|-------------|
+| `surrogate.loglik` | `compute_markov_marginal_loglik(model, surrogate)` |
+| `surrogate.vcov` | Not applicable (surrogates don't have vcov) |
+| `draw_paths(surrogate)` | `set_surrogate!(model); draw_paths(model)` |
+
+### New: `AbstractSurrogate` Type Hierarchy
+
+Introduced abstract type for importance sampling surrogates:
+
+```julia
+abstract type AbstractSurrogate end
+struct MarkovSurrogate <: AbstractSurrogate ... end
+struct PhaseTypeSurrogate <: AbstractSurrogate ... end
+```
+
+**New exports:**
+- `AbstractSurrogate`: Abstract supertype for surrogates
+- `MarkovSurrogate`: Exponential hazard surrogate (now exported)
+- `PhaseTypeSurrogate`: Phase-type expanded surrogate (now exported)
+- `is_fitted(s::AbstractSurrogate)`: Check if surrogate parameters are fitted
+
+**`PhaseTypeSurrogate` now has `fitted::Bool` field** to conform to the `AbstractSurrogate` interface.
+
+### Deprecated
+
+- `crude_inits` parameter in `fit_surrogate` and `initialize_surrogate!` is deprecated. Use `method=:heuristic` instead.
+
+---
+
 ## [0.2.3] - 2025-12-18
 
 ### Adaptive SIR Switching for MCEM
@@ -500,12 +560,12 @@ get_influence_functions(fitted) -> Matrix{Float64}
 | `:direct` | `Δᵢ = H⁻¹gᵢ` | O(p²n) | Default, n >> p |
 | `:cholesky` | Exact `H₋ᵢ⁻¹` via rank-k downdate | O(np³) | Ill-conditioned problems |
 
-**Neighborhood Cross-Validation (NCV):**
+**Predictive Infinitesimal Jackknife Cross-Validation (PIJCV):**
 
-Also implemented for penalized spline smoothing parameter selection:
+Also implemented for penalized spline smoothing parameter selection (formerly referred to as NCV):
 
 ```julia
-struct NCVState
+struct PIJCVState
     H_lambda::AbstractMatrix
     K::AbstractMatrix
     subject_grads::AbstractMatrix
@@ -514,8 +574,8 @@ struct NCVState
     # ...
 end
 
-ncv_criterion(state, params, lambda) -> Float64
-ncv_criterion_derivatives(state, params, lambda) -> NamedTuple
+pijcv_criterion(state, params, lambda) -> Float64
+pijcv_criterion_derivatives(state, params, lambda) -> NamedTuple
 ```
 
 **Reference:** Wood (2020) Biometrics - Neighborhood Cross-Validation

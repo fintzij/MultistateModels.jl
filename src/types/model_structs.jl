@@ -56,6 +56,44 @@ const MultistateSemiMarkovProcess = MultistateProcess
 # =============================================================================
 
 """
+    AbstractSurrogate
+
+Abstract supertype for importance sampling surrogates.
+
+All concrete subtypes must provide:
+- `fitted::Bool`: Whether parameters have been fitted or are placeholders
+
+Conventional fields (not enforced, but expected):
+- `parameters`: Parameter storage (structure varies by surrogate type)
+
+# Subtypes
+- [`MarkovSurrogate`](@ref): Exponential hazard surrogate for importance sampling
+- [`PhaseTypeSurrogate`](@ref): Phase-type expanded Q-matrix surrogate for FFBS
+
+# Interface Functions
+- `is_fitted(s::AbstractSurrogate)`: Check if surrogate parameters are fitted
+
+See also: [`MarkovSurrogate`](@ref), [`PhaseTypeSurrogate`](@ref)
+"""
+abstract type AbstractSurrogate end
+
+"""
+    is_fitted(s::AbstractSurrogate) -> Bool
+
+Check whether a surrogate has been fitted (parameters optimized or set).
+
+# Examples
+```julia
+surrogate = fit_surrogate(model; method=:mle)
+is_fitted(surrogate)  # true
+
+surrogate_unfitted = MarkovSurrogate(hazards, params)  # fitted=false by default
+is_fitted(surrogate_unfitted)  # false
+```
+"""
+is_fitted(s::AbstractSurrogate) = s.fitted
+
+"""
     MarkovSurrogate(hazards::Vector{_MarkovHazard}, parameters::NamedTuple; fitted::Bool=false)
 
 Markov surrogate for importance sampling proposals in MCEM.
@@ -77,9 +115,9 @@ surrogate = MarkovSurrogate(hazards, params)  # fitted=false by default
 surrogate = MarkovSurrogate(hazards, params; fitted=true)
 ```
 
-See also: [`set_surrogate!`](@ref)
+See also: [`set_surrogate!`](@ref), [`AbstractSurrogate`](@ref), [`is_fitted`](@ref)
 """
-struct MarkovSurrogate
+struct MarkovSurrogate <: AbstractSurrogate
     hazards::Vector{_MarkovHazard}
     parameters::NamedTuple
     fitted::Bool

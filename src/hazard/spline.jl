@@ -543,11 +543,11 @@ Fit a Markov surrogate to the model, simulate sample paths, and extract sojourn 
 Used for panel data where exact transition times are not observed.
 """
 function _extract_sojourns_from_surrogate(model::MultistateProcess, n_paths::Int, min_ess::Int)
-    # Fit Markov surrogate
-    surrogate_fitted = fit_surrogate(model; verbose=false)
+    # Fit and store surrogate in model (set_surrogate! fits and stores in model.markovsurrogate)
+    set_surrogate!(model; verbose=false)
     
-    # Draw sample paths
-    path_result = draw_paths(surrogate_fitted; min_ess=min_ess)
+    # Draw sample paths from the model (uses stored markovsurrogate)
+    path_result = draw_paths(model; min_ess=min_ess)
     
     # Extract paths - handle different return types from draw_paths
     # For panel data: returns NamedTuple with samplepaths::Vector{Vector{SamplePath}}
@@ -557,7 +557,7 @@ function _extract_sojourns_from_surrogate(model::MultistateProcess, n_paths::Int
         SamplePath[p for subj_paths in path_result.samplepaths for p in subj_paths]
     elseif path_result isa NamedTuple && haskey(path_result, :loglik)
         # Exact data case (shouldn't happen here, but handle gracefully)
-        extract_paths(surrogate_fitted.data)
+        extract_paths(model.data)
     elseif path_result isa Vector{<:Vector}
         # Direct Vector{Vector{SamplePath}} - flatten
         SamplePath[p for subj_paths in path_result for p in subj_paths]

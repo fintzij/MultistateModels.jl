@@ -133,7 +133,16 @@ function to_natural_scale(params_nested::NamedTuple, hazards, ::Type{T}) where T
     hazard_keys = keys(params_nested)
     transformed_hazards = map(enumerate(hazard_keys)) do (idx, hazname)
         hazard_params = params_nested[hazname]
-        hazard = hazards[idx]
+        
+        # Find the hazard with the matching name
+        # We cannot assume hazards[idx] corresponds to hazname because params_nested keys 
+        # might be sorted differently than the hazards vector
+        h_idx = findfirst(h -> h.hazname == hazname, hazards)
+        if isnothing(h_idx)
+            error("Hazard $hazname found in parameters but not in hazards vector")
+        end
+        hazard = hazards[h_idx]
+        
         family = hazard.family
         
         # Transform baseline to natural scale (family-aware)

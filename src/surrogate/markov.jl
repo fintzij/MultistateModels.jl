@@ -19,7 +19,11 @@ Otherwise, builds surrogate hazards from scratch using the model's hazard specif
 function make_surrogate_model(model::MultistateProcess)
     if isnothing(model.markovsurrogate)
         # Build surrogate hazards from scratch
-        surrogate_haz, surrogate_pars, _ = build_hazards(model.modelcall.hazards...; data = model.data, surrogate = true)
+        # Ensure hazards are sorted to match model.hazards order (which determines tmat indices)
+        hazards = collect(model.modelcall.hazards)
+        sort!(hazards, by = h -> (h.statefrom, h.stateto))
+        
+        surrogate_haz, surrogate_pars, _ = build_hazards(hazards...; data = model.data, surrogate = true)
         markov_surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars)
     else
         markov_surrogate = model.markovsurrogate
@@ -44,85 +48,67 @@ end
 
 
 """
-fit_surrogate(model::MultistateSemiMarkovProcess)
+    fit_surrogate(model::MultistateProcess; type=:markov, method=:mle, ...)
 
-Fit a Markov surrogate model.
-
-!!! note "Deprecated"
-    This signature is deprecated. Use `fit_surrogate(model; type=:markov, method=:mle, ...)` instead.
+Fit a Markov or phase-type surrogate model for importance sampling.
 
 # Arguments
-- model: multistate model object
-- surrogate_parameters: Optional fixed parameters
-- surrogate_constraints: Optional constraints for MLE fitting
-- crude_inits: Use crude initializations (ignored, for backward compatibility)
-- verbose: Print progress information
+- `model`: Multistate model object
+- `type::Symbol = :markov`: Surrogate type (`:markov` or `:phasetype`)
+- `method::Symbol = :mle`: Fitting method (`:mle` or `:heuristic`)
+- `n_phases = 2`: For phase-type: number of phases (Int, Dict{Int,Int}, or :auto/:heuristic)
+- `surrogate_parameters = nothing`: Optional fixed parameters (skips fitting)
+- `surrogate_constraints = nothing`: Optional constraints for MLE fitting
+- `verbose = true`: Print progress information
 
 # Returns
-- `MultistateMarkovModelFitted`: Fitted Markov model (for backward compatibility)
+- `MarkovSurrogate` if `type=:markov`
+- `PhaseTypeSurrogate` if `type=:phasetype`
+
+# Examples
+```julia
+# Fit Markov surrogate via MLE (default)
+surrogate = fit_surrogate(model)
+
+# Fit Markov surrogate with heuristic (faster, no optimization)
+surrogate = fit_surrogate(model; method=:heuristic)
+
+# Fit phase-type surrogate with 3 phases
+surrogate = fit_surrogate(model; type=:phasetype, n_phases=3)
+```
+
+See also: [`set_surrogate!`](@ref), [`MarkovSurrogate`](@ref), [`PhaseTypeSurrogate`](@ref)
 """
 function fit_surrogate(model::MultistateProcess; 
     surrogate_parameters = nothing, 
     surrogate_constraints = nothing, 
-    crude_inits = true, 
+    crude_inits = nothing,  # Deprecated, ignored
     verbose = true,
-    # New unified API parameters
     type::Symbol = :markov,
     method::Symbol = :mle,
     n_phases::Union{Int, Dict{Int,Int}, Symbol} = 2)
     
-    # Check if using new API (type or method specified non-default)
-    using_new_api = (type !== :markov) || 
-                    (method !== :mle && isnothing(surrogate_parameters))
-    
-    if using_new_api || type === :phasetype
-        # Use new unified API
-        _validate_surrogate_inputs(type, method)
-        
-        if type === :markov
-            return _fit_markov_surrogate(model; 
-                method = method,
-                surrogate_parameters = surrogate_parameters,
-                surrogate_constraints = surrogate_constraints,
-                verbose = verbose)
-        else  # :phasetype
-            return _fit_phasetype_surrogate(model;
-                method = method,
-                n_phases = n_phases,
-                surrogate_parameters = surrogate_parameters,
-                surrogate_constraints = surrogate_constraints,
-                verbose = verbose)
-        end
+    # Deprecation warning for crude_inits
+    if !isnothing(crude_inits)
+        @warn "crude_inits is deprecated and ignored. Use method=:heuristic for crude initialization." maxlog=1
     end
     
-    # Backward compatible path: return fitted model (not MarkovSurrogate)
-    # This is for callers expecting surrogate_fitted.parameters, surrogate_fitted.loglik, etc.
-    surrogate_model = make_surrogate_model(model)
-
-    if !isnothing(surrogate_parameters) 
-        set_parameters!(surrogate_model, surrogate_parameters)
-    elseif crude_inits
-        set_crude_init!(surrogate_model)
-    end
-
-    if !isnothing(surrogate_constraints)
-        consfun_surrogate = parse_constraints(surrogate_constraints.cons, surrogate_model.hazards; 
-                                               consfun_name = :consfun_surrogate)
-        initcons = consfun_surrogate(zeros(length(surrogate_constraints.cons)), 
-                                      get_parameters_flat(surrogate_model), nothing)
-        badcons = findall(initcons .< surrogate_constraints.lcons .|| 
-                         initcons .> surrogate_constraints.ucons)
-        if length(badcons) > 0
-            error("Constraints $badcons are violated at the initial parameter values for the Markov surrogate.")
-        end
-    end
-
-    if verbose
-        println("Obtaining the MLE for the Markov surrogate model ...\n")
-    end
+    _validate_surrogate_inputs(type, method)
     
-    surrogate_fitted = fit(surrogate_model; constraints = surrogate_constraints, compute_vcov = false)
-    return surrogate_fitted
+    if type === :markov
+        return _fit_markov_surrogate(model; 
+            method = method,
+            surrogate_parameters = surrogate_parameters,
+            surrogate_constraints = surrogate_constraints,
+            verbose = verbose)
+    else  # :phasetype
+        return _fit_phasetype_surrogate(model;
+            method = method,
+            n_phases = n_phases,
+            surrogate_parameters = surrogate_parameters,
+            surrogate_constraints = surrogate_constraints,
+            verbose = verbose)
+    end
 end
 
 """

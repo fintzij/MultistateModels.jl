@@ -3,6 +3,7 @@ module MultistateModels
 using BSplineKit
 using ComponentArrays
 using DataFrames
+using DifferentiationInterface
 using DiffResults
 using Distributions
 using ElasticArrays
@@ -94,8 +95,16 @@ export
     set_parameters!,
     set_surrogate!,
     is_surrogate_fitted,
+    is_fitted,
     initialize_parameters,
     initialize_parameters!,
+    
+    # --------------------------------------------------------------------------
+    # Type hierarchy
+    # --------------------------------------------------------------------------
+    AbstractSurrogate,
+    MarkovSurrogate,
+    PhaseTypeSurrogate,
     
     # --------------------------------------------------------------------------
     # Phase-type model accessors

@@ -859,7 +859,15 @@ function build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Sym
     # Build nested parameters structure per hazard
     # Parameters are stored on log scale for baseline, as-is for covariates
     params_nested_pairs = [
-        hazname => build_hazard_params(parameters[idx], hazards[idx].parnames, hazards[idx].npar_baseline, hazards[idx].npar_total)
+        begin
+            # Robustly find hazard by name
+            h_idx = findfirst(h -> h.hazname == hazname, hazards)
+            if isnothing(h_idx)
+                 error("Hazard $hazname not found in hazards vector")
+            end
+            hazard = hazards[h_idx]
+            hazname => build_hazard_params(parameters[idx], hazard.parnames, hazard.npar_baseline, hazard.npar_total)
+        end
         for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
     ]
     params_nested = NamedTuple(params_nested_pairs)
@@ -870,7 +878,11 @@ function build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Sym
     
     # Get natural scale parameters (family-aware transformation)
     params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname], hazards[idx].family)
+        begin
+            h_idx = findfirst(h -> h.hazname == hazname, hazards)
+            hazard = hazards[h_idx]
+            hazname => extract_natural_vector(params_nested[hazname], hazard.family)
+        end
         for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
     ]
     params_natural = NamedTuple(params_natural_pairs)

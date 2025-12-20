@@ -1491,10 +1491,10 @@ end
 
 
 # ============================================================================
-# NCV: Neighbourhood Cross-Validation
+# PIJCV: Predictive Infinitesimal Jackknife Cross-Validation
 # ============================================================================
 # 
-# Implementation of Neighbourhood Cross-Validation (NCV) for smoothing parameter
+# Implementation of Predictive Infinitesimal Jackknife Cross-Validation (PIJCV) for smoothing parameter
 # selection in penalized likelihood models, following:
 # 
 # Wood, S.N. (2024). Neighbourhood Cross Validation. arXiv:2404.16490
@@ -1520,12 +1520,12 @@ end
 # ============================================================================
 
 """
-    NCVState
+    PIJCVState
 
-Mutable state object for Neighbourhood Cross-Validation computations.
+Mutable state object for Predictive Infinitesimal Jackknife Cross-Validation computations.
 
 Stores the penalized Hessian factorization and subject/neighbourhood-level 
-quantities needed for efficient NCV criterion computation.
+quantities needed for efficient PIJCV criterion computation.
 
 # Fields
 - `H_lambda::Matrix{Float64}`: Penalized Hessian H_λ = -∂²ℓ/∂β² + Sλ
@@ -1540,7 +1540,7 @@ quantities needed for efficient NCV criterion computation.
 # Reference
 Wood, S.N. (2024). Neighbourhood Cross Validation. arXiv:2404.16490
 """
-mutable struct NCVState
+mutable struct PIJCVState
     H_lambda::Matrix{Float64}
     H_chol::Union{Nothing, Cholesky{Float64,Matrix{Float64}}}
     subject_grads::Matrix{Float64}
@@ -1552,10 +1552,10 @@ mutable struct NCVState
 end
 
 """
-    NCVState(H_lambda, subject_grads; subject_hessians=nothing, 
+    PIJCVState(H_lambda, subject_grads; subject_hessians=nothing, 
              penalty_matrix=nothing, log_smoothing_params=nothing)
 
-Initialize an NCV state from penalized Hessian and neighbourhood gradients.
+Initialize a PIJCV state from penalized Hessian and neighbourhood gradients.
 
 # Arguments
 - `H_lambda::AbstractMatrix`: Penalized Hessian H_λ = -∂²ℓ/∂β² + Sλ, p × p
@@ -1565,12 +1565,12 @@ Initialize an NCV state from penalized Hessian and neighbourhood gradients.
 - `log_smoothing_params::Union{Nothing, AbstractVector}=nothing`: log(λ) values
 
 # Returns
-- `NCVState`: Initialized state with Cholesky factorization attempted
+- `PIJCVState`: Initialized state with Cholesky factorization attempted
 
 # Example
 ```julia
 # From fitted model with splines
-state = NCVState(penalized_hessian, subject_grads;
+state = PIJCVState(penalized_hessian, subject_grads;
                  subject_hessians=subj_hess,
                  penalty_matrix=S_lambda)
 ```
@@ -1580,7 +1580,7 @@ The Cholesky factorization is attempted on initialization. If it fails (indicati
 H_λ is not positive definite), `H_chol` will be `nothing` and subsequent computations
 will use direct methods.
 """
-function NCVState(H_lambda::AbstractMatrix, 
+function PIJCVState(H_lambda::AbstractMatrix, 
                   subject_grads::AbstractMatrix;
                   subject_hessians::Union{Nothing, AbstractArray}=nothing,
                   penalty_matrix::Union{Nothing, AbstractMatrix}=nothing,
@@ -1605,7 +1605,7 @@ function NCVState(H_lambda::AbstractMatrix,
     H_chol = try
         cholesky(Symmetric(H_mat))
     catch e
-        @debug "Cholesky factorization failed during NCVState initialization; NCV will use direct solves" exception=(e, catch_backtrace())
+        @debug "Cholesky factorization failed during PIJCVState initialization; PIJCV will use direct solves" exception=(e, catch_backtrace())
         nothing
     end
     
@@ -1613,7 +1613,7 @@ function NCVState(H_lambda::AbstractMatrix,
     deltas = zeros(Float64, nparams, nsubj)
     indefinite_flags = falses(nsubj)
     
-    return NCVState(H_mat, H_chol, grads_mat, hess_arr, deltas, 
+    return PIJCVState(H_mat, H_chol, grads_mat, hess_arr, deltas, 
                     indefinite_flags, pen_mat, log_sp)
 end
 
@@ -1706,7 +1706,7 @@ function cholesky_downdate_copy(L::AbstractMatrix, v::AbstractVector; tol::Float
 end
 
 """
-    ncv_loo_perturbation_cholesky(H_chol, H_k, g_k; tol=1e-10)
+    pijcv_loo_perturbation_cholesky(H_chol, H_k, g_k; tol=1e-10)
 
 Compute LOO perturbation Δ_{-α(k)} using Cholesky downdate.
 
@@ -1737,7 +1737,7 @@ NamedTuple with:
 # Reference
 Wood, S.N. (2024). Neighbourhood Cross Validation, Equation 3 and Section 2.1.
 """
-function ncv_loo_perturbation_cholesky(H_chol::Cholesky,
+function pijcv_loo_perturbation_cholesky(H_chol::Cholesky,
                                        H_k::AbstractMatrix,
                                        g_k::AbstractVector;
                                        tol::Float64=1e-10)
@@ -1787,12 +1787,12 @@ function ncv_loo_perturbation_cholesky(H_chol::Cholesky,
         return (delta=delta, indefinite=false)
     else
         # Fall back to Woodbury identity
-        return ncv_loo_perturbation_woodbury(H_chol, H_k, g_k)
+        return pijcv_loo_perturbation_woodbury(H_chol, H_k, g_k)
     end
 end
 
 """
-    ncv_loo_perturbation_woodbury(H_chol, H_k, g_k)
+    pijcv_loo_perturbation_woodbury(H_chol, H_k, g_k)
 
 Compute LOO perturbation using Woodbury matrix identity.
 
@@ -1819,7 +1819,7 @@ NamedTuple with:
 # Reference
 Wood, S.N. (2024). Neighbourhood Cross Validation, Equation 4.
 """
-function ncv_loo_perturbation_woodbury(H_chol::Cholesky,
+function pijcv_loo_perturbation_woodbury(H_chol::Cholesky,
                                        H_k::AbstractMatrix,
                                        g_k::AbstractVector)
     # Compute H_λ^{-1} g_k
@@ -1854,7 +1854,7 @@ function ncv_loo_perturbation_woodbury(H_chol::Cholesky,
 end
 
 """
-    ncv_loo_perturbation_direct(H_lambda, H_k, g_k)
+    pijcv_loo_perturbation_direct(H_lambda, H_k, g_k)
 
 Compute LOO perturbation by direct solve (no Cholesky).
 
@@ -1868,7 +1868,7 @@ NamedTuple with:
 - `delta::Vector{Float64}`: LOO perturbation
 - `indefinite::Bool`: Whether solve required regularization
 """
-function ncv_loo_perturbation_direct(H_lambda::AbstractMatrix,
+function pijcv_loo_perturbation_direct(H_lambda::AbstractMatrix,
                                      H_k::AbstractMatrix,
                                      g_k::AbstractVector)
     H_lambda_k = H_lambda - H_k
@@ -1893,17 +1893,17 @@ function ncv_loo_perturbation_direct(H_lambda::AbstractMatrix,
 end
 
 """
-    compute_ncv_perturbations!(state::NCVState)
+    compute_pijcv_perturbations!(state::PIJCVState)
 
 Compute all LOO perturbations Δ_{-α(k)} for each neighbourhood.
 
 Updates `state.deltas` and `state.indefinite_flags` in place.
 
 # Arguments
-- `state::NCVState`: NCV state with H_λ and neighbourhood quantities
+- `state::PIJCVState`: PIJCV state with H_λ and neighbourhood quantities
 
 # Returns
-- `state`: The modified NCVState
+- `state`: The modified PIJCVState
 
 # Algorithm
 For each neighbourhood k = 1, ..., n:
@@ -1915,7 +1915,7 @@ For each neighbourhood k = 1, ..., n:
 Uses efficient Cholesky downdate when H_chol is available and H_k allows.
 Falls back to Woodbury identity or direct solve as needed.
 """
-function compute_ncv_perturbations!(state::NCVState)
+function compute_pijcv_perturbations!(state::PIJCVState)
     nsubj = size(state.subject_grads, 2)
     
     # Check if we have subject Hessians
@@ -1935,9 +1935,9 @@ function compute_ncv_perturbations!(state::NCVState)
         end
         
         result = if have_chol
-            ncv_loo_perturbation_cholesky(state.H_chol, H_k, g_k)
+            pijcv_loo_perturbation_cholesky(state.H_chol, H_k, g_k)
         else
-            ncv_loo_perturbation_direct(state.H_lambda, H_k, g_k)
+            pijcv_loo_perturbation_direct(state.H_lambda, H_k, g_k)
         end
         
         state.deltas[:, k] .= result.delta
@@ -1948,20 +1948,20 @@ function compute_ncv_perturbations!(state::NCVState)
 end
 
 """
-    ncv_criterion(state::NCVState, params::AbstractVector, 
+    pijcv_criterion(state::PIJCVState, params::AbstractVector, 
                   loss_fn::Function, data; use_quadratic=false)
 
-Compute the NCV criterion (approximate leave-neighbourhood-out cross-validation loss).
+Compute the PIJCV criterion (approximate leave-neighbourhood-out cross-validation loss).
 
 # Arguments
-- `state::NCVState`: NCV state with computed perturbations
+- `state::PIJCVState`: PIJCV state with computed perturbations
 - `params::AbstractVector`: Current parameter estimates β̂
 - `loss_fn::Function`: Function `loss_fn(params, data, k)` returning loss for neighbourhood k
 - `data`: Data object passed to loss function
 - `use_quadratic::Bool=false`: Use quadratic approximation V_q for robustness
 
 # Returns
-- `Float64`: NCV criterion V = (1/n) Σₖ D(y_{α(k)}, β̂ + Δ_{-α(k)})
+- `Float64`: PIJCV criterion V = (1/n) Σₖ D(y_{α(k)}, β̂ + Δ_{-α(k)})
 
 # Quadratic Approximation
 When `use_quadratic=true`, uses:
@@ -1975,7 +1975,7 @@ would cause numerical issues in the exact loss evaluation.
 # Reference
 Wood, S.N. (2024). Neighbourhood Cross Validation, Equations 2 and 5.
 """
-function ncv_criterion(state::NCVState,
+function pijcv_criterion(state::PIJCVState,
                        params::AbstractVector,
                        loss_fn::Function,
                        data;
@@ -1983,7 +1983,7 @@ function ncv_criterion(state::NCVState,
     nsubj = size(state.deltas, 2)
     
     if use_quadratic
-        return ncv_criterion_quadratic(state, params, loss_fn, data)
+        return pijcv_criterion_quadratic(state, params, loss_fn, data)
     end
     
     V = 0.0
@@ -1997,7 +1997,7 @@ function ncv_criterion(state::NCVState,
         # Check for numerical issues
         if !isfinite(D_k)
             # Fall back to quadratic approximation for this neighbourhood
-            D_k = ncv_loss_quadratic_k(state, params, loss_fn, data, k)
+            D_k = pijcv_loss_quadratic_k(state, params, loss_fn, data, k)
         end
         
         V += D_k
@@ -2007,17 +2007,17 @@ function ncv_criterion(state::NCVState,
 end
 
 """
-    ncv_criterion_quadratic(state::NCVState, params::AbstractVector,
+    pijcv_criterion_quadratic(state::PIJCVState, params::AbstractVector,
                             loss_fn::Function, data)
 
-Compute NCV criterion using quadratic approximation (Equation 5 in Wood 2024).
+Compute PIJCV criterion using quadratic approximation (Equation 5 in Wood 2024).
 
 More robust than exact evaluation when perturbations are large.
 ```math
 V_q = (1/n) Σₖ [D_k(β̂) + g_k'Δ_{-α(k)} + (1/2)Δ_{-α(k)}'H_k Δ_{-α(k)}]
 ```
 """
-function ncv_criterion_quadratic(state::NCVState,
+function pijcv_criterion_quadratic(state::PIJCVState,
                                  params::AbstractVector,
                                  loss_fn::Function,
                                  data)
@@ -2026,18 +2026,18 @@ function ncv_criterion_quadratic(state::NCVState,
     
     V_q = 0.0
     for k in 1:nsubj
-        V_q += ncv_loss_quadratic_k(state, params, loss_fn, data, k)
+        V_q += pijcv_loss_quadratic_k(state, params, loss_fn, data, k)
     end
     
     return V_q / nsubj
 end
 
 """
-    ncv_loss_quadratic_k(state, params, loss_fn, data, k)
+    pijcv_loss_quadratic_k(state, params, loss_fn, data, k)
 
 Quadratic approximation of LOO loss for neighbourhood k.
 """
-function ncv_loss_quadratic_k(state::NCVState,
+function pijcv_loss_quadratic_k(state::PIJCVState,
                               params::AbstractVector,
                               loss_fn::Function,
                               data, k::Int)
@@ -2065,14 +2065,14 @@ function ncv_loss_quadratic_k(state::NCVState,
 end
 
 """
-    ncv_criterion_derivatives(state::NCVState, params::AbstractVector,
+    pijcv_criterion_derivatives(state::PIJCVState, params::AbstractVector,
                               loss_fn::Function, grad_loss_fn::Function, data, 
                               penalty_derivatives)
 
-Compute NCV criterion and its derivatives with respect to log smoothing parameters.
+Compute PIJCV criterion and its derivatives with respect to log smoothing parameters.
 
 # Arguments
-- `state::NCVState`: NCV state with computed perturbations
+- `state::PIJCVState`: PIJCV state with computed perturbations
 - `params::AbstractVector`: Current parameter estimates β̂
 - `loss_fn::Function`: Function `loss_fn(params, data, k)` returning loss
 - `grad_loss_fn::Function`: Function returning gradient of loss w.r.t. params
@@ -2081,7 +2081,7 @@ Compute NCV criterion and its derivatives with respect to log smoothing paramete
 
 # Returns
 NamedTuple with:
-- `V`: NCV criterion value
+- `V`: PIJCV criterion value
 - `dV_drho`: Vector of ∂V/∂ρⱼ derivatives
 
 # Derivative Computation
@@ -2102,7 +2102,7 @@ is too large and has effectively removed those basis functions.
 # Reference
 Wood, S.N. (2024). Neighbourhood Cross Validation, Section 3.
 """
-function ncv_criterion_derivatives(state::NCVState,
+function pijcv_criterion_derivatives(state::PIJCVState,
                                    params::AbstractVector,
                                    loss_fn::Function,
                                    grad_loss_fn::Function,
@@ -2111,8 +2111,8 @@ function ncv_criterion_derivatives(state::NCVState,
     nsubj = size(state.deltas, 2)
     n_smoothing = length(penalty_derivatives)
     
-    # Compute NCV criterion
-    V = ncv_criterion(state, params, loss_fn, data)
+    # Compute PIJCV criterion
+    V = pijcv_criterion(state, params, loss_fn, data)
     
     # Initialize derivative accumulator
     dV_drho = zeros(Float64, n_smoothing)
@@ -2143,9 +2143,9 @@ function ncv_criterion_derivatives(state::NCVState,
             end
             
             if have_chol
-                result = ncv_loo_perturbation_cholesky(state.H_chol, H_k, Sj_params_loo)
+                result = pijcv_loo_perturbation_cholesky(state.H_chol, H_k, Sj_params_loo)
             else
-                result = ncv_loo_perturbation_direct(state.H_lambda, H_k, Sj_params_loo)
+                result = pijcv_loo_perturbation_direct(state.H_lambda, H_k, Sj_params_loo)
             end
             
             d_params_loo_drho_j = -result.delta
@@ -2162,7 +2162,7 @@ function ncv_criterion_derivatives(state::NCVState,
 end
 
 """
-    ncv_degeneracy_test(state::NCVState, params::AbstractVector, 
+    pijcv_degeneracy_test(state::PIJCVState, params::AbstractVector, 
                         penalty_derivative::AbstractMatrix; tol=1e-6)
 
 Test for degeneracy in smoothing parameter (Section 3 of Wood 2024).
@@ -2176,7 +2176,7 @@ This occurs when λⱼ is so large that the corresponding basis functions
 have been effectively removed from the model.
 
 # Arguments
-- `state::NCVState`: NCV state
+- `state::PIJCVState`: PIJCV state
 - `params::AbstractVector`: Current parameters
 - `penalty_derivative::AbstractMatrix`: ∂S/∂ρⱼ for the smoothing parameter
 - `tol::Float64=1e-6`: Tolerance for degeneracy detection
@@ -2184,7 +2184,7 @@ have been effectively removed from the model.
 # Returns
 - `Bool`: `true` if the smoothing parameter is degenerate
 """
-function ncv_degeneracy_test(state::NCVState,
+function pijcv_degeneracy_test(state::PIJCVState,
                              params::AbstractVector,
                              penalty_derivative::AbstractMatrix;
                              tol::Float64=1e-6)
@@ -2207,46 +2207,46 @@ function ncv_degeneracy_test(state::NCVState,
 end
 
 """
-    ncv_get_loo_estimates(state::NCVState, params::AbstractVector)
+    pijcv_get_loo_estimates(state::PIJCVState, params::AbstractVector)
 
-Get leave-neighbourhood-out parameter estimates from NCV state.
+Get leave-neighbourhood-out parameter estimates from PIJCV state.
 
 # Arguments
-- `state::NCVState`: NCV state with computed perturbations
+- `state::PIJCVState`: PIJCV state with computed perturbations
 - `params::AbstractVector`: Current (full-data) parameter estimates, length p
 
 # Returns
 - `Matrix{Float64}`: p × n matrix where column k is β̂_{-α(k)} = β̂ + Δ_{-α(k)}
 """
-function ncv_get_loo_estimates(state::NCVState, params::AbstractVector)
+function pijcv_get_loo_estimates(state::PIJCVState, params::AbstractVector)
     return params .+ state.deltas
 end
 
 """
-    ncv_get_perturbations(state::NCVState)
+    pijcv_get_perturbations(state::PIJCVState)
 
-Get the LOO perturbations Δ_{-α(k)} from NCV state.
+Get the LOO perturbations Δ_{-α(k)} from PIJCV state.
 
 # Arguments
-- `state::NCVState`: NCV state with computed perturbations
+- `state::PIJCVState`: PIJCV state with computed perturbations
 
 # Returns
 - `Matrix{Float64}`: p × n matrix where column k is Δ_{-α(k)} = β̂_{-α(k)} - β̂
 """
-function ncv_get_perturbations(state::NCVState)
+function pijcv_get_perturbations(state::PIJCVState)
     return state.deltas
 end
 
 """
-    ncv_vcov(state::NCVState)
+    pijcv_vcov(state::PIJCVState)
 
-Compute variance estimates from NCV state perturbations.
+Compute variance estimates from PIJCV state perturbations.
 
 Returns both IJ and jackknife variance estimates based on the LOO perturbations,
 analogous to the standard IJ/JK variance estimators.
 
 # Arguments
-- `state::NCVState`: NCV state with computed perturbations
+- `state::PIJCVState`: PIJCV state with computed perturbations
 
 # Returns
 NamedTuple with:
@@ -2257,7 +2257,7 @@ NamedTuple with:
 These variance estimates account for the penalization structure through the
 perturbations, which are computed from the penalized Hessian H_λ.
 """
-function ncv_vcov(state::NCVState)
+function pijcv_vcov(state::PIJCVState)
     n = size(state.deltas, 2)
     delta_outer = state.deltas * state.deltas'
     

@@ -153,7 +153,13 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         end
         
         # get estimates - use Ipopt for unconstrained
-        optf = OptimizationFunction(loglik_fn, Optimization.AutoForwardDiff())
+        # Use SecondOrder AD if solver requires it (Newton, Ipopt) to avoid warnings
+        adtype = Optimization.AutoForwardDiff()
+        if isnothing(solver) || (solver isa Optim.Newton) || (solver isa Optim.NewtonTrustRegion) || (solver isa Ipopt.Optimizer)
+            adtype = DifferentiationInterface.SecondOrder(Optimization.AutoForwardDiff(), Optimization.AutoForwardDiff())
+        end
+
+        optf = OptimizationFunction(loglik_fn, adtype)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
 
         # solve with user-specified solver or default Ipopt
@@ -204,7 +210,13 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             loglik_fn = loglik
         end
 
-        optf = OptimizationFunction(loglik_fn, Optimization.AutoForwardDiff(), cons = consfun_multistate)
+        # Use SecondOrder AD if solver requires it
+        adtype = Optimization.AutoForwardDiff()
+        if isnothing(solver) || (solver isa Optim.Newton) || (solver isa Optim.NewtonTrustRegion) || (solver isa Ipopt.Optimizer)
+            adtype = DifferentiationInterface.SecondOrder(Optimization.AutoForwardDiff(), Optimization.AutoForwardDiff())
+        end
+
+        optf = OptimizationFunction(loglik_fn, adtype, cons = consfun_multistate)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths), lcons = constraints.lcons, ucons = constraints.ucons)
         
         # solve with user-specified solver or default Ipopt
