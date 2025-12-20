@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.5] - 2025-12-20
+
+### Fixed
+
+- **Long test bug fix**: Removed shadowed `get_parameters_flat` function in `longtest_helpers.jl` that was returning natural-scale parameters instead of log-scale, causing 3 "Distributional fidelity" test failures in `longtest_exact_markov.jl`.
+
+### Testing Infrastructure
+
+- **MultistateModelsTests cleanup**: 
+  - Fixed duplicate test entries in `run_all_tests.jl` (`longtest_phasetype_exact.jl` and `longtest_phasetype_panel.jl` are included by `longtest_phasetype.jl`, not run separately)
+  - Updated README.md with correct API documentation for `runtests()` and environment variables
+  - Updated Quarto reports to accurately reflect the 10 active long test suites
+  - Added callout noting `longtest_sir.jl` is not in the standard suite
+
+### Documentation
+
+- Updated `long_tests.qmd` inventory to match actual test runner (10 suites, not 12)
+- Fixed run commands in reports to use correct `MSM_TEST_LEVEL=full` pattern
+- Updated `index.qmd` with current test recording workflow
+
 ## [0.2.4] - 2025-12-19
 
 ### Refactor: NCV -> PIJCV
