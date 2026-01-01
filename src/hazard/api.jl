@@ -202,7 +202,7 @@ function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, haza
     elseif (length(tstart) != 1) & (length(tstop) == 1)
         tstop = rep(tstop, length(tstart))
     else
-        error("Lengths of tstart and tstop are not compatible.")
+        throw(ArgumentError("Lengths of tstart ($(length(tstart))) and tstop ($(length(tstop))) are not compatible."))
     end
 
     # get hazard index

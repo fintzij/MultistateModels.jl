@@ -141,18 +141,23 @@ end
 const PATH_WORKSPACES = Dict{Int, PathWorkspace}()
 const PATH_WORKSPACE_LOCK = ReentrantLock()
 
-"""Get or create thread-local PathWorkspace"""
+"""
+    get_path_workspace() -> PathWorkspace
+
+Get or create a thread-local PathWorkspace for the current thread.
+
+Thread-safe: Uses a lock to ensure only one workspace is created per thread
+even under concurrent access from multiple threads.
+"""
 function get_path_workspace()::PathWorkspace
     tid = Threads.threadid()
-    ws = get(PATH_WORKSPACES, tid, nothing)
-    if isnothing(ws)
-        lock(PATH_WORKSPACE_LOCK) do
-            ws = get!(PATH_WORKSPACES, tid) do
-                PathWorkspace(1000)
-            end
+    # Always acquire lock to avoid TOCTOU race condition
+    # The lock ensures thread-safe initialization
+    lock(PATH_WORKSPACE_LOCK) do
+        get!(PATH_WORKSPACES, tid) do
+            PathWorkspace(1000)
         end
     end
-    return ws
 end
 
 # ============================================================================

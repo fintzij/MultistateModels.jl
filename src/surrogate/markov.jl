@@ -115,12 +115,15 @@ end
     _validate_surrogate_inputs(type, method)
 
 Validate surrogate fitting input parameters.
+
+# Throws
+- `ArgumentError` for invalid type or method
 """
 function _validate_surrogate_inputs(type::Symbol, method::Symbol)
     type in (:markov, :phasetype) || 
-        error("type must be :markov or :phasetype, got :$type")
+        throw(ArgumentError("type must be :markov or :phasetype, got :$type"))
     method in (:mle, :heuristic) || 
-        error("method must be :mle or :heuristic, got :$method")
+        throw(ArgumentError("method must be :mle or :heuristic, got :$method"))
 end
 
 # =============================================================================
@@ -181,7 +184,7 @@ function _fit_markov_surrogate(model;
             badcons = findall(initcons .< surrogate_constraints.lcons .|| 
                              initcons .> surrogate_constraints.ucons)
             if length(badcons) > 0
-                error("Constraints $badcons are violated at the initial parameter values for the Markov surrogate.")
+                throw(ArgumentError("Constraints $badcons are violated at the initial parameter values for the Markov surrogate."))
             end
         end
         

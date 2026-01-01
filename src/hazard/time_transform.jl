@@ -11,11 +11,11 @@
     _ensure_transform_supported(hazard::_Hazard)
 
 Verify that time transform optimization is supported for this hazard type.
-Throws error if hazard claims time_transform=true but type is unsupported.
+Throws ArgumentError if hazard claims time_transform=true but type is unsupported.
 """
 @inline function _ensure_transform_supported(hazard::_Hazard)
     if !(hazard isa Union{MarkovHazard, SemiMarkovHazard, RuntimeSplineHazard})
-        error("Time transform not implemented for hazard type $(typeof(hazard))")
+        throw(ArgumentError("Time transform not implemented for hazard type $(typeof(hazard)). Supported: MarkovHazard, SemiMarkovHazard, RuntimeSplineHazard"))
     end
 end
 
@@ -23,12 +23,13 @@ end
     _time_transform_cache(context::TimeTransformContext, hazard_slot::Int)
 
 Get the cache for a specific hazard slot from the context.
+Throws BoundsError if hazard_slot exceeds available caches.
 """
 @inline function _time_transform_cache(context::TimeTransformContext{LinType,TimeType}, hazard_slot::Int) where {LinType,TimeType}
     if hazard_slot <= length(context.local_caches)
         return context.local_caches[hazard_slot]
     end
-    error("Hazard slot $hazard_slot exceeds cache size $(length(context.local_caches))")
+    throw(BoundsError(context.local_caches, hazard_slot))
 end
 
 """

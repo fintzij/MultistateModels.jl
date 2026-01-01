@@ -200,7 +200,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         initcons = consfun_multistate(zeros(length(constraints.cons)), parameters, nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
         if length(badcons) > 0
-            error("Constraints $badcons are violated at the initial parameter values.")
+            throw(ArgumentError("Constraints $badcons are violated at the initial parameter values."))
         end
 
         # Create likelihood function - parallel or sequential
@@ -411,7 +411,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         initcons = consfun_markov(zeros(length(constraints.cons)), parameters, nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
         if length(badcons) > 0
-            error("Constraints $badcons are violated at the initial parameter values.")
+            throw(ArgumentError("Constraints $badcons are violated at the initial parameter values."))
         end
 
         optf = OptimizationFunction(loglik_fn, get_optimization_ad(adbackend), cons = consfun_markov)
@@ -647,7 +647,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
 
     # Validate acceleration parameter
     if acceleration ∉ (:none, :squarem)
-        error("acceleration must be :none or :squarem, got :$acceleration")
+        throw(ArgumentError("acceleration must be :none or :squarem, got :$acceleration"))
     end
     use_squarem = acceleration === :squarem
     
@@ -657,25 +657,25 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
 
     # Validate SIR parameters
     if sir ∉ (:none, :sir, :lhs, :adaptive_sir, :adaptive_lhs)
-        error("sir must be :none, :sir, :lhs, :adaptive_sir, or :adaptive_lhs, got :$sir")
+        throw(ArgumentError("sir must be :none, :sir, :lhs, :adaptive_sir, or :adaptive_lhs, got :$sir"))
     end
     if sir_resample ∉ (:always, :degeneracy)
-        error("sir_resample must be :always or :degeneracy, got :$sir_resample")
+        throw(ArgumentError("sir_resample must be :always or :degeneracy, got :$sir_resample"))
     end
     if sir_pool_constant <= 0
-        error("sir_pool_constant must be positive, got $sir_pool_constant")
+        throw(ArgumentError("sir_pool_constant must be positive, got $sir_pool_constant"))
     end
     if sir_max_pool <= 0
-        error("sir_max_pool must be positive, got $sir_max_pool")
+        throw(ArgumentError("sir_max_pool must be positive, got $sir_max_pool"))
     end
     if !(0 < sir_degeneracy_threshold < 1)
-        error("sir_degeneracy_threshold must be in (0,1), got $sir_degeneracy_threshold")
+        throw(ArgumentError("sir_degeneracy_threshold must be in (0,1), got $sir_degeneracy_threshold"))
     end
     if sir_adaptive_threshold <= 0
-        error("sir_adaptive_threshold must be positive, got $sir_adaptive_threshold")
+        throw(ArgumentError("sir_adaptive_threshold must be positive, got $sir_adaptive_threshold"))
     end
     if sir_adaptive_min_iters < 1
-        error("sir_adaptive_min_iters must be at least 1, got $sir_adaptive_min_iters")
+        throw(ArgumentError("sir_adaptive_min_iters must be at least 1, got $sir_adaptive_min_iters"))
     end
     
     # Derive SIR mode flags from sir parameter
@@ -714,33 +714,32 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         _constraints = deepcopy(constraints)
         consfun_semimarkov = parse_constraints(_constraints.cons, model.hazards; consfun_name = :consfun_semimarkov)
 
-        # Phase 3: Use ParameterHandling.jl flat parameters for constraint check
         initcons = consfun_semimarkov(zeros(length(constraints.cons)), get_parameters_flat(model), nothing)
         badcons = findall(initcons .< constraints.lcons .|| initcons .> constraints.ucons)
         if length(badcons) > 0
-            error("Constraints $badcons are violated at the initial parameter values.")
+            throw(ArgumentError("Constraints $badcons are violated at the initial parameter values."))
         end
     end
 
     # check that max_sampling_effort is greater than 1
     if max_sampling_effort <= 1
-        error("max_sampling_effort must be greater than 1.")
+        throw(ArgumentError("max_sampling_effort must be greater than 1, got $max_sampling_effort"))
     end
 
     # check that ess_growth_factor is greater than 1
     if ess_growth_factor <= 1
-        error("ess_growth_factor must be greater than 1.")
+        throw(ArgumentError("ess_growth_factor must be greater than 1, got $ess_growth_factor"))
     end
 
     # Validate ess_increase_method parameter
     if ess_increase_method ∉ (:fixed, :adaptive)
-        error("ess_increase_method must be :fixed or :adaptive, got :$ess_increase_method")
+        throw(ArgumentError("ess_increase_method must be :fixed or :adaptive, got :$ess_increase_method"))
     end
     if ascent_alpha <= 0 || ascent_alpha >= 1
-        error("ascent_alpha must be in (0,1), got $ascent_alpha")
+        throw(ArgumentError("ascent_alpha must be in (0,1), got $ascent_alpha"))
     end
     if ascent_beta <= 0 || ascent_beta >= 1
-        error("ascent_beta must be in (0,1), got $ascent_beta")
+        throw(ArgumentError("ascent_beta must be in (0,1), got $ascent_beta"))
     end
     use_adaptive_ess = ess_increase_method === :adaptive
     
@@ -750,7 +749,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
 
     # throw a warning if trying to fit a spline model where the degree is 0 for all splines
     if all(map(x -> (isa(x, _MarkovHazard) | (isa(x, _SplineHazard) && (x.degree == 0) && (length(x.knots) == 2))), model.hazards))
-        error("Attempting to fit a time-homogeneous Markov model via MCEM. Recode as exponential hazards and refit.")
+        throw(ArgumentError("Attempting to fit a time-homogeneous Markov model via MCEM. Recode as exponential hazards and refit."))
     end
 
     # MCEM initialization
@@ -835,7 +834,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # Require a pre-built Markov surrogate for MCEM
     # Users should call set_surrogate!(model) or use surrogate=:markov in multistatemodel() beforehand
     if isnothing(model.markovsurrogate)
-        error("MCEM requires a Markov surrogate. Call `set_surrogate!(model)` or use `surrogate=:markov` in `multistatemodel()` before fitting.")
+        throw(ArgumentError("MCEM requires a Markov surrogate. Call `set_surrogate!(model)` or use `surrogate=:markov` in `multistatemodel()` before fitting."))
     end
     
     # Check if surrogate needs to be fitted (not yet fitted)

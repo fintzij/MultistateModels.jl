@@ -189,6 +189,10 @@ export
 # Abstract type hierarchy
 include("types/abstract.jl")
 
+# Package-wide constants (numerical tolerances, thresholds)
+# Loaded early so other modules can use them
+include("utilities/constants.jl")
+
 # Hazard metadata and caching types
 include("types/hazard_metadata.jl")
 

@@ -86,7 +86,7 @@ function get_phasetype_parameters(model::MultistateModelFitted; scale::Symbol=:n
     for orig_haz in original_hazards
         orig_name = Symbol("h$(orig_haz.statefrom)$(orig_haz.stateto)")
         
-        if orig_haz isa MultistateModels.PhaseTypeHazardSpec
+        if orig_haz isa MultistateModels.PhaseTypeHazard
             # Phase-type hazard: collect λ and μ rates from expanded hazards
             n = orig_haz.n_phases
             user_params = Float64[]
@@ -649,10 +649,10 @@ See also: [`get_influence_functions`](@ref), [`get_jk_pseudovalues`](@ref)
 """
 function get_loo_perturbations(model::MultistateModelFitted; method::Symbol=:direct)
     if isnothing(model.subject_gradients)
-        error("Subject gradients were not computed. Refit with compute_ij_vcov=true or compute_jk_vcov=true.")
+        throw(ArgumentError("Subject gradients were not computed. Refit with compute_ij_vcov=true or compute_jk_vcov=true."))
     end
     if isnothing(model.vcov)
-        error("Variance-covariance matrix was not computed. Refit with compute_vcov=true.")
+        throw(ArgumentError("Variance-covariance matrix was not computed. Refit with compute_vcov=true."))
     end
     
     return loo_perturbations_direct(model.vcov, model.subject_gradients)
@@ -1146,7 +1146,7 @@ function Base.show(io::IO, model::MultistateModelFitted)
                 end
             end
             
-            if !isnothing(pt_haz) && pt_haz isa PhaseTypeHazardSpec
+            if !isnothing(pt_haz) && pt_haz isa PhaseTypeHazard
                 n_phases = pt_haz.n_phases
                 statefrom = pt_haz.statefrom
                 stateto = pt_haz.stateto

@@ -58,7 +58,7 @@ function build_phasetype_mappings(hazards::Vector{<:HazardFunction},
     # Identify pt hazard indices
     pt_hazard_indices = Int[]
     for (i, h) in enumerate(hazards)
-        if h isa PhaseTypeHazardSpec
+        if h isa PhaseTypeHazard
             push!(pt_hazard_indices, i)
         end
     end
@@ -107,7 +107,7 @@ function _build_expanded_tmat(original_tmat::Matrix{Int},
         n_phases = n_phases_per_state[s]
         
         # Check if this state has :pt outgoing hazards
-        has_pt = any(h -> h isa PhaseTypeHazardSpec && h.statefrom == s, hazards)
+        has_pt = any(h -> h isa PhaseTypeHazard && h.statefrom == s, hazards)
         
         if has_pt && n_phases > 1
             # Add internal progression transitions (λ rates)
@@ -129,7 +129,7 @@ function _build_expanded_tmat(original_tmat::Matrix{Int},
                 h = hazards[haz_idx]
                 first_phase_d = first(state_to_phases[d])
                 
-                if h isa PhaseTypeHazardSpec
+                if h isa PhaseTypeHazard
                     # Phase-type: exit from each phase (μ rates)
                     for p in 1:n_phases
                         from_phase = phases_s[p]
@@ -178,7 +178,7 @@ function _build_expanded_hazard_indices(hazards::Vector{<:HazardFunction},
         n_phases = n_phases_per_state[s]
         
         # Check if this state has :pt outgoing hazards
-        has_pt = any(h -> h isa PhaseTypeHazardSpec && h.statefrom == s, hazards)
+        has_pt = any(h -> h isa PhaseTypeHazard && h.statefrom == s, hazards)
         
         if has_pt && n_phases > 1
             # Count progression hazards (internal λ transitions)
@@ -193,7 +193,7 @@ function _build_expanded_hazard_indices(hazards::Vector{<:HazardFunction},
             
             hazname = Symbol("h$(s)$(h.stateto)")
             
-            if h isa PhaseTypeHazardSpec
+            if h isa PhaseTypeHazard
                 # PT hazard: n exit transitions (μ rates)
                 exit_indices = collect(hazard_counter:(hazard_counter + n_phases - 1))
                 hazard_counter += n_phases
@@ -316,7 +316,7 @@ function expand_hazards_for_phasetype(hazards::Vector{<:HazardFunction},
         phases_s = mappings.state_to_phases[s]
         
         # Check if this state has :pt hazards (determines if we need progression hazards)
-        has_pt = any(h -> h isa PhaseTypeHazardSpec && h.statefrom == s, hazards)
+        has_pt = any(h -> h isa PhaseTypeHazard && h.statefrom == s, hazards)
         
         # Add progression hazards (λ: phase i → phase i+1) if this state has :pt
         if has_pt && n_phases > 1
@@ -338,7 +338,7 @@ function expand_hazards_for_phasetype(hazards::Vector{<:HazardFunction},
             d = h.stateto
             first_phase_d = first(mappings.state_to_phases[d])
             
-            if h isa PhaseTypeHazardSpec
+            if h isa PhaseTypeHazard
                 # PT hazard: create exit hazard from each phase
                 for p in 1:n_phases
                     from_phase = phases_s[p]
@@ -444,7 +444,7 @@ Build a MarkovHazard for phase-type exit transition (μ rate).
 These hazards represent transitions from a specific phase to the destination state.
 Covariates from the original :pt specification are included.
 """
-function _build_exit_hazard(pt_spec::PhaseTypeHazardSpec, 
+function _build_exit_hazard(pt_spec::PhaseTypeHazard, 
                              observed_from::Int, observed_to::Int,
                              phase_index::Int, n_phases::Int,
                              from_phase::Int, to_phase::Int,
@@ -554,7 +554,7 @@ function _build_expanded_hazard(h::HazardFunction,
     # Get the builder and create the hazard
     builder = get(_HAZARD_BUILDERS, family, nothing)
     if builder === nothing
-        error("Unknown hazard family for phase-type expansion: $(family)")
+        throw(ArgumentError("Unknown hazard family for phase-type expansion: $(family). Supported: $(keys(_HAZARD_BUILDERS))"))
     end
     
     haz_struct, hazpars = builder(ctx)
@@ -633,7 +633,7 @@ function expand_emission_matrix(EmissionMatrix::Matrix{Float64},
     
     # Validate input dimensions
     if size(EmissionMatrix, 2) != n_observed
-        error("EmissionMatrix must have \$(n_observed) columns (one per observed state).")
+        throw(ArgumentError("EmissionMatrix must have $n_observed columns (one per observed state), got $(size(EmissionMatrix, 2))."))
     end
     
     expanded_emat = zeros(Float64, n_expanded_obs, n_expanded_states)
@@ -717,7 +717,7 @@ function expand_data_for_phasetype_fitting(data::DataFrame, mappings::PhaseTypeM
             # The observation says "in state s at time t" but we don't know which phase
             # Use censoring pattern to allow all phases of state s
             if s > length(mappings.state_to_phases)
-                error("State $s found in data but not in model (max state: $(length(mappings.state_to_phases))).")
+                throw(ArgumentError("State $s found in data but not in model (max state: $(length(mappings.state_to_phases)))."))
             end
             n_phases_in_state = length(mappings.state_to_phases[s])
             if n_phases_in_state > 1
@@ -782,12 +782,15 @@ function _build_phase_censoring_patterns(mappings::PhaseTypeMappings)
     # Pattern matrix format for build_emat compatibility:
     # - Row s corresponds to obstype = s + 2 (sojourn in observed state s)
     # - Column 1 is the pattern code (s + 2.0)
-    # - Columns 2:n_expanded+1 are indicators for which phases are allowed
+    # - Columns 2:n_expanded+1 are indicator values (1.0 = possible, 0.0 = impossible)
     patterns = zeros(Float64, n_observed, n_expanded + 1)
     
     for s in 1:n_observed
         patterns[s, 1] = s + 2.0  # Pattern code (for reference/debugging)
         phases = mappings.state_to_phases[s]
+        # Use indicator values (1.0 for all possible phases)
+        # The likelihood computation sums transition probabilities for all allowed phases:
+        #   L = Σ_s P(transition to s) * indicator(s is allowed)
         for p in phases
             patterns[s, p + 1] = 1.0  # Phase p is allowed (column index = p + 1)
         end
@@ -1015,7 +1018,7 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
     # Identify states with :pt hazards
     pt_states = Set{Int}()
     for h in hazards_ordered
-        if h isa PhaseTypeHazardSpec
+        if h isa PhaseTypeHazard
             push!(pt_states, h.statefrom)
         end
     end
@@ -1024,9 +1027,9 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
     n_phases_per_state = ones(Int, n_states)  # Default: 1 phase for non-pt states
     
     if isnothing(n_phases) || isempty(n_phases)
-        # Legacy path: use n_phases from PhaseTypeHazardSpec
+        # Legacy path: use n_phases from PhaseTypeHazard
         for h in hazards_ordered
-            if h isa PhaseTypeHazardSpec
+            if h isa PhaseTypeHazard
                 s = h.statefrom
                 n_phases_per_state[s] = max(n_phases_per_state[s], h.n_phases)
             end
@@ -1036,18 +1039,18 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
         # Validate: all pt states must be in dict
         for s in pt_states
             if !haskey(n_phases, s)
-                error("State $s has :pt hazards but is not in n_phases dict. " *
-                      "Specify n_phases = Dict($s => k) where k is the number of phases.")
+                throw(ArgumentError("State $s has :pt hazards but is not in n_phases dict. " *
+                      "Specify n_phases = Dict($s => k) where k is the number of phases."))
             end
         end
         
         # Validate: dict shouldn't have states without :pt hazards
         for (s, k) in n_phases
             if s ∉ pt_states
-                error("n_phases specifies $k phases for state $s, but state $s has no :pt hazards.")
+                throw(ArgumentError("n_phases specifies $k phases for state $s, but state $s has no :pt hazards."))
             end
             if k < 1
-                error("n_phases[$s] must be ≥ 1, got $k")
+                throw(ArgumentError("n_phases[$s] must be ≥ 1, got $k"))
             end
             # Coerce n_phases = 1 to exponential (no warning, just do it)
             n_phases_per_state[s] = k
@@ -1057,7 +1060,7 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
     # Step 1c: Check for mixed hazard types from states with :pt hazards
     for s in pt_states
         outgoing_hazards = filter(h -> h.statefrom == s, hazards_ordered)
-        non_pt_hazards = filter(h -> !(h isa PhaseTypeHazardSpec), outgoing_hazards)
+        non_pt_hazards = filter(h -> !(h isa PhaseTypeHazard), outgoing_hazards)
         if !isempty(non_pt_hazards)
             non_pt_names = [Symbol("h$(h.statefrom)$(h.stateto)") for h in non_pt_hazards]
             @warn "State $s has :pt hazards but also has non-:pt hazards: $non_pt_names. " *
@@ -1280,7 +1283,7 @@ function _build_original_parameters(hazards::Vector{<:HazardFunction}, data::Dat
         hazname = Symbol("h$(h.statefrom)$(h.stateto)")
         hazkeys[hazname] = idx
         
-        if h isa PhaseTypeHazardSpec
+        if h isa PhaseTypeHazard
             # PT hazard: 2n-1 baseline params (λ rates + μ exit rates) + covariates
             n = h.n_phases
             npar_baseline = 2 * n - 1

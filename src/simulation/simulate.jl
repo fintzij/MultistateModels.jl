@@ -458,7 +458,7 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
 
     # throw an error if neither paths nor data are asked for
     if paths == false && data == false
-        error("Why are you calling `simulate` if you don't want sample paths or data? Stop wasting my time.")
+        throw(ArgumentError("Neither paths nor data requested. Set at least one of `paths=true` or `data=true`."))
     end
 
     # Validate per-transition observation parameters
@@ -537,7 +537,7 @@ function simulate(model::MultistateProcess; nsim = 1, data = true, paths = false
         elseif paths == true && data == false
             return trajectories
         else
-            error("Internal error: unexpected combination of data=$data, paths=$paths")
+            @assert false "Internal error: unexpected combination of data=$data, paths=$paths"
         end
     finally
         # Restore original model data if we modified it
@@ -1014,7 +1014,7 @@ function _collapse_simulation_result(result, mappings, return_data::Bool, return
         return [[_collapse_path(p, mappings) for p in paths] for paths in result]
         
     else
-        error("Internal error: unexpected combination of return_data=$return_data, return_paths=$return_paths")
+        @assert false "Internal error: unexpected combination of return_data=$return_data, return_paths=$return_paths"
     end
 end
 

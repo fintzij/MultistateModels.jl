@@ -24,10 +24,15 @@
 
 """
     make_constraints(cons::Vector{Expr}, lcons::Vector{Float64}, ucons::Vector{Float64})
+
+Create a constraints specification for model fitting.
+
+# Throws
+- `ArgumentError` if vectors have different lengths
 """
 function make_constraints(;cons::Vector{Expr}, lcons::Vector{Float64}, ucons::Vector{Float64})
     if !(length(cons) == length(lcons) == length(ucons))
-        error("cons, lcons, and ucons must all be the same length.")
+        throw(ArgumentError("cons ($(length(cons))), lcons ($(length(lcons))), and ucons ($(length(ucons))) must all be the same length."))
     end
     return (cons = cons, lcons = lcons, ucons = ucons)
 end

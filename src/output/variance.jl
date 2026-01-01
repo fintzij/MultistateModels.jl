@@ -2335,7 +2335,7 @@ function compare_variance_estimates(fitted; use_ij::Bool = true, threshold::Floa
     # Get model-based variance
     model_vcov = get_vcov(fitted)
     if isnothing(model_vcov)
-        error("Model-based variance not available. Fit model with compute_vcov=true.")
+        throw(ArgumentError("Model-based variance not available. Fit model with compute_vcov=true."))
     end
     
     # Get robust variance
@@ -2343,7 +2343,7 @@ function compare_variance_estimates(fitted; use_ij::Bool = true, threshold::Floa
     if isnothing(robust_vcov)
         error_msg = use_ij ? "IJ variance not available. Fit model with compute_ij_vcov=true." :
                            "JK variance not available. Fit model with compute_jk_vcov=true."
-        error(error_msg)
+        throw(ArgumentError(error_msg))
     end
     
     # Compute standard errors

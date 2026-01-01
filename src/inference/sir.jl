@@ -103,7 +103,7 @@ Dispatcher for SIR resampling methods.
 - `Vector{Int}`: Indices into the original array
 
 # Throws
-- `ErrorException` if method is not `:sir` or `:lhs`
+- `ArgumentError` if method is not `:sir` or `:lhs`
 """
 function get_sir_subsample_indices(weights::AbstractVector{<:Real}, n_resample::Real, method::Symbol)
     n = Int(n_resample)  # Convert to Int (e.g., from Float64 ESS target)
@@ -112,7 +112,7 @@ function get_sir_subsample_indices(weights::AbstractVector{<:Real}, n_resample::
     elseif method == :lhs
         return resample_lhs(weights, n)
     else
-        error("Unknown SIR method: $method. Must be :sir or :lhs")
+        throw(ArgumentError("Unknown SIR method: $method. Must be :sir or :lhs"))
     end
 end
 

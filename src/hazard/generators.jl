@@ -54,7 +54,7 @@ function generate_exponential_hazard(parnames::Vector{Symbol}, linpred_effect::S
             end
         ))
     else
-        error("Unsupported linpred_effect $(linpred_effect) for exponential hazard")
+        throw(ArgumentError("Unsupported linpred_effect :$(linpred_effect) for exponential hazard. Supported: :ph, :aft"))
     end
 
     return hazard_fn, cumhaz_fn
@@ -130,7 +130,7 @@ function generate_weibull_hazard(parnames::Vector{Symbol}, linpred_effect::Symbo
             end
         ))
     else
-        error("Unsupported linpred_effect $(linpred_effect) for Weibull hazard")
+        throw(ArgumentError("Unsupported linpred_effect :$(linpred_effect) for Weibull hazard. Supported: :ph, :aft"))
     end
 
     return hazard_fn, cumhaz_fn
@@ -204,7 +204,7 @@ function generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symb
                 # flexsurv parameterization: H(t) = (rate/shape) * (exp(shape*t) - 1)
                 shape = pars.baseline.$(shape_parname)
                 rate = pars.baseline.$(rate_parname)
-                if abs(shape) < 1e-10
+                if abs(shape) < $SHAPE_ZERO_TOL
                     # Reduces to exponential: H = rate * (ub - lb)
                     baseline_cumhaz = rate * (ub - lb)
                 else
@@ -236,7 +236,7 @@ function generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symb
                 time_scale = exp(-linear_pred)
                 scaled_shape = shape * time_scale
                 scaled_rate = rate * time_scale
-                if abs(scaled_shape) < 1e-10
+                if abs(scaled_shape) < $SHAPE_ZERO_TOL
                     baseline_cumhaz = scaled_rate * (ub - lb)
                 else
                     baseline_cumhaz = (scaled_rate / scaled_shape) * (exp(scaled_shape * ub) - exp(scaled_shape * lb))
@@ -245,7 +245,7 @@ function generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symb
             end
         ))
     else
-        error("Unsupported linpred_effect $(linpred_effect) for Gompertz hazard")
+        throw(ArgumentError("Unsupported linpred_effect :$(linpred_effect) for Gompertz hazard. Supported: :ph, :aft"))
     end
 
     return hazard_fn, cumhaz_fn

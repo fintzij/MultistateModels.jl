@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Internal hazard types for runtime evaluation. Users specify hazards via
-# ParametricHazard, SplineHazard, or PhaseTypeHazardSpec (defined in 
+# ParametricHazard, SplineHazard, or PhaseTypeHazard (defined in 
 # hazard_specs.jl), which are then converted to these internal types during
 # model construction.
 #
@@ -181,7 +181,7 @@ The expanded hazard from phase i has rate:
 - `progression_param_indices::UnitRange{Int}`: Indices of λ parameters in parnames
 - `exit_param_indices::UnitRange{Int}`: Indices of μ parameters in parnames
 
-See also: [`PhaseTypeHazardSpec`](@ref), [`PhaseTypeModel`](@ref)
+See also: [`PhaseTypeHazard`](@ref), [`PhaseTypeModel`](@ref)
 """
 struct PhaseTypeCoxianHazard <: _MarkovHazard
     hazname::Symbol

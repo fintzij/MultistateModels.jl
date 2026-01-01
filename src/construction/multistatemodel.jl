@@ -104,7 +104,7 @@ function Hazard(
 
     if family_key == :pt
         # Phase-type (Coxian) hazard
-        h = PhaseTypeHazardSpec(hazard, family_key, statefrom, stateto, n_phases, coxian_structure, metadata)
+        h = PhaseTypeHazard(hazard, family_key, statefrom, stateto, n_phases, coxian_structure, metadata)
     elseif family_key != :sp
         h = ParametricHazard(hazard, family_key, statefrom, stateto, metadata)
     else 
@@ -165,7 +165,7 @@ function enumerate_hazards(hazards::HazardFunction...)
     transition_pairs = [(hazinfo.statefrom[i], hazinfo.stateto[i]) for i in 1:n_haz]
     if length(unique(transition_pairs)) != n_haz
         duplicates = [tp for tp in unique(transition_pairs) if count(==(tp), transition_pairs) > 1]
-        error("Duplicate transitions detected: $(duplicates). Each transition (statefrom → stateto) should be specified only once.")
+        throw(ArgumentError("Duplicate transitions detected: $(duplicates). Each transition (statefrom → stateto) should be specified only once."))
     end
 
     # enumerate and sort hazards
@@ -590,7 +590,7 @@ function _generate_spline_hazard_fns(
             end
         end
     else
-        error("Spline hazards currently only support proportional hazards (linpred_effect=:ph)")
+        throw(ArgumentError("Spline hazards currently only support proportional hazards (linpred_effect=:ph), got :$(linpred_effect)"))
     end
     
     return hazard_fn, cumhaz_fn
@@ -717,7 +717,7 @@ function _eval_linear_pred_named(pars_covariates::NamedTuple, covars::NamedTuple
         if haskey(covars, cname)
             result += pval * getfield(covars, cname)
         else
-            error("Covariate $cname not found in covars NamedTuple")
+            throw(ArgumentError("Covariate $cname not found in covars NamedTuple. Available: $(keys(covars))"))
         end
     end
     return result
@@ -831,7 +831,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
     for (idx, ctx) in enumerate(contexts)
         hazkeys[ctx.hazname] = idx
         builder = get(_HAZARD_BUILDERS, ctx.family, nothing)
-        builder === nothing && error("Unknown hazard family: $(ctx.family)")
+        builder === nothing && throw(ArgumentError("Unknown hazard family: $(ctx.family). Supported families: $(keys(_HAZARD_BUILDERS))"))
         hazard_struct, hazpars = builder(ctx)
         _hazards[idx] = hazard_struct
         push!(parameters_list, hazpars)
@@ -863,7 +863,7 @@ function build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Sym
             # Robustly find hazard by name
             h_idx = findfirst(h -> h.hazname == hazname, hazards)
             if isnothing(h_idx)
-                 error("Hazard $hazname not found in hazards vector")
+                throw(ArgumentError("Hazard $hazname not found in hazards vector. Available: $(getfield.(hazards, :hazname))"))
             end
             hazard = hazards[h_idx]
             hazname => build_hazard_params(parameters[idx], hazard.parnames, hazard.npar_baseline, hazard.npar_total)
@@ -945,14 +945,14 @@ function build_emat(data::DataFrame, CensoringPatterns::Matrix{Float64}, Emissio
     # If EmissionMatrix is provided, validate and use it directly
     if !isnothing(EmissionMatrix)
         if size(EmissionMatrix) != (n_obs, n_states)
-            error("EmissionMatrix must have dimensions ($(n_obs), $(n_states)), got $(size(EmissionMatrix)).")
+            throw(ArgumentError("EmissionMatrix must have dimensions ($(n_obs), $(n_states)), got $(size(EmissionMatrix))."))
         end
         if any(EmissionMatrix .< 0) || any(EmissionMatrix .> 1)
-            error("EmissionMatrix values must be in [0, 1].")
+            throw(ArgumentError("EmissionMatrix values must be in [0, 1]."))
         end
         for i in 1:n_obs
             if all(EmissionMatrix[i,:] .== 0)
-                error("EmissionMatrix row $i has no allowed states (all zeros).")
+                throw(ArgumentError("EmissionMatrix row $i has no allowed states (all zeros)."))
             end
         end
         return EmissionMatrix
@@ -1147,19 +1147,19 @@ function multistatemodel(hazards::HazardFunction...;
 
     # Validate surrogate option
     if surrogate ∉ (:none, :markov)
-        error("surrogate must be :none or :markov, got :$surrogate")
+        throw(ArgumentError("surrogate must be :none or :markov, got :$surrogate"))
     end
     
     # Validate coxian_structure
     if coxian_structure ∉ (:unstructured, :sctp)
-        error("coxian_structure must be :unstructured or :sctp, got :$coxian_structure")
+        throw(ArgumentError("coxian_structure must be :unstructured or :sctp, got :$coxian_structure"))
     end
     
     # Validate inputs
     isempty(hazards) && throw(ArgumentError("At least one hazard must be provided"))
 
     # Check for phase-type hazards and route accordingly
-    if any(h -> h isa PhaseTypeHazardSpec, hazards)
+    if any(h -> h isa PhaseTypeHazard, hazards)
         return _build_phasetype_model_from_hazards(hazards;
             data = data,
             constraints = constraints,
@@ -1176,7 +1176,7 @@ function multistatemodel(hazards::HazardFunction...;
     
     # Validate n_phases not specified for non-phase-type models
     if !isnothing(n_phases) && !isempty(n_phases)
-        error("n_phases specified but no :pt hazards found. n_phases only applies to phase-type models.")
+        throw(ArgumentError("n_phases specified but no :pt hazards found. n_phases only applies to phase-type models."))
     end
 
     # catch the model call (includes constraints for use by fit())

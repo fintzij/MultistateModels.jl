@@ -294,7 +294,7 @@ Bidirectional mappings between observed and expanded state spaces for phase-type
 - `pt_hazard_indices::Vector{Int}`: Indices of phase-type hazards
 - `expanded_hazard_indices::Dict{Symbol,Vector{Int}}`: Original hazard name → expanded indices
 
-See also: [`PhaseTypeHazardSpec`](@ref), [`PhaseTypeExpansion`](@ref)
+See also: [`PhaseTypeHazard`](@ref), [`PhaseTypeExpansion`](@ref)
 """
 struct PhaseTypeMappings
     n_observed::Int

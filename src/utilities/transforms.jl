@@ -54,17 +54,13 @@ NamedTuple with same keys but values transformed appropriately
         # Second param (scale/rate): exp transform
         transformed_values = ntuple(i -> i == 1 ? vs[i] : exp(vs[i]), length(vs))
         return NamedTuple{ks}(transformed_values)
-    else
-        # All other families: all baseline parameters are positive (exp)
+    elseif family in (:exp, :wei)
+        # Exponential and Weibull: all baseline parameters are positive (exp)
         transformed_values = map(v -> exp(v), values(baseline))
         return NamedTuple{keys(baseline)}(transformed_values)
+    else
+        throw(ArgumentError("Unknown hazard family :$family for baseline transformation. Expected one of :exp, :wei, :gom, :sp"))
     end
-end
-
-# Backward-compatible version without family (assumes all positive)
-@inline function transform_baseline_to_natural(baseline::NamedTuple, ::Type{T}) where T
-    transformed_values = map(v -> exp(v), values(baseline))
-    return NamedTuple{keys(baseline)}(transformed_values)
 end
 
 """
@@ -96,17 +92,13 @@ NamedTuple with same keys but values transformed appropriately
         # Second param (scale/rate): log transform
         transformed_values = ntuple(i -> i == 1 ? vs[i] : log(vs[i]), length(vs))
         return NamedTuple{ks}(transformed_values)
-    else
-        # All other families: all baseline parameters are positive (log)
+    elseif family in (:exp, :wei)
+        # Exponential and Weibull: all baseline parameters are positive (log)
         transformed_values = map(v -> log(v), values(baseline))
         return NamedTuple{keys(baseline)}(transformed_values)
+    else
+        throw(ArgumentError("Unknown hazard family :$family for baseline transformation. Expected one of :exp, :wei, :gom, :sp"))
     end
-end
-
-# Backward-compatible version without family (assumes all positive)
-@inline function transform_baseline_to_estimation(baseline::NamedTuple)
-    transformed_values = map(v -> log(v), values(baseline))
-    return NamedTuple{keys(baseline)}(transformed_values)
 end
 
 """
@@ -139,7 +131,8 @@ function to_natural_scale(params_nested::NamedTuple, hazards, ::Type{T}) where T
         # might be sorted differently than the hazards vector
         h_idx = findfirst(h -> h.hazname == hazname, hazards)
         if isnothing(h_idx)
-            error("Hazard $hazname found in parameters but not in hazards vector")
+            throw(ArgumentError("Hazard $hazname found in parameters but not in hazards vector. " *
+                               "Check that parameter names match hazard definitions."))
         end
         hazard = hazards[h_idx]
         
@@ -147,25 +140,6 @@ function to_natural_scale(params_nested::NamedTuple, hazards, ::Type{T}) where T
         
         # Transform baseline to natural scale (family-aware)
         baseline_natural = transform_baseline_to_natural(hazard_params.baseline, family, T)
-        
-        # Keep covariates unchanged
-        if haskey(hazard_params, :covariates)
-            hazname => (baseline = baseline_natural, covariates = hazard_params.covariates)
-        else
-            hazname => (baseline = baseline_natural,)
-        end
-    end
-    
-    return NamedTuple(transformed_hazards)
-end
-
-# Backward-compatible version without hazards (assumes all positive)
-function to_natural_scale(params_nested::NamedTuple, ::Type{T}) where T
-    transformed_hazards = map(keys(params_nested)) do hazname
-        hazard_params = params_nested[hazname]
-        
-        # Transform baseline to natural scale (legacy: all exp)
-        baseline_natural = transform_baseline_to_natural(hazard_params.baseline, T)
         
         # Keep covariates unchanged
         if haskey(hazard_params, :covariates)
@@ -205,25 +179,6 @@ function to_estimation_scale(params_nested::NamedTuple, hazards)
         
         # Transform baseline to estimation scale (family-aware)
         baseline_estimation = transform_baseline_to_estimation(hazard_params.baseline, family)
-        
-        # Keep covariates unchanged
-        if haskey(hazard_params, :covariates)
-            hazname => (baseline = baseline_estimation, covariates = hazard_params.covariates)
-        else
-            hazname => (baseline = baseline_estimation,)
-        end
-    end
-    
-    return NamedTuple(transformed_hazards)
-end
-
-# Backward-compatible version without hazards (assumes all positive/log)
-function to_estimation_scale(params_nested::NamedTuple)
-    transformed_hazards = map(keys(params_nested)) do hazname
-        hazard_params = params_nested[hazname]
-        
-        # Transform baseline to estimation scale (legacy: all log)
-        baseline_estimation = transform_baseline_to_estimation(hazard_params.baseline)
         
         # Keep covariates unchanged
         if haskey(hazard_params, :covariates)
@@ -388,7 +343,7 @@ function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natur
             end
         end
         if hazname === nothing
-            error("Could not find hazard name for index $h")
+            throw(ArgumentError("Could not find hazard name for index $h. Available hazards: $(keys(model.hazkeys))"))
         end
         
         # Return appropriate representation

@@ -586,6 +586,6 @@ function init_par(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, cr
         return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
         
     else
-        error("Unknown hazard family: $family")
+        throw(ArgumentError("Unknown hazard family: $family. Supported: :exp, :wei, :gom, :sp"))
     end
 end

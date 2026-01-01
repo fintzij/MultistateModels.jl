@@ -254,12 +254,13 @@ function set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Floa
     
     # check that we have the right number of parameters
     if length(newvalues) != n_hazards
-        error("New values and model parameters are not of the same length. Expected $n_hazards, got $(length(newvalues)).")
+        throw(ArgumentError("New values and model parameters are not of the same length. Expected $n_hazards, got $(length(newvalues))."))
     end
 
     for i in 1:n_hazards
         if length(current_natural[i]) != length(newvalues[i])
-            error("New values for hazard $i and model parameters for that hazard are not of the same length.")
+            throw(ArgumentError("New values for hazard $i and model parameters for that hazard are not of the same length. " *
+                               "Expected $(length(current_natural[i])), got $(length(newvalues[i]))."))
         end
 
         # remake if a spline hazard
@@ -290,13 +291,14 @@ function set_parameters!(model::MultistateProcess, newvalues::Tuple)
     
     # check that there is a vector of parameters for each cause-specific hazard
     if length(newvalues) != n_hazards
-        error("Number of supplied parameter vectors not equal to number of transition intensities. Expected $n_hazards, got $(length(newvalues)).")
+        throw(ArgumentError("Number of supplied parameter vectors not equal to number of transition intensities. Expected $n_hazards, got $(length(newvalues))."))
     end
 
     for i in eachindex(newvalues)
         # check that we have the right number of parameters
         if length(current_natural[i]) != length(newvalues[i])
-            error("New values and parameters for cause-specific hazard $i are not of the same length.")
+            throw(ArgumentError("New values and parameters for cause-specific hazard $i are not of the same length. " *
+                               "Expected $(length(current_natural[i])), got $(length(newvalues[i]))."))
         end
         
         # remake if a spline hazard
@@ -332,7 +334,8 @@ function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
 
         # check length of supplied parameters
         if length(newvalues[vind]) != length(current_natural[mind])
-            error("The new parameter values for $vind are not the expected length.")
+            throw(ArgumentError("The new parameter values for $vind are not the expected length. " *
+                               "Expected $(length(current_natural[mind])), got $(length(newvalues[vind]))."))
         end
 
         # remake if a spline hazard
@@ -385,12 +388,12 @@ function set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{F
     
     # Check hazard index
     if h < 1 || h > n_hazards
-        error("Hazard index $h is out of bounds. Model has $n_hazards hazards.")
+        throw(BoundsError(model.hazards, h))
     end
     
     # Check parameter length
     if length(newvalues) != length(current_natural[h])
-        error("New values length ($(length(newvalues))) does not match expected length ($(length(current_natural[h]))) for hazard $h.")
+        throw(ArgumentError("New values length ($(length(newvalues))) does not match expected length ($(length(current_natural[h]))) for hazard $h."))
     end
     
     # Remake splines if needed
@@ -678,15 +681,6 @@ function get_hazard_params(parameters, hazards)
     est_params = get_estimation_scale_params(parameters)
     # Transform to natural scale for hazard evaluation (family-aware)
     return to_natural_scale(est_params, hazards, Float64)
-end
-
-# Backward-compatible version without hazards (deprecated - assumes all positive)
-# This version applies exp() to ALL baseline parameters, which is incorrect for Gompertz
-function get_hazard_params(parameters)
-    # Get estimation-scale params first
-    est_params = get_estimation_scale_params(parameters)
-    # Transform to natural scale for hazard evaluation (legacy: all exp)
-    return to_natural_scale(est_params, Float64)
 end
 
 """

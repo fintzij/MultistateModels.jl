@@ -63,7 +63,7 @@ struct SplineHazard <: HazardFunction
 end
 
 """
-    PhaseTypeHazardSpec(hazard, family, statefrom, stateto, n_phases, metadata)
+    PhaseTypeHazard(hazard, family, statefrom, stateto, n_phases, metadata)
 
 User-facing specification for a phase-type (Coxian) hazard.
 Created by `Hazard(:pt, ...)` and converted to internal types during model construction.
@@ -106,7 +106,7 @@ model = multistatemodel(h12; data=df, n_phases=Dict(1 => 3), coxian_structure=:s
 
 See also: [`PhaseTypeCoxianHazard`](@ref), [`PhaseTypeModel`](@ref)
 """
-struct PhaseTypeHazardSpec <: HazardFunction
+struct PhaseTypeHazard <: HazardFunction
     hazard::StatsModels.FormulaTerm   # StatsModels.jl formula
     family::Symbol                     # :pt
     statefrom::Int64
@@ -115,10 +115,10 @@ struct PhaseTypeHazardSpec <: HazardFunction
     structure::Symbol                  # :unstructured or :sctp
     metadata::HazardMetadata
     
-    function PhaseTypeHazardSpec(hazard::StatsModels.FormulaTerm, family::Symbol,
-                                  statefrom::Int64, stateto::Int64, n_phases::Int,
-                                  structure::Symbol, metadata::HazardMetadata)
-        family == :pt || throw(ArgumentError("PhaseTypeHazardSpec family must be :pt"))
+    function PhaseTypeHazard(hazard::StatsModels.FormulaTerm, family::Symbol,
+                              statefrom::Int64, stateto::Int64, n_phases::Int,
+                              structure::Symbol, metadata::HazardMetadata)
+        family == :pt || throw(ArgumentError("PhaseTypeHazard family must be :pt"))
         n_phases >= 1 || throw(ArgumentError("n_phases must be ≥ 1, got $n_phases"))
         structure in (:unstructured, :sctp) ||
             throw(ArgumentError("structure must be :unstructured or :sctp, got :$structure"))
@@ -176,12 +176,12 @@ function shared_baseline_key(h::SplineHazard, runtime_family::Symbol)
     return SharedBaselineKey(h.statefrom, sig)
 end
 
-function baseline_signature(h::PhaseTypeHazardSpec, runtime_family::Symbol)
+function baseline_signature(h::PhaseTypeHazard, runtime_family::Symbol)
     parts = (:phasetype, runtime_family, h.n_phases)
     return UInt64(hash(parts))
 end
 
-function shared_baseline_key(h::PhaseTypeHazardSpec, runtime_family::Symbol)
+function shared_baseline_key(h::PhaseTypeHazard, runtime_family::Symbol)
     h.metadata.time_transform || return nothing
     sig = baseline_signature(h, runtime_family)
     sig === nothing && return nothing
