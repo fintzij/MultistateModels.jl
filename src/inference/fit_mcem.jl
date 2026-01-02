@@ -129,6 +129,8 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
 - `loo_method::Symbol=:direct`: method for LOO perturbations Δᵢ (jackknife only, not IJ):
   - `:direct`: Δᵢ = H⁻¹gᵢ (faster)
   - `:cholesky`: exact H₋ᵢ⁻¹ via Cholesky downdates (stable)
+- `penalty::Union{Nothing, SplinePenalty, Vector{SplinePenalty}}=nothing`: penalty specification for spline hazards
+- `lambda_init::Float64=1.0`: initial smoothing parameter value (used when penalty is specified)
 
 # Returns
 - `MultistateModelFitted`: fitted model with MCEM solution and variance estimates
@@ -169,7 +171,7 @@ fitted = fit(semimarkov_model; acceleration=:squarem)
 
 See also: [`fit`](@ref), [`compare_variance_estimates`](@ref)
 """
-function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :squarem, sir::Symbol = :adaptive_lhs, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, sir_adaptive_threshold::Float64 = 2.0, sir_adaptive_min_iters::Int = 3, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = 100, tol = 1e-2, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = 50, max_ess = 10000, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :squarem, sir::Symbol = :adaptive_lhs, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, sir_adaptive_threshold::Float64 = 2.0, sir_adaptive_min_iters::Int = 3, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, penalty = nothing, lambda_init = 1.0, kwargs...)
 
     # Validate acceleration parameter
     if acceleration ∉ (:none, :squarem)
@@ -292,6 +294,19 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # extract and initialize model parameters
     # Phase 3: Use ParameterHandling.jl flat parameters (log scale)
     params_cur = get_parameters_flat(model)
+
+    # Build penalty configuration if penalty is specified
+    penalty_config = if !isnothing(penalty)
+        penalties = penalty isa SplinePenalty ? [penalty] : penalty
+        build_penalty_config(model, penalties; lambda_init=lambda_init)
+    else
+        PenaltyConfig()  # Empty config - no penalty
+    end
+    use_penalty = has_penalties(penalty_config)
+    
+    if verbose && use_penalty
+        println("Using penalized likelihood with $(penalty_config.n_lambda) smoothing parameter(s).\n")
+    end
 
     # initialize ess target
     ess_target = ess_target_initial
@@ -537,12 +552,25 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     end
 
     # generate optimization problem
-    if isnothing(constraints)
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-        prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights))
+    # If using penalty, wrap objective to include penalty term
+    if use_penalty
+        # Create penalized objective that captures penalty_config
+        penalized_loglik = (params, data) -> loglik(params, data, penalty_config)
+        if isnothing(constraints)
+            optf = OptimizationFunction(penalized_loglik, Optimization.AutoForwardDiff())
+            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights))
+        else
+            optf = OptimizationFunction(penalized_loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
+            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
+        end
     else
-        optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
-        prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
+        if isnothing(constraints)
+            optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights))
+        else
+            optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
+            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
+        end
     end
 
     # print output

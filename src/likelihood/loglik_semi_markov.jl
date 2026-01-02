@@ -311,3 +311,94 @@ function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}
     end
 end
 
+
+# =============================================================================
+# Penalized Semi-Markov Likelihood (for MCEM with spline penalties)
+# =============================================================================
+
+"""
+    loglik_semi_markov_penalized(parameters, data::SMPanelData, penalty_config::PenaltyConfig;
+                                  neg::Bool=true, use_sampling_weight::Bool=true)
+
+Compute penalized log-likelihood for semi-Markov panel data.
+
+This wraps `loglik_semi_markov` and adds the spline penalty term:
+    ℓₚ(β; λ) = ℓ(β) - (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ
+
+# Arguments
+- `parameters`: Flat parameter vector on estimation scale
+- `data::SMPanelData`: Semi-Markov panel data with paths and importance weights
+- `penalty_config::PenaltyConfig`: Penalty specification with matrices and lambdas
+- `neg::Bool=true`: Return negative log-likelihood for minimization
+- `use_sampling_weight::Bool=true`: Apply subject sampling weights
+
+# Returns
+Scalar (penalized) log-likelihood
+
+# Notes
+- Penalty is computed on natural-scale coefficients (exp-transformed baseline)
+- Used in MCEM M-step when fitting penalized spline models
+- For unpenalized likelihood, use `loglik_semi_markov` directly
+"""
+function loglik_semi_markov_penalized(parameters, data::SMPanelData, penalty_config::PenaltyConfig;
+                                       neg::Bool=true, use_sampling_weight::Bool=true)
+    # Compute base log-likelihood (as negative for consistency)
+    nll_base = loglik_semi_markov(parameters, data; neg=true, use_sampling_weight=use_sampling_weight)
+    
+    # If no penalties, return base likelihood
+    has_penalties(penalty_config) || return neg ? nll_base : -nll_base
+    
+    # Extract natural-scale baseline coefficients for penalty
+    pars_natural = unflatten_natural(parameters, data.model)
+    
+    # Build flat natural-scale vector for penalty computation
+    T = eltype(parameters)
+    n_params = length(parameters)
+    beta_natural = Vector{T}(undef, n_params)
+    
+    offset = 0
+    for (hazname, idx) in sort(collect(data.model.hazkeys), by = x -> x[2])
+        hazard = data.model.hazards[idx]
+        n_total = hazard.npar_total
+        n_baseline = hazard.npar_baseline
+        
+        # Natural scale baseline (exp-transformed)
+        haz_pars = pars_natural[hazname]
+        baseline_vals = values(haz_pars.baseline)
+        for i in 1:n_baseline
+            beta_natural[offset + i] = baseline_vals[i]
+        end
+        
+        # Covariate coefficients unchanged
+        if n_total > n_baseline
+            covar_vals = values(haz_pars.covariates)
+            for i in 1:(n_total - n_baseline)
+                beta_natural[offset + n_baseline + i] = covar_vals[i]
+            end
+        end
+        
+        offset += n_total
+    end
+    
+    # Compute penalty
+    penalty = compute_penalty(beta_natural, penalty_config)
+    
+    # Return penalized negative log-likelihood
+    nll_penalized = nll_base + penalty
+    return neg ? nll_penalized : -nll_penalized
+end
+
+"""
+    loglik(parameters, data::SMPanelData, penalty_config::PenaltyConfig; kwargs...)
+
+Dispatch method for penalized semi-Markov likelihood.
+
+This enables a consistent interface for both penalized and unpenalized fitting:
+- `loglik(params, data)` → unpenalized
+- `loglik(params, data, penalty_config)` → penalized
+"""
+function loglik(parameters, data::SMPanelData, penalty_config::PenaltyConfig; 
+                neg::Bool=true, use_sampling_weight::Bool=true)
+    loglik_semi_markov_penalized(parameters, data, penalty_config;
+                                  neg=neg, use_sampling_weight=use_sampling_weight)
+end
