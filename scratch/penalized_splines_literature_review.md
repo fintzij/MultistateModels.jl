@@ -313,22 +313,23 @@ For B-splines of order $m_1$ with penalty on the $m_2$-th derivative:
 
 | Option | Model | Penalty | Verdict |
 |:-------|:------|:--------|:--------|
-| **A: Natural scale** | $h = \sum_k \beta_k B_k$ | $\lambda \beta^T S \beta$ | ❌ Positivity issues |
-| **B: Log scale** | $\log h = \sum_k \theta_k B_k$ | $\lambda \theta^T S \theta$ | ✅ Standard, use this |
+| **A: Natural scale** | $h = \sum_k \beta_k B_k$ | $\lambda \beta^T S \beta$ | ✅ Used with positivity constraints |
+| **B: Log scale** | $\log h = \sum_k \theta_k B_k$ | $\lambda \theta^T S \theta$ | Alternative (no closed-form cumulative hazard) |
 | **C: Hybrid** | $h = \exp(\sum_k \theta_k B_k)$ | $\lambda \int [h^{(m)}]^2$ | ⏳ Future extension |
 
-**Recommendation:** Option B (log scale). Standard, ensures positivity, keeps penalty quadratic.
+**Recommendation:** Option A (natural scale) for Phase 1 implementation. Enables closed-form cumulative hazard computation; positivity enforced via box constraints.
 
 ### Summary: Penalty Design Decisions
 
 | Decision | Recommendation | Rationale |
 |:---------|:---------------|:----------|
-| Individual hazards | ✅ Yes | Standard, necessary |
-| Total hazards | ✅ Yes | Important for competing risks |
+| Individual hazards | ✅ Yes (implicit via decomposition) | Decomposes into total + deviation |
+| Total hazard penalty | ✅ Yes ($\lambda_H$) | Controls survival smoothness |
+| Deviation penalty | ✅ Yes ($\lambda_\pi$) | Controls cause allocation (indirect) |
 | Cumulative hazards | 🔍 Explore | Alternative to hazard penalty |
 | Transition probabilities | 🔍 Explore | Natural for panel data |
 | Sojourn/Transition densities | 🔍 Explore | Smooth observables vs parameters |
-| Parametrization | Log scale | Positivity, quadratic penalty |
+| Parametrization | Natural scale | Closed-form cumulative hazard |
 | Penalty order | $m=2$ | Penalize curvature |
 
 ---
@@ -337,11 +338,11 @@ For B-splines of order $m_1$ with penalty on the $m_2$-th derivative:
 
 ### The Nested Optimization Problem
 
-Given the penalty structure, we need to find optimal $\boldsymbol{\lambda} = (\lambda_{rs}, \mu_r)$:
+Given the penalty structure, we need to find optimal $\boldsymbol{\lambda} = (\lambda_H, \lambda_\pi)$:
 
-$$\min_{\boldsymbol{\lambda}} \text{Criterion}(\boldsymbol{\lambda}) \quad \text{where} \quad \hat{\theta}(\boldsymbol{\lambda}) = \arg\max_\theta \ell_p(\theta; \boldsymbol{\lambda})$$
+$$\min_{\boldsymbol{\lambda}} \text{Criterion}(\boldsymbol{\lambda}) \quad \text{where} \quad \hat{\boldsymbol{\beta}}(\boldsymbol{\lambda}) = \arg\max_{\boldsymbol{\beta}} \ell_p(\boldsymbol{\beta}; \boldsymbol{\lambda})$$
 
-**Inner optimization:** Newton/trust-region for $\theta$ given $\boldsymbol{\lambda}$
+**Inner optimization:** Newton/trust-region for $\boldsymbol{\beta}$ given $\boldsymbol{\lambda}$
 
 **Outer optimization:** BFGS or similar for $\boldsymbol{\lambda}$
 
@@ -746,58 +747,69 @@ h12 = Hazard(@formula(0 ~ s(age, by=trt)), :wei, 1, 2)
 
 ---
 
-## Extended Scope: Shared-Origin Tensor Product Splines
+## Extended Scope: Likelihood-Motivated Penalty Structure for Competing Risks
 
 ### Motivation
 
-For competing risks from state $r$, the baseline hazards to different destinations are often related:
-- Similar time patterns (e.g., all hazards increase after diagnosis)
-- Correlated uncertainty when some destinations have sparse data
-- Total hazard should be smooth
+For competing risks from state $r$, the baseline hazards to different destinations are connected through the likelihood factorization:
 
-Rather than independent splines with ad-hoc penalties, tensor products provide a principled approach.
+$$L = \underbrace{\exp\left(-\int_0^t H(u) du\right) \cdot H(t)}_{\text{Survival component}} \cdot \underbrace{\pi_d(t)}_{\text{Cause allocation}}$$
+
+This motivates controlling:
+1. **Total hazard smoothness** $H(t) = \sum_d h_d(t)$ → smooth survival curves
+2. **Cause allocation smoothness** $\pi_d(t) = h_d(t)/H(t)$ → stable cause mix
+
+The likelihood-motivated decomposition (Section 2) provides the mathematical foundation.
 
 ### Mathematical Formulation
 
-For state $r$ with destinations $\{s_1, \ldots, s_D\}$, model:
-$$\log h_{r,d}(t) = f_r(t, d) = \sum_{i=1}^{K_t} \sum_{j=1}^{D} \beta_{ij} B_i(t) \mathbf{1}_{d=j}$$
+For state $r$ with destinations $\{s_1, \ldots, s_D\}$, model hazards on the natural scale:
+$$h_d(t) = \sum_{k=1}^{K} \beta_{kd} B_k(t), \quad \beta_{kd} > 0$$
 
-This is a tensor product of:
-1. **Time basis**: $B_1(t), \ldots, B_{K_t}(t)$ (B-splines as before)
-2. **Destination factor**: $\mathbf{1}_{d=s_1}, \ldots, \mathbf{1}_{d=s_D}$
+Coefficients form matrix $\mathbf{B} \in \mathbb{R}^{K \times D}$. Vectorizing column-wise: $\boldsymbol{\beta} = \text{vec}(\mathbf{B}) \in \mathbb{R}^{KD}$.
 
-Coefficient matrix $\boldsymbol{\beta}$ is $K_t \times D$.
+**Shared knots requirement**: All hazards from the same origin must use the same B-spline basis.
 
-### Penalty Structure (ANOVA Decomposition)
+### Penalty Structure (Likelihood-Motivated Decomposition)
 
-**Penalty 1: Smoothness in time** (within each destination)
-$$\mathcal{P}_1 = \lambda_t \sum_{j=1}^{D} \boldsymbol{\beta}_{\cdot j}^T S_t \boldsymbol{\beta}_{\cdot j} = \lambda_t \text{tr}(\boldsymbol{\beta}^T S_t \boldsymbol{\beta})$$
+**Total hazard penalty** (survival smoothness):
+$$\mathcal{P}_H = \int_0^\tau (H''(t))^2 dt = \boldsymbol{\beta}^T (\mathbf{1}_D\mathbf{1}_D^T \otimes S) \boldsymbol{\beta}$$
 
-**Penalty 2: Shrinkage across destinations** (at each time point)
-$$\mathcal{P}_2 = \lambda_d \sum_{i=1}^{K_t} \boldsymbol{\beta}_{i \cdot}^T S_d \boldsymbol{\beta}_{i \cdot}$$
+**Deviation penalty** (indirect cause allocation control):
+$$\mathcal{P}_\pi = \sum_{d=1}^D \int_0^\tau ((h_d - \bar{h})''(t))^2 dt = \boldsymbol{\beta}^T (C_D \otimes S) \boldsymbol{\beta}$$
 
-where $S_d$ is a penalty on destination dimension:
-- **Ridge** (default): $S_d = I_D$ — shrink destinations toward each other
-- **First difference**: $S_d = D_1^T D_1$ — adjacent destinations similar (if ordered)
-- **Graph Laplacian**: $S_d = L$ — destinations connected by clinical similarity
+where $C_D = I_D - \frac{1}{D}\mathbf{1}_D\mathbf{1}_D^T$ is the centering matrix.
 
-**Combined penalty (vectorized)**:
-$$\mathcal{P}(\boldsymbol{\beta}) = \lambda_t \boldsymbol{\beta}^T (I_D \otimes S_t) \boldsymbol{\beta} + \lambda_d \boldsymbol{\beta}^T (S_d \otimes I_{K_t}) \boldsymbol{\beta}$$
+**Combined penalty**:
+$$\mathcal{P}(\boldsymbol{\beta}; \lambda_H, \lambda_\pi) = \lambda_H \mathcal{P}_H + \lambda_\pi \mathcal{P}_\pi$$
 
-where $\boldsymbol{\beta} = \text{vec}(B)$ is column-vectorized.
+### Key Result: The Decomposition
 
-### Advantages Over Total Hazard Penalty
+**Theorem** (Section 2.9): The independent penalty decomposes as:
+$$I_D \otimes S = \frac{1}{D}(\mathbf{1}_D\mathbf{1}_D^T \otimes S) + (C_D \otimes S)$$
 
-The original plan used:
-$$\mathcal{P}_{total} = \mu_r \left(\sum_s \theta_{rs}\right)^T S_r \left(\sum_s \theta_{rs}\right)$$
+**Interpretation**: The standard "independent" penalty implicitly applies:
+- Weight $1/D$ on total hazard curvature (survival smoothness)
+- Weight $1$ on deviation curvature (cause allocation smoothness)
 
-which penalizes the **sum** of log-hazards.
+The two-parameter formulation allows explicit control of this balance.
 
-The tensor product penalty instead:
-- Shrinks destinations **toward each other** (not toward their sum)
-- Has cleaner probabilistic interpretation (random effects on destinations)
-- More flexible (can specify structure on destination dimension)
-- Borrows strength from data-rich transitions to sparse ones
+### Special Cases
+
+| Setting | Penalty | Interpretation |
+|:--------|:--------|:---------------|
+| $\lambda_H = \lambda/D$, $\lambda_\pi = \lambda$ | $\lambda(I_D \otimes S)$ | Standard independent |
+| $\lambda_H > 0$, $\lambda_\pi = 0$ | Pure total hazard | Max flexibility in cause allocation |
+| $\lambda_H = 0$, $\lambda_\pi > 0$ | Pure deviation | No constraint on survival smoothness |
+| $\lambda_H \gg \lambda_\pi$ | Emphasize survival | Prioritize smooth survival curve |
+
+### Connection to Tensor Products
+
+The Kronecker product structure $(\cdot \otimes S)$ is a tensor product of:
+1. **Time dimension**: B-spline basis $\{B_k(t)\}$ with penalty $S$
+2. **Destination dimension**: Indicator basis with penalty $\mathbf{1}_D\mathbf{1}_D^T$ (total) or $C_D$ (deviation)
+
+This unifies the likelihood-motivated approach with tensor product methodology.
 
 **Recommendation**: Replace total hazard penalty with tensor products for shared-origin states.
 
@@ -1232,13 +1244,14 @@ The total hazard penalty controls the mean component; the deviation penalty cont
 
 ---
 
-### Design Decisions
+### Design Decisions for Competing Risks Penalties
 
 | Decision | Options | Recommendation |
 |----------|---------|----------------|
-| Destination penalty $S_d$ | Ridge, Difference, Custom | Ridge (default), user-configurable |
-| Shared $\lambda_t$ across destinations | Yes / No | Yes (tensor structure implies sharing) |
-| Number of $\lambda$ parameters | 2 or more | Start with 2 ($\lambda_t$, $\lambda_d$) |
+| Total hazard penalty ($\lambda_H$) | Use / Don't use | Use — controls survival smoothness |
+| Deviation penalty ($\lambda_\pi$) | Use / Don't use | Use — controls cause allocation (indirect) |
+| Number of $\lambda$ parameters | 1, 2, or more | 2 ($\lambda_H$, $\lambda_\pi$) for explicit control |
+| Default mode | Independent / Separate | Independent recovers standard approach |
 
 ---
 
@@ -1622,8 +1635,9 @@ This requires constrained trust region methods, which are more complex than unco
 
 | Question | Resolution |
 |:---------|:-----------|
-| Total vs individual penalty | Replace with shared-origin tensor products |
-| Shared smoothing parameters | Via tensor product structure |
+| Total vs individual penalty | Likelihood-motivated decomposition: $\lambda_H$ (total hazard) + $\lambda_\pi$ (deviation) |
+| Competing risks structure | Total hazard penalty controls survival; deviation penalty controls cause allocation (indirect) |
+| Independent penalty | Recoverable via $\lambda_H = \lambda/D$, $\lambda_\pi = \lambda$ |
 | Penalty storage location | `PenaltyConfig` stored in `ConvergenceRecords` NamedTuple (R8-1, R8-4, R9-4) |
 | PIJCVState usage | Use existing `pijcv_criterion()` for NCV; provide appropriate loss_fn (R8-13) |
 | RecombinedBSplineBasis | Transform penalty: $S_{recombined} = R^T S_{original} R$ (R is rectangular) |
@@ -1632,7 +1646,7 @@ This requires constrained trust region methods, which are more complex than unco
 | Monotone + penalization (1D) | Disallow (conflicting objectives) |
 | Monotone tensor products | Supported via cumulative I-spline transformation per dimension |
 | MCEM compatibility | Deferred; initial scope is Markov + exact data |
-| Absorbing states | Treat same as other destinations in shared-origin tensors |
+| Absorbing states | Treat same as other destinations in penalty structure |
 | `apply_schema` signature | Must use `schema::StatsModels.Schema` (R9-1) |
 
 ---

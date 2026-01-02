@@ -141,6 +141,7 @@ export
     has_penalties,
     compute_penalty,
     build_penalty_config,
+    select_smoothing_parameters,
     
     # --------------------------------------------------------------------------
     # MCEM proposal configuration
@@ -344,5 +345,8 @@ include("utilities/penalty_config.jl")
 
 # cross-validation and robust covariance estimation
 include("output/variance.jl")
+
+# smoothing parameter selection (PIJCV, GCV) - must be after variance.jl
+include("inference/smoothing_selection.jl")
 
 end

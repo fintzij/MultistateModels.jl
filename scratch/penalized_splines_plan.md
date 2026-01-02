@@ -17,7 +17,7 @@ This document specifies penalized B-splines for baseline hazard estimation in `M
 | **Model Scale** | Natural hazard scale: $h(t) = \sum_i \beta_i B_i(t)$, $\beta_i > 0$ | Closed-form cumulative hazard; positivity via constraints. |
 | **Penalty Scale** | Natural scale: $\int (h''(t))^2 dt = \beta^T S \beta$ | Quadratic form; stable; compatible with adaptive smooths. |
 | **Penalty Basis** | Derivative-based (Wood 2016) | Robust to uneven knot spacing. |
-| **Smoothing Selection** | PIJCV (Wood 2024) | Efficient; accounts for within-subject correlation. |
+| **Smoothing Selection** | PIJCV (Wood 2024) with GCV fallback | Efficient; accounts for within-subject correlation. |
 | **Spline Library** | `BSplineKit.jl` | Pure Julia; supports derivatives. |
 
 ---
@@ -231,6 +231,8 @@ The `:sp` family indicates a spline baseline hazard.
 ### 3.2 Penalty Configuration
 
 Penalties are configured at the model level using a **rule-based API**. Rules are applied from general to specific.
+
+**Validation Note**: When `share_lambda=true` or `total_hazard=true` is used for a set of competing risks, the constructor **must enforce** that all involved hazards share the exact same knot locations. If knots differ, the constructor will throw an error.
 
 ```julia
 """
@@ -452,9 +454,7 @@ end
 
 ## 9. fit() Integration Design
 
-### 9.1 Penalty Location
-
-**Decision**: Option C — penalty stored in model at construction, overridable at fit time.
+### 9.1 Penalty LocatB — penalty stored in model at construction, overridable at fit time.
 
 ```julia
 # Model construction with default penalty
@@ -463,7 +463,12 @@ model = multistatemodel(h12, h13; data=data, penalty=SplinePenalty())
 # Use model penalty
 fit(model)
 
-# Override at fit time
+# Override at fit time (returns model with updated penalty config)
+fit(model; penalty=SplinePenalty(order=3))
+```
+
+**Storage**: The `MultistateModel` struct will gain a `penalty_config` field.
+**Type Stability**: Spline coefficients will be stored within the existing `VectorOfVectors` or `ComponentArray` parameter structure to ensure type stability and compatibility with `ElasticArrays`.verride at fit time
 fit(model; penalty=SplinePenalty(order=3))
 ```
 
@@ -581,7 +586,21 @@ This naturally handles within-subject correlation in panel data.
 
 ### 10.6 Implementation Requirements
 
-1. **Subject-level gradients**: Already have `compute_subject_gradients()`
+### 10.7 Fallback Strategy (GCV)
+
+If PIJCV fails to converge or produces degenerate smoothing parameters (e.g., due to sparse data or flat likelihoods), the optimization routine will fall back to **Generalized Cross-Validation (GCV)**.
+
+**GCV Criterion**:
+$$V_{GCV}(\lambda) = \frac{n \|\mathbf{y} - \hat{\boldsymbol{\mu}}\| ^2}{(n - \text{tr}(\mathbf{A}))^2}$$
+
+where $\mathbf{A}$ is the influence (hat) matrix. For non-Gaussian models, this is approximated using the deviance and the effective degrees of freedom ($\text{edf} = \text{tr}(\mathbf{A})$).
+
+**Implementation**:
+1. Attempt PIJCV optimization.
+2. If failure detected (NaNs, non-convergence, or $\lambda \to 0$ with wiggly fit):
+   - Switch objective function to GCV.
+   - Re-optimize $\lambda$.
+3. If GCV also fails, warn user and default to a stiff penalty (high $\lambda$).
 2. **Subject-level Hessians**: Already have `compute_subject_hessians()`
 3. **Cholesky downdate**: Need to implement rank-k update/downdate
 4. **Separate penalized/unpenalized evaluation**: Need both in loglik functions
