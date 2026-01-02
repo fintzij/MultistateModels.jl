@@ -134,6 +134,15 @@ export
     MooncakeBackend,
     
     # --------------------------------------------------------------------------
+    # Spline penalty configuration
+    # --------------------------------------------------------------------------
+    SplinePenalty,
+    PenaltyConfig,
+    has_penalties,
+    compute_penalty,
+    build_penalty_config,
+    
+    # --------------------------------------------------------------------------
     # MCEM proposal configuration
     # --------------------------------------------------------------------------
     ProposalConfig,
@@ -164,6 +173,10 @@ export
     # --------------------------------------------------------------------------
     calibrate_splines,
     calibrate_splines!,
+    build_penalty_matrix,
+    build_spline_hazard_info,
+    place_interior_knots_pooled,
+    validate_shared_knots,
     compute_hazard,
     compute_cumulative_hazard,
     cumulative_incidence,
@@ -325,6 +338,9 @@ include("simulation/simulate.jl")
 
 # smooths / spline hazards
 include("hazard/spline.jl")
+
+# penalty configuration builder (must be after spline.jl)
+include("utilities/penalty_config.jl")
 
 # cross-validation and robust covariance estimation
 include("output/variance.jl")

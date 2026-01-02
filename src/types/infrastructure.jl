@@ -290,3 +290,210 @@ end
 Get current global threading configuration.
 """
 get_threading_config() = _GLOBAL_THREADING_CONFIG[]
+# =============================================================================
+# Spline Penalty Configuration Types
+# =============================================================================
+#
+# User-facing and internal types for penalized spline hazards.
+# See scratch/penalized_splines_plan.md for design documentation.
+#
+# =============================================================================
+
+"""
+    SplinePenalty
+
+User-facing configuration for spline penalties in baseline hazards.
+
+Penalties are configured at the model level using a rule-based API.
+Rules are applied from general to specific: transition > origin > global.
+
+# Arguments
+- `selector`: Which hazards this rule applies to.
+  - `:all` — All spline hazards (default for global settings)
+  - `r::Int` — All hazards from origin state `r`
+  - `(r, s)::Tuple{Int,Int}` — Specific transition `r → s`
+- `order::Int=2`: Derivative to penalize (1=slope, 2=curvature, 3=change in curvature)
+- `total_hazard::Bool=false`: Penalize smoothness of total hazard out of this origin
+- `share_lambda::Bool=false`: Share λ across competing hazards from same origin
+
+# Examples
+```julia
+# Global curvature penalty (default)
+penalty = SplinePenalty()
+
+# Stiffer penalty (3rd derivative) for all hazards
+penalty = SplinePenalty(order=3)
+
+# Origin 1: shared λ across competing risks
+penalty = SplinePenalty(1, share_lambda=true)
+
+# Transition 1→2: first derivative (flatness) penalty
+penalty = SplinePenalty((1, 2), order=1)
+```
+
+# Notes
+- When `share_lambda=true` or `total_hazard=true`, all spline hazards from that 
+  origin MUST have identical knot locations. The constructor validates this.
+- For competing risks, the likelihood-motivated decomposition suggests separate
+  control of total hazard and deviation penalties. Use `total_hazard=true` to
+  enable the additional total hazard penalty term.
+
+See also: [`PenaltyConfig`](@ref), [`SplineHazardInfo`](@ref)
+"""
+struct SplinePenalty
+    selector::Union{Symbol, Int, Tuple{Int,Int}}
+    order::Int
+    total_hazard::Bool
+    share_lambda::Bool
+    
+    function SplinePenalty(selector::Union{Symbol, Int, Tuple{Int,Int}}=:all;
+                            order::Int=2, total_hazard::Bool=false, 
+                            share_lambda::Bool=false)
+        order >= 1 || throw(ArgumentError("order must be ≥ 1, got $order"))
+        
+        # Validate selector type
+        if selector isa Symbol && selector != :all
+            throw(ArgumentError("Symbol selector must be :all, got :$selector"))
+        end
+        if selector isa Int && selector < 1
+            throw(ArgumentError("Origin state selector must be ≥ 1, got $selector"))
+        end
+        if selector isa Tuple{Int,Int}
+            selector[1] >= 1 && selector[2] >= 1 || 
+                throw(ArgumentError("Transition selector states must be ≥ 1, got $selector"))
+        end
+        
+        new(selector, order, total_hazard, share_lambda)
+    end
+end
+
+"""
+    PenaltyTerm
+
+Internal representation of a single penalty term in the penalized likelihood.
+
+# Fields
+- `hazard_indices::UnitRange{Int}`: Indices into flat parameter vector
+- `S::Matrix{Float64}`: Penalty matrix (K × K)
+- `lambda::Float64`: Current smoothing parameter (log-scale internally)
+- `order::Int`: Derivative order
+- `hazard_names::Vector{Symbol}`: Names of hazards covered by this term
+"""
+struct PenaltyTerm
+    hazard_indices::UnitRange{Int}
+    S::Matrix{Float64}
+    lambda::Float64
+    order::Int
+    hazard_names::Vector{Symbol}
+end
+
+"""
+    TotalHazardPenaltyTerm
+
+Internal representation of a total hazard penalty term (for competing risks).
+
+The total hazard penalty penalizes the curvature of H(t) = Σₖ hₖ(t) where
+the sum is over all competing hazards from the same origin state.
+
+# Fields
+- `origin::Int`: Origin state for this penalty
+- `hazard_indices::Vector{UnitRange{Int}}`: Indices for each competing hazard
+- `S::Matrix{Float64}`: Base penalty matrix (shared across hazards)
+- `lambda_H::Float64`: Smoothing parameter for total hazard
+- `order::Int`: Derivative order
+"""
+struct TotalHazardPenaltyTerm
+    origin::Int
+    hazard_indices::Vector{UnitRange{Int}}
+    S::Matrix{Float64}
+    lambda_H::Float64
+    order::Int
+end
+
+"""
+    PenaltyConfig
+
+Internal representation of resolved penalty configuration for a model.
+
+Created by resolving `SplinePenalty` rules against model structure.
+Used during likelihood evaluation to compute penalty contribution.
+
+# Fields
+- `terms::Vector{PenaltyTerm}`: Individual hazard penalty terms
+- `total_hazard_terms::Vector{TotalHazardPenaltyTerm}`: Total hazard penalties
+- `shared_lambda_groups::Dict{Int, Vector{Int}}`: Origin → indices of shared-λ terms
+- `n_lambda::Int`: Total number of smoothing parameters
+
+# Notes
+The penalty contribution to negative log-likelihood is:
+    P(β; λ) = (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ + (1/2) Σᵣ λ_H,r βᵣᵀ (𝟙𝟙ᵀ ⊗ S) βᵣ
+"""
+struct PenaltyConfig
+    terms::Vector{PenaltyTerm}
+    total_hazard_terms::Vector{TotalHazardPenaltyTerm}
+    shared_lambda_groups::Dict{Int, Vector{Int}}
+    n_lambda::Int
+    
+    function PenaltyConfig(terms::Vector{PenaltyTerm},
+                            total_hazard_terms::Vector{TotalHazardPenaltyTerm},
+                            shared_lambda_groups::Dict{Int, Vector{Int}},
+                            n_lambda::Int)
+        n_lambda >= 0 || throw(ArgumentError("n_lambda must be ≥ 0"))
+        new(terms, total_hazard_terms, shared_lambda_groups, n_lambda)
+    end
+end
+
+"""
+    PenaltyConfig()
+
+Create an empty penalty configuration (no penalties).
+"""
+PenaltyConfig() = PenaltyConfig(PenaltyTerm[], TotalHazardPenaltyTerm[], Dict{Int,Vector{Int}}(), 0)
+
+"""
+    has_penalties(config::PenaltyConfig) -> Bool
+
+Check if the penalty configuration contains any active penalty terms.
+"""
+has_penalties(config::PenaltyConfig) = !isempty(config.terms) || !isempty(config.total_hazard_terms)
+
+"""
+    compute_penalty(beta::AbstractVector, config::PenaltyConfig) -> Float64
+
+Compute the total penalty contribution for given coefficients.
+
+# Arguments
+- `beta`: Coefficient vector on natural scale (not log-transformed)
+- `config`: Resolved penalty configuration
+
+# Returns
+Penalty value: (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ + total hazard penalties
+
+# Notes
+- Coefficients must be on natural scale (positive for hazard splines)
+- Returns 0.0 if config has no penalties
+"""
+function compute_penalty(beta::AbstractVector{T}, config::PenaltyConfig) where T
+    has_penalties(config) || return zero(T)
+    
+    penalty = zero(T)
+    
+    # Individual hazard penalties
+    for term in config.terms
+        β_j = @view beta[term.hazard_indices]
+        penalty += term.lambda * dot(β_j, term.S * β_j)
+    end
+    
+    # Total hazard penalties (if any)
+    for term in config.total_hazard_terms
+        # Sum coefficients across competing hazards for total hazard
+        K = size(term.S, 1)
+        β_total = zeros(T, K)
+        for idx_range in term.hazard_indices
+            β_total .+= @view beta[idx_range]
+        end
+        penalty += term.lambda_H * dot(β_total, term.S * β_total)
+    end
+    
+    return penalty / 2
+end

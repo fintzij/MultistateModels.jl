@@ -10,6 +10,7 @@
 # - Optional parallel likelihood evaluation
 # - Model-based and robust (IJ/jackknife) variance estimation
 # - Support for constrained optimization
+# - Penalized likelihood for spline hazards
 #
 # =============================================================================
 
@@ -19,11 +20,21 @@
 Internal implementation: Fit a multistate model to continuously observed (exact) data.
 
 This is called by `fit()` when `is_panel_data(model) == false`.
+
+# Keyword Arguments
+- `penalty`: Penalty specification for spline hazards. Can be:
+  - `nothing` (default): No penalty
+  - `SplinePenalty()`: Curvature penalty on all spline hazards
+  - `Vector{SplinePenalty}`: Multiple rules resolved by specificity
+- `lambda_init::Float64=1.0`: Initial smoothing parameter value
+
+See also: [`SplinePenalty`](@ref), [`build_penalty_config`](@ref)
 """
 function _fit_exact(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing, 
              parallel = false, nthreads = nothing,
              compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, 
-             compute_jk_vcov = false, loo_method = :direct, kwargs...)
+             compute_jk_vcov = false, loo_method = :direct,
+             penalty = nothing, lambda_init::Float64 = 1.0, kwargs...)
 
     # initialize array of sample paths
     samplepaths = extract_paths(model)
@@ -46,18 +57,34 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         println("Using $(threading_config.nthreads) threads for likelihood evaluation ($(n_paths) paths)")
     end
 
+    # Build penalty configuration if specified
+    penalty_config = build_penalty_config(model, penalty; lambda_init=lambda_init)
+    use_penalty = has_penalties(penalty_config)
+    
+    if use_penalty && verbose
+        println("Using penalized likelihood with $(penalty_config.n_lambda) smoothing parameter(s)")
+    end
+
     # parse constraints, or not, and solve
     if isnothing(constraints) 
         # Create likelihood function - parallel or sequential
         # Note: ForwardDiff uses the function passed to OptimizationFunction for both
         # objective and gradient. We pass the sequential version for AD correctness,
         # but create a parallel version for objective-only evaluation.
-        if use_parallel
-            # Create wrapper that uses parallel evaluation
-            # ForwardDiff will still use sequential for gradient computation
-            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
+        if use_penalty
+            # Penalized likelihood
+            if use_parallel
+                loglik_fn = (params, data) -> loglik_exact_penalized(params, data, penalty_config; neg=true, parallel=true)
+            else
+                loglik_fn = (params, data) -> loglik_exact_penalized(params, data, penalty_config; neg=true, parallel=false)
+            end
         else
-            loglik_fn = loglik_exact
+            # Unpenalized likelihood
+            if use_parallel
+                loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
+            else
+                loglik_fn = loglik_exact
+            end
         end
         
         # get estimates - use Ipopt for unconstrained
@@ -78,7 +105,8 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             rectify_coefs!(sol.u, model)
         end
         
-        # get vcov
+        # get vcov (use UNPENALIZED likelihood for Fisher information)
+        # Note: For penalized models, the vcov is an approximation; consider bootstrap for more accurate inference
         if compute_vcov && (sol.retcode == ReturnCode.Success) && !any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
             # Compute subject-level gradients and Hessians to cache them for robust variance
             # This avoids redundant computation when computing robust variance estimates
@@ -111,11 +139,19 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             throw(ArgumentError("Constraints $badcons are violated at the initial parameter values."))
         end
 
-        # Create likelihood function - parallel or sequential
-        if use_parallel
-            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
+        # Create likelihood function - parallel or sequential, with or without penalty
+        if use_penalty
+            if use_parallel
+                loglik_fn = (params, data) -> loglik_exact_penalized(params, data, penalty_config; neg=true, parallel=true)
+            else
+                loglik_fn = (params, data) -> loglik_exact_penalized(params, data, penalty_config; neg=true, parallel=false)
+            end
         else
-            loglik_fn = loglik
+            if use_parallel
+                loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
+            else
+                loglik_fn = loglik_exact
+            end
         end
 
         # Use SecondOrder AD if solver requires it
@@ -144,7 +180,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         vcov = nothing
     end
 
-    # compute subject-level likelihood at the estimate
+    # compute subject-level likelihood at the estimate (always UNPENALIZED for model comparison)
     ll_subj = loglik_exact(sol.u, ExactData(model, samplepaths); return_ll_subj = true)
 
     # compute robust variance estimates if requested

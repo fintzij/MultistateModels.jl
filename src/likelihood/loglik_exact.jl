@@ -248,6 +248,98 @@ For interaction terms, computes the product of the component values.
     end
 end
 
+# =============================================================================
+# Penalized Log-Likelihood Wrapper
+# =============================================================================
+
+"""
+    loglik_exact_penalized(parameters, data::ExactData, penalty_config::PenaltyConfig;
+                           neg=true, parallel=false) -> Real
+
+Compute **penalized** negative log-likelihood for exact data.
+
+The penalized objective combines the data log-likelihood with a roughness penalty:
+    -ℓ_p(β) = -ℓ(β) + (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ
+
+# Arguments
+- `parameters`: Flat parameter vector on estimation scale (log-transformed baseline)
+- `data::ExactData`: Exact data containing model and sample paths
+- `penalty_config::PenaltyConfig`: Resolved penalty configuration
+- `neg::Bool=true`: Return negative penalized log-likelihood
+- `parallel::Bool=false`: Use multi-threaded parallel computation for base likelihood
+
+# Returns
+Scalar (penalized) negative log-likelihood when `neg=true`
+
+# Notes
+- Penalty is computed on **natural scale** coefficients (exp-transformed baseline)
+- This function is AD-compatible (works with ForwardDiff.Dual)
+- For likelihood-only computation (no penalty), use `loglik_exact` directly
+
+# Example
+```julia
+data = ExactData(model, paths)
+config = build_penalty_config(model, SplinePenalty())
+
+# Penalized negative log-likelihood
+nll = loglik_exact_penalized(params, data, config)
+
+# Use in optimization
+optf = OptimizationFunction((p, d) -> loglik_exact_penalized(p, d, config), AutoForwardDiff())
+```
+
+See also: [`loglik_exact`](@ref), [`build_penalty_config`](@ref), [`compute_penalty`](@ref)
+"""
+function loglik_exact_penalized(parameters, data::ExactData, penalty_config::PenaltyConfig;
+                                 neg::Bool=true, parallel::Bool=false)
+    # Compute base log-likelihood (always as negative for consistency)
+    nll_base = loglik_exact(parameters, data; neg=true, return_ll_subj=false, parallel=parallel)
+    
+    # If no penalties, return base likelihood
+    has_penalties(penalty_config) || return neg ? nll_base : -nll_base
+    
+    # Extract natural-scale baseline coefficients for penalty
+    # The penalty applies to exp(β) where β are the baseline spline coefficients
+    pars_natural = unflatten_natural(parameters, data.model)
+    
+    # Build flat natural-scale vector for penalty computation
+    # Only baseline parameters need transformation; coefficients are unchanged
+    T = eltype(parameters)
+    n_params = length(parameters)
+    beta_natural = Vector{T}(undef, n_params)
+    
+    offset = 0
+    for (hazname, idx) in sort(collect(data.model.hazkeys), by = x -> x[2])
+        hazard = data.model.hazards[idx]
+        n_total = hazard.npar_total
+        n_baseline = hazard.npar_baseline
+        
+        # Natural scale baseline (exp-transformed)
+        haz_pars = pars_natural[hazname]
+        baseline_vals = values(haz_pars.baseline)
+        for i in 1:n_baseline
+            beta_natural[offset + i] = baseline_vals[i]
+        end
+        
+        # Covariate coefficients unchanged
+        if n_total > n_baseline
+            covar_vals = values(haz_pars.covariates)
+            for i in 1:(n_total - n_baseline)
+                beta_natural[offset + n_baseline + i] = covar_vals[i]
+            end
+        end
+        
+        offset += n_total
+    end
+    
+    # Compute penalty
+    penalty = compute_penalty(beta_natural, penalty_config)
+    
+    # Return penalized negative log-likelihood
+    nll_penalized = nll_base + penalty
+    return neg ? nll_penalized : -nll_penalized
+end
+
 """
     loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false, parallel=false)
 
