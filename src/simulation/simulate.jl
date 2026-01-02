@@ -48,9 +48,6 @@ Useful for regression testing or debugging.
 """
 struct DirectTransformStrategy <: AbstractTransformStrategy end
 
-# Legacy aliases for backward compatibility
-
-
 # Strategy dispatch helpers
 """
     _use_time_transform(::CachedTransformStrategy) -> true
@@ -265,10 +262,17 @@ function _prepare_simulation_data(model::MultistateProcess,
         tmax > 0 || throw(ArgumentError("tmax must be positive, got $tmax"))
         
         sim_data = copy(model.data)
-        sim_data.tstop .= tmax
         
-        # Collapse to one row per subject (taking first row's covariates)
-        sim_data = _collapse_to_single_interval(sim_data)
+        # Check for TVC structure before deciding how to prepare data
+        if _has_tvc_structure(sim_data)
+            # Preserve TVC intervals, extend only the last interval to tmax
+            sim_data = _extend_tvc_to_tmax(sim_data, tmax)
+        else
+            # No TVC: collapse to single interval per subject
+            sim_data.tstop .= tmax
+            sim_data = _collapse_to_single_interval(sim_data)
+        end
+        
         sim_subjinds, _ = get_subjinds(sim_data)
         
         # Store original and swap
@@ -284,10 +288,17 @@ function _prepare_simulation_data(model::MultistateProcess,
         implicit_tmax = maximum(model.data.tstop)
         
         sim_data = copy(model.data)
-        sim_data.tstop .= implicit_tmax
         
-        # Collapse to one row per subject
-        sim_data = _collapse_to_single_interval(sim_data)
+        # Check for TVC structure before deciding how to prepare data
+        if _has_tvc_structure(sim_data)
+            # Preserve TVC intervals, extend only the last interval to implicit_tmax
+            sim_data = _extend_tvc_to_tmax(sim_data, implicit_tmax)
+        else
+            # No TVC: collapse to single interval per subject
+            sim_data.tstop .= implicit_tmax
+            sim_data = _collapse_to_single_interval(sim_data)
+        end
+        
         sim_subjinds, _ = get_subjinds(sim_data)
         
         # Store original and swap
@@ -304,10 +315,69 @@ function _prepare_simulation_data(model::MultistateProcess,
 end
 
 """
+    _has_tvc_structure(data::DataFrame) -> Bool
+
+Detect whether the data has time-varying covariate structure.
+Returns true if any subject has multiple rows with differing covariate values.
+"""
+function _has_tvc_structure(data::DataFrame)
+    # Get covariate columns (everything except required columns)
+    required_cols = Set([:id, :tstart, :tstop, :statefrom, :stateto, :obstype])
+    covar_cols = [col for col in Symbol.(names(data)) if col ∉ required_cols]
+    
+    # No covariates means no TVC
+    isempty(covar_cols) && return false
+    
+    # Check if any subject has multiple rows with different covariate values
+    ids = unique(data.id)
+    for id in ids
+        subj_rows = data[data.id .== id, :]
+        nrow(subj_rows) <= 1 && continue
+        
+        # Check if any covariate differs across rows for this subject
+        for col in covar_cols
+            vals = subj_rows[!, col]
+            if !all(v -> v == first(vals), vals)
+                return true
+            end
+        end
+    end
+    
+    return false
+end
+
+"""
+    _extend_tvc_to_tmax(data::DataFrame, tmax::Float64) -> DataFrame
+
+Extend TVC data structure so the final interval reaches tmax,
+while preserving all covariate intervals.
+"""
+function _extend_tvc_to_tmax(data::DataFrame, tmax::Float64)
+    result_rows = DataFrame[]
+    ids = unique(data.id)
+    
+    for id in ids
+        subj_data = data[data.id .== id, :]
+        subj_data = sort(subj_data, :tstart)
+        
+        # Get the last row and extend its tstop to tmax
+        extended = copy(subj_data)
+        extended[end, :tstop] = tmax
+        
+        push!(result_rows, extended)
+    end
+    
+    return reduce(vcat, result_rows)
+end
+
+"""
     _collapse_to_single_interval(data::DataFrame)
 
 Collapse multi-row per subject data to a single row per subject.
 Takes the first row's covariates and statefrom, sets tstart=0.
+
+NOTE: This should only be called when the data does NOT have TVC structure.
+For TVC data, use `_extend_tvc_to_tmax` instead.
 """
 function _collapse_to_single_interval(data::DataFrame)
     # Get unique subjects in order

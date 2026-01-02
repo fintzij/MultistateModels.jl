@@ -1129,7 +1129,6 @@ function multistatemodel(hazards::HazardFunction...;
                         initialize::Bool = true,
                         surrogate::Symbol = :none,
                         fit_surrogate::Bool = true,
-                        optimize_surrogate::Union{Bool, Nothing} = nothing,  # deprecated
                         surrogate_constraints = nothing,
                         n_phases::Union{Nothing, Dict{Int,Int}} = nothing,
                         coxian_structure::Symbol = :unstructured,
@@ -1138,12 +1137,6 @@ function multistatemodel(hazards::HazardFunction...;
                         CensoringPatterns::Union{Nothing,Matrix{<:Real}} = nothing, 
                         EmissionMatrix::Union{Nothing,Matrix{Float64}} = nothing,
                         verbose = false) 
-
-    # Handle deprecated optimize_surrogate keyword
-    if !isnothing(optimize_surrogate)
-        @warn "optimize_surrogate is deprecated. Use fit_surrogate instead." maxlog=1
-        fit_surrogate = optimize_surrogate
-    end
 
     # Validate surrogate option
     if surrogate ∉ (:none, :markov)

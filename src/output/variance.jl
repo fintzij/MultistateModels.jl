@@ -2384,7 +2384,8 @@ function compare_variance_estimates(fitted; use_ij::Bool = true, threshold::Floa
     # Get parameter names if available
     parnames = try
         get_parnames(fitted)
-    catch
+    catch e
+        @debug "Could not retrieve parameter names from fitted model" exception=(e, catch_backtrace())
         ["param_$i" for i in 1:length(model_se)]
     end
     

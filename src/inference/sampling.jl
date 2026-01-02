@@ -1406,8 +1406,11 @@ function ComputeImportanceWeightsESS!(loglik_target, loglik_surrog, _logImportan
                     psis_pareto_k[i] = psiw.pareto_k[1]
     
                 catch err
-                    # exponentiate and normalize the unnormalized log weights
-                    copyto!(ImportanceWeights[i], normalize(exp.(_logImportanceWeights[i]), 1))
+                    @debug "PSIS failed for subject $i; falling back to standard importance weights" exception=(err, catch_backtrace())
+                    # exponentiate and normalize the unnormalized log weights using log-sum-exp for numerical stability
+                    max_logw = maximum(_logImportanceWeights[i])
+                    log_sum_exp = max_logw + log(sum(exp.(_logImportanceWeights[i] .- max_logw)))
+                    copyto!(ImportanceWeights[i], exp.(_logImportanceWeights[i] .- log_sum_exp))
 
                     # calculate the ess
                     ess_cur[i] = 1 / sum(ImportanceWeights[i] .^ 2)

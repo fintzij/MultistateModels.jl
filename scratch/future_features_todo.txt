@@ -104,6 +104,83 @@ REFERENCES:
 
 
 ================================================================================
+FEATURE: STRATIFIED HAZARDS
+================================================================================
+
+Status: Not started
+Priority: MEDIUM
+
+MOTIVATION:
+- Common need: separate baseline hazards by group (e.g., sex, site, treatment arm)
+- Covariate effects often assumed shared across strata
+- Currently requires duplicating hazard specifications manually
+- Stratified Cox model is standard in survival analysis
+
+DESIGN IDEAS:
+```julia
+# Option 1: strata() term in formula
+h12 = Hazard(@formula(0 ~ 1 + age + strata(sex)), :wei, 1, 2)
+# Creates separate shape/scale for each sex level, shared age coefficient
+
+# Option 2: Explicit strata argument
+h12 = Hazard(@formula(0 ~ 1 + age), :wei, 1, 2; strata = :sex)
+
+# Option 3: StratifiedHazard wrapper
+h12 = StratifiedHazard(
+    Hazard(@formula(0 ~ 1 + age), :wei, 1, 2),
+    strata = :sex
+)
+```
+
+SEMANTICS:
+- Separate baseline hazard parameters for each stratum
+- Shared covariate coefficients across strata
+- Model: h_k(t|x) = h_{0k}(t) * exp(β'x) where k indexes stratum
+- Equivalent to fitting separate baselines but constrained β
+
+PARAMETER STRUCTURE:
+```julia
+# For Weibull with 2 strata (M/F) and 1 covariate:
+# params = [shape_M, log_scale_M, shape_F, log_scale_F, β_age]
+#          ├── baseline (stratum M) ──┤├── baseline (stratum F) ──┤├─ shared ─┤
+```
+
+KEY QUESTIONS:
+1. How to handle spline baselines with stratification?
+   - Separate knots per stratum, or shared knots with different coefficients?
+2. Should stratification be at hazard level or model level?
+3. How to report/display stratified estimates?
+4. Reference coding for strata (which level gets "first" baseline)?
+
+IMPLEMENTATION NOTES:
+- Extends n_baseparams() to return n_baseparams * n_strata
+- Need stratum indicator column in data
+- Parameter indexing: baseline_offset = (stratum_idx - 1) * n_baseparams
+- Covariate design matrix unchanged
+- Likelihood contribution: use stratum-appropriate baseline for each subject
+
+DATA REQUIREMENTS:
+- Strata variable must be categorical/integer
+- Each subject belongs to exactly one stratum (time-constant)
+- Strata need not have equal sample sizes
+
+USE CASES:
+- Multi-center trials: separate baselines by site, shared treatment effect
+- Competing risks by subgroup: stratify illness-death by sex
+- Historical controls: separate baselines for RCT vs registry, shared β
+
+RELATED TO:
+- Frailty models (random baselines vs fixed strata)
+- Interaction terms (can achieve similar effect but less interpretable)
+- Spline covariates (stratification is discrete version of smooth baseline variation)
+
+REFERENCES:
+- Therneau & Grambsch (2000) Modeling Survival Data, Ch 4.2
+- Cox (1972) original stratified Cox model
+- R survival::coxph with strata() term
+
+
+================================================================================
 FEATURE: PENALIZED SPLINES (NEXT PRIORITY)
 ================================================================================
 

@@ -269,8 +269,13 @@ include("hazard/api.jl")
 # crude parameter initialization functions
 include("utilities/initialization.jl")
 
-# likelihood functions
-include("likelihood/loglik.jl")
+# likelihood functions (split for maintainability)
+include("likelihood/loglik_utils.jl")       # ForwardDiff helpers, parameter prep
+include("likelihood/loglik_batched.jl")     # Batched hazard-centric infrastructure
+include("likelihood/loglik_markov.jl")      # Markov panel likelihood, forward algorithm
+include("likelihood/loglik_markov_functional.jl")  # Reverse-mode AD compatible
+include("likelihood/loglik_semi_markov.jl") # Semi-Markov MCEM path-based likelihood
+include("likelihood/loglik_exact.jl")       # Exact data likelihood, fused computation
 
 # Monte Carlo EM functions
 include("inference/mcem.jl")
@@ -278,10 +283,15 @@ include("inference/mcem.jl")
 # miscellaneous functions
 include("utilities/misc.jl")
 
-# phase-type distributions for improved surrogates
+# phase-type distributions for improved surrogates (split for maintainability)
 include("phasetype/types.jl")
 include("phasetype/surrogate.jl")
-include("phasetype/expansion.jl")
+include("phasetype/expansion_mappings.jl")    # State space mappings
+include("phasetype/expansion_hazards.jl")     # Hazard expansion
+include("phasetype/expansion_constraints.jl") # SCTP constraint generation
+include("phasetype/expansion_model.jl")       # Model building
+include("phasetype/expansion_loglik.jl")      # Log-likelihood computation
+include("phasetype/expansion_ffbs_data.jl")   # Data expansion for FFBS
 
 # surrogate
 include("surrogate/markov.jl")
@@ -289,8 +299,11 @@ include("surrogate/markov.jl")
 # sampling importance resampling
 include("inference/sir.jl")
 
-# model fitting
-include("inference/fit.jl")
+# model fitting (split for maintainability)
+include("inference/fit_common.jl")   # Entry point, dispatch, common helpers
+include("inference/fit_exact.jl")    # Exact data fitting
+include("inference/fit_markov.jl")   # Markov panel fitting
+include("inference/fit_mcem.jl")     # Semi-Markov MCEM fitting
 
 # model generation
 include("construction/multistatemodel.jl")

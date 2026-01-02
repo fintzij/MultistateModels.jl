@@ -145,11 +145,6 @@ This is the allocation-free path for cached parameters.
     return hazard(t, pars_vec, covars)
 end
 
-# Backward compatibility aliases (deprecated)
-# Use unflatten_natural instead
-const unflatten_parameters = unflatten_natural
-const safe_unflatten = unflatten_natural
-
 """
     unflatten_estimation(flat_params, model)
 
@@ -188,10 +183,6 @@ function unflatten_estimation(flat_params::AbstractVector{T}, model::MultistateP
         return unflattenAD(model.parameters.reconstructor, flat_params)
     end
 end
-
-# Backward compatibility alias (deprecated)
-# Use unflatten_estimation instead
-const unflatten_to_estimation_scale = unflatten_estimation
 
 """
     rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::MultistateProcess)
@@ -588,19 +579,6 @@ function extract_natural_vector(hazard_params::NamedTuple, family::Symbol)
         # All other families: all baseline params are positive
         baseline_natural = exp.(baseline_vals)
     end
-    
-    if haskey(hazard_params, :covariates)
-        covar_vals = collect(values(hazard_params.covariates))
-        return vcat(baseline_natural, covar_vals)
-    else
-        return baseline_natural
-    end
-end
-
-# Backward-compatible version without family (assumes all positive)
-function extract_natural_vector(hazard_params::NamedTuple)
-    baseline_vals = collect(values(hazard_params.baseline))
-    baseline_natural = exp.(baseline_vals)
     
     if haskey(hazard_params, :covariates)
         covar_vals = collect(values(hazard_params.covariates))

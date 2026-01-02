@@ -28,13 +28,6 @@ Used to clamp survival probabilities away from exactly 0 to prevent log(0).
 const SURVIVAL_PROB_EPS = eps(Float64)
 
 """
-Tolerance for importance sampling uniform random variable boundaries.
-
-When u is within DELTA_U of 0 or 1, boundary handling is applied.
-"""
-const DELTA_U = 1e-10
-
-"""
 Tolerance for transition probability matrix row sums.
 
 TPM rows should sum to 1; values within this tolerance are considered valid.

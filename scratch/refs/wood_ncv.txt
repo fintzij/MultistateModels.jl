@@ -1,0 +1,3769 @@
+On Neighbourhood Cross Validation
+Simon N. Wood
+School of Mathematics, University of Edinburgh, U.K.
+simon.wood@ed.ac.uk
+November 6, 2025
+
+arXiv:2404.16490v4 [stat.ME] 5 Nov 2025
+
+Abstract
+
+approximation to the criterion can be optimized with
+respect to multiple smoothing parameters, at the same
+leading order cost as fitting the model given smoothing
+parameters. The paper’s second contribution is to show
+how a version of NCV [6, 45] can practically be used to
+deal with un-modelled short range residual autocorrelation, avoiding the need to know the ‘correct’ autocorrelation model, while still performing well calibrated uncertainty quantification. Such un-modelled autocorrelation is arguably the most substantial problem frequently
+‘swept under the carpet’ in applications of smooth regression modelling.
+
+Many varieties of cross validation would be statistically
+appealing for the estimation of smoothing and other penalized regression hyperparameters, were it not for the
+high cost of evaluating such criteria. Here it is shown
+how to efficiently and accurately compute and optimize a
+broad variety of cross validation criteria for a wide range
+of regression models estimated by minimizing a quadratically penalized loss. The leading order computational
+cost of hyperparameter estimation is made comparable to
+the cost of a single model fit given hyperparameters. In
+many cases this represents an O(n) computational saving
+when modelling n data. The methods make it feasible,
+for the first time, to use leave-out-neighbourhood cross
+validation to deal with the widespread problem of unmodelled short range autocorrelation, which otherwise
+leads to underestimation of smoothing parameters. It
+is also shown how to accurately quantify uncertainty in
+this case, despite the un-modelled autocorrelation. Practical examples are provided, including smooth quantile
+regression, generalized additive models for location scale
+and shape, and focussing particularly on dealing with unmodelled autocorrelation.
+
+1
+
+Cross validation has been widely used for model selection, evaluation and estimation of tuning parameters for
+a long time [e.g 50, 51], with a corresponding diversity
+of variants developed [see 1]. The basic idea of repeatedly omitting a subset of the data during model fitting,
+and then assessing the quality of model predictions for
+the subset, gives rise to: the leave-one-out cross validation underpinning several smoothing parameter estimation criteria [e.g 9, 16, 19, 56]; leave-out-several cross
+validation used to deal with autocorrelated data [e.g.
+6, 45, 59, §6.2.2], see also [40]; and the k-fold cross validation [e.g. 22, §7.10] often used for validation and tuning
+parameter selection. In principle cross validation has the
+advantage of considerable generality. It can be applied
+to almost any loss function used for estimation, unlike
+the marginal likelihood based methods for smoothing parameter or variance parameter estimation [54, 57], for
+example. But a major problem with cross validation is
+computational cost: in general the model has to be refitted for each omitted subset (fold). For some special
+cases, such as univariate least squares spline smoothing,
+the cost can be reduced essentially to that of a single
+model fit [e.g 11, 14, 23]. But beyond the univariate
+least squares setting cost considerations lead to the use
+of approximations such as Generalized Cross Validation
+[GCV, 9, 16]. Splitting the data into only a small number of folds, as in k-fold cross validation, is another approach that reduces cost, but optimizing such scores with
+respect to hyperparameters is typically quite expensive,
+
+Introduction
+
+This paper uses Neighbourhood Cross Validation (NCV)
+to refer to a general cross validation criterion encompassing a wide range of existing, statistically appealing, cross
+validation criteria. Many such criteria were previously
+computable only at a cost that rendered them impractical for the selection of more than one or two hyperparameters, often requiring models to be fully refitted to
+multiple sub-samples of the data. Building on previous
+work approximating leave-one-out cross validation [e.g.
+4, 9, 16, 19, 42, 49, 55, 56] this paper’s first contribution
+is to show how to avoid this computational cost when applying NCV to a broad class of quadratically penalized
+regression models, demonstrating how a highly accurate
+1
+
+while the choice of folds introduces a degree of arbitrariness in the results. This paper shows how cross validation
+criteria can be computed efficiently and to high accuracy
+for a wide class of penalized regression models, optimized
+equally efficiently with respect to hyperparameters, and
+exploited for uncertainty quantification, substantially extending earlier work such as [4, 49, 55]. The methods apply equally to likelihood and non-likelihood based regular
+loss functions. Particular attention is paid to how this facilitates model estimation in the presence of unmodelled
+short-range residual autocorrelation – an important applied issue.
+Consider n data yi . Suppose that we have a regression
+model for yi , with parameters θi , which are in turn determined by p coefficients, β, and that the fit of the model
+is measured by a regular loss function
+n
+X
+
+estimation data. Then the neighbourhood cross validation
+(NCV) criterion
+V =
+
+For example D might be a negative log likelihood, a negative log pseudo- or quasi-likelihood, or a different loss
+such as the ELF loss [15] used in quantile regression. D
+may itself also depend on a small number of hyperparameters, but there will typically be a larger number of
+hyperparameters associated with penalties on β applied
+during estimation. The penalties control the smoothness
+of spline terms in the model, or the dispersion of random
+effects.
+For example, in the special case of a generalized additive model [21, 59] for some exponential family distributed yi , D might be the corresponding deviance and
+θi would simply be µi = E(yi ), parameterized in terms of
+the coefficients, β, of basis expansions for the model component smooth functions of covariates. These coefficients
+would then be estimated to minimize
+
+i=1
+
+X
+
+λj β T Sj β
+
+)
+
+(2)
+
+is optimized with respect to the hyperparameters. Leaveone-out cross validation corresponds to m = n and
+α(k) = δ(k) = k. K-fold cross validation has m = K,
+α(k) = δ(k) and each α(k) an approximately equally
+sized non-overlapping subset of {1, . . . , n}, such that
+∪K
+k=1 α(k) = {1, . . . , n}. A particularly interesting case
+occurs when nei(i) denotes some neighbourhood of i determined, for example, by spatial or temporal proximity
+and α(k) = nei(k) with m = n and δ(k) = k. If it is
+reasonable to assume that there is short range residual
+correlation between point k and points in α(k), but not
+between k and j ∈
+/ α(k), then NCV provides a means
+to choose hyper-parameters without the danger of overfit
+that such short range (positive) autocorrelation otherwise causes [e.g. 6]. Since the residual autocorrelation
+is not being directly modelled, then if D is nominally
+a negative log likelihood, this approach is treating it as
+a log (first order or marginal) pseudo-likelihood. Under short range autocorrelation the corresponding maximum pseudo-likelihood estimators for θ are consistent
+[see e.g. 8, 18], so that the same can be arranged under the quadratic penalization of interest here. However
+standard asymptotic covariance matrix results for maximum pseudo-likelihood estimators would require multiple
+replicates of the response vector y and can hence not be
+adapted for use in this context. Uncertainty quantification has to allow for this.
+The various versions of cross validation covered by
+(2) have a long history, but their use for routine hyperparameter estimation has been limited by computational
+cost. Other than in linear special cases, the cost of exactly evaluating (2) is O(mnp2 ) for a regression model
+with O(np2 ) estimation cost, and often m = n. The
+aim of this paper is to provide methods by which hyperparameters can efficiently and reliably be estimated by
+optimization of accurate approximations to (2), reducing the cost to O(np2 ). Uncertainty quantification is also
+discussed: the link between cross validation and the jackknife being useful in the cases of a non-likelihood based
+loss, and in the presence of residual autocorrelation.
+The paper is structured as follows. Section 2 covers
+efficient and accurate computation of the NCV criterion
+and its derivatives w.r.t. smoothing or precision parameters. Section 3 covers optimization of the criterion. Enhanced computational and statistical robustness is considered in section 4, while section 5 explains how NCV
+can overcome the deficiencies of leave-one-out cross validation in the face of autocorrelation and section 6 dis-
+
+D(yi , θi ).
+
+D(yi , µi ) +
+
+−α(k)
+
+D(yi , θi
+
+k=1 i∈δ(k)
+
+i=1
+
+n
+X
+
+m X
+X
+
+(1)
+
+j
+
+where the penalties, β T Sj β, measure function wiggliness.
+The hyperparameters, λj , therefore control how smooth
+the estimated model functions will be. In the case in
+which the loss is a negative log likelihood and each parameter, θi , is modelled by its own smooth additive linear predictor, the class of models is the distributional
+regression models (generalized additive models for location scale and shape) of [26, 27, 35, 44, 48, 61, 63, 64]
+etc.
+Generically the direct cross validation approach to estimating hyperparameters is as follows. For k = 1, . . . , m
+choose subsets α(k) ⊂ {1, . . . , n} and δ(k) ⊂ {1, . . . , n}.
+−α(k)
+Usually δ(k) ⊆ α(k). Let θi
+denote the estimate of
+θi when data with indices in α(k) are omitted from the
+2
+
+∆, then ∥ϵ0 ∥ = O(p3/2 /n). The error after one Newton
+step is hence ∥ϵ1 ∥ = O(p3 /n2 ), which is in turn the error
+in V /n. For cubic splines, for example, p = O(n1/5 ) is
+often used (p = O(n1/9 ) gives the optimal convergence
+rates for regression splines, but the higher rate arguably
+makes more sense under penalization). See [4] and [55]
+for similar results in the context of approximate leaveone-out cross validation and fixed p.
+
+cusses variance estimation and the link to the jackknife.
+Section 7 provides simulation examples of performance
+under autocorrelation and with quantile regression, while
+section 8 provides brief example applications to electricity load prediction, spatial modelling of extreme rainfall
+and spatio-temporal modelling of forest health data.
+
+2
+
+Computing the neighbourhood In itself the idea of taking single Newton steps is of
+course not new, and is effectively what is done anytime a
+cross validation criterion
+
+second order Taylor expansion is used to derive an easier
+to compute approximation [e.g. 9, 16, 19, 42, 56]. Indeed
+[4, 49, 55] have all proposed basing a leave-one-out cross
+validation approximation on the leave-one-out version of
+(3). Direct computation with this has O(np3 ) cost in
+general, an improvement on the O(n2 p2 ) cost of refitting
+for each fold, but the papers do not specify how to reduce this to the O(np2 ) cost of a single model fit [but see
+4, which does hint that it is possible]. Without such a
+reduction leave-one-out cross validation is not computationally competitive with marginal likelihood or AIC type
+methods, and more general cross validation methods will
+have impractical cost as estimation criteria. Equally important, previous attempts to use (3), directly, do not
+address the substantial practical issues of (i), what to do
+if Hλ,α(i) is not positive definite and (ii), how to handle the case in which (3) proposes parameters for which
+∆−α(i) = H−1
+g
+.
+(3)
+λ,α(i) α(i)
+the loss is undefined or infinite. No method for practical
+use with general purpose modelling software, for examThat is we use the approximation β̂ −α(i) = β̂ − ∆−α(i) .
+ple, can ignore these problems. The remainder of this
+Consider the accuracy of the approximation, for a regular
+section explains how to obtain the cost reduction, while
+loss (meeting the Fisher regularity conditions, for examrecognizing issue (i), for a broad class of smooth statisple). To fix ideas suppose that B-spline based sieve estitical regression models, while allowing for efficient optimators are used for the model smooth covariate effects,
+mization of the resulting NCV by smooth optimization
+so that p may increase with n, typically at a slow rate
+methods. Issue (ii) is addressed in section 4.1.
+such as p ∝ n1/5 [see 7]. Further assume that the samThere are several approaches that can reduce the cost
+ple size is increasing such that the rate of increase within
+of
+(3) to O(p2 ). However the choice is narrowed when we
+the support of each basis function
+is the same. Then
+P
+recognise that while Hλ,α(i) is almost always positive defH−1
+j∈α(i) gj = O(1), proλ,α(i) = O(p/n), while gα(i) =
+vided that the size of α(i) is not increasing with n. Note inite in practice, there is no finite sample size guarantee of
+that as p increases the number of non-zero elements of this. Two aspects of indefiniteness need to be considered.
+gα(i) is O(1), so ∆ = O(p/n), and ∥∆∥ = O(p3/2 /n) How to diagnose it at low cost, and what to do when it is
+encountered? The pragmatic approach, on encountering
+(Euclidean norm).
+Newton’s method is quadratically convergent, meaning indefiniteness, is simply to solve (3) using a method that
+does not require a positive definite Hessian, in order to
+that sufficiently close to the optimum, β ∗
+ensure the continuity of V required for stable optimizak+1
+∗
+k
+∗ 2
+tion. However, if this is done, it is imperative to at least
+∥β
+− β ∥ ≤ M ∥β − β ∥
+have a means to detect that the problem has occurred,
+for some finite positive constant M [see 36, Thm 3.5 and so that results can be carefully checked (for example by
+A.2]. Let ϵk = β k − β ∗ , and ∆k = β k+1 − β k = ϵk+1 − refitting with V redefined without the problematic α(k)).
+ϵk . Then ∥∆k ∥ ≤ ∥ϵk ∥ + ∥ϵk+1 ∥, and hence ∥∆k ∥ ≤
+A reasonable strategy starts from the Cholesky factor∥ϵk ∥ + M ∥ϵk ∥2 . Similarly ∥ϵk ∥ ≤ ∥∆k ∥ + M ∥ϵk ∥2 , so ization of the full data penalized Hessian, RT
+0 R0 = H λ .
+that ∥∆k ∥ ≥ ∥ϵk ∥ − M ∥ϵk ∥2 . So ∥ϵk ∥ and ∥∆k ∥ are of Updating of R0 to obtain the Cholesky factor of Hλ,α(i)
+the same order. Hence if ϵ0 is the error in β̂ before adding when the latter is a low rank update of Hλ , has O(p2 )
+
+To compute (2) we need to compute the coefficient estimates on omission of the data points in α(k), namely
+−α(k)
+β̂ −α(k) , which determine θi
+. Let β̂ denote the model
+coefficient values optimizing the penalized loss, and let
+gi denote the gradient of the unpenalized
+loss for yi with
+P
+respect to β at β̂. Let gα(i) = j∈α(i) gj . Furthermore
+let Hλ denote the Hessian of the penalized loss with respect to β at β̂, while Hα(i),α(i) is the Hessian of the
+unpenalized loss for yj such that j ∈ α(i). Note that the
+rank of Hα(i),α(i) is the size of the set α(i). The Hessian
+of the penalized loss based on the complement of α(i),
+at β̂, is therefore Hλ,α(i) = Hλ − Hα(i),α(i) . The change
+in β̂ on omission of yα(i) can then be approximated by
+taking one step of Newton’s method
+
+3
+
+cost, and the update process reveals whether or not the
+updated Hessian is positive definite [17, §6.5.4]. The update fails when it is not. Hence if Hλ,α(i) is detected to
+be positive definite then its (triangular) Cholesky factor
+can be used to solve (3) at O(p2 ) cost. If an indefinite
+Hλ,α(i) is detected then an iterative method suitable for
+symmetric indefinite matrices could be substituted, such
+as a pre-conditioned MINRES algorithm [41, 53, §6.4].
+Alternatively, in the work reported here, the Woodbury
+T
+identity [20, §18.2d] is used. If Hλ,α(i) = RT
+0 R0 − UU
+where U is p × k then
+
+end for
+end for
+Obviously in practice the symmetry of H is exploited for
+computational efficiency.
+The down dates of the Hessian are less obvious in this
+case. The following algorithm breaks the computation
+of the dropping of the ith point down into rank 1 up
+and down dates, assuming the existence of a function
+cholup(R,u,up) which updates R to the Cholesky factor
+of RT R + {2I(up = TRUE) − 1}uuT , if this is possible (R
+package mgcv provides such a function, for example).
+R = R0 ; b = 0
+for q = 1 : 2 do ▷ 2 pass ensures up- before down-date
+for j = 1 : K do
+for k = (j + 1) : K do
+α = lijk
+if q = 1 then b[j]+ = α; b[k]+ = α.
+if (q = 1, α > 0) or (q = 2, α < 0) then
+v=0 p
+|α|X[i, Jj ]
+v[Jj ] = p
+v[Jk ]+ = |α|X[i, Jk ]
+R = cholup(R, v, α > 0)
+end if
+end for
+α = lijj − b[j]
+▷ b[j] times block subtracted
+if (q = 1,α > 0) orp
+(q = 2, α < 0) then
+v = 0; v[Jj ] = |α|X[i, Jj ]
+R0 = cholup(R, v, α > 0)
+end if
+end for
+end for
+
+T −1
+T
+H−1
+=
+λ,α(i) = (R0 R0 − UU )
+−T
+T −1 −T
+−1 T −1
+R−1
+U R0 }R−T
+0 {Ip − R0 U(U R0 R0 U − Ik )
+0
+(4)
+
+which has O(kp2 ) cost for k < p.
+
+2.1
+
+Hessian factor downdate algorithms
+
+In practice the down-dating of Cholesky factors is performed by repeated application of rank 1 down dates,
+using the Givens and hyperbolic rotation based algorithms given in [17, §6.5.4]. This is straightforward in
+simple generalized regression settings where the unpenalized Hessian is H = XT WX for some model matrix, X,
+and diagonal weight matrix, W. Each rank 1 update of
+H is of the form −XT
+i Wii Xi , where Xi is the ith row of
+X corresponding to the omission of the ith observation.
+If any rank one update fails due to indefiniteness, the
+Cholesky factor before the update attempt is restored,
+and the failed update added to an array of failed updates. Computation with this modified Hessian can then
+use (4) with the partially updated Cholesky factor as R0
+and the failed updates making up −UUT . Obviously any
+negative Wii will result in an update that can not fail.
+A broad class of models to which neighbourhood cross
+validation can be applied are the distributional regression models in which multiple parameters of a negative
+log likelihood are each dependent on a separate linear
+predictor [26, 27, 44, 48, 61, 63, 64]. Some sharing of
+terms between predictors is also possible. Generically
+there are K linear predictors η k = X[, Jk ]β[Jk ] where Jk
+is a vector of indices of the model matrix columns and coefficients involved in the kth predictor. The log likelihood
+for yi is then of the form l(yi , h1 (ηi1 ), h2 (ηi2 ), . . . , hK (ηiK ))
+where the hj are inverse link functions. Writing the second partial derivative of li w.r.t. ηij and ηik as lijk then
+the Hessian is computed as
+H = 0p×p
+for j = 1 : K do
+for k = 1 : K do
+H[Jj , Jk ]+ = −X[, Jj ]T diag(ljk )X[, Jk ]
+
+The basic idea is that the rank one updates creating the
+off diagonal blocks of H also add unwanted contributions
+to the leading diagonal blocks. These extra contributions
+are tracked in the length K vector b, and then corrected
+as part of each leading diagonal block’s update. The
+two passes of the algorithm ensure that all guaranteed
+positive definite updates are made before any updates
+that could potentially remove positive definiteness.
+As with the simpler regression models, the algorithm
+can be modified to deal with indefinite updates. If a rank
+one update fails, we simply revert to the pre-attempt R
+and store the corresponding v as a column of U to employ
+with (4) or an equivalent iterative solver.
+In summary, (3) is computed via two triangular solves
+using the cheaply computed Cholesky factor of Hλ,α(i) ,
+or via (4) using the partially updated Cholesky factor
+and the skipped updates, U, if indefiniteness is detected.
+The latter case warrants some sensitivity checking, perhaps checking the results with the offending α(k) and
+corresponding δ(k) omitted from (2).
+4
+
+2.2
+
+Derivatives of the NCV
+
+definite at very high or low values of the log smoothing parameters, because the model fit is then invariant
+to smoothing parameter changes. In practice problems
+caused by very low smoothing parameter values are extremely rare, but very high smoothing parameters occur often, corresponding to the case in which a model
+in the null space of a smoothing penalty is appropriate.
+For example, when using a cubic spline term, very large
+smoothing parameters occur whenever a simple linear effect is supported by the data. Since such occurrences
+are routine, it is necessary to be able to deal with them
+efficiently.
+The major problem with criteria indefiniteness at large
+smoothing parameters is that it can easily cause an optimizer to continually increase a smoothing parameter
+to the point at which numerical stability is lost as the
+smoothing penalty completely dominates the data. This
+issue is particularly acute when using Newton type optimizers, where low curvature on near flat sections of the
+criteria can lead to very large steps being taken. Simple
+steepest decent type optimizers, or conjugate gradient
+methods, avoid this large steps issue, but are extremely
+computationally inefficient for near indefinite problems.
+Full outer Newton optimization would require the exact Hessian of (2), which could be used directly to detect
+indefiniteness, optimization then proceeding only in the
+strictly positive definite subspace of the smoothing parameters. But the full Hessian of (2) is both implementationally tedious and somewhat computationally expensive to obtain, making quasi-Newton optimization, based
+only on first derivatives, a more appealing choice. The
+difficulty is that the approximate Hessian used by a quasiNewton method is positive definite by construction, rendering it useless for detecting indefiniteness.
+An alternative recognises that indefiniteness arises because β̂ ceases to depend meaningfully on one or more
+ρj s. That is dβ̂/dρj ≃ 0. Testing a vector condition is inconvenient and liable to involve arbitrary scaling choices.
+However, recognising that Hλ 1 is the large sample approximate posterior precision matrix for β, then a suitable test for indefiniteness can be based on the scalar test
+of
+dβ̂
+dβ̂ T
+Hλ
+≃ 0.
+dρj
+dρj
+
+Efficient and reliable optimization of (2) with respect to
+multiple smoothing/precision parameters is only possible
+if numerically exact derivatives of the NCV criterion with
+respect to the log smoothing parameters are available.
+The derivatives of V w.r.t. ρ = log λ follow from dβ̂/dρj
+and
+X
+dHλ,α(i) −1
+d∆−α(i)
+= −H−1
+Hλ,α(i)
+gj
+λ,α(i)
+dρj
+dρj
+j∈α(i)
+
++ H−1
+λ,α(i)
+
+
+= H−1
+λ,α(i)
+
+X dgj
+dρj
+j∈α(i)
+
+
+X dgj
+dHλ,α(i) −α(i)
+
+−
+∆
+dρj
+dρj
+
+j∈α(i)
+
+all evaluated at β̂. Obviously ∂Hλ,α(i) /∂ρj = ∂Hλ /∂ρj −
+∂Hα(i),α(i) /∂ρj with both terms on the right hand side
+depending in turn on dβ̂/dρj . The latter is obtained
+from (1), or its generalization with D(yi , θi ) as the loss,
+by implicit differentiation,
+dβ̂
+= −λj H−1
+λ Sj β̂.
+dρj
+Notice how these computations add only O(p2 ) operations given the preceding methods for efficient computation with H−1
+λ,α(i) . Derivatives of V w.r.t. ρj then follow
+by routine application of the chain rule at O(np2 ) computational cost in the k-fold or leave one out cases. Appendix B provides expressions for dg/dρj for some specific cases.
+
+3
+
+NCV optimization
+
+Given the above methods for efficiently computing (2)
+and its derivatives with respect to ρ, the NCV criterion
+can be optimized with respect to ρ. In practice this will
+involve nested optimization. An outer optimizer seeks the
+best ρ according to (2), with each trial ρ in turn requiring an inner optimization to obtain the corresponding β̂.
+Such nested strategies are not as computationally costly
+as they naively appear, because the previous iterate’s β̂
+value serves as an ever better starting value for the inner
+optimization as the outer optimization converges. In the
+current context a full Newton optimization is used for
+the inner optimization, since just evaluating (2) anyway
+requires computation of Hλ . The outer optimizer choice
+is less obvious.
+The main practical problem is that (2), and other prediction error based smoothness selection criteria, are in-
+
+If this condition is met and ∂V /∂ρj ≃ 0 then the jth element of the proposed quasi-Newton update step can be
+set to zero. It is readily shown that such a step is still a
+descent direction, and that as such its length can always
+be selected to satisfy the Wolfe conditions [see 36, section
+3.1], the second of which is sufficient to ensure that the
+1 There are also arguments for using the Hessian of the unpenalized likelihood instead.
+
+5
+
+BFGS quasi-Newton update maintains positive definiteness of the Hessian approximation. Hence an outer BFGS
+– inner Newton, stabilized nested optimization approach
+is the one employed here.
+The O(np2 ) cost of each optimization step matches the
+equivalent for GCV or marginal likelihood [e.g., 57], making NCV practically competitive for smoothing parameter estimation. However, low level computational considerations still make NCV the somewhat more expensive
+option in practice, as discussed in Appendix C.
+
+4
+
+bourhood are replaced by data having the opposite influence on the gradient of the loss w.r.t. linear predictor,
+η. This leads to a doubling of the change in gradient on
+perturbation of the neighbourhood, and using the same
+quadratic model as in the data omission case, a doubling
+of the step length. In short,
+η [−α(i)] ← 2η [−α(i)] − η̂.
+More generally one might choose to move a different size
+of perturbation, leading to
+η [−α(i)] ← γη [−α(i)] − (γ − 1)η̂.
+
+More robust versions of NCV
+
+again for γ > 1. The modified η [−α(i)] ← 2η [−α(i)] − η̂.
+is then used in (2) to obtain an alternative Vr .
+Computation of Vr requires only routine modifications
+of the computations for V .
+
+Given the tendency of prediction error criteria to be more
+sensitive to underfit than overfit, robust versions of GCV
+have a long history in the context of smooth mean regression [e.g 31–33, 46, 52]. The basic idea is to add,
+to the standard leave-one-out cross validation criterion,
+a penalty on the change in the estimate of µi = E(yi )
+on omission of yi from the fit. This penalty is essentially a stability criterion, and the analyst has to choose
+how much weight to give the prediction error and stability terms in the robustified criterion. The choice is
+fundamental as neither the tendency for overfit, nor the
+effect of the stability penalty, vanish in the large sample
+limit. Often the comparison of robust and non robust
+cross validation results serves as a useful check of statistical stability.
+Beyond mean regression a more general notion of model
+stability is required. For example
+Vs =
+
+m X
+X
+k=1 i∈δ(k)
+
+−α(k)
+
+D(yi , θi
+
+)−
+
+m X
+X
+
+4.1
+
+Sometimes models are specified in such a way that some
+β values are impossible. For example, using a regression
+model for Poisson data with a square root or identity
+link will predict negative expected values for some regression coefficient values. For model fitting this is not
+usually problematic, because a numerical optimizer can
+easily avoid regions of infinite log likelihood. However
+the proposed NCV requires taking Newton steps without
+checking that the loss function is finite at the step end.
+Indeed making such checks would break the differentiability of the NCV score on which efficient optimization
+relies. Further, while the high convergence rates on which
+the proposal relies suggest that this issue will be rare at
+large sample sizes, there are no guarantees at finite sample size, and in any case it only takes one problematic
+datum, at some point in the NCV optimization, to break
+the optimization.
+A simple fix for this problem is to replace the loss function in the NCV criterion with a quadratic approximation
+about the full model fit. Consider D when several linear
+predictors are involved. For compactness denote derivatives by sub and superscripts so that Dη̂j = ∂D/∂ηj |η̂j ,
+and use the convention that repeated indices in a product
+are to be summed over. Suppressing the indices relating
+to particular observations, we then have
+
+D(yi , θ̂i )
+
+k=1 i∈δ(k)
+
+measures the sum of the difference in loss between fits
+with and without each α(i) omitted. This is a measure
+of how sensitive the model fit is to omission of data, which
+is naturally on the same scale as the NCV score. Letting
+γ − 1 denote the weight to give to Vs , the robust NCV
+criterion then becomes
+Vr = γ
+
+m X
+X
+k=1 i∈δ(k)
+
+−α(k)
+D(yi , θi
+)−(γ−1)
+
+m X
+X
+
+Finite sample computational robustness
+
+D(yi , θ̂i ).
+
+k=1 i∈δ(k)
+
+The definition of γ, such that γ = 1 yields the ordinary
+NCV criterion, corresponds to the usual usage for robustified GCV criteria. If the loss is a negative log likelihood
+γD(η1 , η2 , . . .) − (γ − 1)D(η̂1 , η̂2 , . . .) ≃ D(η̂1 , η̂2 , . . .)
+and leave-one-out or k−fold cross validation is used, then
+to within an additive constant NCV is a direct estimate
++ γDη̂j (ηj − η̂j ) + γDη̂j η̂k (ηj − η̂j )(ηk − η̂k )/2.
+of the KL-divergence, and Vs might be thought of as estimating a sort of ‘KL-stability’.
+This quadratic approximation on the right hand side is
+A simpler alternative is as follows. Suppose that, then used in place of D in (2). The resulting criterion,
+rather than simply being dropped, the data for a neigh- Vq say, is always finite. Its derivatives with respect to
+6
+
+smoothing/precision parameters rely on differentiating LOOCV directly estimates the model dependent part of
+the quadratic approximation to yield
+the Kullback-Leibler divergence between the estimated
+model and the truth, which we would usually like to be
+dη̂
+dη̂
+as small as possible [see e.g. the demonstration of the
+k
+j
+j
+k
+j
++ γDη̂η̂
+(ηj − η̂j )
+Dρ̂i ≃ Dη̂
+asymptotic equivalence of LOOCV and AIC in 51].
+dρi
+dρi
+LOOCV obviously fails as a prediction error/loss esγ j kl dη̂l
++ Dη̂η̂η̂
+(ηj − η̂j )(ηk − η̂k )
+timator
+for autocorrelated data, since in that case each
+2
+dρ
+
+ i
+
+
+datum omitted is correlated with the estimation data,
+dηj
+dη̂j
+γ
+dηj
+dη̂j
+rather than being independent of them: we are not es+ γDη̂j
+−
++ Dη̂j η̂k
+−
+(ηk − η̂k )
+dρi
+dρi
+2
+dρi
+dρi
+timating the error/loss for predicting independent new
+
+
+γ jk
+dηk
+dη̂k
+data. Under positive autocorrelation this means that
++ Dη̂η̂ (ηj − η̂j )
+−
+2
+dρi
+dρi
+the prediction error will be underestimated for a model
+that overfits, and overly complex models will tend to be
+which, on collection of terms, is
+selected. As a simple example
+Pt+1 consider yt = α + et ,
+t = 1, . . . , n, where et =
+
+
+j=t−1 ϵj , the ϵj being i.i.d.
+dηj
+dη̂j
+j
+i
+Gaussian.
+Suppose
+that
+the
+mean of yt as a func+γ
+Dρ̂ ≃ Dη̂ (1 − γ)
+dρi
+dρi
+tion of t is to be estimated by a running mean of
+
+
+ymax(1,t−k) , . . . , ymin(n,t+k) . Clearly the k minimizing preγ jk
+dη̂k
+dηk
++ Dη̂η̂
++
+(ηj − η̂j )
+diction error is ≥ n − 1. In contrast the k minimizing
+2
+dρi
+dρi
+
+
+
+LOOCV is 1 (at least for large n).
+dη̂j
+dηj
+−
+(ηk − η̂k )
++
+The natural solution [e.g. 6] is to omit sufficient neighdρi
+dρi
+bouring points, from the estimation data for the ith cross
+dη̂l
+γ
+validated prediction, that the datum to be predicted is
++ Dη̂j η̂klη̂
+(ηj − η̂j )(ηk − η̂k )
+2
+dρi
+again independent of the estimation data. That is to
+again estimate the loss when predicting independent data,
+Vq is obviously never needed when the likelihood is finite
+using the NCV criterion
+for all finite β values, and even when this is not guarann
+teed seems to be needed only rarely. However there are
+X
+−nei(i)
+cases where it is essential. For example, for distributional
+V =
+D(yi , θi
+)
+i=1
+regression with the generalized extreme value distribution
+it is very easy to find cases for which optimization of the
+original V fails. Again optimization of this version of the where nei(i) is a set of points neighbouring point i, chosen
+so that yi is independent of y−nei(i) (conditional on the
+criterion proceeds exactly as for (2) itself.
+regression model covariates).
+In the case of autocorrelation induced by a finite moving
+average process, as in the simple example above, it is
+5 Neighbourhood cross validation
+possible to completely restore independence of the preand non-independent data
+dicted and estimation data in this way. In other cases,
+such as autoregressive autocorrelation, then complete
+As mentioned in the introduction, a particularly inter- elimination of dependence will not be possible, and a deesting application of NCV is to the case of short range cision must be made about how much residual autocorautocorrelated data. The theoretical motivation for use relation to tolerate between the estimation and predicted
+of cross validation is that it estimates the prediction er- data. In a time series application one might choose neighror, or predictive loss; that is the error or loss expected bourhoods large enough to eliminate ‘significant’ autocorwhen the estimated model is used to predict a new datum, relations from a residual ACF, for example.
+independent of the fit data. Leave-one-out cross validation (LOOCV) is particularly appealing in this context,
+as the omission of only one datum at a time from estima- 6
+Cross validated uncertainty
+tion minimizes both the variance increase and any bias
+quantification and the jackknife
+increase caused by the reduction in the estimation sample
+size. Note that [3] have shown, in the context of linear
+models, that LOOCV estimates the prediction error, not
+on the training data set to hand, but rather over other un- The link between cross validation and the jackknife is
+seen training data sets drawn from the same population. obvious, but is worth exploring for the NCV criterion
+If the loss is proportional to a negative log likelihood then based on predicting each single datum in turn (i.e. δ(k) =
+7
+
+k for k = 1, . . . , n). Define n × p matrix D with ith row
+given by ∆−α(i) (n−|α(i)|)1/2 /(n|α(i)|)1/2 , where ∆−α(i)
+is from (3). Then the Jackknife estimate of the covariance
+matrix of β̂ is VJ = DT D [e.g. 47]. [10, §2.8.1] point
+out that for an estimator with convergence rate O(n−c )
+the power of 1/2 in the definition of D should really be
+c: between 2/5 and 4/9 for cubic penalized regression
+splines, for example. But this correction turns out to be
+of negligible importance given what follows.
+Unfortunately the jackknife estimator only gives well
+calibrated inference for independent response data.
+When there is residual autocorrelation then the estimate
+is better calibrated than standard results assuming independence, but performance is still far too poor for practical use. This behaviour is easy to understand, by expanding β̂(y) about µ = E(y)
+β̂(y) = β̂(µ) +
+
+X ∂ β̂
+i
+
++
+
+∂yi
+
+the components of the Jackknife estimator have expectation
+E{(β̂ −α(i) − β̂)(β̂ −α(i) − β̂)T }
+
+
+∂β T
+∂β
+(yα(i) − µα(i) )(yα(i) − µα(i) )T
+.
+≃E
+∂yα(i)
+∂yα(i)T
+So the Jacknife estimator partly accounts for residual correlation in y, but its component terms ignore the correlation between yα(i) and y−α(i) , and are hence missing
+part of the correlation structure expected even if each yi
+is only correlated with terms in neighbourhood α(i).
+To avoid the problem of neglected residual autocorrelation, a simpler estimator of the coefficient covariance matrix is based on the observed version of (6).
+Let bki = ∂βk /∂yi = O(n−1 ) and ei = yi − µi be
+the ith residual. Reusing the assumption of no residual correlation between yi and y−α(i) (and assuming that
+j ∈ α(i) ⇔ i ∈ α(j)), then (6) can be re-written elementwise as
+
+(yi − µi )
+µ
+
+1 X ∂ 2 β̂
+2 ij ∂yi ∂yj
+
+(yi − µi )(yj − µj )
+
+(5)
+
+nVkm = n
+
+ỹ
+
+n(V̂km − Vkm ) = n
+
+n
+X
+
+bmj ei ej .
+
+j∈α(i)
+
+X
+
+bki
+
+i
+
+bmj {ei ej − E(ei ej )}
+
+j∈α(i)
+−1/2
+
+= Op (n
+
+),
+
+since the j term is a zero mean Op (n−1 ) random variable with bounded
+P variance, provided |α(i)| does not
+grow with n, and i is then over a random walk. Clearly
+if |α(i)| grows with n the convergence rate will be lower,
+with convergence failure for |α(i)| = O(n). Notice that
+these requirements on |α(i)|, while targetting a fixed β,
+amount to requiring a separation of scales between the
+signal and the residual autocorrelation scale length.
+Computation is especially simple if we note that from
+application of (5) to the leave-one-out case we can write
+P
+
+∆−i = ∂ β̂/∂yi
+
+X ∂β
+− β̂ ≃
+(yj − µj ).
+∂yj
+
+µ̂i
+
+(yi − µ̂i ) + Op (n−2 ), so that the esti-
+
+mated version of (6) becomes:
+X
+X
+T
+V̂ =
+∆−i
+∆−j .
+
+j∈α(i)
+
+Hence while
+
+i
+
+V = E{(β̂ − β)(β̂ − β)T }
+
+
+∂β
+∂β T
+=E
+(y − µ)(y − µ)T T + O(n−3/2 )
+∂y
+∂y
+
+X
+
+bki
+
+Then
+
+X ∂β
+(yj − µj )
+∂yj
+= β̂
+
+n
+X
+i
+
+j ∈α(i)
+/
+
+⇒∆
+
+j∈α(i)
+
+nV̂km = n
+
+ỹ
+
+−α(i)
+
+bmj E(ei ej ) + O(n−1/2 )
+
+with observed version
+
+Concentrating on the dominant linear term, while writing β̂ for β̂(y) and β for β̂(µ) it follows that
+
+−α(i)
+
+X
+
+bki
+
+i
+
+where ỹ lies on a line between µ and y. In the case
+of a discrete yi this expression should be understood
+as being based on estimation using quasi-likelihood. In
+that case estimates are identical whether the yi are
+viewed as observations of discrete or continuous random variables, and the required derivatives exist. For
+the moment assuming β of fixed dimension, then typically ∂ β̂/∂yi = O(n−1 ) and ∂ 2 β̂/∂yi ∂yj = O(n−2 ),
+as can readily be checked for single parameter exponential family distributions, or quasi-likelihoods, used with
+GLMs for example. Since E(yi − µi ) = 0, and assuming bounded variance of yi − µi , the summations can be
+viewed as random walks. For independent yi it then
+P
+follows that
+(yi − µi ) = Op (n−1/2 ), and
+i ∂ β̂/∂yi
+µ
+P
+2
+(yi − µi )(yj − µj ) = Op (n−1 ).
+ij ∂ β̂/∂yi ∂yj
+
+β̂ −α(i) ≃ β +
+
+n
+X
+
+(7)
+
+j∈α(i)
+
+To improve finite sample performance this could arguably
+be scaled by n/(n − τ ) where τ denotes the (effective) degrees of freedom of the fitted model. But unfortunately
+
+(6)
+
+8
+
+1 and 2 result in frequentist covariance matrices, which do
+not account for smoothing bias, and are therefore likely to
+result in miscalibrated inference. In case 3 this problem
+is largely overcome by the use of the Bayesian posterior
+covariance matrix of the model coefficients. The Bayesian
+covariance matrix can be interpreted as the frequentist
+covariance matrix plus a Bayesian bias correction: the
+expectation, under the prior, of the squared bias matrix
+[see in particular 34, 37].
+Computation of an appropriate Bayesian bias correction for a general regular loss can be conducted under
+the coherent belief updating framework of [5]. Under
+this framework prior beliefs are updated to posterior beliefs using a general negative loss in place of the usual
+log likelihood, but doing so requires an estimate of the
+learning rate parameter, ν, which is the weighting of the
+loss relative to the prior in the belief updating framework. In the current context it is hence a multiplier
+on the unpenalized Hessian of the loss. Obviously NCV
+and corresponding point estimates are insensitive to ν –
+any multiplicative change in ν simply results in the same
+change in the estimated λ. However, the asymptotic
+Bayesian and frequentist covariance matrices, Vb = H−1
+λ
+−1
+and Vf = H−1
+λ HHλ are not invariant, instead scaling
+directly as ν −1 . Hence ν can be estimated from the relative scaling of Vf and V̂ (e.g. from the ratio of their
+traces), and the resulting ν̂ used to compute the Bayesian
+bias correction, (Vb − Vf )ν̂ −1 , to be added to Ṽ.
+
+the estimator anyway substantially underestimates variances at finite sample sizes. This can be understood by
+considering the residual products involved in (7). Denote
+the true residual product by a = (yi − µi )(yα(i) − µα(i) )T ,
+and let µ̂i = µi + δ̂i , where δ̂i is the error in µ̂i .
+(yi − µ̂i )(yα(i) − µ̂α(i) )T
+T
+T
+− δ̂i (yα(i) − µα(i) )T + δ̂i δ̂α(i)
+= a − (yi − µi )δ̂α(i)
+T
+T
+− δ̂i (yα(i) − µ̂α(i) )T − δ̂i δ̂α(i)
+.
+= a − (yi − µ̂i )δ̂α(i)
+
+The difficulty arises because δ̂i tends to be positively
+correlated with the residuals in its neighbourhood when
+these are positively correlated with each other (a cluster
+of positive residuals leads to a positive error, for example). Consider the contribution that the first error term
+above makes to the summations involved in V̂km , namely
+X
+X
+−n
+bki (yi − µ̂i )
+bmj δ̂j .
+j∈α(i)
+
+δ̂j is at best Op (n−1/2 ). The correlation between yi − µ̂i
+and the δ̂j here means that the i-summation is over terms
+that have positive expectation, so that the error term is
+then itself Op (n−1/2 ). Were yi − µ̂i uncorrelated with
+δ̂j then the i-summation would again be a random walk
+and the error term Op (n−1 ). In fact in the penalized regression setting this effect not only adds downward bias
+of the order of the error, it actually worsens the convergence rate, as outlined in Appendix D.
+So to reduce the impact of this bias on V̂ to negligible
+order we need to replaced the residuals êi = yi − µ̂i with
+residuals constructed from a model not estimated using
+yα(i) . The cross validated residuals, ẽi = yi − µ̂−α(i) are
+the obvious candidate, and to use them in place of the êi
+simply define
+˜ −k = ∆−k ẽk /êk ,
+∆
+
+7
+
+Example simulations
+
+By way of illustration of the ability of NCV to cope
+with short range autocorrelation, x, y data were simulated from the function f (x) = 2.5 sin(4πx) exp(−2x)
+evaluated at x values spaced equally over [0, 1]. Gaussian, Poisson and gamma simulations were run, with
+short range autocorrelation generated from Gaussian AR
+or MA processes. In the AR1 case the autocorrelation
+model was ei+1 = 0.6ei +ϵi , where ϵi are i.i.d N (0, 1) deviPi+2
+ates. In the MA case the model was ei = j=i−2 ϵj , but
+linearly scaled so that var(ei ) = 1. Then three response
+models were used: yi = f (xi ) + ei , yi ∼ Poi{exp(f (xi ) +
+ei − σe2 /2)} or yi ∼ gamma{exp(f (xi ) + ei − σe2 /2), ϕ}
+where ϕ = 0.1.
+The data were then fitted using appropriate spline
+models with the autocorrelation handled in one of four
+ways. The first option used penalized quasi-likelihood
+based fitting, with an AR1 correlation model on the working model scale. This is the correct model only for the
+Gaussian AR1 simulation, but is typical of what is often done in applications to somewhat account for otherwise un-modelled autocorrelation. The second option
+used NCV in which δ(i) = i and α(i) consisted of i and its
+
+and use it in place of ∆−k in (7) (call the result Ṽ).
+An immediate generalization replaces the simple residuals used above with generalized residuals based on the
+loss itself and constructed such that zeros for all residuals
+would imply β̂ = β, so that (5) can be replaced by an
+expansion (about 0) directly in terms of these residuals.
+Deviance residuals can be used, for example.
+So we have three distinct cases:
+1. For independent data and a general loss, the jackknife covariance matrix estimator can be used.
+2. For data subject to unmodelled short range autocorrelation (and sufficiently large n) then (7) is used,
+˜ −k .
+but based on ∆
+3. Using a negative log likelihood with independent
+data, we can use the standard large sample approx−1
+imation β|y ∼ N (β̂, Hλ ).
+9
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+1
+2
+
+−2
+
+0
+
+1
+
+1
+0
+−2
+2
+1
+0
+−2
+2
+1
+0
+−2
+2
+1
+0
+−2
+
+−2
+
+0
+
+1
+
+2
+
+−2
+
+0
+
+1
+
+2
+
+−2
+
+0
+
+1
+
+2
+
+−2
+
+0
+
+1
+
+2
+
+−2
+
+0
+
+1
+0
+−2
+1
+0
+−2
+2
+1
+0
+−2
+2
+1
+0
+−2
+1
+0
+−2
+
+Gaussian
+
+2
+1
+0.8
+
+Poisson
+
+0.6
+
+0.6
+
+gamma
+
+0.4
+
+0.4
+
+Gaussian
+
+0.2
+
+0.2
+
+Poisson
+
+0.0
+
+0.0
+
+gamma
+
+1.0
+
+2
+
+0.8
+
+2
+
+0.6
+
+−2
+
+0
+
+1
+−2
+
+0
+
+1
+0
+−2
+
+0.4
+
+2
+
+0.2
+
+2
+
+true error process AR1
+
+0.0
+
+2
+
+true error process MA
+
+REML
+
+2
+
+NCV
+
+2
+
+AR1−PQL
+
+Figure 1: Reasonably typical example smooth estimates using PQL with working AR1 model (left), NCV (middle)
+and REML (right). In each panel nominal 95% confidence bands are shown in grey, truth is in red. For the top
+three rows autocorrelation was generated using an AR1 process, and in the bottom three an MA process. The top
+three rows are for Gaussian, Poisson and gamma responses respectively and the same ordering is repeated for the
+bottom 3 rows.
+
+10
+
+8 nearest x-neighbours. The final options simply ignored
+the autocorrelation and estimated smoothing parameters
+using REML or GCV. Figure 1 shows reasonably typical
+reconstructions (the second replicate of each case). Table
+1 gives coverage probability and MSE results. NCV generally outperforms the alternatives by some margin, with
+coverage probabilities close to nominal at larger sample sizes for the moving average correlation process for
+which it is ideally suited. It is of course not a panacea:
+when there is some remaining autocorrelation between
+each point i and the points outside α(i), then coverage
+probabilities are somewhat degraded.
+
+over [−4, 3]: see figure 3. Smooth quantile regression
+was used to estimate the 95% quantile, with the quantile represented using a rank 50 penalized cubic spline.
+The ELF loss of [15] was used as detailed in appendix A.
+The smoothing parameter was selected by leave-one-out
+NCV, and the coefficient covariance matrix computed using the method in section 6. 200 replicates were run, with
+a typical reconstruction and 95% confidence band shown
+in figure 3. Over 200 replicates the average across the
+function coverage probability of the nominally 95% credible bands was 0.947, with on average 4.82% of data lying
+above the estimated quantile. In this case the NCV criterion corresponds to the direct cross validation used by
+Spatial example. Data were also simulated from a true [38] (to within O(p3 n−2 ) error), but they did not consider
+function, f (x, z), that was the sum of two scaled Gaus- interval estimation and used direct calculation and grid
+sian p.d.f.s over a square x, z grid, with equal grid spacing search for the smoothing parameter optimization, which
+in x and z. For each grid point independent N (0, 1) de- would be infeasibly expensive for multiple smoothing paviates ϵ′ were simulated. Dependent deviates ϵ were then rameters, unlike NCV.
+produced for each grid point by averaging ϵ′ values for
+the grid point and its 8 nearest neighbours. The average was weighted: 1 for the point itself, 0.5 for each of 8
+Examples
+the 4 nearest neighbours and 0.3 for the 4 next-nearest
+neighbours. Edges were dealt with by simply extending
+8.1 UK electricity load
+the grid for the ϵ′ , so that the required components of
+ϵ were always available. 3 models were simulated from: Figure 4 shows daily data on load on the UK national
+the Gaussian model yi = f (xi , zi ) + ϵi , the Poisson model electricity grid between 6AM and 6.30AM2 . Operational
+yi ∼ Poi{exp(f (xi , zi )+ϵi −σϵ2 /2)} and the gamma model prediction of the load one day ahead is often based on
+yi ∼ gamma{exp(f (xi , zi ) + ϵi − σϵ2 /2), ϕ} where ϕ = 0.1. generalized additive models, either alone or as the major
+Grids of size 18 × 18 and 36 × 36 were used.
+component of a mixture of experts approach. There is
+Models were then estimated in which the smooth func- typically a degree of un-modelled autocorrelation in the
+tions of x and z were represented using penalized thin residuals from such models. This can cause over fit, inplate regression splines, with basis dimensions of 100 for creasing prediction error and degrading estimates of prethe smaller grid and 150 for the larger. Smoothing pa- dictive uncertainty. A typical model structure for the
+rameters were estimated by GCV, REML and by NCV data shown is
+with the omitted neighbourhoods for each point consisting of the square of 25 points centred on the point. TypiE(loadi ) = αdow(i) + fdt(i) (load48i ) + f1 (toyi )
+cal reconstructions using REML and NCV, for the larger
++ f2 (timeCounti ) + f3 (tempi ) + f4 (temp95i )
+grid, are shown in Figure 2. The tendency of REML to
+severely over fit when there is un-modelled short range
+residual autocorrelation is shown even more strongly by where dow(i) is the day of the week of observation i and
+GCV [see 29, for an explanation]. Performance of the αdow(i) a parameter. The fj are all unknown smooth functions. dt(i) is a label taking one of 4 values: Mon, Sat,
+model fits over 500 replicates is shown in table 2.
+Sun or ‘ww’ corresponding to any working day that folQuantile regression example. Smooth quantile re- lows a working day. load48i is the load 48 half hours
+gression models provide an example where attempts to before point loadi occurred. So the idea is that load is
+use generalized cross validation perform exceptionally predicted by the load at the same time the previous day,
+poorly. Moving away from the 50% quantile, increasingly but that the relationship varies from day to day. toyi
+severe overfit is observed, as discussed in [43]. The diffi- is time of year, timeCounti is scaled total elapsed time,
+culty appears to relate to the averaging of leverage used tempi is average current temperature and temp95i is exin generalized cross validation, which is inappropriate for ponentially smoothed lagged temperature.
+a highly asymmetric loss. The NCV approach avoids this
+2 obtained
+from
+the
+predecessor
+of
+https://data.
+problem and gives well calibrated inference. For exam- nationalgrideso.com/data-groups/demand
+and
+2
+2
+ple, the model y ∼ N (1 + x + x , {1.2 + sin(2x)} ) was https://demandforecast.nationalgrid.com/
+used to simulate x, y data for 2000 x data evenly spaced efs demand forecast/faces/DataExplorer
+11
+
+AR1 correlation
+n = 250
+n = 1000
+Gau Poi
+Γ
+Gau Poi
+Γ
+1.14 0.76 0.87 1.14 0.73 0.79
+.923 .902 .909 .943 .937 .926
+.744 .772 .831 .965 .779 .930
+.643 .741 .676 .695 .709 .733
+.610 .748 .635 .666 .693 .706
+.085 .130 .103 .024 .036 .030
+.297 .197 .166 .022 .059 .029
+.159 .237 .174 .046 .077 .058
+.241 .629 .268 .072 .124 .085
+
+S/N
+NCV CP
+PQL-AR CP
+REML CP
+GCV CP
+NCV MSE
+PQL-AR MSE
+REML MSE
+GCV MSE
+
+Moving average correlation
+n = 250
+n = 1000
+Gau Poi
+Γ
+Gau Poi
+Γ
+1.44 0.89 1.07 1.42 0.87 0.97
+.938 .925 .929 .957 .949 .950
+.610 .820 .728 .994 .840 .959
+.470 .773 .562 .617 .752 .679
+.453 .774 .533 .593 .734 .649
+.068 .105 .080 .019 .030 .022
+.611 .142 .322 .018 .042 .022
+.194 .191 .190 .046 .060 .051
+.223 .599 .248 .061 .098 .070
+
+1.0
+
+0.6
+
+−0
+.4
+
+.6
+
+−0.2
+
+0.4
+
+−0.4
+
+0.8
+
+1.0
+
+0.6
+
+0.5
+
+0
+
+0.0
+
+0.2
+
+0.0
+
+0.0
+
+−
+
+0.4
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+0
+
+1.2
+
+0.2
+0
+
+0.8
+
+1.0
+
+.4
+−0
+−0.6
+−0.8
+
+1
+
+0.2
+
+0.0
+
+0.2
+
+−0.4
+
+0.6
+
+0.2
+
+0.6
+0.8
+
+0.4
+
+0.6
+
+0.2
+
+0
+
+0.0
+
+0.4
+
+0.2
+
+0.6
+
+x
+
+1.0
+
+0
+
+0.2
+
+.2
+
+0.3
+
+0.8
+
+.1
+−0
+
+−0
+
+−0.3
+
+0.5
+
+−0.5
+0.4
+
+−1.2
+
+0.4
+
+0.8
+
+−0.4
+
+−1
+
+x
+
+0.6
+
+.4
+−0
+−0.5
+2
+3 −0.
+−0.
+1
+−0.
+0.1
+
+0.6
+
+0.8
+
+z
+
+−0.2
+
+0.4
+
+−0.6
+
+z
+
+0.6
+
+0
+
+0.4
+
+0.0
+
+1.0
+.2
+−0
+
+.4
+
+0.4
+
+0.4
+
+−1
+
+−0
+
+0.2
+
+0.2
+
+1.0
+
+x
+
+−0
+.2
+
+0.2
+
+−0.2
+0
+
+0.8
+
+z
+
+1.0
+
+1.0
+
+0
+
+−0.4
+
+.6
+−0
+
+0.6
+
+−0.6
+
+x
+
+0.4
+
+0.4
+
+−0.4
+
+0.2
+
+0.2
+
+4
+0.
+
+x
+
+0.8
+
+0
+
+0.6
+
+0
+
+0.0
+
+0.0
+
+0.6
+−1
+
+0.2
+
+0.2
+
+0
+
+0
+
+0
+
+0.0
+
+−0
+
+0.8
+
+0.2
+
+−
+
+0
+
+0.2
+
+−0.5
+
+0
+
+0
+
+z
+
+1
+
+1.5
+
+0.6
+
+0.2
+
+0
+
+0.4
+
+−0
+
+0
+
+0.8
+
+−0.2
+
+0.2
+0.4
+
+0.4
+
+z
+.4
+
+0.4
+
+0.4
+0.6
+
+1
+
+0
+
+0.2
+
+−0.4
+
+0.0
+
+0.6
+
+z
+
+4
+
+.
+−0
+
+0.2
+
+.2
+−0
+
+0.0
+
+0.8
+
+0
+
+0.6
+
+0.8
+
+0.2
+
+−0.2
+
+−0.4
+
+8
+
+−0.
+
+0
+−0.2
+
+−0.5
+
+−1
+
+0.4
+
+0
+
+−0.4
+
+0.5
+
+−0.6
+
+.6
+
+−0
+
+1.0
+
+1.0
+
+Table 1: Nominal 95% confidence interval coverage and mean squared error for penalized regression splines with
+smoothness selection by GCV, REML and NCV with α(i) consisting of the 4 neighbours of i on either side plus i
+itself. The same spline was also fitted using PQL with an AR1 residual correlation model on the working model
+scale. Notice that NCV achieves close to nominal coverage for the larger sample size and MA process, for which
+it is eliminates all residual autocorrelation effects in smoothness selection. Cases in which a non-NCV method
+outperformed NCV are highlighted in bold. For the most part NCV achieves better coverage probabilities and lower
+MSE than the PQL approach, even for the Gaussian - AR1 simulations for which the latter model is correct. Results
+are over 500 replicates.
+
+1.0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+x
+
+Figure 2: Typical example smooth estimates using REML (top) and NCV (bottom) smoothing selection, when
+spatial data are autocorrelated, and the mean field is a smooth sum of two Gaussians. Data are simulated on a
+grid, with errors that include a moving average process, where the average is over each grid point and its 8 nearest
+neighbours. NCV omits each point and its (24) autocorrelated neighbours in turn. Left is for Gaussian response,
+middle Poisson and right gamma.
+
+12
+
+Gaussian
+0.95
+.939
+.321
+.319
+.040
+.111
+.114
+
+S/N
+NCV CP
+REML CP
+GCV CP
+NCV MSE
+REML MSE
+GCV MSE
+
+18 × 18
+Poisson
+1.11
+.962
+.827
+.826
+.064
+.093
+.116
+
+gamma
+0.68
+.934
+.671
+.653
+.037
+.091
+.110
+
+36 × 36
+Poisson
+1.08
+.952
+.763
+.749
+.021
+.061
+.082
+
+Gaussian
+0.94
+.950
+.467
+.459
+.012
+.063
+.068
+
+gamma
+0.66
+.948
+.672
+.651
+.013
+.056
+.069
+
+megawatt load
+
+20000 25000 30000 35000 40000
+
+Table 2: Spatial moving average simulation example results over 500 replicates, for two grid sizes and 3 response
+distributions, reporting signal to noise ratio (ratio of standard deviation of f to standard deviation of residual),
+coverage probabilities of nominally 95% CIs and mean square error, for NCV, REML and GCV smoothing parameter
+estimation.
+
+0.0
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+5
+
+10
+
+timeCount
+
+Figure 4: Megawatt load on the UK electricity grid from
+6AM until 6.30AM each day from 2011 to mid 2016, plotted against scaled time (timeCount). The 2016 data
+shown in blue is to be predicted 24 hours ahead, from
+a model fitted to the data shown in black.
+
+−5
+
+0
+
+y
+
+0.2
+
+−4
+
+−3
+
+−2
+
+−1
+
+0
+
+1
+
+2
+
+3
+
+Fitting the model to pre-2016 data, assuming load is
+normally distributed with constant variance, and estimating smoothing parameters by standard marginal likeFigure 3: Typical example NCV based smooth estimate lihood maximization gives significant residual autocorreof 95% quantile for the distribution of the data shown lation to lag 9. Refitting the model by penalized least
+in grey as a smooth function of x. The smooth is repre- squares with NCV using the 9 neighbouring points on
+sented using a rank 50 penalized spline and the ELF loss either side of point i as α(i), results in smoother estiis used. The fit is shown in black, with the 95% credible mates for some model terms, as shown in figure 5. It
+band in blue and the truth in red.
+also yields improved prediction of load over 2016. Both
+models have mean absolute percentage prediction error
+(MAPE) of 1.1% on the fit data. For prediction of 2016
+this increases to 3.0% for the standard approach, but only
+1.6% for the model estimated using NCV. Nominally 95%
+prediction intervals have realized coverage of 65% for the
+standard approach, and 91% for the NCV based model.
+In this case it is clear that the improved prediction
+performance relates to the smoother timeCount and toy
+x
+
+13
+
+35000
+
+25000
+
+20000
+
+40000
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+15
+
+20
+
+2000
+
+load
+
+1000
+−1000
+
+10
+temp
+
+0
+
+5
+
+35000
+
+40000
+
+500 1000
+0.0
+
+0.2
+
+10
+temp95
+
+0.4
+
+0.6
+
+0.8
+
+timeCount
+
+0
+
+s(temp95,4.78)
+
+1500
+1000
+500
+
+5
+
+1.0
+
+toy
+
+0
+
+0
+
+−1000
+
+35000
+
+load48
+
+30000
+
+0
+
+s(timeCount,1)
+
+1500
+500
+
+s(toy,11.99)
+30000
+
+25000
+
+load48
+
+−1500
+25000
+
+2000
+
+40000
+
+−500
+
+4000
+0
+20000
+
+s(temp,4.47)
+
+35000
+
+load48
+
+−4000
+
+s(load48,6.93):dtyww
+
+30000
+
+0
+
+s(load48,4.54):dtySun
+20000
+
+−4000
+
+2000
+
+40000
+
+load48
+
+15
+
+20
+
+20000 25000 30000 35000
+
+30000
+
+0
+
+s(load48,2.71):dtySat
+25000
+
+−4000
+
+6000
+2000
+
+s(load48,1.9):dtyMon
+
+−6000 −2000
+20000
+
+20000
+
+25000
+
+30000
+
+35000
+
+predicted
+
+Figure 5: Estimated smooth effects for the grid load prediction models. For the first 8 plots from top left, the
+black curves and grey bands show estimates and 95% confidence bands from the NCV based model fit, while the
+superimposed blue curves show the equivalent for the marginal likelihood based fit, ignoring autocorrelation. The
+numbers in the y-axis labels are effective degrees of freedom. The plot at bottom right compares the models’
+predictive performance for the 2016 data. The black points show load versus predicted load for the NCV estimated
+model, and the blue points are for the marginal likelihood estimated model. The line illustrates where perfect
+prediction would lie.
+
+14
+
+effects. Careful model construction could have imposed
+this in an ad hoc manner, and achieved MAPE performance similar to the NCV fit, but confidence bands would
+still be neglecting the residual autocorrelation. In addition operational use of these models typically involves
+substantial automation. For example, a full day’s prediction would involve 48 models of the type shown here,
+which may in turn only be components of mixtures of
+experts, and which need to be regularly re-estimated as
+new training data accumulate. More local forecasting
+may involve thousands of such models. Hence the scope
+for careful ad hoc adjustment to deal with autocorrelation problems is limited, while the computational and
+implementational burden of fully specifying models for
+the autocorrelation appears prohibitive.
+An appealing alternative, when focused on forecasting,
+is to use a forecasting version of NCV. For example, one
+might predict for each week of the final year of fit data,
+so that for week k of the final year α(k) would index all
+data from the start of week k (or perhaps from the start
+of week k − 1 onwards), while δ(k) would be the indices
+of the data for week k. Using this criterion produces
+effect estimates slightly smoother than those shown but
+practically indistinguishable MAPE results on fit and test
+data.
+
+8.2
+
+Swiss extreme rainfall
+
+Now considering a smooth location-scale model for the
+most extreme 12 hour total rainfall each year from 65
+Swiss weather stations from 1981 to 20153 . After some
+model selection [59, §7.9.1], the data were modelled using
+a generalized extreme value distribution with location parameter model µ = f1 (E, N )+f2 (nao)+f3 (elevation)+
+γc.r ; log scale parameter model ρ = log σ = f4 (E, N ) +
+f5 (year) + f6 (elevation) + βc.r and modified logit shape
+parameter model g(ξ) = αc.r . Function g is a logit link
+modified to constrain ξ between -1 and .5 (so variance
+remains finite and maximum likelihood estimation is consistent). The fj are smooth functions, represented using
+thin plate regression splines. There is one parameter αj ,
+βj and γj for each level of the 12 level factor c.r, the
+climate region. Variable nao is the north Atlantic oscillation index. N and E are northing and easting in degrees.
+The station locations are shown as black points in the
+lower row of figure 6.
+The model can be estimated using the methods of [61],
+with smoothing parameters estimated by Laplace approximate marginal likelihood. The resulting fit is shown in
+the left 2 columns of figure 6. However, estimation of
+GEV models is somewhat statistically and numerically
+taxing, and it is hence useful to be able to check results by
+3 data are available as dataset swer in R package gamair.
+
+re-estimating with an alternative smoothing parameter
+estimation criterion. Leave one out NCV offers this possibility, using the variant of section 4.1, and in this case
+give results visually almost identical to those obtained via
+marginal likelihood. An additional concern for these data
+is the possibility of localised short range spatial autocorrelation in the extremes, with the accompanying danger
+of over-fit. To investigate this, NCV was used with neighbourhoods defined by stations being within 0.3 degrees
+of each other and year being the same (giving neighbourhood sizes from 1 to 6). The right 2 columns of figure
+6 show the results, which are little changed, suggesting
+little effect of short range spatial correlation here. So in
+this case the new methods allow considerably more confidence about the practical reliability of the results than
+was previously possible.
+
+8.3
+
+Spatio-temporal
+health
+
+models
+
+of
+
+forest
+
+The final example concerns spatio-temporal modelling
+of forest health data for Norway spruce trees in BadenWürttemberg, Germany. The data (n = 5876) were gathered annually from 1991-2020 on a semi-regular 4km ×
+4km spatial grid, but with coarser (8km × 8km or 16km
+× 16km) sub-grids used in some years. The nodes of the
+grid are tree stands, and the response variable of interest
+is average defoliation of trees at the stand, as a proportion between 0 and 1 (average number of spruce trees per
+stand is 17). The survey is in alignment with the International Co-operative Programme on Assessment and
+Monitoring of Air Pollution Effects on Forests and thus
+uses the same survey protocol [12]. There are reasons to
+expect some short range temporal autocorrelation at the
+stand level, as spruce do not shed all their needles each
+year. Within year local spatial correlation might also be
+present. Simply neglecting this, and treating the data
+as independent, risks over-fit and over-selection of model
+covariates. Neighbourhoods α(i) were hence constructed
+for each data point, consisting of the data from the same
+year and from a stand 10km or less away (on average
+4 such neighbours per point), and from data less than
+7 years apart at the same stand (average 5.6 such neighbours per point). The corresponding neighbourhood sizes
+range from 1 to 31 with a mean of 11.2.
+Alongside spatial location and stand age (these are
+managed forests, so surveyed trees within a stand have
+very similar ages), a number of other covariates were measured, relating to the physical nature of the site (slope,
+elevation, aspect, wetness, soil composition, underlying
+geology, etc) and the tree properties (crown closure, level
+of fructification, forest diversity etc). Preliminary screening suggests some 16 covariates potentially of real interest
+
+15
+
+−0.1
+−0.3
+0.4
+0.2
+0.0
+
+s.1(elevation,3.4)
+
+500
+
+1500
+
+9
+
+15
+
+7
+
+E
+
+8
+
+9
+
+E
+
+0
+
+.1
+0
+
+0
+
+10
+
+−0.2
+
+5
+
+−1
+
+10
+
+−0
+
+0.1
+
+0.2
+
+.3
+
+47.5
+
+5
+
+0
+
+46.0
+10
+
+47.0
+
+0
+
+−0.1
+
+s.1(E,N,11.17)
+
+−5
+
+−10
+
+47.0
+46.5
+
+0.
+3
+
+2500
+
+elevation
+
+N
+
+−0
+.1
+3
+−0
+.
+
+2
+0.
+
+−0.2
+
+10 15 20
+5
+−5
+47.5
+
+47.5
+47.0
+
+N
+
+−10
+
+N
+
+5
+
+46.0
+
+46.5
+
+8
+
+2500
+
+−10
+
+−5
+
+2010
+
+0.3
+
+46.0
+
+0
+0.1
+
+7
+
+1500
+
+2000
+
+year
+
+5
+
+E
+
+10
+
+1990
+
+s(E,N,23.65)
+
+0.4
+
+9
+
+1980
+
+elevation
+
+0
+−0.1
+
+0
+
+500
+
+0
+
+8
+
+4
+
+−5
+
+−5
+
+15
+
+2
+
+0
+
+−1
+
+10
+
+0
+
+0
+
+s(elevation,7.85)
+
+0.5
+0.3
+
+2500
+
+−0.1
+
+5
+
+46.5
+
+1500
+
+s.1(E,N,13.44)
+
+−5
+0
+
+5
+
+7
+
+0.1
+
+s.1(elevation,1.01)
+
+500
+
+s(E,N,22.87)
+
+0
+
+−2
+
+−5
+
+47.0
+
+2500
+
+elevation
+
+−5
+
+−4
+
+nao
+
+elevation
+−5
+
+s.1(year,4.59)
+−6
+
+−0.1
+
+15
+10
+5
+0
+
+s(elevation,7.33)
+
+−5
+
+1500
+
+47.5
+
+500
+
+2
+
+2010
+
+year
+
+−0
+
+2000
+
+0.1
+
+4
+1990
+
+0
+
+s(nao,7.26)
+
+1980
+
+N
+
+4
+
+46.5
+
+2
+
+46.0
+
+0
+
+nao
+
+−6 −4 −2
+
+0.1
+−2
+
+−0.1
+
+s.1(year,5.03)
+−4
+
+−0.3
+
+2
+0
+−2
+
+s(nao,6.44)
+
+−4
+−6
+
+7
+
+8
+
+9
+
+10
+
+E
+
+Figure 6: Swiss extreme rainfall location scale model. The left two columns are for Laplace approximate marginal
+likelihood based smoothing parameter estimation, the right two for NCV with neighbourhoods based on stations
+closer than 0.3 degrees. In each column pair the left column shows smooth effect estimates for the location parameter,
+and the right for the log scale parameter. In this case the estimates are very similar between the methods, with
+little evidence for un-modelled short range spatial correlation being important here. A fit using leave-one-out NCV
+is visually almost indistinguishable from the marginal likelihood estimates.
+
+16
+
+year →
+2016
+
+2020
+−0
+
+0.06
+
+0.1
+
+−0.02
+
+−0.02
+
+0.02
+6
+
+−0.06
+
+−0.02
+
+−0.04
+
+0.08
+
+−0.02
+
+0
+
+0.0
+
+4
+
+0
+
+0
+
+2
+
+0.02
+
+−0.06
+
+−0.04
+
+−0.0
+
+−0
+
+4
+0.0
+
+4e+05
+
+5e+05
+x_utm
+
+1995
+
+6e+05
+
+−0.02
+
+1998
+
+0.04
+
+0
+0.02
+
+0.02
+
+02
+0.
+
+0.04
+
+0.02
+
+0.06
+
+0.02
+0
+
+year →
+
+0.02
+
+−0.04
+
+0.04
+
+−0.02
+
+0
+
+0.04
+0
+
+4e+05
+
+0.02
+
+5e+05
+x_utm
+
+−0.04
+
+5500000
+5300000
+
+0.02
+
+−0.02
+
+0.02
+
+−
+
+0
+
+02
+
+0
+
+06
+
+0
+
+0
+
+5300000
+
+0.02
+
+0.04
+
+0
+
+0.04
+0.
+
+0
+
+0
+
+0.
+
+0
+0.02
+
+0
+
+0
+
+2
+0.0
+
+y_utm
+5400000
+
+0
+
+−0.02
+
+−0.0
+
+0
+
+5500000
+y_utm
+5400000
+
+0
+
+−0.04
+
+−0.06
+
+0.04
+
+06
+
+−
+
+−0.04
+
+0.04
+
+4
+
+0.
+
+0.06
+
+8
+
+0
+0.
+
+0.06
+
+0
+
+−0.02
+
+0.0
+
+0
+
+0.04
+
+0.02
+
+.04
+
+0.04
+
+4
+
+0.04
+2
+
+0
+
+0.0
+
+0
+
+2
+
+0.04
+
+0.02
+
+0
+
+06
+
+0
+
+−0.02
+
+0.02
+
+−0.02
+
+0.02
+
+0.
+
+4
+
+0.04
+
+0.0
+
+6
+
+0.02
+
+−0.02
+
+0.02
+
+0
+0.0
+
+0.06
+
+0.06
+
+.04
+
+0.04
+
+0.04
+
+−0
+
+0.02
+
+0.0
+
+0
+
+0
+0
+
+0.04
+
+0
+
+0
+2
+
+0.0
+
+0.04
+
+−0.04
+
+2
+
+−0.0
+
+−0.04
+6
+
+.0
+−0
+
+.02
+
+0.06
+
+0.08
+
+0.02
+
+−0
+
+0.04
+0
+
+0.02
+0.04
+
+−0.06
+
+.04
+
+−0
+
+8
+
+0
+
+2
+
+−0.0
+
+−0
+.0
+
+4
+
+−0.0
+
+8
+
+−0.02
+
+−0.06
+
+0.0
+2
+
+0
+
+−0.0
+
+0.02
+
+0.02
+
+0
+
+0.0
+
+0
+
+0.02
+
+−0.04
+
+04
+
+4
+
+8
+
+0.
+
+0
+
+6
+.0
+−0
+
+0.0
+
+−0.0
+
+.02
+
+−0
+0.04
+
+6
+
+2013
+
+.08
+
+2020
+
+0
+
+2016
+
+0.0
+
+year →
+2013
+
+6e+05
+
+−0
+
+0
+
+.0
+
+2
+
+0.02
+
+0.
+
+04
+
+0.02
+
+1995
+
+.06
+
+0
+
+1998
+year →
+
+0
+
+50
+
+100
+
+150
+
+tree age
+
+200
+
+0.02 0.04 0.06 0.08
+−0.02
+
+−0.2
+
+−0.05
+
+−0.1
+
+0.00
+
+0.05
+
+0.0
+
+0.10
+
+0.1
+
+0.15
+
+Figure 7: Forest health model space-time interaction effect estimates. Left uses NCV accounting for the possibility
+of spatial and temporal autocorrelation as described in the text, and right uses REML assuming independence.
+Broadly, the NCV estimate is smoother in space, but less so in time.
+
+8
+
+10
+
+12
+
+14
+
+16
+
+mean temp last year
+
+18
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10
+
+wetness index
+
+Figure 8: The three most interesting smooth covariate effects for forest defoliation estimated by NCV (black and
+grey band) compared to REML assuming independence (blue).
+
+17
+
+(in addition to year and location). Generically the model components for each datum it is applicable in all situafor these data has the form
+tions for which Laplace approximate marginal likelihood
+(LAML) might otherwise be used [see e.g. 61], but with
+k
+X
+the advantage over LAML of being directly useful for
+E(defoliationi ) = f0 (km.ni , km.ei , yeari ) +
+fj (xji )
+comparing models with differing fixed effects (unpenalj=1
+ized) structures. In any case, the availability of a second
+where xj is a covariate and the fj are smooth functions. criterion for smoothing parameter selection in these cases
+f0 is a smooth space-time interaction, represented by a offers a useful check of statistical stability in applications.
+tensor product of a thin plate spline of space with a cu- The link to Jackknife estimation also leads to useful varibic spline of year [2, 13]. The model can be estimated by ance estimates.
+One immediate application is to the estimation of
+penalized least squares with NCV smoothing parameter
+estimation, and a basic backward selection strategy used, smooth models in the presence of nuisance autocorrelawhich sequentially removes the least significant terms [us- tion. Addressing short range autocorrelation, without
+ing the approximate p-values of 58] until all are signifi- requiring formulation and estimation of a high rank corcant at the 10% level. This approach retains 10 covari- relation model, can offer some application advantages,
+ates: tree age, previous year’s mean temperature, precip- potentially allowing fuller exploration of the model eleitation evaporation index in May, topographic wetness ments of most direct scientific interest. NCV always ofindex, topographic position index, exchangeably bound fers a way to check the sensitivity of model conclusions to
+soil cations, days with max temperature > 25C and 3 the assumption of no un-modelled autocorrelation. Howothers that barely reach the inclusion threshold. By con- ever when such autocorrelation is present, it only offers
+trast, repeating the same exercise, but neglecting the pos- mitigation when there is reason to expect that there is a
+sibility of autocorrelation and using REML smoothness separation of scales between the nuisance autocorrelation
+selection, retains 13 covariates, with the May precipita- and the model components of interest. Otherwise there is
+tion/evaporation index replaced by the same for Septem- no alternative but to fully model the correlation process.
+ber, and a measure of forest diversity, net evapotranspira- When the separation of scales assumption is reasonable,
+tion the preceding year, and summed nitrate over critical the question of whether better calibrated finite sample
+uncertainty quantification is possible for the NCV apload.
+Figure 7 compares the estimated spatio-temporal ef- proach is interesting and open. A further open question
+fects using NCV to those when the possibility of resid- is the feasibility of a general treatment of smoothing bias
+ual autocorrelation is ignored. The NCV estimates are without requiring a Bayesian bias estimate via coherent
+smoother in space, but slightly less so in time. Figure 8 belief updating.
+The second immediate application is to non-likelihood
+picks out the three most interesting smooth covariate effect estimates and compares them when estimation is by based smooth loss functions. For example, in the smooth
+NCV and REML assuming independence. There is slight quantile regression case the approach offers a frequentist
+attenuation of the time related effects, whereas the to- alternative to [15] without the need to subscribe to the
+pographic wetness index effect appears stable. The NCV Bayesian belief updating framework of [5], except for the
+model has about 20 fewer effective degrees of freedom, limited purposes of accounting for smoothing bias in furand an r2 about 1.4% lower than the alternative at just ther inference. This less Bayesian approach aligns more
+over 0.59. Clearly in this case there is evidence for short readily with quantile regression’s avoidance of a full probrange residual autocorrelation in the data, as would be abilistic model.
+expected on a priori grounds, and this has some effect
+While the computational cost of NCV is the O(np2 )
+both on model estimates and the selection of model co- of marginal likelihood or GCV, the constant of proporvariates.
+tionality is higher and a disadvantage is that it is not obvious how to achieve the sort of scalability achieved for
+marginal likelihood by [60] and [30] in big data settings.
+9 Conclusions
+NCV is available in R package mgcv.
+The NCV approach discussed here is both simple conceptually and general in applicability. It offers a principled
+Quantile regression
+method for choosing smoothing/precision parameters for A
+models estimated with a variety of loss functions, in adFollowing [15] the ELF loss targeting the τ quantile, q, is
+dition to negative log likelihoods and pseudo-likelihoods,
+
+
+and is also a model selection criterion [1]. In the case
+y−q
+y−q
+λσ
++
+λ
+log
+1
++
+e
+.
+ρ(y
+−
+µ)
+=
+(τ
+−
+1)
+in which the the loss is a sum of negative log likelihood
+σ
+18
+
+This can be viewed as a smoothed version of the usual
+quantile regression pinball loss [28]. As [24] show,
+smoothing the loss generally results in lower MSE than
+using the unsmoothed loss, and the degree of smoothing can be chosen to optimize MSE, with the optimum
+depending on the number of data per model degree of
+freedom. A simple approach is to fit a pilot location
+scale model to the data, to obtain standardized residuals zi = (yi − µ̂i )/σ̂i : let k be the estimated degrees
+of freedom of the pilot mean model. Taking size ⌈n/k⌉
+bootstrap samples, the MSE of q̂ based on optimization
+of the ELF loss for each sample can be computed, where
+the τ quantile of the zi is the target truth. The λ minimizing this MSE is the estimate of the optimal degree
+of loss smoothing, and is used for fitting the full model,
+along with the σ̂i from the pilot fit.
+The approach of a pilot location-scale model fit and
+then computing the optimal amount of smoothing from
+the pooled pilot residuals follows [15], but the bootstrap
+step simplifies the method for optimizing the smoothing
+of the loss, which is otherwise reliant on asymptotic results. Computationally, the same nb bootstrap resamples
+are used with each trial λ. This ensures that the MSE is
+smooth in λ. The optimal quantiles for each replicate can
+be found most efficiently by Newton optimization, starting from the true target quantile. The pilot fit consisted
+of a smooth model for the mean, using NCV, and then
+fitting a second smooth model to the resulting squared
+residuals to estimate σ̂i2 , again using NCV. A location
+scale model such as the gaulss model in R package mgcv
+would be an alternative. P
+When using this smoothed loss,
+an obvious check is that i I(yi < qi ) ≈ τ .
+
+B
+
+Example likelihood derivatives
+
+This appendix supplies examples of the loss specific
+derivatives required in practice to compute the NCV
+derivatives as described in section 2.2. First consider single parameter exponential family regression where µi =
+E(yi ), g(µi ) = ηi , η = Xβ and var(yi ) = V (µi )ϕ, for
+link function g, variance function V and scale parameter
+ϕ (the loss is the negative log likelihood or the deviance).
+Then for, li , the contribution to the log likelihood from
+yi we have
+yi − µ i
+∂li
+=
+Xij
+∂βj
+ϕg ′ (µi )V (µi )
+and
+∂ 2 li
+Xij α(µi ) X
+dβ̂k
+=− ′
+Xik
+.
+∂βj ∂ρq
+g (µi )2 V (µi )
+dρq
+k
+
+The latter term provides dg/dρj . More generally for
+other location parameter regression cases,
+∂li
+∂li dµi
+=
+Xij
+∂βj
+∂µi dηi
+and
+∂ 2 li
+=
+∂βj ∂ρq
+
+(
+
+∂ 2 li
+∂µ2i
+
+
+
+dµi
+dηi
+
+2
+
+∂li d2 µi
++
+∂µi dηi2
+
+)
+Xij
+
+X
+
+Xik
+
+k
+
+dβ̂k
+.
+dρq
+
+In
+both
+NCV criterion has the form V =
+Pm
+Pthese cases the
+−α(k)
+) so that
+k=1
+i∈β(k) D(yi , ηi
+m
+
+−α(i)
+
+X X ∂D
+∂ηi
+∂V
+=
+∂ρj
+∂ηi η−α(i) ∂ρj
+k=1 i∈β(k)
+
+i
+
+Some location parameter regressions may also depend on
+extra parameters, θ (not varying with i). Then V =
+Pm P
+−α(i)
+, θ) so that
+k=1
+i∈β(k) D(yi , ηi
+m
+
+−α(i)
+
+X X ∂D
+∂V
+∂ηi
+=
+∂θj
+∂ηi η−α(i) ∂θj
+k=1 i∈β(k)
+
++
+
+i
+
+∂D
+∂θj η−α(i)
+i
+
+and
+∂ 2 li
+=
+∂βj ∂θq
+
+(
+
+∂ 2 li
+∂µ2i
+
+
+
+dµi
+dηi
+
+2
+
+∂li d2 µi
++
+∂µi dηi2
+
+)
+Xij
+
+X
+k
+
+Xik
+
+dβ̂k
+dθq
+
+∂ 2 li dµi
+Xij .
++
+∂µi ∂θq dηi
+The Hessian and its derivative w.r.t. ρj follow in a similar
+manner.
+
+C
+
+Low level computational considerations
+
+The O(np2 ) floating point operation cost of NCV is similar to the cost for GCV or REML. However in reality NCV is more costly in practice, since its leading order operations consist of matrix-vector operations, while
+GCV and REML computations can be structured so that
+the leading order operations are matrix-matrix. Matrixmatrix operations can typically be arranged in a way that
+is highly cache efficient and any optimized BLAS [e.g. 62]
+will exploit this. At time of writing such cache efficiency
+typically results in some 20-fold speed up for matrix cross
+products, for example. Matrix-vector operations can not
+be arranged in this cache efficient manner [see 17, for an
+introduction to the issues].
+However, this disadvantage can be offset by relatively
+simple parallelization. The terms in the summations (2)
+
+19
+
+can be trivially parallelized, as can the summations required for derivative computation. Here, OMP [39] in
+C was used. Realized scaling is then reasonable. This
+is in contrast to attempts to use simple parallelization
+approaches for matrix-matrix dominated GCV or REML
+computations. In such cases anything gained by parallelization is often immediately lost, as different execution
+threads compete for cache, destroying the cache efficiency
+on which the BLAS relies. For matrix-vector dominated
+computation this trade-off does not occur.
+
+Acknowledgments
+I thank Heike Puhlmann and Simon Trust at the Forest Research Institute Baden-Württemberg, Germany for
+the Terrestrial Crown Condition Inventory (TCCI) forest health monitoring survey data, and Nicole Augustin
+for the corresponding model structure. Thanks to the
+reviewers for comments on improving the clarity of the
+paper.
+
+References
+D
+
+variance estimation under pe- [1] Arlot, S. and A. Celisse (2010). A survey of crossvalidation procedures for model selection. Statistics
+nalization
+Surveys 4, 40–79.
+
+In a penalised regression setting the convergence rates
+for V̂, from section 6, will be reduced, since the best
+that we can then do is δ̂ = Op (n−4/9 ) [e.g. 7]. As a
+concrete example, for a one dimensional cubic regression
+spline sieve estimator with k knots we could set k ∝ n1/9
+[25]. Again consider reconstruction of a fixed function
+under infill asymptotics, where none the less |α(i)| does
+not grow with n, so that a separation of scales occurs
+between the autocorrelated noise process and the signal.
+Then bki = O(n−8/9 ) and we now have
+n8/9 (V̂km − Vkm ) = n
+
+n
+X
+i
+
+= Op (n
+
+bki
+
+X
+
+[2] Augustin, N. H., M. Musio, K. von Wilpert,
+E. Kublin, S. N. Wood, and M. Schumacher (2009).
+Modeling spatiotemporal forest health monitoring
+data. Journal of the American Statistical Association 104 (487), 899–911.
+[3] Bates, S., T. Hastie, and R. Tibshirani (2024). Crossvalidation: what does it estimate and how well does
+it do it? Journal of the American Statistical Association 119 (546), 1434–1445.
+[4] Beirami, A., M. Razaviyayn, S. Shahrampour, and
+V. Tarokh (2017). On optimal generalizability in parametric learning. Advances in neural information processing systems 30.
+
+bmj {ei ej − E(ei ej )}
+
+j∈α(i)
+−7/18
+
+),
+
+a somewhat reduced rate. Considering the bias terms [5] Bissiri, P. G., C. Holmes, and S. G. Walker (2016).
+A general framework for updating belief distribucaused by the correlation of δ̂i and the residuals indexed
+tions. Journal of the Royal Statistical Society. Series
+by α(i) we now have
+B 78 (5), 1103–1130.
+X
+X
+n8/9
+bki (yi − µ̂i )
+bmj δ̂j = Op (n−1/3 )
+[6] Chu, C.-K. and J. S. Marron (1991). Comparison of
+j∈α(i)
+two bandwidth selectors with dependent errors. The
+Annals of Statistics 19 (4), 1906–1918.
+a lowered convergence rate (this bias is no longer simply
+increasing the error at any given n without changing the [7] Claeskens, G., T. Krivobokova, and J. D. Opsomer
+(2009). Asymptotic properties of penalized spline estirate). Again if the residuals are independent of δ̂i then
+mators. Biometrika 96 (3), 529–544.
+these bias terms are Op (n−5/6 ) and therefore negligible.
+Hence as in the main paper, provided we use crossA note on
+validated residuals in place of the usual residuals, the [8] Cox, D. R. and N. Reid (2004).
+pseudolikelihood
+constructed
+from
+marginal
+densities.
+estimator of the covariance matrix can be expected to be
+Biometrika
+91
+(3),
+729–737.
+reasonable, as long as there is really a separation of scales
+between the signal and the autocorrelation scale length. [9] Craven, P. and G. Wahba (1979).
+Smoothing
+√
+If the n scaling of the random walk appears nonnoisy data with spline functions. Numerische Mathobvious because of the induced correlation, note that we
+ematik 31 (5), 377–403.
+could decompose the summations into max |α(i)| separate
+random walks each with O(n) finite variance independent [10] Davison, A. C. and D. V. Hinkley (1997). Bootstrap
+increments. Each of these components is clearly Op (n1/2 )
+methods and their application. Cambridge university
+as is the sum of a fixed finite number of them.
+press.
+20
+
+[11] deHoog, F. and M. Hutchinson (1987). An efficient [23] Hutchinson, M. F. and F. De Hoog (1985). Smoothmethod for calculating smoothing splines using oring noisy data with spline functions. Numerische Maththogonal transformations. Numerische Mathematik 50,
+ematik 47 (1), 99–106.
+311–319.
+[24] Kaplan, D. M. and Y. Sun (2017). Smoothed estimating equations for instrumental variables quantile
+[12] Eichhorn, J., P. Roskams, N. Potoc̀ic̀, V. Timmerregression. Econometric Theory 33 (1), 105–157.
+mann, Ferretti, V. Mues, A. Szepesi, D. Durrant,
+I. Seletković, H-W.Schröck, S. Nevalainen, F. Bussotti,
+P. Garcia, and S. Wulff (Eds.) (2017). ICP Forests [25] Kauermann, G., T. Krivobokova, and L. Fahrmeir
+(2009). Some asymptotic results on generalized penalmanual on methods and criteria for harmonized samized spline smoothing. Journal of the Royal Statistical
+pling, assessment, monitoring and analysis of the efSociety: Series B (Statistical Methodology) 71 (2), 487–
+fects of air pollution on forests. Thünen Institute of
+503.
+Forest Ecosystems, Eberswalde,Germany.
+[26] Klein, N., T. Kneib, S. Klasen, and S. Lang (2014).
+[13] Eickenscheidt, N., N. H. Augustin, and N. Wellbrock
+Bayesian structured additive distributional regression
+(2019). Spatio-temporal modelling of forest monitorfor multivariate responses. Journal of the Royal Statising data: Modelling German tree defoliation data coltical Society: Series C (Applied Statistics) 64, 569–591.
+lected between 1989 and 2015 for trend estimation and
+survey grid examination using GAMMs. iForest Bio- [27] Klein, N., T. Kneib, S. Lang, and A. Sohn (2015).
+geosciences and Forestry 12, 338–348.
+Bayesian structured additive distributional regression
+with an application to regional income inequality in
+[14] Eldén, L. (1984). A note on the computation of the
+Germany. Annals of Applied Statistics 9, 1024–1052.
+generalized cross-validation function for ill-conditioned
+least squares problems. BIT Numerical Mathemat- [28] Koenker, R. (2005). Quantile Regression. Cambridge
+ics 24 (4), 467–472.
+University Press.
+[15] Fasiolo, M., S. N. Wood, M. Zaffran, R. Nedellec,
+and Y. Goude (2021). Fast calibrated additive quantile
+regression. Journal of the American Statistical Association 116 (535), 1402–1412.
+
+[29] Krivobokova, T. and G. Kauermann (2007). A
+note on penalized spline smoothing with correlated
+errors. Journal of the American Statistical Association 102 (480), 1328–1337.
+
+[16] Golub, G. H., M. Heath, and G. Wahba (1979). Gen- [30] Li, Z. and S. N. Wood (2020). Faster model matrix crossproducts for large generalized linear models
+eralized cross validation as a method for choosing a
+with discretized covariates. Statistics and Computgood ridge parameter. Technometrics 21 (2), 215–223.
+ing. 30 (1), 19–25.
+[17] Golub, G. H. and C. F. van Loan (2013). Matrix
+Computations (4th ed.). Baltimore: Johns Hopkins [31] Lukas, M. A. (2006). Robust generalized crossvalidation for choosing the regularization parameter.
+University Press.
+Inverse Problems 22 (5), 1883.
+[18] Gouriéroux, C., A. Monfort, and E. Renault
+(2017). Consistent pseudo-maximum likelihood esti- [32] Lukas, M. A. (2010). Robust GCV choice of the regularization parameter for correlated data. The Journal
+mators. Annals of Economics and Statistics/Annales
+of integral equations and applications, 519–547.
+d’Économie et de Statistique (125/126), 187–218.
+[19] Gu, C. and D. Xiang (2001). Cross-validating [33] Lukas, M. A., F. R. de Hoog, and R. S. Anderssen (2016). Practical use of robust GCV and modnon-gaussian data: Generalized approximate crossified GCV for spline smoothing. Computational Statisvalidation revisited. Journal of Computational and
+tics 31 (1), 269–289.
+Graphical Statistics 10 (3), 581–591.
+[34] Marra, G. and S. N. Wood (2012). Coverage properties of confidence intervals for generalized additive
+model components. Scandinavian Journal of Statis[21] Hastie, T. and R. Tibshirani (1990). Generalized
+tics 39 (1), 53–74.
+Additive Models. Chapman & Hall.
+[35] Mayr, A., N. Fenske, B. Hofner, T. Kneib, and
+[22] Hastie, T., R. Tibshirani, and J. Friedman (2009).
+M. Schmid (2012). Generalized additive models for
+The Elements of Statistical Learning. Springer.
+location, scale and shape for high dimensional data —
+[20] Harville, D. A. (1997). Matrix Algebra from a Statistician’s Perspective. New York: Springer.
+
+21
+
+a flexible approach based on boosting. Journal of the [48] Stasinopoulos, M. D., R. A. Rigby, G. Z. Heller,
+Royal Statistical Society. Series C 61 (3), 403–427.
+V. Voudouris, and F. De Bastiani (2017). Flexible Regression and Smoothing: using GAMLSS in R. Chap[36] Nocedal, J. and S. Wright (2006). Numerical Optiman and Hall/CRC.
+mization (2nd ed.). New York: Springer Verlag.
+[49] Stephenson, W. and T. Broderick (2020). Approxi[37] Nychka, D. (1988). Bayesian confidence intervals for
+mate cross-validation in high dimensions with guaransmoothing splines. Journal of the American Statistical
+tees. In International Conference on Artificial IntelliAssociation 83 (404), 1134–1143.
+gence and Statistics, pp. 2424–2434. PMLR.
+[50] Stone, M. (1974). Cross-validatory choice and assessment of statistical predictions (with discussion).
+Journal of the Royal Statistical Society, Series B 36,
+111–147.
+
+[38] Oh, H.-S., T. C. Lee, and D. W. Nychka (2011).
+Fast nonparametric quantile regression with arbitrary
+smoothing methods. Journal of Computational and
+Graphical Statistics 20 (2), 510–526.
+
+[51] Stone, M. (1977). An asymptotic equivalence of
+choice of model by cross-validation and Akaike’s criterion. Journal of the Royal Statistical Society, Series
+[40] Opsomer, J., Y. Wang, and Y. Yang (2001). NonB 39, 44–47.
+parametric regression with correlated errors. Statistical
+[52] van der Linde, A. (2000). Smoothing and RegresScience, 134–153.
+sion, Chapter Variance Estimation and SmoothingParameter Selection for Spline Regression, pp. 19–42.
+[41] Paige, C. C. and M. A. Saunders (1975). Solution
+Wiley.
+of sparse indefinite systems of linear equations. SIAM
+journal on numerical analysis 12 (4), 617–629.
+[53] van der Vorst, H. A. (2003). Iterative Krylov Methods for Large Linear Systems. Cambridge University
+[42] Rad, K. R. and A. Maleki (2020). A scalable estiPress.
+mate of the out-of-sample prediction error via approximate leave-one-out cross-validation. Journal of the
+[54] Wahba, G. (1985). A comparison of GCV and GML
+Royal Statistical Society Series B: Statistical Methodfor choosing the smoothing parameter in the generology 82 (4), 965–996.
+alized spline smoothing problem. Annals of Statistics 13 (4), 1378–1402.
+[43] Reiss, P. T. and L. Huang (2012). Smoothness se[39] OpenMP Architecture Review Board (2008, May).
+OpenMP application program interface version 3.0.
+
+lection for penalized quantile regression splines. The
+[55] Wilson, A., M. Kasy, and L. Mackey (2020). Apinternational journal of biostatistics 8 (1).
+proximate cross-validation: Guarantees for model assessment and selection. In International conference
+[44] Rigby, R. and D. M. Stasinopoulos (2005). Genon artificial intelligence and statistics, pp. 4530–4540.
+eralized additive models for location, scale and shape
+PMLR.
+(with discussion). Journal of the Royal Statistical Society. Series C 54 (3), 507–554.
+
+[56] Wood, S. N. (2008). Fast stable direct fitting and
+smoothness selection for generalized additive models.
+[45] Roberts, D. R., V. Bahn, S. Ciuti, M. S. Boyce,
+Journal of the Royal Statistical Society: Series B (StaJ. Elith, G. Guillera-Arroita, S. Hauenstein, J. J.
+tistical Methodology) 70 (3), 495–518.
+Lahoz-Monfort, B. Schröder, W. Thuiller, et al. (2017).
+Cross-validation strategies for data with temporal, spa- [57] Wood, S. N. (2011). Fast stable restricted maximum
+tial, hierarchical, or phylogenetic structure. Ecogralikelihood and marginal likelihood estimation of semiphy 40 (8), 913–929.
+parametric generalized linear models. Journal of the
+Royal Statistical Society. Series B 73 (1), 3–36.
+[46] Robinson, T. and R. Moyeed (1989). Making robust the cross-validatory choice of smoothing param- [58] Wood, S. N. (2013). On p-values for smooth cometer in spline smoothing regression. Communications
+ponents of an extended generalized additive model.
+in Statistics-Theory and Methods 18 (2), 523–539.
+Biometrika 100 (1), 221–228.
+[47] Shi, X. (1988). A note on the delete-d jackknife vari- [59] Wood, S. N. (2017). Generalized Additive Modance estimators. Statistics & probability letters 6 (5),
+els: An Introduction with R (2 ed.). Chapman &
+341–347.
+Hall/CRC.
+22
+
+[60] Wood, S. N., Z. Li, G. Shaddick, and N. H. Augustin (2017). Generalized additive models for gigadata: modelling the UK black smoke network daily
+data. Journal of the American Statistical Association 112 (519), 1199–1210.
+[61] Wood, S. N., N. Pya, and B. Säfken (2016). Smoothing parameter and model selection for general smooth
+models (with discussion). Journal of the American Statistical Association 111, 1548–1575.
+[62] Xianyi, Z., W. Qian, and Z. Chothia (2014). OpenBLAS. URL: http://xianyi. github. io/OpenBLAS .
+[63] Yee, T. W. (2015). Vector Generalized Linear
+and Additive Models: with an Implementation in R.
+Springer.
+[64] Yee, T. W. and C. Wild (1996). Vector generalized
+additive models. Journal of the Royal Statistical Society. Series B 58 (3), 481–493.
+
+23
+
+

@@ -13,7 +13,7 @@
 #   - Covariate coefficients: as-is
 #
 # The transformation happens at the boundary:
-#   - to_natural_scale: Called in unflatten_parameters (estimation → natural)
+#   - to_natural_scale: Called in unflatten_natural (estimation → natural)
 #   - to_estimation_scale: Called when storing/outputting parameters
 #
 # This design:
@@ -349,8 +349,10 @@ function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natur
         # Return appropriate representation
         if scale == :natural
             return model.parameters.natural[hazname]
-        else  # :nested or :transformed (backward compat)
+        elseif scale == :nested
             return model.parameters.nested[hazname]
+        else
+            throw(ArgumentError("scale must be :natural or :nested (got :$scale)"))
         end
     else
         throw(ArgumentError("scale must be :natural, :nested, or :log (got :$scale)"))

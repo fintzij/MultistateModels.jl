@@ -82,16 +82,10 @@ See also: [`set_surrogate!`](@ref), [`MarkovSurrogate`](@ref), [`PhaseTypeSurrog
 function fit_surrogate(model::MultistateProcess; 
     surrogate_parameters = nothing, 
     surrogate_constraints = nothing, 
-    crude_inits = nothing,  # Deprecated, ignored
     verbose = true,
     type::Symbol = :markov,
     method::Symbol = :mle,
     n_phases::Union{Int, Dict{Int,Int}, Symbol} = 2)
-    
-    # Deprecation warning for crude_inits
-    if !isnothing(crude_inits)
-        @warn "crude_inits is deprecated and ignored. Use method=:heuristic for crude initialization." maxlog=1
-    end
     
     _validate_surrogate_inputs(type, method)
     
@@ -410,21 +404,7 @@ function set_surrogate!(model::MultistateProcess;
     n_phases::Union{Int, Dict{Int,Int}, Symbol} = 2,
     surrogate_parameters = nothing, 
     surrogate_constraints = nothing, 
-    verbose = true,
-    # Backward compatibility
-    optimize = nothing,
-    crude_inits = nothing)
-    
-    # Handle backward compatibility
-    if !isnothing(optimize)
-        @warn "optimize keyword is deprecated. Use method=:heuristic instead of optimize=false."
-        if !optimize
-            method = :heuristic
-        end
-    end
-    if !isnothing(crude_inits)
-        @warn "crude_inits keyword is deprecated. Use method=:heuristic for crude initialization."
-    end
+    verbose = true)
     
     _validate_surrogate_inputs(type, method)
     

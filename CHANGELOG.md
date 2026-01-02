@@ -1,5 +1,34 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking Changes: Deprecation Removal
+
+The following deprecated functions and keywords have been removed:
+
+**Removed function aliases** (use the new names instead):
+- `unflatten_parameters` → use `unflatten_natural`
+- `safe_unflatten` → use `unflatten_natural`  
+- `unflatten_to_estimation_scale` → use `unflatten_estimation`
+- `extract_natural_vector(hazard_params::NamedTuple)` (without family argument) → use `extract_natural_vector(hazard_params, family)`
+
+**Removed legacy spline functions**:
+- `spline_ests2coefs(ests, hazard)` → use `_spline_ests2coefs(ests, basis, monotone)` from multistatemodel.jl
+- `spline_coefs2ests(coefs, hazard)` → use `_spline_coefs2ests(coefs, basis, monotone)` from multistatemodel.jl
+
+**Removed deprecated keyword arguments**:
+- `optimize_surrogate` in `multistatemodel()` → use `fit_surrogate` instead
+- `crude_inits` in `fit_surrogate()` → use `method=:heuristic` instead
+- `crude_inits` and `optimize` in `set_surrogate!()` → use `method=:heuristic` instead
+
+**Removed backward-compat scale aliases**:
+- `scale=:transformed` in `get_parameters_for_hazard()` → use `scale=:nested`
+
+**Removed unused constants**:
+- `DELTA_U` from constants.jl (was never used; simulate.jl uses its own `_DELTA_U`)
+
+---
+
 ## [0.2.5] - 2025-12-20
 
 ### Fixed
