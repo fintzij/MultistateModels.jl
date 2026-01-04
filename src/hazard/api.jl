@@ -160,8 +160,8 @@ function compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int64
     # get hazard index
     hazind = model.hazkeys[hazard]
     
-    # get log-scale parameters for this hazard
-    hazard_params = get_parameters(model, hazind, scale=:log)
+    # get natural-scale parameters for this hazard (required by eval_hazard)
+    hazard_params = get_hazard_params(model.parameters, model.hazards)[hazind]
     haz = model.hazards[hazind]
 
     # compute hazards
@@ -208,8 +208,8 @@ function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, haza
     # get hazard index
     hazind = model.hazkeys[hazard]
     
-    # get log-scale parameters for this hazard
-    hazard_params = get_parameters(model, hazind, scale=:log)
+    # get natural-scale parameters for this hazard (required by eval_cumhaz)
+    hazard_params = get_hazard_params(model.parameters, model.hazards)[hazind]
     haz = model.hazards[hazind]
 
     # compute hazards

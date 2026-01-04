@@ -65,7 +65,7 @@ Hazard Evaluation API
 =============================================================================# 
 
 """
-    eval_hazard(hazard, t, pars, covars; apply_transform=false, cache_context=nothing, hazard_slot=nothing)
+    eval_hazard(hazard, t, pars, covars; apply_transform=false, cache_context=nothing, hazard_slot=nothing, use_effective_time=false)
 
 Evaluate the hazard rate at time `t`. Returns the hazard on NATURAL scale (not log).
 
@@ -73,15 +73,18 @@ This is the primary interface for hazard evaluation. It handles:
 - Direct evaluation via hazard_fn
 - Time transform optimization (when apply_transform=true and hazard supports it)
 - Caching for repeated evaluations with same linear predictor
+- Effective time handling for AFT with time-varying covariates
 
 # Arguments
 - `hazard::_Hazard`: The hazard function struct
-- `t::Real`: Time at which to evaluate hazard
+- `t::Real`: Time at which to evaluate hazard (effective time if `use_effective_time=true`)
 - `pars::AbstractVector`: Parameters (log-scale for baseline, natural for covariates)
 - `covars`: Covariate values - can be NamedTuple (cached) or DataFrameRow (direct view, zero-copy)
 - `apply_transform::Bool=false`: Use time transform optimization if hazard supports it
 - `cache_context::Union{Nothing,TimeTransformContext}=nothing`: Cache for repeated evaluations
 - `hazard_slot::Union{Nothing,Int}=nothing`: Index of this hazard in the model
+- `use_effective_time::Bool=false`: If true, `t` is treated as effective time (integrated history). 
+  For AFT, this bypasses internal time scaling but applies the rate scaling factor.
 
 # Returns
 - `Float64`: Hazard rate on natural scale
@@ -89,27 +92,71 @@ This is the primary interface for hazard evaluation. It handles:
 @inline function eval_hazard(hazard::_Hazard, t::Real, pars::Union{AbstractVector, NamedTuple}, covars::CovariateData;
                              apply_transform::Bool = false,
                              cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                             hazard_slot::Union{Nothing,Int}=nothing)
+                             hazard_slot::Union{Nothing,Int}=nothing,
+                             use_effective_time::Bool = false)
     use_transform = apply_transform && hazard.metadata.time_transform
-    use_transform || return hazard(t, pars, covars)
+    
+    if !use_transform
+        if use_effective_time && hazard.metadata.linpred_effect == :aft
+            # For AFT with effective time τ, we need h₀(τ) × exp(-β'x).
+            # The generated hazard_fn computes h(t|x) = h₀(t·e^{-β'x}) × e^{-β'x} = h₀(t) × t^(κ-1) × e^{-κβ'x}
+            # which assumes clock time input. When we pass τ, this gives wrong result.
+            # Instead: get h₀(τ) by passing zero covariates, then multiply by exp(-linpred).
+            
+            if isempty(hazard.covar_names)
+                return hazard(t, pars, covars)
+            else
+                # Compute linear predictor before zeroing covariates
+                linpred = _linear_predictor(pars, covars, hazard)
+                
+                # Zero covariates to get baseline hazard h₀(τ)
+                zero_vals = zeros(Float64, length(hazard.covar_names))
+                zero_covars = NamedTuple{Tuple(hazard.covar_names)}(zero_vals)
+                
+                # h(t|x) = h₀(τ) × exp(-β'x) for AFT with effective time
+                return hazard(t, pars, zero_covars) * exp(-linpred)
+            end
+        else
+            return hazard(t, pars, covars)
+        end
+    end
 
     _ensure_transform_supported(hazard)
     linpred = _linear_predictor(pars, covars, hazard)
     pars_vec = _time_transform_pars(pars)
 
-    if cache_context === nothing || hazard_slot === nothing
-        return _time_transform_hazard(hazard, pars_vec, t, linpred)
-    end
+    # If using effective time (AFT with TVC), we pass 0.0 as linpred to the time transform
+    # to avoid double-scaling the time argument. However, for AFT, we must still apply
+    # the rate scaling factor exp(-linpred).
+    # For PH, effective time = clock time, so linpred is used as is (or 0 if we handled it outside? 
+    # No, PH doesn't use effective time logic usually, but if it did, it would be same).
+    
+    # Actually, for AFT: h(t|x) = h0(tau) * exp(-beta*x).
+    # If use_effective_time=true, t is tau. We want h0(t) * exp(-linpred).
+    # _time_transform_hazard(..., t, 0.0) returns h0(t).
+    # So we multiply by exp(-linpred).
+    
+    eff_linpred = (use_effective_time && hazard.metadata.linpred_effect == :aft) ? zero(linpred) : linpred
 
-    cache = _shared_or_local_cache(cache_context, hazard_slot, hazard)
-    key = _hazard_cache_key(cache, linpred, t)
-    return get!(cache.hazard_values, key) do
-        _time_transform_hazard(hazard, pars_vec, t, linpred)
+    val = if cache_context === nothing || hazard_slot === nothing
+        _time_transform_hazard(hazard, pars_vec, t, eff_linpred)
+    else
+        cache = _shared_or_local_cache(cache_context, hazard_slot, hazard)
+        key = _hazard_cache_key(cache, eff_linpred, t)
+        get!(cache.hazard_values, key) do
+            _time_transform_hazard(hazard, pars_vec, t, eff_linpred)
+        end
+    end
+    
+    if use_effective_time && hazard.metadata.linpred_effect == :aft
+        return val * exp(-linpred)
+    else
+        return val
     end
 end
 
 """
-    eval_cumhaz(hazard, lb, ub, pars, covars; apply_transform=false, cache_context=nothing, hazard_slot=nothing)
+    eval_cumhaz(hazard, lb, ub, pars, covars; apply_transform=false, cache_context=nothing, hazard_slot=nothing, use_effective_time=false)
 
 Evaluate the cumulative hazard over interval [lb, ub]. Returns on NATURAL scale (not log).
 
@@ -117,13 +164,15 @@ This is the primary interface for cumulative hazard evaluation.
 
 # Arguments
 - `hazard::_Hazard`: The hazard function struct
-- `lb::Real`: Lower bound of interval
-- `ub::Real`: Upper bound of interval  
+- `lb::Real`: Lower bound of interval (effective time if `use_effective_time=true`)
+- `ub::Real`: Upper bound of interval (effective time if `use_effective_time=true`)
 - `pars::AbstractVector`: Parameters (log-scale for baseline, natural for covariates)
 - `covars`: Covariate values - can be NamedTuple (cached) or DataFrameRow (direct view, zero-copy)
 - `apply_transform::Bool=false`: Use time transform optimization if hazard supports it
 - `cache_context::Union{Nothing,TimeTransformContext}=nothing`: Cache for repeated evaluations
 - `hazard_slot::Union{Nothing,Int}=nothing`: Index of this hazard in the model
+- `use_effective_time::Bool=false`: If true, `lb` and `ub` are treated as effective times.
+  For AFT, this bypasses internal time scaling.
 
 # Returns
 - `Float64`: Cumulative hazard on natural scale
@@ -131,22 +180,50 @@ This is the primary interface for cumulative hazard evaluation.
 @inline function eval_cumhaz(hazard::_Hazard, lb::Real, ub::Real, pars::Union{AbstractVector, NamedTuple}, covars::CovariateData;
                              apply_transform::Bool = false,
                              cache_context::Union{Nothing,TimeTransformContext}=nothing,
-                             hazard_slot::Union{Nothing,Int}=nothing)
+                             hazard_slot::Union{Nothing,Int}=nothing,
+                             use_effective_time::Bool = false)
     use_transform = apply_transform && hazard.metadata.time_transform
-    use_transform || return cumulative_hazard(hazard, lb, ub, pars, covars)
+    
+    if !use_transform
+        if use_effective_time && hazard.metadata.linpred_effect == :aft
+            # For AFT with effective time, we need to evaluate the baseline cumulative hazard H0(lb, ub).
+            # The standard cumhaz_fn includes the covariate effect: H(t|x) = H0(t*exp(-beta*x)) * exp(-beta*x).
+            # Since lb/ub are already effective times (tau = t*exp(-beta*x)), we want H0(tau).
+            # We achieve this by passing zero covariates, which forces linear_pred = 0.
+            # This results in H0(tau) * exp(0) = H0(tau).
+            
+            if isempty(hazard.covar_names)
+                return cumulative_hazard(hazard, lb, ub, pars, covars)
+            else
+                # Construct NamedTuple of zeros matching covariate names
+                # This is necessary because cumhaz_fn uses property access (covars.name)
+                zero_vals = zeros(Float64, length(hazard.covar_names))
+                zero_covars = NamedTuple{Tuple(hazard.covar_names)}(zero_vals)
+                return cumulative_hazard(hazard, lb, ub, pars, zero_covars)
+            end
+        else
+            return cumulative_hazard(hazard, lb, ub, pars, covars)
+        end
+    end
 
     _ensure_transform_supported(hazard)
     linpred = _linear_predictor(pars, covars, hazard)
     pars_vec = _time_transform_pars(pars)
 
+    # If using effective time, we pass 0.0 as linpred to avoid scaling lb/ub again.
+    # For AFT: H(t) = H0(tau). We want H0(ub) - H0(lb).
+    # _time_transform_cumhaz(..., lb, ub, 0.0) returns H0(ub) - H0(lb).
+    
+    eff_linpred = (use_effective_time && hazard.metadata.linpred_effect == :aft) ? zero(linpred) : linpred
+
     if cache_context === nothing || hazard_slot === nothing
-        return _time_transform_cumhaz(hazard, pars_vec, lb, ub, linpred)
+        return _time_transform_cumhaz(hazard, pars_vec, lb, ub, eff_linpred)
     end
 
     cache = _shared_or_local_cache(cache_context, hazard_slot, hazard)
-    key = _cumul_cache_key(cache, linpred, lb, ub)
+    key = _cumul_cache_key(cache, eff_linpred, lb, ub)
     return get!(cache.cumulhaz_values, key) do
-        _time_transform_cumhaz(hazard, pars_vec, lb, ub, linpred)
+        _time_transform_cumhaz(hazard, pars_vec, lb, ub, eff_linpred)
     end
 end
 

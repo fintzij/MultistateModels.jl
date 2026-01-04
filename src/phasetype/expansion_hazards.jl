@@ -168,7 +168,8 @@ function _build_progression_hazard(observed_state::Int, phase_index::Int, n_phas
         false,             # no covariates
         Symbol[],          # covar_names
         metadata,
-        nothing            # shared_baseline_key
+        nothing,           # shared_baseline_key
+        SmoothTermInfo[]   # smooth_info (progression hazards have no covariates)
     )
     
     return haz, [0.0]  # Initial rate = exp(0) = 1
@@ -216,6 +217,7 @@ function _build_exit_hazard(pt_spec::PhaseTypeHazard,
         time_transform = false  # Exit hazards are exponential
     )
     
+    # TODO: Extract smooth_info from pt_spec if exit hazards support s(x) in future
     haz = MarkovHazard(
         hazname,
         from_phase,
@@ -229,7 +231,8 @@ function _build_exit_hazard(pt_spec::PhaseTypeHazard,
         has_covars,
         covar_names,
         metadata,
-        nothing            # Each exit hazard is independent
+        nothing,           # Each exit hazard is independent
+        SmoothTermInfo[]   # smooth_info (exit hazards don't yet support smooth terms)
     )
     
     return haz, zeros(Float64, npar_total)
@@ -287,7 +290,8 @@ function _build_expanded_hazard(h::HazardFunction,
         h.metadata,
         rhs_names,
         shared_key,
-        data
+        data,
+        hazschema
     )
     
     # Get the builder and create the hazard
@@ -314,7 +318,8 @@ function _adjust_hazard_states(haz::MarkovHazard, new_statefrom::Int, new_statet
         haz.hazname, new_statefrom, new_stateto, haz.family,
         haz.parnames, haz.npar_baseline, haz.npar_total,
         haz.hazard_fn, haz.cumhaz_fn, haz.has_covariates,
-        haz.covar_names, haz.metadata, haz.shared_baseline_key
+        haz.covar_names, haz.metadata, haz.shared_baseline_key,
+        haz.smooth_info
     )
 end
 
@@ -323,7 +328,8 @@ function _adjust_hazard_states(haz::SemiMarkovHazard, new_statefrom::Int, new_st
         haz.hazname, new_statefrom, new_stateto, haz.family,
         haz.parnames, haz.npar_baseline, haz.npar_total,
         haz.hazard_fn, haz.cumhaz_fn, haz.has_covariates,
-        haz.covar_names, haz.metadata, haz.shared_baseline_key
+        haz.covar_names, haz.metadata, haz.shared_baseline_key,
+        haz.smooth_info
     )
 end
 
@@ -333,7 +339,8 @@ function _adjust_hazard_states(haz::RuntimeSplineHazard, new_statefrom::Int, new
         haz.parnames, haz.npar_baseline, haz.npar_total,
         haz.hazard_fn, haz.cumhaz_fn, haz.has_covariates,
         haz.covar_names, haz.degree, haz.knots, haz.natural_spline,
-        haz.monotone, haz.extrapolation, haz.metadata, haz.shared_baseline_key
+        haz.monotone, haz.extrapolation, haz.metadata, haz.shared_baseline_key,
+        haz.smooth_info
     )
 end
 

@@ -58,19 +58,55 @@ See also: [`SplinePenalty`](@ref), [`PenaltyConfig`](@ref), [`compute_penalty`](
 """
 function build_penalty_config(model::MultistateProcess, 
                                penalties::Union{Nothing, SplinePenalty, Vector{SplinePenalty}};
-                               lambda_init::Float64=1.0)
-    # Handle nothing case
-    isnothing(penalties) && return PenaltyConfig()
+                               lambda_init::Float64=1.0,
+                               include_smooth_covariates::Bool=true)
+    # Compute parameter indices for each hazard (flat parameter vector)
+    param_offsets = _compute_hazard_param_offsets(model)
+    
+    # Determine covariate lambda sharing mode from penalties
+    share_covariate_lambda = false
+    if !isnothing(penalties)
+        penalty_rules = penalties isa SplinePenalty ? [penalties] : penalties
+        # Use the most specific (last) non-false setting found
+        for rule in penalty_rules
+            if rule.share_covariate_lambda != false
+                share_covariate_lambda = rule.share_covariate_lambda
+            end
+        end
+    end
+    
+    # Check for smooth covariate terms in any hazard
+    smooth_covariate_terms, shared_smooth_groups, n_smooth_lambda = if include_smooth_covariates
+        _build_smooth_covariate_penalty_terms(model, param_offsets, lambda_init, share_covariate_lambda)
+    else
+        (SmoothCovariatePenaltyTerm[], Vector{Int}[], 0)
+    end
+    
+    # Handle nothing case - still include smooth covariate terms if present
+    if isnothing(penalties)
+        if n_smooth_lambda > 0
+            return PenaltyConfig(PenaltyTerm[], TotalHazardPenaltyTerm[], smooth_covariate_terms,
+                                  Dict{Int,Vector{Int}}(), shared_smooth_groups, n_smooth_lambda)
+        else
+            return PenaltyConfig()
+        end
+    end
     
     # Normalize to vector
     penalty_rules = penalties isa SplinePenalty ? [penalties] : penalties
     
     # Find all spline hazards
     spline_hazard_indices = findall(h -> h isa _SplineHazard, model.hazards)
-    isempty(spline_hazard_indices) && return PenaltyConfig()
     
-    # Compute parameter indices for each hazard (flat parameter vector)
-    param_offsets = _compute_hazard_param_offsets(model)
+    # If no spline hazards, return config with only smooth covariate terms
+    if isempty(spline_hazard_indices)
+        if n_smooth_lambda > 0
+            return PenaltyConfig(PenaltyTerm[], TotalHazardPenaltyTerm[], smooth_covariate_terms,
+                                  Dict{Int,Vector{Int}}(), shared_smooth_groups, n_smooth_lambda)
+        else
+            return PenaltyConfig()
+        end
+    end
     
     # Resolve settings for each spline hazard
     resolved_settings = Dict{Int, NamedTuple}()  # hazard_index => (order, share_lambda, total_hazard)
@@ -230,7 +266,95 @@ function build_penalty_config(model::MultistateProcess,
         ))
     end
     
-    return PenaltyConfig(terms, total_hazard_terms, shared_lambda_groups, lambda_idx)
+    # Add smooth covariate penalty terms (already computed at start of function)
+    lambda_idx += n_smooth_lambda
+    
+    return PenaltyConfig(terms, total_hazard_terms, smooth_covariate_terms, shared_lambda_groups, shared_smooth_groups, lambda_idx)
+end
+
+"""
+    _build_smooth_covariate_penalty_terms(model, param_offsets, lambda_init, share_covariate_lambda)
+        -> (Vector{SmoothCovariatePenaltyTerm}, Vector{Vector{Int}}, Int)
+
+Discover and build penalty terms for smooth covariate effects (s(x)) in all hazards.
+
+Returns a tuple of:
+- `smooth_terms`: Vector of SmoothCovariatePenaltyTerm
+- `shared_smooth_groups`: Groups of term indices sharing λ (empty if no sharing)
+- `n_lambda`: Number of smoothing parameters for smooth terms
+
+# Sharing Modes
+- `false`: Each smooth term gets its own λ
+- `:hazard`: All smooth terms within each hazard share one λ
+- `:global`: All smooth terms in the model share one λ
+"""
+function _build_smooth_covariate_penalty_terms(model::MultistateProcess,
+                                                param_offsets::Vector{Tuple{Int,Int}},
+                                                lambda_init::Float64,
+                                                share_covariate_lambda::Union{Bool, Symbol})
+    smooth_terms = SmoothCovariatePenaltyTerm[]
+    shared_smooth_groups = Vector{Vector{Int}}()
+    
+    # Collect all smooth terms
+    for (haz_idx, hazard) in enumerate(model.hazards)
+        # Check if this hazard has smooth_info
+        !hasproperty(hazard, :smooth_info) && continue
+        isempty(hazard.smooth_info) && continue
+        
+        offset_start, _ = param_offsets[haz_idx]
+        
+        for info in hazard.smooth_info
+            # Adjust parameter indices from hazard-local to global flat vector
+            global_indices = [idx + offset_start - 1 for idx in info.par_indices]
+            
+            push!(smooth_terms, SmoothCovariatePenaltyTerm(
+                global_indices,
+                info.S,
+                lambda_init,
+                2,  # Default penalty order for smooth covariates
+                info.label,
+                hazard.hazname
+            ))
+        end
+    end
+    
+    # No smooth terms found
+    if isempty(smooth_terms)
+        return (smooth_terms, shared_smooth_groups, 0)
+    end
+    
+    # Determine number of lambdas and groupings based on sharing mode
+    if share_covariate_lambda == false
+        # Each term gets its own lambda
+        n_lambda = length(smooth_terms)
+        # No groups - each term independent
+    elseif share_covariate_lambda == :global
+        # All terms share one lambda
+        n_lambda = 1
+        push!(shared_smooth_groups, collect(1:length(smooth_terms)))
+    elseif share_covariate_lambda == :hazard
+        # Group by hazard name
+        hazard_to_indices = Dict{Symbol, Vector{Int}}()
+        for (i, term) in enumerate(smooth_terms)
+            if !haskey(hazard_to_indices, term.hazard_name)
+                hazard_to_indices[term.hazard_name] = Int[]
+            end
+            push!(hazard_to_indices[term.hazard_name], i)
+        end
+        
+        n_lambda = 0
+        for hazname in sort(collect(keys(hazard_to_indices)))
+            indices = hazard_to_indices[hazname]
+            if length(indices) > 1
+                push!(shared_smooth_groups, indices)
+            end
+            n_lambda += 1  # One lambda per hazard with smooth terms
+        end
+    else
+        error("Unexpected share_covariate_lambda value: $share_covariate_lambda")
+    end
+    
+    return (smooth_terms, shared_smooth_groups, n_lambda)
 end
 
 """

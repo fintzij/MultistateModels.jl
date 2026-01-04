@@ -211,6 +211,7 @@ struct HazardBuildContext
     rhs_names::Vector{String}
     shared_baseline_key::Union{Nothing,SharedBaselineKey}
     data::DataFrame  # For data-dependent operations like automatic knot placement
+    hazschema::Any
 end
 
 # Computed accessors for HazardBuildContext - avoids storing redundant data
@@ -255,6 +256,7 @@ function _prepare_hazard_context(hazard::HazardFunction,
         rhs_names,
         shared_key,
         data,
+        hazschema,
     )
 end
 
@@ -290,6 +292,7 @@ function _build_parametric_hazard_common(
     ncovar = _ncovar(ctx)
     npar_total = npar_baseline + ncovar
     covar_names = Symbol.(_covariate_labels(ctx.rhs_names))
+    smooth_info = _extract_smooth_info(ctx, parnames)
     
     haz_struct = HazType(
         ctx.hazname,
@@ -305,6 +308,7 @@ function _build_parametric_hazard_common(
         covar_names,
         ctx.metadata,
         ctx.shared_baseline_key,
+        smooth_info,
     )
     return haz_struct, zeros(Float64, npar_total)
 end
@@ -321,6 +325,48 @@ end
 function _semimarkov_covariate_parnames(ctx::HazardBuildContext)
     covars = _covariate_labels(ctx.rhs_names)
     return _prefixed_symbols(ctx.hazname, covars)
+end
+
+"""
+    _extract_smooth_info(ctx::HazardBuildContext, parnames::Vector{Symbol})
+
+Extract information about smooth covariate terms (s(x), te(x,y)) from the hazard schema.
+"""
+function _extract_smooth_info(ctx::HazardBuildContext, parnames::Vector{Symbol})
+    smooth_info = SmoothTermInfo[]
+    rhs = ctx.hazschema.rhs
+    
+    # MatrixTerm contains all terms on the RHS
+    terms = rhs isa StatsModels.MatrixTerm ? rhs.terms : (rhs,)
+    
+    for term in terms
+        if term isa SmoothTerm
+            # Find indices of coefficients for this term in parnames
+            cnames = StatsModels.coefnames(term)
+            prefixed_cnames = Symbol.(string(ctx.hazname) * "_" .* cnames)
+            
+            indices = [findfirst(==(p), parnames) for p in prefixed_cnames]
+            if any(isnothing, indices)
+                # This should not happen if parnames was built correctly
+                error("Could not find parameter indices for smooth term $(term.label) in hazard $(ctx.hazname)")
+            end
+            
+            push!(smooth_info, SmoothTermInfo(indices, term.S, term.label))
+        elseif term isa TensorProductTerm
+            # Find indices of coefficients for tensor product term
+            cnames = StatsModels.coefnames(term)
+            prefixed_cnames = Symbol.(string(ctx.hazname) * "_" .* cnames)
+            
+            indices = [findfirst(==(p), parnames) for p in prefixed_cnames]
+            if any(isnothing, indices)
+                error("Could not find parameter indices for tensor product term $(term.label) in hazard $(ctx.hazname)")
+            end
+            
+            push!(smooth_info, SmoothTermInfo(indices, term.S, term.label))
+        end
+    end
+    
+    return smooth_info
 end
 
 function _build_weibull_hazard(ctx::HazardBuildContext)
@@ -467,6 +513,7 @@ function _build_spline_hazard(ctx::HazardBuildContext)
     )
     
     # Build the internal RuntimeSplineHazard struct
+    smooth_info = _extract_smooth_info(ctx, parnames)
     haz_struct = RuntimeSplineHazard(
         ctx.hazname,
         hazard.statefrom,
@@ -486,6 +533,7 @@ function _build_spline_hazard(ctx::HazardBuildContext)
         hazard.extrapolation,
         ctx.metadata,
         ctx.shared_baseline_key,
+        smooth_info,
     )
     
     # Initialize parameters at zero (log scale → exp(0) = 1 for all coefficients)
@@ -521,76 +569,88 @@ function _generate_spline_hazard_fns(
     # Capture spline infrastructure in closures
     # Note: basis and extrap_method are immutable, safe to capture
     
-    if linpred_effect == :ph
-        # Proportional hazards: h(t|x) = h0(t) * exp(β'x)
-        hazard_fn = let B = basis, ext = extrap_method, mono = monotone, nb = nbasis, has_cov = has_covars
-            function(t, pars, covars)
-                # Handle both vector and NamedTuple parameter formats
-                if pars isa AbstractVector
-                    # Legacy vector format: first nbasis elements are spline coefficients
-                    spline_coefs_vec = pars[1:nb]
-                    covar_pars = has_cov ? pars[(nb+1):end] : Float64[]
-                else
-                    # NamedTuple format
-                    spline_coefs_vec = collect(values(pars.baseline))
-                    covar_pars = has_cov ? pars.covariates : NamedTuple()
-                end
-                
-                # Transform parameters to spline coefficients
-                coefs = _spline_ests2coefs(spline_coefs_vec, B, mono)
-                # Build spline on-the-fly
-                spline = Spline(B, coefs)
-                spline_ext = SplineExtrapolation(spline, ext)
-                # Evaluate baseline hazard
+    # Capture spline infrastructure in closures
+    # Note: basis and extrap_method are immutable, safe to capture
+    
+    hazard_fn = let B = basis, ext = extrap_method, mono = monotone, nb = nbasis, has_cov = has_covars, effect = linpred_effect
+        function(t, pars, covars)
+            # Handle both vector and NamedTuple parameter formats
+            if pars isa AbstractVector
+                # Legacy vector format: first nbasis elements are spline coefficients
+                spline_coefs_vec = pars[1:nb]
+                covar_pars = has_cov ? pars[(nb+1):end] : Float64[]
+            else
+                # NamedTuple format
+                spline_coefs_vec = collect(values(pars.baseline))
+                covar_pars = has_cov ? pars.covariates : NamedTuple()
+            end
+            
+            # Transform parameters to spline coefficients
+            coefs = _spline_ests2coefs(spline_coefs_vec, B, mono)
+            # Build spline on-the-fly
+            spline = Spline(B, coefs)
+            spline_ext = SplineExtrapolation(spline, ext)
+            
+            # Apply covariate effect - only if covariates actually provided
+            n_covars = covars isa AbstractVector ? length(covars) : length(covars)
+            if has_cov && n_covars > 0
+                linear_pred = pars isa AbstractVector ? 
+                              dot(collect(covars), covar_pars) : 
+                              _eval_linear_pred_named(covar_pars, covars)
+            else
+                linear_pred = 0.0
+            end
+
+            if effect == :aft
+                scale = exp(-linear_pred)
+                h0 = spline_ext(t * scale)
+                return h0 * scale
+            else
                 h0 = spline_ext(t)
-                # Apply covariate effect - only if covariates actually provided
-                n_covars = covars isa AbstractVector ? length(covars) : length(covars)
-                if has_cov && n_covars > 0
-                    linear_pred = pars isa AbstractVector ? 
-                                  dot(collect(covars), covar_pars) : 
-                                  _eval_linear_pred_named(covar_pars, covars)
-                else
-                    linear_pred = 0.0
-                end
                 return h0 * exp(linear_pred)
             end
         end
-        
-        cumhaz_fn = let B = basis, ext = extrap_method, mono = monotone, nb = nbasis, has_cov = has_covars
-            function(lb, ub, pars, covars)
-                # Handle both vector and NamedTuple parameter formats
-                if pars isa AbstractVector
-                    # Legacy vector format
-                    spline_coefs_vec = pars[1:nb]
-                    covar_pars = has_cov ? pars[(nb+1):end] : Float64[]
-                else
-                    # NamedTuple format
-                    spline_coefs_vec = collect(values(pars.baseline))
-                    covar_pars = has_cov ? pars.covariates : NamedTuple()
-                end
-                
-                # Transform parameters to spline coefficients
-                coefs = _spline_ests2coefs(spline_coefs_vec, B, mono)
-                # Build spline and its integral on-the-fly
-                spline = Spline(B, coefs)
-                spline_ext = SplineExtrapolation(spline, ext)
-                cumhaz_spline = integral(spline_ext.spline)
-                # Handle extrapolation for cumulative hazard
+    end
+    
+    cumhaz_fn = let B = basis, ext = extrap_method, mono = monotone, nb = nbasis, has_cov = has_covars, effect = linpred_effect
+        function(lb, ub, pars, covars)
+            # Handle both vector and NamedTuple parameter formats
+            if pars isa AbstractVector
+                # Legacy vector format
+                spline_coefs_vec = pars[1:nb]
+                covar_pars = has_cov ? pars[(nb+1):end] : Float64[]
+            else
+                # NamedTuple format
+                spline_coefs_vec = collect(values(pars.baseline))
+                covar_pars = has_cov ? pars.covariates : NamedTuple()
+            end
+            
+            # Transform parameters to spline coefficients
+            coefs = _spline_ests2coefs(spline_coefs_vec, B, mono)
+            # Build spline and its integral on-the-fly
+            spline = Spline(B, coefs)
+            spline_ext = SplineExtrapolation(spline, ext)
+            cumhaz_spline = integral(spline_ext.spline)
+            
+            # Apply covariate effect - only if covariates actually provided
+            n_covars_provided = covars isa NamedTuple ? length(covars) : length(covars)
+            if n_covars_provided > 0
+                linear_pred = pars isa AbstractVector ? 
+                              dot(collect(covars), covar_pars) : 
+                              _eval_linear_pred_named(covar_pars, covars)
+            else
+                linear_pred = 0.0
+            end
+
+            if effect == :aft
+                scale = exp(-linear_pred)
+                H0 = _eval_cumhaz_with_extrap(spline_ext, cumhaz_spline, lb * scale, ub * scale)
+                return H0
+            else
                 H0 = _eval_cumhaz_with_extrap(spline_ext, cumhaz_spline, lb, ub)
-                # Apply covariate effect - only if covariates actually provided
-                n_covars_provided = covars isa NamedTuple ? length(covars) : length(covars)
-                if n_covars_provided > 0
-                    linear_pred = pars isa AbstractVector ? 
-                                  dot(collect(covars), covar_pars) : 
-                                  _eval_linear_pred_named(covar_pars, covars)
-                else
-                    linear_pred = 0.0
-                end
                 return H0 * exp(linear_pred)
             end
         end
-    else
-        throw(ArgumentError("Spline hazards currently only support proportional hazards (linpred_effect=:ph), got :$(linpred_effect)"))
     end
     
     return hazard_fn, cumhaz_fn
@@ -1174,6 +1234,10 @@ function multistatemodel(hazards::HazardFunction...;
 
     # catch the model call (includes constraints for use by fit())
     modelcall = (hazards = hazards, data = data, constraints = constraints, SubjectWeights = SubjectWeights, ObservationWeights = ObservationWeights, CensoringPatterns = CensoringPatterns, EmissionMatrix = EmissionMatrix)
+
+    # Expand smooth term basis columns into data (make a copy to avoid mutating user data)
+    data = copy(data)
+    expand_all_smooth_terms!(data, hazards)
 
     # get indices for each subject in the dataset
     subjinds, nsubj = get_subjinds(data)

@@ -52,6 +52,8 @@ export
     @hazard,
     multistatemodel,
     fit,
+    s,
+    te,
     
     # --------------------------------------------------------------------------
     # Simulation
@@ -319,6 +321,10 @@ include("inference/fit_exact.jl")    # Exact data fitting
 include("inference/fit_markov.jl")   # Markov panel fitting
 include("inference/fit_mcem.jl")     # Semi-Markov MCEM fitting
 
+# smooths / spline hazards (must be before multistatemodel.jl)
+include("utilities/spline_utils.jl")
+include("hazard/smooth_terms.jl")
+
 # model generation
 include("construction/multistatemodel.jl")
 
@@ -337,7 +343,7 @@ include("inference/sampling.jl")
 # simulation
 include("simulation/simulate.jl")
 
-# smooths / spline hazards
+# spline baseline hazards (requires smooth_terms.jl already loaded)
 include("hazard/spline.jl")
 
 # penalty configuration builder (must be after spline.jl)

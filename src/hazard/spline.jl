@@ -63,10 +63,11 @@ struct SplineHazardInfo
     end
 end
 
-"""
-    build_penalty_matrix(basis, order::Int; knots::Vector{Float64}=Float64[])
+# build_penalty_matrix and helpers moved to utilities/spline_utils.jl
 
-Construct the derivative-based penalty matrix using Wood's (2016) algorithm.
+"""
+    place_interior_knots_pooled(model::MultistateProcess, origin::Int, nknots::Int;
+                                 lower_bound::Real=0.0) -> Vector{Float64}
 
 For a B-spline basis of order `m₁` and penalty order `m₂`, computes:
     S_{ij} = ∫ B_i^(m₂)(t) B_j^(m₂)(t) dt
@@ -104,179 +105,6 @@ v_linear = collect(1.0:length(basis))
 # References
 - Wood, S.N. (2016). "P-splines with derivative based penalties and tensor 
   product smoothing of unevenly distributed data." Statistics and Computing.
-"""
-function build_penalty_matrix(basis, order::Int; knots::Vector{Float64}=Float64[])
-    order >= 1 || throw(ArgumentError("Penalty order must be ≥ 1, got $order"))
-    
-    # Get knot vector - handle both BSplineBasis and RecombinedBSplineBasis
-    if isempty(knots)
-        knots = collect(BSplineKit.knots(basis))
-    end
-    
-    # Get number of basis functions
-    K = length(basis)
-    
-    # Get spline order (degree + 1)
-    m1 = BSplineKit.order(basis)
-    
-    # Derivative reduces order
-    m_deriv = m1 - order
-    if m_deriv < 1
-        # Derivative order exceeds spline degree, penalty is identically zero
-        @warn "Penalty order $order exceeds spline degree $(m1 - 1); returning zero matrix"
-        return zeros(K, K)
-    end
-    
-    # Number of Gauss-Legendre points per interval
-    # For exact integration of product of two derivatives (each degree m_deriv - 1):
-    # Product has degree 2*(m_deriv - 1), need (2*(m_deriv-1)+1)/2 ≈ m_deriv points
-    n_gauss = max(m_deriv, 2)
-    
-    # Get Gauss-Legendre nodes and weights on [-1, 1]
-    gl_nodes, gl_weights = _gauss_legendre(n_gauss)
-    
-    # Unique interior breakpoints (excluding repeated boundary knots)
-    unique_knots = unique(knots)
-    n_intervals = length(unique_knots) - 1
-    
-    # Initialize penalty matrix
-    S = zeros(K, K)
-    
-    # Derivative operator
-    deriv_op = Derivative(order)
-    
-    # Integrate over each knot interval
-    for q in 1:n_intervals
-        a, b = unique_knots[q], unique_knots[q + 1]
-        h = b - a
-        
-        # Skip degenerate intervals
-        h < 1e-14 && continue
-        
-        # Transform Gauss points to [a, b]
-        t_points = @. a + (gl_nodes + 1) * h / 2
-        w_scaled = @. gl_weights * h / 2
-        
-        # Evaluate basis derivatives at quadrature points
-        # BSplineKit returns a matrix: rows = basis functions, cols = evaluation points
-        for (i_pt, t) in enumerate(t_points)
-            # Get derivative values at this point
-            deriv_vals = _evaluate_basis_derivatives(basis, t, order)
-            
-            # Outer product contribution to penalty matrix
-            w = w_scaled[i_pt]
-            for i in 1:K
-                for j in i:K  # Only upper triangle due to symmetry
-                    S[i, j] += w * deriv_vals[i] * deriv_vals[j]
-                end
-            end
-        end
-    end
-    
-    # Symmetrize (copy upper to lower)
-    for i in 1:K
-        for j in (i+1):K
-            S[j, i] = S[i, j]
-        end
-    end
-    
-    return S
-end
-
-"""
-    _evaluate_basis_derivatives(basis, t::Real, order::Int) -> Vector{Float64}
-
-Evaluate all basis function derivatives of given order at point t.
-
-Returns a vector of length K where K is the number of basis functions.
-Uses BSplineKit's `diff` function to construct the derivative spline.
-"""
-function _evaluate_basis_derivatives(basis, t::Real, order::Int)
-    K = length(basis)
-    deriv_vals = zeros(K)
-    
-    # For each basis function, create a spline with unit coefficient
-    # and take the derivative using diff()
-    for i in 1:K
-        coeffs = zeros(K)
-        coeffs[i] = 1.0
-        spl = Spline(basis, coeffs)
-        
-        # Apply diff() `order` times to get the requested derivative
-        dspl = spl
-        for _ in 1:order
-            dspl = diff(dspl)
-        end
-        
-        deriv_vals[i] = dspl(t)
-    end
-    
-    return deriv_vals
-end
-
-"""
-    _gauss_legendre(n::Int) -> (nodes::Vector{Float64}, weights::Vector{Float64})
-
-Compute n-point Gauss-Legendre quadrature nodes and weights on [-1, 1].
-
-Uses the Golub-Welsch algorithm via eigenvalue decomposition of the 
-Jacobi matrix.
-"""
-function _gauss_legendre(n::Int)
-    n >= 1 || throw(ArgumentError("n must be ≥ 1"))
-    
-    if n == 1
-        return [0.0], [2.0]
-    end
-    
-    # Jacobi matrix for Legendre polynomials
-    # β_k = k / sqrt(4k² - 1)
-    beta = [k / sqrt(4.0 * k^2 - 1.0) for k in 1:(n-1)]
-    
-    # Tridiagonal Jacobi matrix (symmetric, so just need sub/super diagonal)
-    J = SymTridiagonal(zeros(n), beta)
-    
-    # Eigenvalues are nodes, eigenvectors give weights
-    eig = eigen(J)
-    nodes = eig.values
-    
-    # Weights: w_k = 2 * (first component of k-th eigenvector)²
-    weights = [2.0 * eig.vectors[1, k]^2 for k in 1:n]
-    
-    return nodes, weights
-end
-
-"""
-    place_interior_knots_pooled(model::MultistateProcess, origin::Int, nknots::Int;
-                                 lower_bound::Real=0.0) -> Vector{Float64}
-
-Place interior knots at quantiles of pooled event times from all transitions 
-originating from the given state.
-
-This function is used for competing risks when hazards share a penalty structure
-(via `shared_origin_tensor`). All hazards from the same origin must use the same
-knot locations to enable the Kronecker product penalty formulation.
-
-# Arguments
-- `model::MultistateProcess`: The multistate model (must have data attached)
-- `origin::Int`: The origin state to pool events from
-- `nknots::Int`: Number of interior knots to place
-- `lower_bound::Real=0.0`: Lower boundary (default 0 for sojourn times)
-
-# Returns
-- `Vector{Float64}`: Interior knot locations (excluding boundaries)
-
-# Notes
-- Pools all exact transitions (obstype 1 or 3) from the origin state
-- For panel data, uses surrogate simulation to estimate transition times
-- Returns evenly-spaced knots if no transitions are observed
-
-# Example
-```julia
-# Model with transitions 1→2 and 1→3
-model = multistatemodel(h12, h13; data=data)
-knots = place_interior_knots_pooled(model, 1, 5)  # Pool 1→2 and 1→3 events
-```
 """
 function place_interior_knots_pooled(model::MultistateProcess, origin::Int, nknots::Int;
                                       lower_bound::Real=0.0)
@@ -896,6 +724,7 @@ function _rebuild_model_with_knots!(model::MultistateProcess,
             haz.extrapolation,
             haz.metadata,
             haz.shared_baseline_key,
+            haz.smooth_info  # Preserve smooth term info from original hazard
         )
         
         # Replace in model

@@ -302,7 +302,7 @@ get_threading_config() = _GLOBAL_THREADING_CONFIG[]
 """
     SplinePenalty
 
-User-facing configuration for spline penalties in baseline hazards.
+User-facing configuration for spline penalties in baseline hazards and smooth covariates.
 
 Penalties are configured at the model level using a rule-based API.
 Rules are applied from general to specific: transition > origin > global.
@@ -315,6 +315,10 @@ Rules are applied from general to specific: transition > origin > global.
 - `order::Int=2`: Derivative to penalize (1=slope, 2=curvature, 3=change in curvature)
 - `total_hazard::Bool=false`: Penalize smoothness of total hazard out of this origin
 - `share_lambda::Bool=false`: Share λ across competing hazards from same origin
+- `share_covariate_lambda::Union{Bool, Symbol}=false`: Sharing mode for smooth covariate λ
+  - `false` — Separate λ per smooth term (default)
+  - `:hazard` — Share λ across all s() terms within each hazard
+  - `:global` — Share λ across all s() terms in the model
 
 # Examples
 ```julia
@@ -329,6 +333,12 @@ penalty = SplinePenalty(1, share_lambda=true)
 
 # Transition 1→2: first derivative (flatness) penalty
 penalty = SplinePenalty((1, 2), order=1)
+
+# Share smooth covariate λ within each hazard
+penalty = SplinePenalty(share_covariate_lambda=:hazard)
+
+# Share smooth covariate λ globally across all hazards
+penalty = SplinePenalty(share_covariate_lambda=:global)
 ```
 
 # Notes
@@ -337,6 +347,8 @@ penalty = SplinePenalty((1, 2), order=1)
 - For competing risks, the likelihood-motivated decomposition suggests separate
   control of total hazard and deviation penalties. Use `total_hazard=true` to
   enable the additional total hazard penalty term.
+- Smooth covariate sharing (`share_covariate_lambda`) is independent of baseline
+  hazard sharing (`share_lambda`).
 
 See also: [`PenaltyConfig`](@ref), [`SplineHazardInfo`](@ref)
 """
@@ -345,10 +357,12 @@ struct SplinePenalty
     order::Int
     total_hazard::Bool
     share_lambda::Bool
+    share_covariate_lambda::Union{Bool, Symbol}
     
     function SplinePenalty(selector::Union{Symbol, Int, Tuple{Int,Int}}=:all;
                             order::Int=2, total_hazard::Bool=false, 
-                            share_lambda::Bool=false)
+                            share_lambda::Bool=false,
+                            share_covariate_lambda::Union{Bool, Symbol}=false)
         order >= 1 || throw(ArgumentError("order must be ≥ 1, got $order"))
         
         # Validate selector type
@@ -363,7 +377,12 @@ struct SplinePenalty
                 throw(ArgumentError("Transition selector states must be ≥ 1, got $selector"))
         end
         
-        new(selector, order, total_hazard, share_lambda)
+        # Validate share_covariate_lambda
+        if share_covariate_lambda isa Symbol && share_covariate_lambda ∉ (:hazard, :global)
+            throw(ArgumentError("share_covariate_lambda must be false, :hazard, or :global, got :$share_covariate_lambda"))
+        end
+        
+        new(selector, order, total_hazard, share_lambda, share_covariate_lambda)
     end
 end
 
@@ -411,6 +430,28 @@ struct TotalHazardPenaltyTerm
 end
 
 """
+    SmoothCovariatePenaltyTerm
+
+Internal representation of a smooth covariate penalty term (for s(x) terms).
+
+# Fields
+- `param_indices::Vector{Int}`: Indices into flat parameter vector (may not be contiguous)
+- `S::Matrix{Float64}`: Penalty matrix (K × K)
+- `lambda::Float64`: Smoothing parameter
+- `order::Int`: Derivative order (from smooth term)
+- `label::String`: Label for the smooth term (e.g., "s(age)")
+- `hazard_name::Symbol`: Name of hazard containing this smooth term
+"""
+struct SmoothCovariatePenaltyTerm
+    param_indices::Vector{Int}
+    S::Matrix{Float64}
+    lambda::Float64
+    order::Int
+    label::String
+    hazard_name::Symbol
+end
+
+"""
     PenaltyConfig
 
 Internal representation of resolved penalty configuration for a model.
@@ -419,27 +460,52 @@ Created by resolving `SplinePenalty` rules against model structure.
 Used during likelihood evaluation to compute penalty contribution.
 
 # Fields
-- `terms::Vector{PenaltyTerm}`: Individual hazard penalty terms
+- `terms::Vector{PenaltyTerm}`: Individual baseline hazard penalty terms
 - `total_hazard_terms::Vector{TotalHazardPenaltyTerm}`: Total hazard penalties
-- `shared_lambda_groups::Dict{Int, Vector{Int}}`: Origin → indices of shared-λ terms
+- `smooth_covariate_terms::Vector{SmoothCovariatePenaltyTerm}`: Smooth covariate penalties
+- `shared_lambda_groups::Dict{Int, Vector{Int}}`: Origin → indices of shared-λ terms (baseline)
+- `shared_smooth_groups::Vector{Vector{Int}}`: Groups of smooth covariate term indices sharing λ
 - `n_lambda::Int`: Total number of smoothing parameters
 
 # Notes
 The penalty contribution to negative log-likelihood is:
-    P(β; λ) = (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ + (1/2) Σᵣ λ_H,r βᵣᵀ (𝟙𝟙ᵀ ⊗ S) βᵣ
+    P(β; λ) = (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ + (1/2) Σᵣ λ_H,r βᵣᵀ (𝟙𝟙ᵀ ⊗ S) βᵣ + (1/2) Σₖ λₖ βₖᵀ Sₖ βₖ
 """
 struct PenaltyConfig
     terms::Vector{PenaltyTerm}
     total_hazard_terms::Vector{TotalHazardPenaltyTerm}
+    smooth_covariate_terms::Vector{SmoothCovariatePenaltyTerm}
     shared_lambda_groups::Dict{Int, Vector{Int}}
+    shared_smooth_groups::Vector{Vector{Int}}
     n_lambda::Int
     
+    function PenaltyConfig(terms::Vector{PenaltyTerm},
+                            total_hazard_terms::Vector{TotalHazardPenaltyTerm},
+                            smooth_covariate_terms::Vector{SmoothCovariatePenaltyTerm},
+                            shared_lambda_groups::Dict{Int, Vector{Int}},
+                            shared_smooth_groups::Vector{Vector{Int}},
+                            n_lambda::Int)
+        n_lambda >= 0 || throw(ArgumentError("n_lambda must be ≥ 0"))
+        new(terms, total_hazard_terms, smooth_covariate_terms, shared_lambda_groups, shared_smooth_groups, n_lambda)
+    end
+    
+    # 5-argument constructor (no shared_smooth_groups) for backward compatibility
+    function PenaltyConfig(terms::Vector{PenaltyTerm},
+                            total_hazard_terms::Vector{TotalHazardPenaltyTerm},
+                            smooth_covariate_terms::Vector{SmoothCovariatePenaltyTerm},
+                            shared_lambda_groups::Dict{Int, Vector{Int}},
+                            n_lambda::Int)
+        n_lambda >= 0 || throw(ArgumentError("n_lambda must be ≥ 0"))
+        new(terms, total_hazard_terms, smooth_covariate_terms, shared_lambda_groups, Vector{Int}[], n_lambda)
+    end
+    
+    # Legacy 4-argument constructor for backward compatibility
     function PenaltyConfig(terms::Vector{PenaltyTerm},
                             total_hazard_terms::Vector{TotalHazardPenaltyTerm},
                             shared_lambda_groups::Dict{Int, Vector{Int}},
                             n_lambda::Int)
         n_lambda >= 0 || throw(ArgumentError("n_lambda must be ≥ 0"))
-        new(terms, total_hazard_terms, shared_lambda_groups, n_lambda)
+        new(terms, total_hazard_terms, SmoothCovariatePenaltyTerm[], shared_lambda_groups, Vector{Int}[], n_lambda)
     end
 end
 
@@ -448,14 +514,14 @@ end
 
 Create an empty penalty configuration (no penalties).
 """
-PenaltyConfig() = PenaltyConfig(PenaltyTerm[], TotalHazardPenaltyTerm[], Dict{Int,Vector{Int}}(), 0)
+PenaltyConfig() = PenaltyConfig(PenaltyTerm[], TotalHazardPenaltyTerm[], SmoothCovariatePenaltyTerm[], Dict{Int,Vector{Int}}(), Vector{Int}[], 0)
 
 """
     has_penalties(config::PenaltyConfig) -> Bool
 
 Check if the penalty configuration contains any active penalty terms.
 """
-has_penalties(config::PenaltyConfig) = !isempty(config.terms) || !isempty(config.total_hazard_terms)
+has_penalties(config::PenaltyConfig) = !isempty(config.terms) || !isempty(config.total_hazard_terms) || !isempty(config.smooth_covariate_terms)
 
 """
     compute_penalty(beta::AbstractVector, config::PenaltyConfig) -> Float64
@@ -467,7 +533,7 @@ Compute the total penalty contribution for given coefficients.
 - `config`: Resolved penalty configuration
 
 # Returns
-Penalty value: (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ + total hazard penalties
+Penalty value: (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ + total hazard penalties + smooth covariate penalties
 
 # Notes
 - Coefficients must be on natural scale (positive for hazard splines)
@@ -478,7 +544,7 @@ function compute_penalty(beta::AbstractVector{T}, config::PenaltyConfig) where T
     
     penalty = zero(T)
     
-    # Individual hazard penalties
+    # Individual baseline hazard penalties
     for term in config.terms
         β_j = @view beta[term.hazard_indices]
         penalty += term.lambda * dot(β_j, term.S * β_j)
@@ -493,6 +559,12 @@ function compute_penalty(beta::AbstractVector{T}, config::PenaltyConfig) where T
             β_total .+= @view beta[idx_range]
         end
         penalty += term.lambda_H * dot(β_total, term.S * β_total)
+    end
+    
+    # Smooth covariate penalties
+    for term in config.smooth_covariate_terms
+        β_k = beta[term.param_indices]  # Use Vector indexing (may not be contiguous)
+        penalty += term.lambda * dot(β_k, term.S * β_k)
     end
     
     return penalty / 2

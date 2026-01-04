@@ -105,7 +105,7 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
         # Use @view to avoid DataFrameRow allocation
         row_data = @view subjectdata[i, :]
 
-        ll += survprob(
+        val = survprob(
             subjectdata.sojourn[i],
             subjectdata.sojourn[i] + subjectdata.increment[i],
             pars,
@@ -115,6 +115,8 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
             give_log = true,
             apply_transform = use_transform,
             cache_context = tt_context)
+        
+        ll += val
  
         # accumulate hazard if there is a transition
         if subjectdata.statefrom[i] != subjectdata.stateto[i]
@@ -131,6 +133,7 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
                 apply_transform = hazards[transind].metadata.time_transform,
                 cache_context = tt_context,
                 hazard_slot = transind)
+            
             ll += log(haz_value)
         end
      end
@@ -144,7 +147,7 @@ end
 
 Convenience wrapper that evaluates the log-likelihood of a single sample path using the
 current model definition. Accepts various parameter container types (see `prepare_parameters`)
-and reuses `loglik_path` for the heavy lifting.
+and uses `_compute_path_loglik_fused` for efficient, correct evaluation (including AFT+TVC).
 
 # Arguments
 - `parameters`: Tuple, NamedTuple, or flat AbstractVector (will be unflattened internally)
@@ -155,12 +158,50 @@ and reuses `loglik_path` for the heavy lifting.
 function loglik(parameters, path::SamplePath, hazards::Vector{<:_Hazard}, model::MultistateProcess)
     pars = prepare_parameters(parameters, model)
 
-    # build a subject-level dataframe aligned with the sample path
+    # Build minimal cache for this subject
     subj_inds = model.subjectindices[path.subj]
     subj_dat = view(model.data, subj_inds, :)
-    subjdat_df = make_subjdat(path, subj_dat)
-
-    return loglik_path(pars, subjdat_df, hazards, model.totalhazards, model.tmat)
+    
+    # Construct SubjectCovarCache locally
+    # Note: This is slightly inefficient compared to reusing a global cache,
+    # but this function is typically used in contexts where we don't have the global cache handy.
+    # For MCEM inner loops, we might want to optimize this further, but correctness comes first.
+    # Convert names to Symbol for proper comparison (names() returns Vector{String})
+    covar_cols = setdiff(Symbol.(names(model.data)), [:id, :tstart, :tstop, :statefrom, :stateto, :obstype])
+    has_covars = !isempty(covar_cols)
+    
+    if has_covars
+        covar_data = subj_dat[:, covar_cols]
+        tstart = collect(subj_dat.tstart)
+    else
+        covar_data = DataFrame()
+        tstart = Float64[]
+    end
+    
+    subj_cache = SubjectCovarCache(tstart, covar_data)
+    
+    # Covar names per hazard
+    covar_names_per_hazard = [
+        hasfield(typeof(hazards[h]), :covar_names) ? 
+            hazards[h].covar_names : 
+            extract_covar_names(hazards[h].parnames)
+        for h in eachindex(hazards)
+    ]
+    
+    # Time transform context
+    any_time_transform = any(h -> h.metadata.time_transform, hazards)
+    tt_context = if any_time_transform
+        sample_df = isempty(covar_data) ? nothing : covar_data[1:1, :]
+        maybe_time_transform_context(pars, sample_df, hazards)
+    else
+        nothing
+    end
+    
+    # Use the fused path likelihood computation which correctly handles AFT+TVC
+    return _compute_path_loglik_fused(
+        path, pars, hazards, model.totalhazards, model.tmat,
+        subj_cache, covar_names_per_hazard, tt_context, Float64
+    )
 end
 
 ########################################################

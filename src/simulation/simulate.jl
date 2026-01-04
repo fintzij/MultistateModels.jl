@@ -924,27 +924,60 @@ function simulate_path(model::MultistateProcess, subj::Int64;
         u = max(rand(rng), _DELTA_U)
     end
 
+    # initialize effective times for AFT tracking
+    # effective_times[h] tracks the accumulated effective time for hazard h
+    effective_times = zeros(Float64, length(model.hazards))
+
     # simulate path
     while keep_going
         use_transform = time_transform && _time_transform_enabled(model.totalhazards[scur], model.hazards)
         
+        # Helper to compute cumulative hazard increment over a clock time interval dt
+        # This replaces survprob() to correctly handle effective time accumulation for AFT
+        function compute_cumhaz_increment(dt)
+            total_cumhaz = 0.0
+            @inbounds for h_idx in model.totalhazards[scur].components
+                hazard = model.hazards[h_idx]
+                pars = params[h_idx]
+                covars = covars_cache[h_idx]
+                
+                if hazard.metadata.linpred_effect == :aft
+                    # AFT: H(t) = H0(tau(t))
+                    # tau(t+dt) = tau(t) + dt * exp(-linpred)
+                    linpred = _linear_predictor(pars, covars, hazard)
+                    scale = exp(-linpred)
+                    tau_start = effective_times[h_idx]
+                    tau_end = tau_start + dt * scale
+                    
+                    # Evaluate baseline cumulative hazard over [tau_start, tau_end]
+                    # We pass use_effective_time=true so eval_cumhaz knows these are effective times
+                    total_cumhaz += eval_cumhaz(hazard, tau_start, tau_end, pars, covars; 
+                                              use_effective_time=true, 
+                                              apply_transform=use_transform,
+                                              cache_context=tt_context,
+                                              hazard_slot=h_idx)
+                else
+                    # PH / others: standard evaluation over [timeinstate, timeinstate + dt]
+                    total_cumhaz += eval_cumhaz(hazard, timeinstate, timeinstate + dt, pars, covars;
+                                              use_effective_time=false,
+                                              apply_transform=use_transform,
+                                              cache_context=tt_context,
+                                              hazard_slot=h_idx)
+                end
+            end
+            return total_cumhaz
+        end
+
         # calculate event probability over the next interval
-        interval_incid = (1 - cuminc) * (1 - survprob(
-            timeinstate,
-            timeinstate + tstop - tcur,
-            params,
-            covars_cache,
-            model.totalhazards[scur],
-            model.hazards;
-            give_log = false,
-            apply_transform = use_transform,
-            cache_context = tt_context))
+        # interval_incid = (1 - cuminc) * (1 - exp(-compute_cumhaz_increment(tstop - tcur)))
+        
+        interval_len = tstop - tcur
+        cumhaz_incr = compute_cumhaz_increment(interval_len)
+        interval_incid = (1 - cuminc) * (1 - exp(-cumhaz_incr))
 
         # check if event happened in the interval
         if (u < (cuminc + interval_incid)) && (u >= cuminc)
 
-            interval_len = tstop - tcur
-            
             # Use closed-form for exponential hazards, root-finding otherwise
             if is_state_all_markov[scur]
                 # Closed-form: compute total rate and use analytical formula
@@ -953,18 +986,12 @@ function simulate_path(model::MultistateProcess, subj::Int64;
                 timeincrement = _find_jump_time_exponential(u, cuminc, total_rate, interval_len)
             else
                 # Non-exponential: use root-finding
-                current_timeinstate = timeinstate
                 gap_fn = t -> begin
-                    surv = survprob(
-                        current_timeinstate,
-                        current_timeinstate + t,
-                        params,
-                        covars_cache,
-                        model.totalhazards[scur],
-                        model.hazards;
-                        give_log = false,
-                        apply_transform = use_transform,
-                        cache_context = tt_context)
+                    # surv = exp(-compute_cumhaz_increment(t))
+                    # But compute_cumhaz_increment uses effective_times which are fixed at start of interval
+                    # This is correct: we want to find t such that H(t) matches target
+                    dH = compute_cumhaz_increment(t)
+                    surv = exp(-dH)
                     cuminc + (1 - cuminc) * (1 - surv) - u
                 end
                 timeincrement = _find_jump_time(solver, gap_fn, _DELTA_U, interval_len)
@@ -972,21 +999,61 @@ function simulate_path(model::MultistateProcess, subj::Int64;
 
             timeinstate += timeincrement
 
-            # calculate next state transition probabilities 
-            # next_state_probs!(ns_probs, timeinstate, scur, subjdat_row, model.parameters, model.hazards, model.totalhazards, model.tmat)
+            # Update effective times for the partial interval
+            @inbounds for h_idx in model.totalhazards[scur].components
+                hazard = model.hazards[h_idx]
+                if hazard.metadata.linpred_effect == :aft
+                    pars = params[h_idx]
+                    covars = covars_cache[h_idx]
+                    linpred = _linear_predictor(pars, covars, hazard)
+                    effective_times[h_idx] += timeincrement * exp(-linpred)
+                end
+            end
 
+            # calculate next state transition probabilities 
             trans_inds = transitions_by_state[scur]
-            next_state_probs!(
-                ns_probs,
-                trans_inds,
-                timeinstate,
-                scur,
-                covars_cache,
-                params,
-                model.hazards,
-                model.totalhazards;
-                apply_transform = use_transform,
-                cache_context = tt_context)
+            
+            # We need to manually compute transition probabilities using effective times.
+            fill!(ns_probs, 0.0)
+            total_haz = 0.0
+            
+            @inbounds for dest_state in trans_inds
+                h_idx = model.tmat[scur, dest_state]
+                hazard = model.hazards[h_idx]
+                pars = params[h_idx]
+                covars = covars_cache[h_idx]
+                
+                if hazard.metadata.linpred_effect == :aft
+                    linpred = _linear_predictor(pars, covars, hazard)
+                    tau = effective_times[h_idx] # This is now at the event time
+                    
+                    # h(t) = h0(tau) * exp(-linpred)
+                    # We use eval_hazard with effective time
+                    haz_val = eval_hazard(hazard, tau, pars, covars; 
+                                        use_effective_time=true, 
+                                        apply_transform=use_transform,
+                                        cache_context=tt_context,
+                                        hazard_slot=h_idx)
+                else
+                    haz_val = eval_hazard(hazard, timeinstate, pars, covars;
+                                        use_effective_time=false,
+                                        apply_transform=use_transform,
+                                        cache_context=tt_context,
+                                        hazard_slot=h_idx)
+                end
+                
+                ns_probs[dest_state] = haz_val
+                total_haz += haz_val
+            end
+            
+            # Normalize
+            if total_haz > 0
+                ns_probs ./= total_haz
+            else
+                # Should not happen if event occurred, but safety fallback
+                ns_probs[trans_inds[1]] = 1.0 
+            end
+
             scur = _sample_next_state(rng, ns_probs, trans_inds)
             
             # increment time in state and cache the jump time and state
@@ -1002,6 +1069,7 @@ function simulate_path(model::MultistateProcess, subj::Int64;
                 u           = max(rand(rng), _DELTA_U) # sample cumulative incidence
                 cuminc      = 0.0 # reset cuminc
                 timeinstate = 0.0 # reset time in state
+                fill!(effective_times, 0.0) # reset effective times
             end
 
         elseif u >= (cuminc + interval_incid) # no transition in interval
@@ -1011,6 +1079,17 @@ function simulate_path(model::MultistateProcess, subj::Int64;
 
                 # increment the time in state
                 timeinstate += tstop - tcur
+
+                # Update effective times for the full interval
+                @inbounds for h_idx in model.totalhazards[scur].components
+                    hazard = model.hazards[h_idx]
+                    if hazard.metadata.linpred_effect == :aft
+                        pars = params[h_idx]
+                        covars = covars_cache[h_idx]
+                        linpred = _linear_predictor(pars, covars, hazard)
+                        effective_times[h_idx] += (tstop - tcur) * exp(-linpred)
+                    end
+                end
 
                 # increment cumulative inicidence
                 cuminc += interval_incid

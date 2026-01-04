@@ -263,10 +263,14 @@ For splines, h(t|x) = h₀(t) * exp(β'x) for PH.
     
     effect = hazard.metadata.linpred_effect
     if effect == :aft
-        # AFT: h(t) * exp(-linpred) - time is scaled, hazard adjusted
-        return base_haz * exp(-linpred)
+        # AFT: h(t|x) = h₀(t * exp(-linpred)) * exp(-linpred)
+        # Scale time by exp(-linpred) before evaluating baseline
+        scale = exp(-linpred)
+        base_haz = hazard.hazard_fn(t * scale, pars, NamedTuple())
+        return base_haz * scale
     else
-        # PH: h(t) * exp(linpred)
+        # PH: h(t|x) = h₀(t) * exp(linpred)
+        base_haz = hazard.hazard_fn(t, pars, NamedTuple())
         return base_haz * exp(linpred)
     end
 end
@@ -278,14 +282,16 @@ Time transform for spline cumulative hazard.
 """
 @inline function _time_transform_cumhaz(hazard::RuntimeSplineHazard, pars::AbstractVector, lb::Real, ub::Real, linpred::Real)
     # The cumhaz_fn closure handles baseline spline cumulative hazard
-    base_cumhaz = hazard.cumhaz_fn(lb, ub, pars, NamedTuple())
     
     effect = hazard.metadata.linpred_effect
     if effect == :aft
-        # AFT: H(t) * exp(-linpred)
-        return base_cumhaz * exp(-linpred)
+        # AFT: H(t|x) = H₀(t * exp(-linpred))
+        # So H(ub|x) - H(lb|x) = H₀(ub * exp(-linpred)) - H₀(lb * exp(-linpred))
+        scale = exp(-linpred)
+        return hazard.cumhaz_fn(lb * scale, ub * scale, pars, NamedTuple())
     else
-        # PH: H(t) * exp(linpred)
+        # PH: H(t|x) = H₀(t) * exp(linpred)
+        base_cumhaz = hazard.cumhaz_fn(lb, ub, pars, NamedTuple())
         return base_cumhaz * exp(linpred)
     end
 end

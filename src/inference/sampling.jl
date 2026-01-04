@@ -771,6 +771,8 @@ function _compute_ess_and_weights!(
             subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
         end
     else
+        weights_raw = exp.(vec(logweights))
+        copyto!(ImportanceWeights[i], normalize(weights_raw, 1))
         subj_ess[i] = ParetoSmooth.relative_eff(logweights; source = "other")[1] * length(loglik_target[i])
     end
 end

@@ -168,7 +168,9 @@ function maybe_time_transform_context(pars,
     time_data = (subjectdata !== nothing && hasproperty(subjectdata, time_column)) ?
         getproperty(subjectdata, time_column) : nothing
     time_type = _time_column_eltype(time_data)
-    return TimeTransformContext(lin_type, time_type, length(hazards))
+    # Promote time_type to lin_type to handle AFT where time becomes Dual
+    actual_time_type = promote_type(lin_type, time_type)
+    return TimeTransformContext(lin_type, actual_time_type, length(hazards))
 end
 
 const _TIME_TRANSFORM_CACHE_ENABLED = Ref(true)

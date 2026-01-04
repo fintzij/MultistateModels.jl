@@ -20,7 +20,8 @@ This is called once per model and reused across all likelihood evaluations.
 """
 function build_subject_covar_cache(model::MultistateProcess)
     n_subjects = length(model.subjectindices)
-    covar_cols = setdiff(names(model.data), [:id, :tstart, :tstop, :statefrom, :stateto, :obstype])
+    # Convert names to Symbol for proper comparison (names() returns Vector{String})
+    covar_cols = setdiff(Symbol.(names(model.data)), [:id, :tstart, :tstop, :statefrom, :stateto, :obstype])
     has_covars = !isempty(covar_cols)
     
     caches = Vector{SubjectCovarCache}(undef, n_subjects)
@@ -507,6 +508,10 @@ function _compute_path_loglik_fused(
     # Initialize log-likelihood for this path
     ll = zero(T)
     
+    # Track effective times for AFT models
+    # We need one accumulator per hazard
+    effective_times = zeros(T, n_hazards)
+    
     # Pre-extract hazard parameters by index to avoid repeated NamedTuple lookups
     # This converts dynamic symbol lookup to static tuple indexing
     pars_indexed = values(pars)  # Convert NamedTuple to Tuple for indexed access
@@ -525,6 +530,11 @@ function _compute_path_loglik_fused(
             statefrom = path.states[i]
             stateto = path.states[i+1]
             
+            # Reset effective times if clock reset (start of sojourn)
+            if lb == 0.0
+                fill!(effective_times, zero(T))
+            end
+            
             # Get total hazard for origin state
             tothaz = totalhazards[statefrom]
             
@@ -540,12 +550,42 @@ function _compute_path_loglik_fused(
                     # Extract covariates
                     covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[h])
                     
-                    # Cumulative hazard (use hazard-specific transform flag)
-                    cumhaz = eval_cumhaz(
-                        hazard, lb, ub, hazard_pars, covars;
-                        apply_transform = hazard.metadata.time_transform,
-                        cache_context = tt_context,
-                        hazard_slot = h)
+                    # Check for AFT
+                    is_aft = hazard.metadata.linpred_effect == :aft
+                    
+                    # Calculate effective time increment
+                    # For PH, scale is 1.0, so effective time = clock time
+                    # For AFT, scale = exp(-linpred)
+                    # We compute linpred here to get the scale
+                    # Note: eval_cumhaz will recompute linpred, but that's unavoidable unless we refactor deeper
+                    # Optimization: if not AFT, we don't strictly need effective_times logic, 
+                    # but keeping it uniform is cleaner. However, for PH, we can just use lb/ub.
+                    
+                    if is_aft
+                        linpred = _linear_predictor(hazard_pars, covars, hazard)
+                        scale = exp(-linpred)
+                        delta_tau = (ub - lb) * scale
+                        
+                        tau_start = effective_times[h]
+                        tau_end = tau_start + delta_tau
+                        effective_times[h] = tau_end
+                        
+                        # Cumulative hazard using effective time
+                        cumhaz = eval_cumhaz(
+                            hazard, tau_start, tau_end, hazard_pars, covars;
+                            apply_transform = hazard.metadata.time_transform,
+                            cache_context = tt_context,
+                            hazard_slot = h,
+                            use_effective_time = true)
+                    else
+                        # Standard PH evaluation (effective time = clock time)
+                        cumhaz = eval_cumhaz(
+                            hazard, lb, ub, hazard_pars, covars;
+                            apply_transform = hazard.metadata.time_transform,
+                            cache_context = tt_context,
+                            hazard_slot = h,
+                            use_effective_time = false)
+                    end
                     
                     ll -= cumhaz
                 end
@@ -557,11 +597,26 @@ function _compute_path_loglik_fused(
                     hazard_pars = pars_indexed[trans_h]  # Fast indexed access
                     covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[trans_h])
                     
-                    haz_value = eval_hazard(
-                        hazard, ub, hazard_pars, covars;
-                        apply_transform = hazard.metadata.time_transform,
-                        cache_context = tt_context,
-                        hazard_slot = trans_h)
+                    is_aft = hazard.metadata.linpred_effect == :aft
+                    
+                    if is_aft
+                        # Use the effective time we just calculated
+                        tau_end = effective_times[trans_h]
+                        
+                        haz_value = eval_hazard(
+                            hazard, tau_end, hazard_pars, covars;
+                            apply_transform = hazard.metadata.time_transform,
+                            cache_context = tt_context,
+                            hazard_slot = trans_h,
+                            use_effective_time = true)
+                    else
+                        haz_value = eval_hazard(
+                            hazard, ub, hazard_pars, covars;
+                            apply_transform = hazard.metadata.time_transform,
+                            cache_context = tt_context,
+                            hazard_slot = trans_h,
+                            use_effective_time = false)
+                    end
                     
                     ll += log(haz_value)
                 end
@@ -575,6 +630,11 @@ function _compute_path_loglik_fused(
         intervals = compute_intervals_from_path(path, subj_cache)
         
         for interval in intervals
+            # Reset effective times if clock reset
+            if interval.lb == 0.0
+                fill!(effective_times, zero(T))
+            end
+            
             tothaz = totalhazards[interval.statefrom]
             
             if tothaz isa _TotalHazardTransient
@@ -583,11 +643,31 @@ function _compute_path_loglik_fused(
                     hazard_pars = pars_indexed[h]  # Fast indexed access
                     covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[h])
                     
-                    cumhaz = eval_cumhaz(
-                        hazard, interval.lb, interval.ub, hazard_pars, covars;
-                        apply_transform = hazard.metadata.time_transform,
-                        cache_context = tt_context,
-                        hazard_slot = h)
+                    is_aft = hazard.metadata.linpred_effect == :aft
+                    
+                    if is_aft
+                        linpred = _linear_predictor(hazard_pars, covars, hazard)
+                        scale = exp(-linpred)
+                        delta_tau = (interval.ub - interval.lb) * scale
+                        
+                        tau_start = effective_times[h]
+                        tau_end = tau_start + delta_tau
+                        effective_times[h] = tau_end
+                        
+                        cumhaz = eval_cumhaz(
+                            hazard, tau_start, tau_end, hazard_pars, covars;
+                            apply_transform = hazard.metadata.time_transform,
+                            cache_context = tt_context,
+                            hazard_slot = h,
+                            use_effective_time = true)
+                    else
+                        cumhaz = eval_cumhaz(
+                            hazard, interval.lb, interval.ub, hazard_pars, covars;
+                            apply_transform = hazard.metadata.time_transform,
+                            cache_context = tt_context,
+                            hazard_slot = h,
+                            use_effective_time = false)
+                    end
                     
                     ll -= cumhaz
                 end
@@ -598,11 +678,25 @@ function _compute_path_loglik_fused(
                     hazard_pars = pars_indexed[trans_h]  # Fast indexed access
                     covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[trans_h])
                     
-                    haz_value = eval_hazard(
-                        hazard, interval.ub, hazard_pars, covars;
-                        apply_transform = hazard.metadata.time_transform,
-                        cache_context = tt_context,
-                        hazard_slot = trans_h)
+                    is_aft = hazard.metadata.linpred_effect == :aft
+                    
+                    if is_aft
+                        tau_end = effective_times[trans_h]
+                        
+                        haz_value = eval_hazard(
+                            hazard, tau_end, hazard_pars, covars;
+                            apply_transform = hazard.metadata.time_transform,
+                            cache_context = tt_context,
+                            hazard_slot = trans_h,
+                            use_effective_time = true)
+                    else
+                        haz_value = eval_hazard(
+                            hazard, interval.ub, hazard_pars, covars;
+                            apply_transform = hazard.metadata.time_transform,
+                            cache_context = tt_context,
+                            hazard_slot = trans_h,
+                            use_effective_time = false)
+                    end
                     
                     ll += log(haz_value)
                 end

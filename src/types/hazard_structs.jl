@@ -14,6 +14,23 @@
 # =============================================================================
 
 """
+    SmoothTermInfo
+
+Information about a smooth covariate term (e.g., s(x)) in a hazard.
+Used for penalty construction and smoothing parameter selection.
+
+# Fields
+- `par_indices::Vector{Int}`: Indices of the coefficients in the hazard's parameter vector
+- `S::Matrix{Float64}`: Penalty matrix for these coefficients
+- `label::String`: Label for the smooth term (e.g., "s(age)")
+"""
+struct SmoothTermInfo
+    par_indices::Vector{Int}
+    S::Matrix{Float64}
+    label::String
+end
+
+"""
     MarkovHazard
 
 Consolidated hazard type for Markov processes (time-homogeneous).
@@ -33,6 +50,7 @@ Supports exponential family hazards with optional covariates.
 - `covar_names::Vector{Symbol}`: Pre-extracted covariate names for fast lookup
 - `metadata::HazardMetadata`: Tang/linpred metadata
 - `shared_baseline_key::Union{Nothing,SharedBaselineKey}`: identifies Tang-sharable baselines
+- `smooth_info::Vector{SmoothTermInfo}`: Information for smooth covariate terms (s(x), te(x,y))
 """
 struct MarkovHazard <: _MarkovHazard
     hazname::Symbol
@@ -48,6 +66,7 @@ struct MarkovHazard <: _MarkovHazard
     covar_names::Vector{Symbol}
     metadata::HazardMetadata
     shared_baseline_key::Union{Nothing,SharedBaselineKey}
+    smooth_info::Vector{SmoothTermInfo}
 end
 
 """
@@ -70,6 +89,7 @@ Supports Weibull and Gompertz families with optional covariates.
 - `covar_names::Vector{Symbol}`: Pre-extracted covariate names for fast lookup
 - `metadata::HazardMetadata`: Tang/linpred metadata
 - `shared_baseline_key::Union{Nothing,SharedBaselineKey}`
+- `smooth_info::Vector{SmoothTermInfo}`: Information for smooth covariate terms (s(x), te(x,y))
 """
 struct SemiMarkovHazard <: _SemiMarkovHazard
     hazname::Symbol
@@ -85,6 +105,7 @@ struct SemiMarkovHazard <: _SemiMarkovHazard
     covar_names::Vector{Symbol}
     metadata::HazardMetadata
     shared_baseline_key::Union{Nothing,SharedBaselineKey}
+    smooth_info::Vector{SmoothTermInfo}
 end
 
 """
@@ -116,6 +137,7 @@ during model construction.
 - `extrapolation::String`: Extrapolation method ("flat", "linear", or "survextrap")
 - `metadata::HazardMetadata`: Tang/linpred metadata
 - `shared_baseline_key::Union{Nothing,SharedBaselineKey}`
+- `smooth_info::Vector{SmoothTermInfo}`: Information for smooth covariate terms (s(x), te(x,y))
 """
 struct RuntimeSplineHazard <: _SplineHazard
     hazname::Symbol
@@ -136,6 +158,7 @@ struct RuntimeSplineHazard <: _SplineHazard
     extrapolation::String
     metadata::HazardMetadata
     shared_baseline_key::Union{Nothing,SharedBaselineKey}
+    smooth_info::Vector{SmoothTermInfo}
 end
 
 """
