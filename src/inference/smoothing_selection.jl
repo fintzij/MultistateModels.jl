@@ -488,6 +488,110 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
 end
 
 """
+    compute_loocv_criterion(lambda::Vector{Float64}, beta_init::Vector{Float64},
+                            model::MultistateProcess, data::ExactData,
+                            penalty_config::PenaltyConfig;
+                            maxiters::Int=50, verbose::Bool=false) -> Float64
+
+Compute exact Leave-One-Out Cross-Validation criterion by refitting n times.
+
+This is the gold-standard LOOCV criterion:
+```math
+V_{LOOCV}(\\lambda) = \\sum_{i=1}^{n} D_i(\\hat\\beta^{-i})
+```
+
+where ``\\hat\\beta^{-i}`` is the penalized MLE with subject ``i`` excluded from the data.
+Unlike PIJCV, which approximates ``\\hat\\beta^{-i}`` via a Newton step, exact LOOCV
+refits the model n times, each time leaving out one observation.
+
+# Computational Cost
+- O(n × fitting_cost) — expensive but exact
+- For n=100 subjects and 50 iterations per fit: ~5000 optimization iterations total
+
+# Implementation
+Uses subject weights to exclude observations: sets weight=0 for subject i,
+refits the model, then evaluates subject i's likelihood at the LOO estimate.
+
+# Arguments
+- `lambda`: Smoothing parameter vector (natural scale, not log)
+- `beta_init`: Initial coefficient estimate (warm start for each LOO fit)
+- `model`: MultistateProcess model (subject weights will be temporarily modified)
+- `data`: ExactData container
+- `penalty_config`: Penalty configuration
+- `maxiters`: Maximum iterations for each LOO fit (default 50)
+- `verbose`: Print progress for each subject (default false)
+
+# Returns
+- `Float64`: LOOCV criterion value (sum of LOO deviances, lower is better)
+
+# Notes
+- This function temporarily modifies `model.SubjectWeights` (restored after each subject)
+- Use `:loocv` in `select_smoothing_parameters()` to select λ via exact LOOCV
+- For approximate LOOCV that's O(n) instead of O(n²), use `:pijcv`
+
+# References
+- Stone, M. (1974). "Cross-Validatory Choice and Assessment of Statistical Predictions."
+  Journal of the Royal Statistical Society B 36(2):111-147.
+- Wood, S.N. (2024). "On Neighbourhood Cross Validation." arXiv:2404.16490v4
+  (PIJCV approximates this criterion via Newton steps)
+
+# Example
+```julia
+# Compute LOOCV at a specific λ
+loocv_value = compute_loocv_criterion(
+    [10.0],           # lambda
+    beta_mle,         # starting coefficients
+    model, data, penalty_config
+)
+
+# Compare with PIJCV at the same λ
+pijcv_value = compute_pijcv_criterion(log.([10.0]), state)
+```
+
+See also: [`compute_pijcv_criterion`](@ref), [`select_smoothing_parameters`](@ref)
+"""
+function compute_loocv_criterion(lambda::Vector{Float64}, beta_init::Vector{Float64},
+                                  model::MultistateProcess, data::ExactData,
+                                  penalty_config::PenaltyConfig;
+                                  maxiters::Int=50, verbose::Bool=false)
+    n_subjects = length(data.paths)
+    
+    # Store original weights
+    original_weights = copy(model.SubjectWeights)
+    
+    total_criterion = 0.0
+    
+    for i in 1:n_subjects
+        # Exclude subject i by setting weight to 0
+        model.SubjectWeights[i] = 0.0
+        
+        # Fit model on data excluding subject i
+        # Warm-start from the provided initial estimate
+        beta_loo = fit_penalized_beta(model, data, lambda, penalty_config, beta_init;
+                                      maxiters=maxiters, verbose=false)
+        
+        # Restore original weight for this subject
+        model.SubjectWeights[i] = original_weights[i]
+        
+        # Compute deviance contribution for subject i at LOO estimate
+        # D_i = -ℓ_i(β̂⁻ⁱ) (loss convention: positive deviance)
+        ll_i = loglik_subject(beta_loo, data, i)
+        D_i = -ll_i
+        
+        total_criterion += D_i
+        
+        if verbose
+            @printf("  Subject %d/%d: D_i = %.4f\n", i, n_subjects, D_i)
+        end
+    end
+    
+    # Restore all original weights (safety)
+    model.SubjectWeights .= original_weights
+    
+    return total_criterion
+end
+
+"""
     _solve_loo_newton_step(chol_H::Cholesky, H_i::Matrix, g_i::AbstractVector) -> Union{Vector, Nothing}
 
 Solve the leave-one-out Newton step using Cholesky rank-k downdate.
@@ -912,7 +1016,7 @@ differs significantly from the unpenalized solution β(0).
 # Arguments
 - `model`: MultistateModel
 - `penalty`: SplinePenalty specification
-- `method`: Selection method (:pijcv, :gcv, :perf, or :efs)
+- `method`: Selection method (:pijcv, :gcv, :perf, :efs, or :loocv)
 - `scope`: Which splines to calibrate (:all, :baseline, or :covariates)
 - `max_outer_iter`: Maximum outer iterations (β-λ alternation)
 - `inner_maxiter`: Maximum iterations for β update per outer iteration
@@ -931,6 +1035,12 @@ NamedTuple with:
 - `method_used`: Actual method used (may fall back from PIJCV to GCV)
 - `penalty_config`: Updated penalty configuration with optimal λ
 - `n_outer_iter`: Number of outer iterations performed
+
+# Notes on LOOCV Method
+When `method=:loocv`, exact leave-one-out cross-validation is performed. This is
+computationally expensive (O(n² × grid_points)) but serves as the gold standard
+for smoothing parameter selection. For approximate LOOCV that is O(n) per grid
+point, use `:pijcv` instead.
 """
 function select_smoothing_parameters(model::MultistateModel, penalty::SplinePenalty;
                                       method::Symbol=:pijcv,
@@ -1026,7 +1136,7 @@ Algorithm:
 - `data`: ExactData container
 - `penalty_config`: Penalty configuration with initial λ values
 - `beta_init`: Initial coefficient estimate (warm start)
-- `method`: Selection method (:pijcv, :gcv, :perf, or :efs)
+- `method`: Selection method (:pijcv, :gcv, :perf, :efs, or :loocv)
 - `scope`: Which splines to calibrate:
   - `:all` (default): Calibrate all spline penalties (baseline + covariates)
   - `:baseline`: Calibrate only baseline hazard splines
@@ -1047,6 +1157,12 @@ NamedTuple with:
 - `method_used`: Actual method used (may fall back from PIJCV to GCV)
 - `penalty_config`: Updated penalty configuration with optimal λ
 - `n_outer_iter`: Number of outer iterations performed
+
+# Notes on LOOCV Method
+When `method=:loocv`, exact leave-one-out cross-validation is performed. This is
+computationally expensive (O(n × grid_points × fitting_cost)) but serves as the
+gold standard for smoothing parameter selection. For approximate LOOCV that is
+O(n) per grid point, use `:pijcv` instead.
 """
 function select_smoothing_parameters(model::MultistateProcess, data::ExactData,
                                       penalty_config::PenaltyConfig,
@@ -1059,6 +1175,10 @@ function select_smoothing_parameters(model::MultistateProcess, data::ExactData,
                                       beta_tol::Float64=1e-4,
                                       lambda_tol::Float64=1e-3,
                                       verbose::Bool=false)
+    # Validate method
+    method ∈ (:pijcv, :gcv, :perf, :efs, :loocv) || 
+        throw(ArgumentError("method must be :pijcv, :gcv, :perf, :efs, or :loocv, got :$method"))
+    
     # Validate scope
     scope ∈ (:all, :baseline, :covariates) || 
         throw(ArgumentError("scope must be :all, :baseline, or :covariates, got :$scope"))
@@ -1096,6 +1216,9 @@ function select_smoothing_parameters(model::MultistateProcess, data::ExactData,
     
     if verbose
         println("  Grid search over log(λ) ∈ [$(log_lambda_grid[1]), $(log_lambda_grid[end])]")
+        if method == :loocv
+            println("  WARNING: Exact LOOCV is computationally expensive (n refits per λ)")
+        end
         println("\n  log(λ)    λ          criterion")
         println("  " * "-"^40)
     end
@@ -1110,39 +1233,47 @@ function select_smoothing_parameters(model::MultistateProcess, data::ExactData,
                                        use_polyalgorithm=true,
                                        verbose=false)
         
-        # Compute Hessians at β(λ)
-        subject_grads_ll = compute_subject_gradients(beta_lam, model, samplepaths)
-        subject_hessians_ll = compute_subject_hessians_fast(beta_lam, model, samplepaths)
-        
-        # Convert to loss convention
-        subject_grads = -subject_grads_ll
-        subject_hessians = [-H for H in subject_hessians_ll]
-        H_unpenalized = sum(subject_hessians)
-        
-        # Create state for criterion evaluation
-        state = SmoothingSelectionState(
-            copy(beta_lam),
-            H_unpenalized,
-            subject_grads,
-            subject_hessians,
-            scoped_config,
-            n_subjects,
-            n_params,
-            model,
-            data
-        )
-        
         # Compute criterion at (λ, β(λ))
-        # Note: log_lambda must be a vector of length n_lambda
-        log_lambda_vec = fill(log_lam, n_lambda)
-        criterion = if method == :pijcv
-            compute_pijcv_criterion(log_lambda_vec, state)
-        elseif method == :perf
-            compute_perf_criterion(log_lambda_vec, state)
-        elseif method == :efs
-            compute_efs_criterion(log_lambda_vec, state)
+        # LOOCV uses a different pathway that doesn't need precomputed Hessians
+        criterion = if method == :loocv
+            # Exact LOOCV: refit n times, each leaving out one subject
+            compute_loocv_criterion(lambda_vec, beta_lam, model, data, scoped_config;
+                                    maxiters=inner_maxiter, verbose=false)
         else
-            compute_gcv_criterion(log_lambda_vec, state)
+            # Other methods use precomputed subject-level Hessians
+            # Compute Hessians at β(λ)
+            subject_grads_ll = compute_subject_gradients(beta_lam, model, samplepaths)
+            subject_hessians_ll = compute_subject_hessians_fast(beta_lam, model, samplepaths)
+            
+            # Convert to loss convention
+            subject_grads = -subject_grads_ll
+            subject_hessians = [-H for H in subject_hessians_ll]
+            H_unpenalized = sum(subject_hessians)
+            
+            # Create state for criterion evaluation
+            state = SmoothingSelectionState(
+                copy(beta_lam),
+                H_unpenalized,
+                subject_grads,
+                subject_hessians,
+                scoped_config,
+                n_subjects,
+                n_params,
+                model,
+                data
+            )
+            
+            # Compute criterion based on method
+            log_lambda_vec = fill(log_lam, n_lambda)
+            if method == :pijcv
+                compute_pijcv_criterion(log_lambda_vec, state)
+            elseif method == :perf
+                compute_perf_criterion(log_lambda_vec, state)
+            elseif method == :efs
+                compute_efs_criterion(log_lambda_vec, state)
+            else
+                compute_gcv_criterion(log_lambda_vec, state)
+            end
         end
         
         push!(grid_results, (log_lambda=log_lam, lambda=lam, criterion=criterion))
@@ -1178,33 +1309,40 @@ function select_smoothing_parameters(model::MultistateProcess, data::ExactData,
                                        use_polyalgorithm=false,
                                        verbose=false)
         
-        subject_grads_ll = compute_subject_gradients(beta_lam, model, samplepaths)
-        subject_hessians_ll = compute_subject_hessians_fast(beta_lam, model, samplepaths)
-        subject_grads = -subject_grads_ll
-        subject_hessians = [-H for H in subject_hessians_ll]
-        H_unpenalized = sum(subject_hessians)
-        
-        state = SmoothingSelectionState(
-            copy(beta_lam),
-            H_unpenalized,
-            subject_grads,
-            subject_hessians,
-            scoped_config,
-            n_subjects,
-            n_params,
-            model,
-            data
-        )
-        
-        log_lambda_vec = fill(log_lam, n_lambda)
-        criterion = if method == :pijcv
-            compute_pijcv_criterion(log_lambda_vec, state)
-        elseif method == :perf
-            compute_perf_criterion(log_lambda_vec, state)
-        elseif method == :efs
-            compute_efs_criterion(log_lambda_vec, state)
+        # Compute criterion at (λ, β(λ))
+        # LOOCV uses a different pathway that doesn't need precomputed Hessians
+        criterion = if method == :loocv
+            compute_loocv_criterion(lambda_vec, beta_lam, model, data, scoped_config;
+                                    maxiters=inner_maxiter, verbose=false)
         else
-            compute_gcv_criterion(log_lambda_vec, state)
+            subject_grads_ll = compute_subject_gradients(beta_lam, model, samplepaths)
+            subject_hessians_ll = compute_subject_hessians_fast(beta_lam, model, samplepaths)
+            subject_grads = -subject_grads_ll
+            subject_hessians = [-H for H in subject_hessians_ll]
+            H_unpenalized = sum(subject_hessians)
+            
+            state = SmoothingSelectionState(
+                copy(beta_lam),
+                H_unpenalized,
+                subject_grads,
+                subject_hessians,
+                scoped_config,
+                n_subjects,
+                n_params,
+                model,
+                data
+            )
+            
+            log_lambda_vec = fill(log_lam, n_lambda)
+            if method == :pijcv
+                compute_pijcv_criterion(log_lambda_vec, state)
+            elseif method == :perf
+                compute_perf_criterion(log_lambda_vec, state)
+            elseif method == :efs
+                compute_efs_criterion(log_lambda_vec, state)
+            else
+                compute_gcv_criterion(log_lambda_vec, state)
+            end
         end
         
         if criterion < best_criterion
