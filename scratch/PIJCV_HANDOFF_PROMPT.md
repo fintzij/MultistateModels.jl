@@ -1,105 +1,85 @@
-# PIJCV Implementation Handoff Prompt
+# Spline Comparison Benchmark Handoff Prompt
 
-**Date:** January 4, 2026  
+**Date:** January 5, 2026  
 **Branch:** `penalized_splines`
 
 ---
 
-## Agent Role
+## Context
 
-You are a **senior Julia package developer and PhD mathematical statistician** with deep expertise in:
-- Penalized likelihood estimation and smoothing parameter selection
-- Spline-based hazard models and P-splines
-- Multistate models and survival analysis
-- Numerical optimization (but using standard packages, not bespoke routines)
-- The SciML/Julia ecosystem
+You are continuing work on a **spline comparison benchmark report** for the MultistateModels.jl package. The report compares penalized spline smoothing parameter selection methods between Julia (MultistateModels.jl) and R packages (mgcv, flexsurv).
+
+**For comprehensive implementation details, see:** `scratch/PENALIZED_SPLINES_REFERENCE.md`
 
 ---
 
-## Session Summary (January 4, 2026)
+## Current State
 
-### ✅ Completed This Session
+**Report location**: `MultistateModelsTests/reports/spline_comparison_benchmark.qmd`
 
-1. **PIJCV Implementation Validated**: The `compute_pijcv_criterion` function now correctly evaluates actual likelihoods at LOO parameters (not Taylor approximations), matching Wood (2024).
+### ✅ What's Complete
 
-2. **Long Test Created**: `MultistateModelsTests/longtests/longtest_pijcv_loocv.jl` validates PIJCV against exact LOOCV across n=30, 50, 100 subjects. Results:
-   - n=30: 0.27% max error, same optimal λ
-   - n=50: 6.4% max error (at extreme λ), same optimal λ  
-   - n=100: 0.11% max error, same optimal λ
+1. **Simple 1-transition survival example** (n=100, Weibull shape=1.5, rate=0.3)
+2. **Julia results for 4 smoothing methods**: PIJCV, GCV, PERF, EFS
+3. **mgcv PAM comparison** with GCV.Cp, REML, and NCV/LOOCV
+4. **flexsurv spline comparison**
+5. **EDF comparison table** (all methods agree ~1.5-2.5 EDF)
+6. **Penalty matrix comparison** using gratia package
+7. **Hazard/survival/CIF function plots**
 
-3. **Cholesky Downdate Bug Fixed**: The algorithm now handles numerical issues gracefully.
+### Key Findings Documented
 
-4. **All 75 PIJCV Unit Tests Pass**: In `MultistateModelsTests/unit/test_pijcv.jl`
-
-5. **Fixed Pkg.test() Dependency Issue**: Added Dates, Distributions, JSON3 to main package's test dependencies in `Project.toml`.
-
-### ⬜ Remaining Tasks (Priority Order)
-
-| Priority | Task | Description | Estimated Effort |
-|----------|------|-------------|------------------|
-| 1 | Fix test_penalty_infrastructure.jl | 2 tests fail due to non-existent 5-arg SmoothingSelectionState constructor | 1 hour |
-| 2 | Verify GCV formula | Validate against Wood (2017) and mgcv | 2-3 hours |
-| 3 | Implement PERF method | Marra & Radice (2020) AIC-equivalent criterion | 4-6 hours |
-| 4 | Implement EFS method | Wood & Fasiolo (2017) REML-based criterion | 6-8 hours |
-| 5 | Benchmark against R packages | Compare to mgcv, flexsurv, flexmsm | 8-12 hours |
-
-### ⬜ Deferred: Advanced Spline Feature Validation
-
-The following features have infrastructure but **have not been validated** with the corrected PIJCV:
-
-| Feature | Status | Priority | Effort |
-|---------|--------|----------|--------|
-| Multiple λ (multiple penalties) | Infrastructure exists | High | 4-6 hours |
-| `s(x)` smooth covariates | Implemented | High | 4-6 hours |
-| `te(x,y)` tensor products | Implemented | Medium | 8-10 hours |
-| `ti(x,y)` baseline×covariate interactions | Implemented | Medium | 6-8 hours |
-| Shared λ (competing risks) | Implemented | Low | 4-6 hours |
-
-See **Section 12.4** of `PIJCV_FIX_REPORT.md` for detailed plans.
+- λ scaling differs ~1000x between Julia and mgcv (due to sample size, penalty normalization, likelihood formulation)
+- **EDF is the proper comparison metric** (scale-invariant)
+- All methods agree on model complexity
+- **NCV in mgcv with `nei=NULL`** = exact LOOCV
+- **PIJCV** = approximate LOOCV (Newton step approximation)
 
 ---
 
-## Your Task
+## Outstanding Task: Add Exact LOOCV to Julia
 
-Continue implementation of smoothing parameter selection in `MultistateModels.jl`. The PIJCV core is now working; focus on:
+The user wants **exact LOOCV** added to MultistateModels.jl for the comparison. Currently:
 
-1. **Immediate**: Fix the failing tests in `test_penalty_infrastructure.jl`
-2. **Short-term**: Verify GCV implementation against mgcv
-3. **Medium-term**: Implement PERF and EFS methods from flexmsm (Eletti et al. 2024)
-4. **Long-term**: Comprehensive benchmarks against R packages
+- **PIJCV** = approximate LOOCV (Newton step approximation for LOO parameters, then evaluates actual likelihood)
+- **NCV in mgcv** with `nei=NULL` = exact LOOCV
 
----
+### Implementation Plan
 
-## Required Reading
+1. **Add `:loocv` method** to `select_smoothing_parameters()` in `src/inference/smoothing_selection.jl`
 
-Before proceeding, read these documents:
+2. **Algorithm**:
+   - For each λ in grid: refit model n times, each time leaving out observation i
+   - Compute CV score = Σᵢ ℓᵢ(β̂₋ᵢ) where β̂₋ᵢ is MLE without observation i
+   - This is O(n × fitting cost) - expensive but exact
 
-1. **`scratch/PIJCV_FIX_REPORT.md`** — Comprehensive implementation report including:
-   - Mathematical derivations and proofs
-   - Implementation progress summary
-   - **Section 12: Future Action Items** — detailed plans for PERF, EFS, benchmarks
-   - Acceptance criteria
+3. **Update fixture generator** (`MultistateModelsTests/fixtures/generate_simple_benchmark.jl`) to include LOOCV results
 
-2. **Eletti, Marra & Radice (2024)** — arXiv:2312.05345v4, Appendix C
-   - PERF method (Eq. 13)
-   - EFS method (Eq. 14)
-   - flexmsm R package interface
+4. **Update report** to show LOOCV alongside PIJCV
 
----
+### Implementation Sketch
 
-## Key Constraints
+```julia
+function compute_loocv_criterion(log_lambda, beta_init, model, penalty_config, samplepaths)
+    lambda = exp.(log_lambda)
+    n = length(samplepaths)
+    cv_score = 0.0
+    
+    for i in 1:n
+        # Create model/data without observation i
+        # Refit to get β̂₋ᵢ
+        # Evaluate likelihood of observation i at β̂₋ᵢ
+        cv_score += ℓᵢ(β̂₋ᵢ)
+    end
+    
+    return -cv_score  # Return negative for minimization
+end
+```
 
-### 1. Faithfulness to References
-Every formula must be traceable to the source paper. Wood (2024) for PIJCV, Wood & Fasiolo (2017) for EFS, Marra & Radice (2020) for PERF.
-
-### 2. No Bespoke Optimization Routines
-Use standard Julia packages (Optimization.jl, Optim.jl, Ipopt).
-
-### 3. Validation at Every Step
-Run code, run tests, report actual results. Never claim completion without verification.
-
-### 4. Test Failures Are Real Errors
-Never assume test failures are stochastic. Always investigate and fix.
+**Challenge**: Efficiently refitting without observation i. Options:
+1. Create subset data and new model (cleanest but slowest)
+2. Use weighted likelihood with weight=0 for observation i
+3. Warm-start from full MLE
 
 ---
 
@@ -107,42 +87,50 @@ Never assume test failures are stochastic. Always investigate and fix.
 
 | File | Purpose |
 |------|---------|
-| `scratch/PIJCV_FIX_REPORT.md` | Comprehensive report with action items |
-| `src/inference/smoothing_selection.jl` | PIJCV/GCV implementation |
-| `MultistateModelsTests/unit/test_pijcv.jl` | PIJCV unit tests (all pass) |
-| `MultistateModelsTests/unit/test_penalty_infrastructure.jl` | Has 2 failing tests to fix |
-| `MultistateModelsTests/longtests/longtest_pijcv_loocv.jl` | PIJCV vs LOOCV validation |
+| `scratch/PENALIZED_SPLINES_REFERENCE.md` | **Consolidated reference** for all penalized spline implementation details |
+| `src/inference/smoothing_selection.jl` | Contains `select_smoothing_parameters()` and criterion functions |
+| `MultistateModelsTests/fixtures/generate_simple_benchmark.jl` | Generates Julia results for report |
+| `MultistateModelsTests/fixtures/simple_benchmark_all_methods.json` | Current Julia results |
+| `MultistateModelsTests/reports/spline_comparison_benchmark.qmd` | Quarto report |
 
 ---
 
-## Alternative Smoothing Methods to Implement
+## Validation
 
-### PERF (Performance Iteration) — Marra & Radice (2020)
-
-Criterion approximately equivalent to AIC:
-$$\lambda^{[a+1]} = \arg\min_\lambda \|M - OM\|^2 - \check{n} + 2\text{tr}(O)$$
-
-### EFS (Extended Fellner-Schall) — Wood & Fasiolo (2017)
-
-REML-based update:
-$$\lambda_k^{[a+1]} = \lambda_k^{[a]} \times \frac{\text{tr}(S_\lambda^{-1} \partial S_\lambda/\partial\lambda_k) - \text{tr}([{-H + S_\lambda}]^{-1} \partial S_\lambda/\partial\lambda_k)}{\hat\theta^\top (\partial S_\lambda/\partial\lambda_k) \hat\theta}$$
-
-Both methods are implemented in flexmsm R package (`sp.method = 'perf'` or `'efs'`).
+After implementing LOOCV, verify:
+1. LOOCV and PIJCV should give **similar λ values** (PIJCV approximates LOOCV)
+2. Both should give **similar EDF**
+3. Run existing spline tests: `julia --project -e 'using Pkg; Pkg.test()' -- splines`
 
 ---
 
-## Benchmark Plan
+## Report Rendering
 
-After implementing all methods, benchmark against:
-1. **mgcv** — GAM gold standard (GCV, REML)
-2. **flexsurv** — Parametric survival (for baseline comparison)
-3. **flexmsm** — Direct competitor (PERF, EFS for multistate splines)
+```bash
+cd MultistateModelsTests/reports
+quarto render spline_comparison_benchmark.qmd
+```
+
+Output goes to `_site/spline_comparison_benchmark.html`
+
+---
+
+## R Package Notes
+
+### mgcv NCV/LOOCV
+- `method="NCV"` with `nei=NULL` (default) is exactly LOOCV
+- From documentation: "If `nei==NULL` then leave-one-out cross validation is obtained"
+
+### flexmsm
+- Supports exact observation times via `living.exact` argument
+- But requires 3+ state illness-death models (not simple 2-state survival)
+- Uses PERF as default smoothing method
 
 ---
 
 ## References
 
 - Wood, S.N. (2024). "On Neighbourhood Cross Validation." arXiv:2404.16490v4
-- Eletti, A., Marra, G. & Radice, R. (2024). "Spline-Based Multi-State Models for Analyzing Disease Progression." arXiv:2312.05345v4
-- Wood, S.N. & Fasiolo, M. (2017). "A generalized Fellner-Schall method for smoothing parameter estimation." *Statistics and Computing* 27(3):759-773.
-- Marra, G. & Radice, R. (2020). "Copula link-based additive models for right-censored event time data." *JASA* 115(530):886-895.
+- Wood, S.N. & Fasiolo, M. (2017). "A generalized Fellner-Schall method." *Statistics and Computing*
+- Marra, G. & Radice, R. (2020). "Copula link-based additive models." *JASA*
+- Eletti, A., Marra, G. & Radice, R. (2024). "Spline-Based Multi-State Models." arXiv:2312.05345v4

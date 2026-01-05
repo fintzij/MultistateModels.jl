@@ -217,7 +217,7 @@ Optimize smoothing parameters given fixed Hessians.
 # Arguments
 - `state`: SmoothingSelectionState with current β and cached Hessians
 - `log_lambda_init`: Initial log-smoothing parameters (warm start)
-- `method`: Selection method (:pijcv or :gcv)
+- `method`: Selection method (:pijcv, :gcv, :perf, or :efs)
 - `maxiter`: Maximum iterations for λ optimization
 - `verbose`: Print progress
 - `use_polyalgorithm`: If true, use LBFGS→Ipopt; if false, pure Ipopt
@@ -903,7 +903,7 @@ end
 User-friendly interface for smoothing parameter selection using performance iteration.
 
 This function implements mgcv-style "performance iteration" that alternates:
-1. Given β, compute Hessians and optimize λ via PIJCV/GCV
+1. Given β, compute Hessians and optimize λ via PIJCV/GCV/PERF
 2. Given λ, update β via penalized maximum likelihood
 
 This is more accurate than one-shot approximation when the penalized solution β(λ*)
@@ -912,7 +912,7 @@ differs significantly from the unpenalized solution β(0).
 # Arguments
 - `model`: MultistateModel
 - `penalty`: SplinePenalty specification
-- `method`: Selection method (:pijcv or :gcv)
+- `method`: Selection method (:pijcv, :gcv, :perf, or :efs)
 - `scope`: Which splines to calibrate (:all, :baseline, or :covariates)
 - `max_outer_iter`: Maximum outer iterations (β-λ alternation)
 - `inner_maxiter`: Maximum iterations for β update per outer iteration
@@ -1016,7 +1016,7 @@ Select smoothing parameters using mgcv-style performance iteration.
 Algorithm:
 1. Initialize β from unpenalized fit, λ from penalty config
 2. Outer loop:
-   a. Given β, compute Hessians and optimize λ via PIJCV/GCV
+   a. Given β, compute Hessians and optimize λ via PIJCV/GCV/PERF
    b. Given λ, update β via penalized maximum likelihood (warm-started)
    c. Check convergence
 3. Return final (β, λ)
@@ -1026,7 +1026,7 @@ Algorithm:
 - `data`: ExactData container
 - `penalty_config`: Penalty configuration with initial λ values
 - `beta_init`: Initial coefficient estimate (warm start)
-- `method`: Selection method (:pijcv or :gcv)
+- `method`: Selection method (:pijcv, :gcv, :perf, or :efs)
 - `scope`: Which splines to calibrate:
   - `:all` (default): Calibrate all spline penalties (baseline + covariates)
   - `:baseline`: Calibrate only baseline hazard splines
@@ -1137,6 +1137,10 @@ function select_smoothing_parameters(model::MultistateProcess, data::ExactData,
         log_lambda_vec = fill(log_lam, n_lambda)
         criterion = if method == :pijcv
             compute_pijcv_criterion(log_lambda_vec, state)
+        elseif method == :perf
+            compute_perf_criterion(log_lambda_vec, state)
+        elseif method == :efs
+            compute_efs_criterion(log_lambda_vec, state)
         else
             compute_gcv_criterion(log_lambda_vec, state)
         end
@@ -1195,6 +1199,10 @@ function select_smoothing_parameters(model::MultistateProcess, data::ExactData,
         log_lambda_vec = fill(log_lam, n_lambda)
         criterion = if method == :pijcv
             compute_pijcv_criterion(log_lambda_vec, state)
+        elseif method == :perf
+            compute_perf_criterion(log_lambda_vec, state)
+        elseif method == :efs
+            compute_efs_criterion(log_lambda_vec, state)
         else
             compute_gcv_criterion(log_lambda_vec, state)
         end
@@ -1452,6 +1460,306 @@ function compute_gcv_criterion(log_lambda::AbstractVector{T}, state::SmoothingSe
     
     gcv = n * deviance / (n - edf)^2
     return gcv
+end
+
+"""
+    compute_perf_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
+
+Compute PERF (Performance Iteration) criterion from Marra & Radice (2020).
+
+PERF is an AIC-type criterion based on prediction error:
+    V_PERF(λ) = ‖M - OM‖² - ň + 2·edf
+
+where:
+- M = H^{1/2}β + H^{-1/2}(−g) is the working response
+- O = H^{1/2}(H + S_λ)^{-1}H^{1/2} is the influence matrix
+- edf = tr(O) is the effective degrees of freedom
+- ň is a constant (typically n) that doesn't affect optimization
+
+This criterion estimates the complexity of smooth terms not supported by data
+and suppresses them, providing stable smoothing parameter selection.
+
+# Arguments
+- `log_lambda`: Vector of log-smoothing parameters (one per penalty term)
+- `state`: SmoothingSelectionState with cached gradients/Hessians
+
+# Returns
+- `Float64`: PERF criterion value (lower is better)
+
+# References
+- Marra, G. & Radice, R. (2020). "Copula link-based additive models for 
+  right-censored event time data." JASA 115(530):886-895.
+- Eletti, A., Marra, G. & Radice, R. (2024). "Spline-Based Multi-State Models 
+  for Analyzing Disease Progression." arXiv:2312.05345v4, Appendix C
+"""
+function compute_perf_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
+    lambda = exp.(log_lambda)
+    
+    # Build penalized Hessian: H_λ = H + S_λ
+    H = state.H_unpenalized
+    H_lambda = _build_penalized_hessian(H, lambda, state.penalty_config)
+    
+    n = state.n_subjects
+    p = state.n_params
+    
+    # Compute H^{1/2} via eigendecomposition for numerical stability
+    # H should be positive definite (we're at a maximum)
+    H_sym = Symmetric(H)
+    eig = try
+        eigen(H_sym)
+    catch e
+        return T(1e10)  # Return large value if eigen fails
+    end
+    
+    # Check for positive definiteness
+    if any(eig.values .< 1e-10)
+        # H is not positive definite - regularize
+        min_eval = minimum(eig.values)
+        regularization = abs(min_eval) + 1e-6
+        H_reg = H + regularization * I(p)
+        eig = eigen(Symmetric(H_reg))
+    end
+    
+    # H^{1/2} = V * D^{1/2} * V'
+    sqrt_evals = sqrt.(max.(eig.values, 1e-10))
+    H_sqrt = eig.vectors * Diagonal(sqrt_evals) * eig.vectors'
+    
+    # H^{-1/2} = V * D^{-1/2} * V'
+    inv_sqrt_evals = 1.0 ./ sqrt_evals
+    H_inv_sqrt = eig.vectors * Diagonal(inv_sqrt_evals) * eig.vectors'
+    
+    # Compute gradient of loss at current estimate
+    # At penalized MLE: ∇ℓ + S_λβ = 0, so ∇ℓ = -S_λβ
+    # For PERF, we need -∇ℓ = S_λβ (loss gradient, not log-likelihood)
+    # But for robustness, compute directly from subject gradients
+    # subject_grads are already in loss convention (negated log-likelihood)
+    g = vec(sum(state.subject_grads, dims=2))  # Total loss gradient
+    
+    # Working response: M = H^{1/2}β + H^{-1/2}(−g)
+    # Note: The −g term represents the residual; at MLE, g ≈ 0 for unpenalized,
+    # but at penalized MLE, g = -S_λβ ≠ 0
+    beta_T = convert(Vector{T}, state.beta_hat)
+    g_T = convert(Vector{T}, g)
+    
+    M = H_sqrt * beta_T - H_inv_sqrt * g_T
+    
+    # Influence matrix: O = H^{1/2} (H + S_λ)^{-1} H^{1/2}
+    H_lambda_sym = Symmetric(H_lambda)
+    H_lambda_inv = try
+        inv(H_lambda_sym)
+    catch e
+        return T(1e10)
+    end
+    
+    O = H_sqrt * H_lambda_inv * H_sqrt
+    
+    # Effective degrees of freedom
+    edf = tr(O)
+    
+    # Fitted values in working space: OM
+    OM = O * M
+    
+    # Residual: M - OM
+    residual = M - OM
+    
+    # Residual sum of squares: ‖M - OM‖²
+    RSS = dot(residual, residual)
+    
+    # PERF criterion: RSS - n + 2*edf
+    # The -n term is a constant that doesn't affect optimization,
+    # but we include it for completeness
+    perf = RSS - n + 2 * edf
+    
+    return perf
+end
+
+"""
+    compute_efs_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
+
+Compute the negative REML (Restricted Maximum Likelihood) criterion for EFS method.
+
+EFS (Extended Fellner-Schall) from Wood & Fasiolo (2017) maximizes the Laplace-approximated
+restricted marginal likelihood:
+
+    ℓ_LA(λ) = ℓ(θ̂) - ½θ̂ᵀS_λθ̂ + ½log|S_λ|₊ - ½log|H + S_λ|
+
+where |S_λ|₊ is the pseudo-determinant (product of non-zero eigenvalues).
+
+This function returns the NEGATIVE of ℓ_LA so that minimization corresponds to REML maximization.
+
+# Arguments
+- `log_lambda`: Vector of log-smoothing parameters (one per penalty term)
+- `state`: SmoothingSelectionState with cached gradients/Hessians
+
+# Returns
+- `Float64`: Negative REML criterion value (lower is better, i.e., higher REML)
+
+# References
+- Wood, S.N. & Fasiolo, M. (2017). "A generalized Fellner-Schall method for smoothing 
+  parameter estimation." Statistics and Computing 27(3):759-773.
+- Eletti, A., Marra, G. & Radice, R. (2024). arXiv:2312.05345v4, Appendix C
+"""
+function compute_efs_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
+    lambda = exp.(log_lambda)
+    
+    # Build penalized Hessian: H_λ = H + S_λ
+    H = state.H_unpenalized
+    H_lambda = _build_penalized_hessian(H, lambda, state.penalty_config)
+    
+    p = state.n_params
+    beta = state.beta_hat
+    
+    # Compute log-likelihood at current estimate
+    ll_subj = loglik_exact(beta, state.data; neg=false, return_ll_subj=true)
+    ll_theta = sum(ll_subj)
+    
+    # Build total penalty matrix S_λ = Σⱼ λⱼ Sⱼ
+    S_lambda = zeros(T, p, p)
+    lambda_idx = 1
+    for term in state.penalty_config.terms
+        idx = term.hazard_indices
+        for i in idx, j in idx
+            S_lambda[i, j] += lambda[lambda_idx] * term.S[i - first(idx) + 1, j - first(idx) + 1]
+        end
+        lambda_idx += 1
+    end
+    
+    # Penalty term: -½ θ̂ᵀ S_λ θ̂
+    beta_T = convert(Vector{T}, beta)
+    penalty_term = -0.5 * dot(beta_T, S_lambda * beta_T)
+    
+    # Log pseudo-determinant of S_λ: ½ log|S_λ|₊
+    # Use eigenvalues, keeping only positive ones (for rank-deficient S)
+    eig_S = eigen(Symmetric(S_lambda))
+    pos_eigs_S = filter(e -> e > 1e-10, eig_S.values)
+    log_det_S = if isempty(pos_eigs_S)
+        T(0.0)  # S_λ is zero (no penalty)
+    else
+        0.5 * sum(log.(pos_eigs_S))
+    end
+    
+    # Log determinant of penalized Hessian: -½ log|H + S_λ|
+    H_lambda_sym = Symmetric(H_lambda)
+    eig_H = try
+        eigen(H_lambda_sym)
+    catch e
+        return T(1e10)
+    end
+    
+    # Check for positive definiteness
+    if any(eig_H.values .< 1e-10)
+        # Not positive definite - return large value
+        return T(1e10)
+    end
+    
+    log_det_H_lambda = -0.5 * sum(log.(eig_H.values))
+    
+    # REML criterion: ℓ(θ̂) - ½θ̂ᵀS_λθ̂ + ½log|S_λ|₊ - ½log|H + S_λ|
+    reml = ll_theta + penalty_term + log_det_S + log_det_H_lambda
+    
+    # Return negative for minimization
+    return -reml
+end
+
+"""
+    compute_efs_update(lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
+
+Compute one EFS (Extended Fellner-Schall) update for smoothing parameters.
+
+The EFS update formula for each λₖ is:
+    λₖ^{new} = λₖ × [tr(S_λ⁻¹ ∂S_λ/∂λₖ) - tr((H + S_λ)⁻¹ ∂S_λ/∂λₖ)] / [θ̂ᵀ (∂S_λ/∂λₖ) θ̂]
+
+For our parameterization where S_λ = Σⱼ λⱼ Sⱼ, we have ∂S_λ/∂λₖ = Sₖ.
+
+# Arguments
+- `lambda`: Current smoothing parameters (natural scale)
+- `state`: SmoothingSelectionState with cached matrices
+
+# Returns
+- `Vector{Float64}`: Updated smoothing parameters
+
+# References
+- Wood, S.N. & Fasiolo (2017), Eq. 6
+"""
+function compute_efs_update(lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
+    p = state.n_params
+    n_lambda = length(lambda)
+    beta = state.beta_hat
+    H = state.H_unpenalized
+    
+    # Build total penalty matrix and penalized Hessian
+    S_lambda = zeros(T, p, p)
+    H_lambda = convert(Matrix{T}, copy(H))
+    
+    lambda_idx = 1
+    for term in state.penalty_config.terms
+        idx = term.hazard_indices
+        for i in idx, j in idx
+            S_lambda[i, j] += lambda[lambda_idx] * term.S[i - first(idx) + 1, j - first(idx) + 1]
+            H_lambda[i, j] += lambda[lambda_idx] * term.S[i - first(idx) + 1, j - first(idx) + 1]
+        end
+        lambda_idx += 1
+    end
+    
+    # Compute (H + S_λ)⁻¹
+    H_lambda_inv = try
+        inv(Symmetric(H_lambda))
+    catch e
+        # If inversion fails, return unchanged lambda
+        return collect(lambda)
+    end
+    
+    # Compute pseudo-inverse of S_λ for trace computation
+    # For rank-deficient S, we use the Moore-Penrose pseudo-inverse
+    eig_S = eigen(Symmetric(S_lambda))
+    S_lambda_pinv = zeros(T, p, p)
+    for i in 1:p
+        if abs(eig_S.values[i]) > 1e-10
+            v = eig_S.vectors[:, i]
+            S_lambda_pinv .+= (1.0 / eig_S.values[i]) .* (v * v')
+        end
+    end
+    
+    # Compute update for each λₖ
+    lambda_new = similar(lambda)
+    beta_T = convert(Vector{T}, beta)
+    
+    lambda_idx = 1
+    for (term_idx, term) in enumerate(state.penalty_config.terms)
+        idx = term.hazard_indices
+        K = length(idx)
+        
+        # Build ∂S_λ/∂λₖ = Sₖ (the k-th penalty matrix, embedded in full space)
+        dS_k = zeros(T, p, p)
+        for i in idx, j in idx
+            dS_k[i, j] = term.S[i - first(idx) + 1, j - first(idx) + 1]
+        end
+        
+        # Numerator: tr(S_λ⁻¹ Sₖ) - tr((H + S_λ)⁻¹ Sₖ)
+        # Note: tr(A⁻¹ B) = tr(A \ B)
+        trace_S_inv_Sk = tr(S_lambda_pinv * dS_k)
+        trace_H_inv_Sk = tr(H_lambda_inv * dS_k)
+        numerator = trace_S_inv_Sk - trace_H_inv_Sk
+        
+        # Denominator: θ̂ᵀ Sₖ θ̂
+        beta_k = beta_T[idx]
+        denominator = dot(beta_k, term.S * beta_k)
+        
+        # Update: λₖ^{new} = λₖ × numerator / denominator
+        if abs(denominator) < 1e-10
+            # Avoid division by zero - keep current lambda
+            lambda_new[lambda_idx] = lambda[lambda_idx]
+        else
+            ratio = numerator / denominator
+            # Bound the update to avoid extreme changes
+            ratio = clamp(ratio, 0.1, 10.0)
+            lambda_new[lambda_idx] = lambda[lambda_idx] * ratio
+        end
+        
+        lambda_idx += 1
+    end
+    
+    return lambda_new
 end
 
 """
