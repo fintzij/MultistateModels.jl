@@ -247,19 +247,36 @@ end
 # phase-type specific info stored in modelcall. Use is_phasetype_fitted() to check.
 
 """
-get_loglik(model::MultistateModelFitted) 
+    get_loglik(model::MultistateModelFitted; type::Symbol=:loglik, ll::Union{Nothing,String}=nothing) 
 
 Return the log likelihood at the maximum likelihood estimates. 
 
 # Arguments 
-- model: fitted model
-- `ll`: one of "loglik" (default) for the observed data log likelihood or "subj_lml" for log marginal likelihood at the subject level
+- `model`: fitted model
+- `type::Symbol=:loglik`: one of:
+  - `:loglik` (default) - observed data log likelihood
+  - `:subj_lml` - log marginal likelihood at the subject level
+- `ll::String` (deprecated): use `type` instead
+
+# Examples
+```julia
+get_loglik(fitted)                  # Total log-likelihood
+get_loglik(fitted; type=:subj_lml)  # Subject-level marginal log-likelihoods
+```
 """
-function get_loglik(model::MultistateModelFitted; ll = "loglik") 
-    if ll == "loglik"
-        model.loglik.loglik
-    elseif ll == "subj_lml"
-        model.loglik.subj_lml
+function get_loglik(model::MultistateModelFitted; type::Symbol=:loglik, ll::Union{Nothing,String}=nothing)
+    # Handle deprecated string argument
+    if !isnothing(ll)
+        Base.depwarn("String argument `ll` is deprecated, use `type::Symbol` instead (e.g., `type=:loglik`)", :get_loglik)
+        type = Symbol(ll)
+    end
+    
+    if type === :loglik
+        return model.loglik.loglik
+    elseif type === :subj_lml
+        return model.loglik.subj_lml
+    else
+        throw(ArgumentError("Unknown type :$type. Use :loglik or :subj_lml"))
     end
 end
 

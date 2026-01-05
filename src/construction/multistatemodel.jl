@@ -71,21 +71,21 @@ function Hazard(
     time_transform::Bool = false,
     linpred_effect::Symbol = :ph)
 
-    # Input validation
-    @assert statefrom > 0 "statefrom must be a positive integer, got $statefrom"
-    @assert stateto > 0 "stateto must be a positive integer, got $stateto"
-    @assert statefrom != stateto "statefrom and stateto must differ (got $statefrom → $stateto)"
+    # Input validation - use ArgumentError for user-facing validation
+    statefrom > 0 || throw(ArgumentError("statefrom must be a positive integer, got $statefrom"))
+    stateto > 0 || throw(ArgumentError("stateto must be a positive integer, got $stateto"))
+    statefrom != stateto || throw(ArgumentError("statefrom and stateto must differ (got $statefrom → $stateto)"))
     
     # Normalize family to Symbol (accept both String and Symbol for backward compatibility)
     family_key = family isa Symbol ? family : Symbol(lowercase(String(family)))
     
     valid_families = (:exp, :wei, :gom, :sp, :pt)
-    @assert family_key in valid_families "family must be one of $valid_families, got :$family_key"
+    family_key in valid_families || throw(ArgumentError("family must be one of $valid_families, got :$family_key"))
     
     if family_key == :sp
-        @assert degree >= 0 "spline degree must be non-negative, got $degree"
-        @assert extrapolation in ("linear", "constant", "flat") "extrapolation must be \"linear\", \"constant\", or \"flat\", got \"$extrapolation\""
-        @assert monotone in (-1, 0, 1) "monotone must be -1, 0, or 1, got $monotone"
+        degree >= 0 || throw(ArgumentError("spline degree must be non-negative, got $degree"))
+        extrapolation in ("linear", "constant", "flat") || throw(ArgumentError("extrapolation must be \"linear\", \"constant\", or \"flat\", got \"$extrapolation\""))
+        monotone in (-1, 0, 1) || throw(ArgumentError("monotone must be -1, 0, or 1, got $monotone"))
         # For degree < 2, constant extrapolation (C1 boundary) is impossible.
         # Default to flat extrapolation (C0 boundary) which is usually desired.
         if extrapolation == "constant" && degree < 2
@@ -94,11 +94,11 @@ function Hazard(
     end
     
     if family_key == :pt
-        @assert n_phases >= 1 "n_phases must be ≥ 1, got $n_phases"
-        @assert coxian_structure in (:unstructured, :sctp) "coxian_structure must be :unstructured or :sctp, got :$coxian_structure"
+        n_phases >= 1 || throw(ArgumentError("n_phases must be ≥ 1, got $n_phases"))
+        coxian_structure in (:unstructured, :sctp) || throw(ArgumentError("coxian_structure must be :unstructured or :sctp, got :$coxian_structure"))
     end
     
-    @assert linpred_effect in (:ph, :aft) "linpred_effect must be :ph or :aft, got :$linpred_effect"
+    linpred_effect in (:ph, :aft) || throw(ArgumentError("linpred_effect must be :ph or :aft, got :$linpred_effect"))
     
     metadata = HazardMetadata(time_transform = time_transform, linpred_effect = linpred_effect)
 
@@ -211,7 +211,7 @@ struct HazardBuildContext
     rhs_names::Vector{String}
     shared_baseline_key::Union{Nothing,SharedBaselineKey}
     data::DataFrame  # For data-dependent operations like automatic knot placement
-    hazschema::Any
+    hazschema::StatsModels.AbstractTerm  # Result of apply_schema (FormulaTerm <: AbstractTerm)
 end
 
 # Computed accessors for HazardBuildContext - avoids storing redundant data
@@ -348,7 +348,7 @@ function _extract_smooth_info(ctx::HazardBuildContext, parnames::Vector{Symbol})
             indices = [findfirst(==(p), parnames) for p in prefixed_cnames]
             if any(isnothing, indices)
                 # This should not happen if parnames was built correctly
-                error("Could not find parameter indices for smooth term $(term.label) in hazard $(ctx.hazname)")
+                throw(ArgumentError("Could not find parameter indices for smooth term $(term.label) in hazard $(ctx.hazname)"))
             end
             
             push!(smooth_info, SmoothTermInfo(indices, term.S, term.label))
@@ -359,7 +359,7 @@ function _extract_smooth_info(ctx::HazardBuildContext, parnames::Vector{Symbol})
             
             indices = [findfirst(==(p), parnames) for p in prefixed_cnames]
             if any(isnothing, indices)
-                error("Could not find parameter indices for tensor product term $(term.label) in hazard $(ctx.hazname)")
+                throw(ArgumentError("Could not find parameter indices for tensor product term $(term.label) in hazard $(ctx.hazname)"))
             end
             
             push!(smooth_info, SmoothTermInfo(indices, term.S, term.label))

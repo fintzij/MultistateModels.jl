@@ -88,7 +88,7 @@ See also: [`get_vcov`](@ref), [`get_ij_vcov`](@ref), [`compare_variance_estimate
 
 Check if solver is Ipopt (supports print_level option).
 """
-_is_ipopt_solver(solver) = isnothing(solver) || solver isa Ipopt.Optimizer
+_is_ipopt_solver(solver) = isnothing(solver) || solver isa IpoptOptimizer
 
 """
     _solve_optimization(prob, solver)
@@ -97,7 +97,7 @@ Solve optimization problem with solver-appropriate options.
 Ipopt supports print_level, but Optim.jl and others don't.
 """
 function _solve_optimization(prob, solver)
-    _solver = isnothing(solver) ? Ipopt.Optimizer() : solver
+    _solver = isnothing(solver) ? IpoptOptimizer() : solver
     if _is_ipopt_solver(solver)
         return solve(prob, _solver; print_level = 0)
     else

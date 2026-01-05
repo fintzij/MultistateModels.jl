@@ -296,7 +296,7 @@ Bidirectional mappings between observed and expanded state spaces for phase-type
 
 See also: [`PhaseTypeHazard`](@ref), [`PhaseTypeExpansion`](@ref)
 """
-struct PhaseTypeMappings
+struct PhaseTypeMappings <: AbstractPhaseTypeMappings
     n_observed::Int
     n_expanded::Int
     n_phases_per_state::Vector{Int}

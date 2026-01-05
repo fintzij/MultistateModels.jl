@@ -90,7 +90,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         # get estimates - use Ipopt for unconstrained
         # Use SecondOrder AD if solver requires it (Newton, Ipopt) to avoid warnings
         adtype = Optimization.AutoForwardDiff()
-        if isnothing(solver) || (solver isa Optim.Newton) || (solver isa Optim.NewtonTrustRegion) || (solver isa Ipopt.Optimizer)
+        if isnothing(solver) || (solver isa Optim.Newton) || (solver isa Optim.NewtonTrustRegion) || (solver isa IpoptOptimizer)
             adtype = DifferentiationInterface.SecondOrder(Optimization.AutoForwardDiff(), Optimization.AutoForwardDiff())
         end
 
@@ -156,7 +156,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
 
         # Use SecondOrder AD if solver requires it
         adtype = Optimization.AutoForwardDiff()
-        if isnothing(solver) || (solver isa Optim.Newton) || (solver isa Optim.NewtonTrustRegion) || (solver isa Ipopt.Optimizer)
+        if isnothing(solver) || (solver isa Optim.Newton) || (solver isa Optim.NewtonTrustRegion) || (solver isa IpoptOptimizer)
             adtype = DifferentiationInterface.SecondOrder(Optimization.AutoForwardDiff(), Optimization.AutoForwardDiff())
         end
 

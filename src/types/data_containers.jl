@@ -154,7 +154,7 @@ element type must match the parameter type for AD compatibility.
 mutable struct TPMCache
     hazmat_book::Vector{Matrix{Float64}}
     tpm_book::Vector{Vector{Matrix{Float64}}}
-    exp_cache::Any  # ExponentialUtilities cache (type varies)
+    exp_cache::Nothing  # ExponentialUtilities cache for ExpMethodGeneric (always Nothing)
     q_work::Matrix{Float64}
     lmat_work::Matrix{Float64}
     # New caches for additional optimizations

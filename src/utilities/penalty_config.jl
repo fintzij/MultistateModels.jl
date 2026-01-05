@@ -351,7 +351,7 @@ function _build_smooth_covariate_penalty_terms(model::MultistateProcess,
             n_lambda += 1  # One lambda per hazard with smooth terms
         end
     else
-        error("Unexpected share_covariate_lambda value: $share_covariate_lambda")
+        throw(ArgumentError("Unexpected share_covariate_lambda value: $share_covariate_lambda. Expected :none, :per_covariate, or :per_hazard"))
     end
     
     return (smooth_terms, shared_smooth_groups, n_lambda)

@@ -299,42 +299,13 @@ function loglik_exact_penalized(parameters, data::ExactData, penalty_config::Pen
     # If no penalties, return base likelihood
     has_penalties(penalty_config) || return neg ? nll_base : -nll_base
     
-    # Extract natural-scale baseline coefficients for penalty
-    # The penalty applies to exp(β) where β are the baseline spline coefficients
-    pars_natural = unflatten_natural(parameters, data.model)
-    
-    # Build flat natural-scale vector for penalty computation
-    # Only baseline parameters need transformation; coefficients are unchanged
-    T = eltype(parameters)
-    n_params = length(parameters)
-    beta_natural = Vector{T}(undef, n_params)
-    
-    offset = 0
-    for (hazname, idx) in sort(collect(data.model.hazkeys), by = x -> x[2])
-        hazard = data.model.hazards[idx]
-        n_total = hazard.npar_total
-        n_baseline = hazard.npar_baseline
-        
-        # Natural scale baseline (exp-transformed)
-        haz_pars = pars_natural[hazname]
-        baseline_vals = values(haz_pars.baseline)
-        for i in 1:n_baseline
-            beta_natural[offset + i] = baseline_vals[i]
-        end
-        
-        # Covariate coefficients unchanged
-        if n_total > n_baseline
-            covar_vals = values(haz_pars.covariates)
-            for i in 1:(n_total - n_baseline)
-                beta_natural[offset + n_baseline + i] = covar_vals[i]
-            end
-        end
-        
-        offset += n_total
-    end
-    
-    # Compute penalty
-    penalty = compute_penalty(beta_natural, penalty_config)
+    # Compute penalty on PARAMETER SCALE (log-scale for spline coefficients)
+    # The penalty matrix S penalizes roughness/curvature of the log-hazard spline.
+    # Since parameters are stored on log-scale (θ) and hazard coefficients are exp(θ),
+    # the penalty should be θᵀSθ (not exp(θ)ᵀS exp(θ)).
+    # This matches standard P-spline practice where we penalize the spline coefficients
+    # directly, not their exponentiated values.
+    penalty = compute_penalty(parameters, penalty_config)
     
     # Return penalized negative log-likelihood
     nll_penalized = nll_base + penalty
@@ -705,4 +676,131 @@ function _compute_path_loglik_fused(
     end
     
     return ll
+end
+# =============================================================================
+# Single-Subject Likelihood Evaluation
+# =============================================================================
+
+"""
+    loglik_subject(parameters, data::ExactData, subject_idx::Int) -> Real
+
+Compute the log-likelihood contribution for a single subject at given parameters.
+
+This function is used by NCV (Neighbourhood Cross-Validation) to evaluate the 
+actual loss at leave-one-out parameters, following Wood (2024) "On Neighbourhood 
+Cross Validation" arXiv:2404.16490v4.
+
+# Arguments
+- `parameters`: Parameter vector (on estimation scale, e.g., log-transformed baseline)
+- `data::ExactData`: Exact data container with model and paths
+- `subject_idx::Int`: Index of the subject (1-based)
+
+# Returns
+- `Real`: Subject's log-likelihood contribution (NOT negated)
+
+# Mathematical Background
+
+The NCV criterion (Wood 2024, Equation 2) is:
+```math
+V(\\lambda) = \\sum_{i=1}^{n} D_i(\\hat\\beta^{-i})
+```
+where ``D_i(\\beta) = -\\ell_i(\\beta)`` is subject ``i``'s negative log-likelihood
+contribution and ``\\hat\\beta^{-i}`` is the penalized MLE with subject ``i`` omitted.
+
+This function computes ``\\ell_i(\\beta)`` at arbitrary parameter values, enabling
+evaluation of the NCV criterion by calling the actual likelihood function at the
+Newton-approximated leave-one-out parameters.
+
+# Notes
+- Does NOT include the penalty term (that's only for total likelihood)
+- Works at arbitrary parameter values (not just MLE)
+- Returns log-likelihood (positive when likelihood is high), not negative log-likelihood
+- Subject weights from the model are applied
+
+# Example
+```julia
+data = ExactData(model, paths)
+params = get_parameters(fitted_model)
+
+# Evaluate subject 5's log-likelihood at current parameters
+ll_5 = loglik_subject(params, data, 5)
+
+# Evaluate at perturbed parameters (e.g., LOO estimate)
+params_loo = params + delta
+ll_5_loo = loglik_subject(params_loo, data, 5)
+```
+
+See also: [`loglik_exact`](@ref), [`compute_pijcv_criterion`](@ref)
+"""
+function loglik_subject(parameters, data::ExactData, subject_idx::Int)
+    model = data.model
+    
+    # Validate subject index
+    @assert 1 <= subject_idx <= length(model.subjectindices) "Subject index $subject_idx out of range [1, $(length(model.subjectindices))]"
+    
+    # Get the path for this subject
+    # Note: For exact data, there's one path per subject, indexed by subject_idx
+    path = data.paths[subject_idx]
+    
+    # Get subject weight
+    w = model.SubjectWeights[path.subj]
+    
+    # Unflatten parameters to natural scale (preserves AD types)
+    pars = unflatten_natural(parameters, model)
+    
+    # Get model components
+    hazards = model.hazards
+    totalhazards = model.totalhazards
+    tmat = model.tmat
+    n_hazards = length(hazards)
+    
+    # Build subject covariate cache for this subject only
+    # (This is a slight inefficiency - could cache across calls, but keeps function pure)
+    subj_inds = model.subjectindices[path.subj]
+    subj_data = view(model.data, subj_inds, :)
+    
+    covar_cols = setdiff(Symbol.(names(model.data)), [:id, :tstart, :tstop, :statefrom, :stateto, :obstype])
+    has_covars = !isempty(covar_cols)
+    
+    if has_covars
+        covar_data = subj_data[:, covar_cols]
+        tstart = collect(subj_data.tstart)
+    else
+        covar_data = DataFrame()
+        tstart = Float64[]
+    end
+    
+    subject_covar = SubjectCovarCache(tstart, covar_data)
+    
+    # Element type for AD compatibility
+    T = eltype(parameters)
+    
+    # Get covariate names for each hazard
+    covar_names_per_hazard = [
+        hasfield(typeof(hazards[h]), :covar_names) ? 
+            hazards[h].covar_names : 
+            extract_covar_names(hazards[h].parnames)
+        for h in 1:n_hazards
+    ]
+    
+    # Check if any hazard uses time transform
+    any_time_transform = any(h -> h.metadata.time_transform, hazards)
+    
+    # Create TimeTransformContext if needed
+    tt_context = if any_time_transform
+        sample_df = isempty(subject_covar.covar_data) ? nothing : subject_covar.covar_data[1:1, :]
+        maybe_time_transform_context(pars, sample_df, hazards)
+    else
+        nothing
+    end
+    
+    # Compute single-path log-likelihood using the fused implementation
+    ll = _compute_path_loglik_fused(
+        path, pars, hazards, totalhazards, tmat,
+        subject_covar, covar_names_per_hazard,
+        tt_context, T
+    )
+    
+    # Apply subject weight and return
+    return ll * w
 end

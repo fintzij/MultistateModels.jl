@@ -244,6 +244,12 @@ function _eval_basis_full(basis, x::Real)
 end
 
 function StatsModels.modelcols(p::SmoothTerm, d::NamedTuple)
+    # Validate that required variable exists in data
+    var_syms = StatsModels.termvars(p.term)
+    for sym in var_syms
+        haskey(d, sym) || throw(ArgumentError("SmoothTerm requires variable :$sym but it was not found in data"))
+    end
+    
     val = modelcols(p.term, d)
     # Evaluate basis at val
     if val isa AbstractVector
@@ -272,6 +278,12 @@ Computes row-wise Kronecker product of the two marginal bases.
 For each row, B_te[i,:] = kron(B_x[i,:], B_y[i,:])
 """
 function StatsModels.modelcols(p::TensorProductTerm, d::NamedTuple)
+    # Validate that required variables exist in data
+    var_syms = StatsModels.termvars(p)
+    for sym in var_syms
+        haskey(d, sym) || throw(ArgumentError("TensorProductTerm requires variable :$sym but it was not found in data"))
+    end
+    
     val_x = modelcols(p.term_x, d)
     val_y = modelcols(p.term_y, d)
     

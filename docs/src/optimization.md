@@ -14,7 +14,7 @@ unified interface to various optimization backends. By default:
 You can pass any Optimization.jl-compatible solver to `fit()` via the `solver` keyword:
 
 ```julia
-using Optim, Ipopt
+using Optim, OptimizationIpopt
 
 # Unconstrained solvers (Optim.jl)
 fit(model; solver=Optim.LBFGS())      # Default, quasi-Newton (recommended)
@@ -23,7 +23,7 @@ fit(model; solver=Optim.NelderMead()) # Derivative-free, slower but robust
 fit(model; solver=Optim.Newton())     # Newton's method, requires Hessian
 
 # Constrained solvers
-fit(model; solver=Ipopt.Optimizer(), constraints=cons)  # Default for constrained
+fit(model; solver=IpoptOptimizer(), constraints=cons)  # Default for constrained
 ```
 
 ### Solver Selection Guidelines
@@ -32,7 +32,7 @@ fit(model; solver=Ipopt.Optimizer(), constraints=cons)  # Default for constraine
 |----------|-------------------|-------|
 | Small model, no constraints | `Optim.LBFGS()` | Fast, low memory |
 | Large model, no constraints | `Optim.LBFGS()` | Scales well |
-| Any model with constraints | `Ipopt.Optimizer()` | Interior-point, handles inequality constraints |
+| Any model with constraints | `IpoptOptimizer()` | Interior-point, handles inequality constraints |
 | Convergence issues | `Optim.NelderMead()` | Derivative-free, more robust but slower |
 | High precision needed | `Optim.Newton()` | Quadratic convergence near optimum |
 

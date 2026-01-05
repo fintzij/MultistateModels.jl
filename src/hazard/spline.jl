@@ -25,7 +25,7 @@ evaluation and smoothing parameter selection.
 - `dest::Int`: Destination state number  
 - `nbasis::Int`: Number of basis functions (K)
 - `breakpoints::Vector{Float64}`: Knot locations (boundary + interior)
-- `basis::BSplineBasis`: BSplineKit basis object (may be recombined)
+- `basis`: BSplineKit basis object (BSplineBasis or RecombinedBSplineBasis)
 - `S::Matrix{Float64}`: Penalty matrix ∫B^(m)(t)B^(m)(t)ᵀdt
 - `penalty_order::Int`: Derivative order for penalty (default 2 = curvature)
 
@@ -35,18 +35,18 @@ evaluation and smoothing parameter selection.
 - For shared penalty (competing risks), all hazards from the same origin share
   identical `breakpoints` and compatible `S` matrices
 """
-struct SplineHazardInfo
+struct SplineHazardInfo{B<:Union{BSplineBasis, RecombinedBSplineBasis}}
     origin::Int
     dest::Int
     nbasis::Int
     breakpoints::Vector{Float64}
-    basis::Any  # BSplineBasis or RecombinedBSplineBasis - use Any for type stability
+    basis::B  # Parametric for type stability
     S::Matrix{Float64}
     penalty_order::Int
     
     function SplineHazardInfo(origin::Int, dest::Int, nbasis::Int,
-                               breakpoints::Vector{Float64}, basis,
-                               S::Matrix{Float64}, penalty_order::Int)
+                               breakpoints::Vector{Float64}, basis::B,
+                               S::Matrix{Float64}, penalty_order::Int) where {B<:Union{BSplineBasis, RecombinedBSplineBasis}}
         # Validate dimensions
         nbasis > 0 || throw(ArgumentError("nbasis must be positive, got $nbasis"))
         penalty_order >= 1 || throw(ArgumentError("penalty_order must be ≥ 1, got $penalty_order"))
@@ -59,7 +59,7 @@ struct SplineHazardInfo
         norm(S - S') < 1e-10 * norm(S) || 
             throw(ArgumentError("Penalty matrix S must be symmetric"))
         
-        new(origin, dest, nbasis, breakpoints, basis, S, penalty_order)
+        new{B}(origin, dest, nbasis, breakpoints, basis, S, penalty_order)
     end
 end
 

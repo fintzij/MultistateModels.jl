@@ -44,6 +44,14 @@ Abstract type for multistate process.
 abstract type MultistateProcess end
 
 """
+Abstract type for phase-type state space mappings.
+
+Used as a forward reference type since PhaseTypeMappings is defined
+in phasetype/types.jl which is loaded after model_structs.jl.
+"""
+abstract type AbstractPhaseTypeMappings end
+
+"""
     ADBackend
 
 Abstract type for automatic differentiation backend selection.

@@ -32,7 +32,7 @@ function build_penalty_matrix(basis, order::Int; knots::Vector{Float64}=Float64[
         elseif basis isa RecombinedBSplineBasis
             knots = collect(BSplineKit.knots(parent(basis)))
         else
-            error("Unsupported basis type: $(typeof(basis))")
+            throw(ArgumentError("Unsupported basis type: $(typeof(basis)). Supported: BSplineBasis, RecombinedBSplineBasis"))
         end
     end
     

@@ -2,12 +2,76 @@
 FUTURE FEATURES TODO - MultistateModels.jl
 ================================================================================
 Created: 2025-11-29
-Updated: 2025-06-28
+Updated: 2026-01-04
 Branch: SIR
+
+================================================================================
+PERFORMANCE IMPROVEMENTS TO INVESTIGATE
+================================================================================
+
+⬜ PrecompileTools for Reduced Time-to-First-Execution (TTFX)
+   Priority: MEDIUM
+   Added: 2026-01-04
+   
+   PROBLEM:
+   - ForwardDiff specializes on parameter dimension p, causing JIT compilation
+     on first use with new parameter counts
+   - First call to compute_subject_hessians_fast can take 1-2s due to compilation
+   - Subsequent calls with same p are fast (9-17ms for n=100-200)
+   
+   SOLUTION:
+   - Add PrecompileTools.jl as dependency
+   - Create @compile_workload block exercising common code paths
+   - Precompile for common parameter dimensions (e.g., p=6, 12, 18, 24)
+   
+   IMPLEMENTATION:
+   ```julia
+   using PrecompileTools
+   
+   @compile_workload begin
+       # Create small test model with common parameter counts
+       # Exercise: fit(), compute_subject_hessians_fast(), 
+       #           select_smoothing_parameters(), etc.
+   end
+   ```
+   
+   CAVEATS:
+   - Increases package load time
+   - May need dimension-agnostic AD approach for full solution
+   - Test actual TTFX improvement before committing
 
 ================================================================================
 VALIDATION TASKS (Priority)
 ================================================================================
+
+⬜ Long PIJCV vs Exact LOOCV Comparison (2026-01-XX)
+   Priority: HIGH
+   Added: 2026-01-XX (pending test implementation)
+   
+   PURPOSE:
+   - Validate that PIJCV (Wood 2024 NCV with Cholesky downdate approximation)
+     matches exact LOOCV across a range of scenarios
+   - Confirm bowl-shaped criterion (minimum at optimal λ)
+   - Verify Cholesky downdate stability for large n
+   
+   VALIDATION CRITERIA:
+   - PIJCV should match exact LOOCV within 1% for most λ values
+   - Both methods should select the same optimal λ
+   - Criterion should be bowl-shaped (not monotonic)
+   
+   TEST SCENARIOS:
+   - n = 50, 100, 200 subjects
+   - λ grid: 10^(-3) to 10^2 (log scale)
+   - Fixed knots to ensure comparable models
+   - Compare: V_pijcv(λ) vs V_loocv(λ) at each grid point
+   
+   LOCATION: MultistateModelsTests/longtests/
+   
+   PRELIMINARY VALIDATION (2026-01-XX):
+   - n=6 subjects, λ=0.5: PIJCV matched exact LOOCV within 0.22%
+   - Cholesky downdate algorithm implemented and unit-tested
+   
+   REFERENCE: Wood, S.N. (2024). On Neighbourhood Cross Validation
 
 ✅ Validate Observation/Subject Weights (2025-06-28)
    - Verified SubjectWeights propagation through MCEM (mcem_mll, mcem_ase, mcem_mll_sir)

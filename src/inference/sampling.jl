@@ -31,7 +31,7 @@ mutable struct PathWorkspace
     R_power::Matrix{Float64}    # Workspace for matrix power
     nstates::Int                # Current state space size
     
-    function PathWorkspace(max_jumps::Int=1000, max_states::Int=10)
+    function PathWorkspace(max_jumps::Int=DEFAULT_MAX_JUMPS, max_states::Int=DEFAULT_MAX_WORKSPACE_STATES)
         new(
             Vector{Float64}(undef, max_jumps),
             Vector{Int}(undef, max_jumps),

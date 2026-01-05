@@ -46,3 +46,51 @@ When pareto_k > PARETO_K_THRESHOLD, weights may be unreliable and resampling
 or more samples may be needed.
 """
 const PARETO_K_THRESHOLD = 0.7
+
+# =============================================================================
+# Simulation Defaults
+# =============================================================================
+
+"""
+Default maximum number of jumps in a single path for workspace allocation.
+
+Used for pre-allocating PathWorkspace buffers. Paths exceeding this will
+trigger dynamic resizing.
+"""
+const DEFAULT_MAX_JUMPS = 1000
+
+"""
+Default maximum number of states for workspace pre-allocation.
+
+Used for R matrix storage in ECCTMC sampling. Should cover typical models.
+"""
+const DEFAULT_MAX_WORKSPACE_STATES = 10
+
+# =============================================================================
+# MCEM Algorithm Defaults
+# =============================================================================
+
+"""
+Default initial effective sample size target per subject.
+
+This is a reasonable starting point that balances Monte Carlo variance
+with computational cost.
+"""
+const DEFAULT_ESS_TARGET_INITIAL = 50
+
+"""
+Default maximum effective sample size before stopping.
+
+If ESS reaches this without convergence, MCEM stops with a warning.
+"""
+const DEFAULT_MAX_ESS = 10000
+
+"""
+Default MCEM convergence tolerance for marginal log-likelihood change.
+"""
+const DEFAULT_MCEM_TOL = 1e-2
+
+"""
+Default maximum MCEM iterations.
+"""
+const DEFAULT_MCEM_MAXITER = 100

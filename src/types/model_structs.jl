@@ -191,7 +191,7 @@ model.phasetype_expansion.mappings.n_expanded  # 4 (with 3 phases for state 1)
 See also: [`PhaseTypeMappings`](@ref), [`has_phasetype_expansion`](@ref)
 """
 struct PhaseTypeExpansion
-    mappings::Any  # PhaseTypeMappings (defined in phasetype.jl, forward reference)
+    mappings::AbstractPhaseTypeMappings  # PhaseTypeMappings <: AbstractPhaseTypeMappings
     original_data::DataFrame
     original_tmat::Matrix{Int}
     original_hazards::Vector{<:HazardFunction}
