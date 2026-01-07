@@ -322,18 +322,11 @@ params = get_parameters(model; expanded=true)  # (h1_ab = [...], h12_a = [...], 
 - [`get_expanded_parameters`](@ref) - Get expanded parameters
 """
 function get_parameters(model::MultistateProcess; scale::Symbol=:natural, expanded::Bool=false)
-    # For phase-type models with expanded=false, return user-facing parameters
+    # For phase-type models with expanded=false, compute user-facing parameters from expanded params
     if !expanded && has_phasetype_expansion(model)
-        orig_params = model.phasetype_expansion.original_parameters
-        if scale == :natural
-            return orig_params.natural
-        elseif scale == :estimation || scale == :log || scale == :flat
-            return orig_params.flat
-        elseif scale == :nested
-            return orig_params.nested
-        else
-            throw(ArgumentError("scale must be :natural, :estimation, :log, :flat, or :nested (got :$scale)"))
-        end
+        # Compute user-facing parameters from current expanded parameters
+        # (not the stale original_parameters that was set at model construction)
+        return _compute_phasetype_user_params(model, scale)
     end
     
     # Otherwise, return expanded/internal parameters
@@ -345,6 +338,74 @@ function get_parameters(model::MultistateProcess; scale::Symbol=:natural, expand
         return model.parameters.nested
     else
         throw(ArgumentError("scale must be :natural, :estimation, :log, :flat, or :nested (got :$scale)"))
+    end
+end
+
+"""
+    _compute_phasetype_user_params(model, scale)
+
+Internal: Compute user-facing phase-type parameters from current expanded parameters.
+Used by `get_parameters` to ensure parameters are always up-to-date.
+"""
+function _compute_phasetype_user_params(model::MultistateProcess, scale::Symbol)
+    # Get current expanded parameters on natural scale
+    exp_params = model.parameters.natural
+    
+    # Get original hazard specifications
+    original_hazards = model.phasetype_expansion.original_hazards
+    
+    # Build user-facing parameters from expanded parameters
+    result_pairs = Vector{Pair{Symbol, Vector{Float64}}}()
+    
+    for orig_haz in original_hazards
+        orig_name = Symbol("h$(orig_haz.statefrom)$(orig_haz.stateto)")
+        
+        if orig_haz isa PhaseTypeHazard
+            # Phase-type hazard: collect λ and μ rates from expanded hazards
+            n = orig_haz.n_phases
+            user_params = Float64[]
+            
+            # Collect λ rates (progression: λ₁, λ₂, ..., λₙ₋₁)
+            for i in 1:(n-1)
+                prog_name = Symbol("h$(orig_haz.statefrom)_$(Char('a' + i - 1))$(Char('a' + i))")
+                if haskey(exp_params, prog_name)
+                    push!(user_params, exp_params[prog_name][1])
+                end
+            end
+            
+            # Collect μ rates (exits: μ₁, μ₂, ..., μₙ)
+            for i in 1:n
+                exit_name = Symbol("h$(orig_haz.statefrom)$(orig_haz.stateto)_$(Char('a' + i - 1))")
+                if haskey(exp_params, exit_name)
+                    push!(user_params, exp_params[exit_name][1])
+                end
+            end
+            
+            push!(result_pairs, orig_name => user_params)
+        else
+            # Non-phase-type hazard: use expanded params directly
+            if haskey(exp_params, orig_name)
+                push!(result_pairs, orig_name => exp_params[orig_name])
+            end
+        end
+    end
+    
+    params_natural = NamedTuple(result_pairs)
+    
+    if scale == :natural
+        return params_natural
+    elseif scale == :flat || scale == :estimation || scale == :log
+        # v0.3.0+: All parameters on natural scale, flatten directly
+        return reduce(vcat, [v for v in values(params_natural)])
+    elseif scale == :nested
+        # v0.3.0+: Convert to nested format on natural scale
+        nested_pairs = [
+            name => (baseline = NamedTuple{Tuple([Symbol("p$i") for i in 1:length(v)])}(v),)
+            for (name, v) in result_pairs
+        ]
+        return NamedTuple(nested_pairs)
+    else
+        throw(ArgumentError("scale must be :natural, :flat, :estimation, :log, or :nested (got :$scale)"))
     end
 end
 

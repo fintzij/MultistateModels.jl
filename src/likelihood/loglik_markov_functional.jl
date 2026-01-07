@@ -39,7 +39,7 @@ Scalar (negative) log-likelihood value.
 """
 function _loglik_markov_functional(parameters, data::MPanelData; neg = true)
     # Unflatten parameters to natural scale (AD-compatible)
-    pars = unflatten_natural(parameters, data.model)
+    pars = unflatten_parameters(parameters, data.model)
     
     # Model components
     hazards = data.model.hazards
@@ -104,7 +104,7 @@ function _loglik_markov_functional(parameters, data::MPanelData; neg = true)
                         hazard = hazards[trans_idx]
                         hazard_pars = pars[hazard.hazname]
                         haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
-                        obs_ll += log(haz_value)
+                        obs_ll += NaNMath.log(haz_value)
                     end
                     
                     obs_ll * obs_weight
@@ -125,7 +125,7 @@ function _loglik_markov_functional(parameters, data::MPanelData; neg = true)
                             prob_sum += P[statefrom_i, s] * emission_prob
                         end
                     end
-                    log(prob_sum) * obs_weight
+                    NaNMath.log(prob_sum) * obs_weight
                 end
             end
             
@@ -184,7 +184,7 @@ function _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, ::Type{T
                 hazard = hazards[trans_idx]
                 hazard_pars = pars[hazard.hazname]
                 haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
-                log_prob = log_surv + log(haz_value)
+                log_prob = log_surv + NaNMath.log(haz_value)
             else
                 log_prob = log_surv
             end
@@ -222,7 +222,7 @@ function _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, ::Type{T
     end
     
     # Log-likelihood is log of sum of final probabilities
-    return log(sum(α))
+    return NaNMath.log(sum(α))
 end
 
 """

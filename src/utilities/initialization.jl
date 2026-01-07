@@ -164,8 +164,15 @@ function _select_one_path_per_subject(samplepaths::Vector{Vector{SamplePath}},
                                        weights::Vector{Vector{Float64}})
     selected = Vector{SamplePath}(undef, length(samplepaths))
     for i in eachindex(samplepaths)
-        # Sample one path proportional to normalized weights
-        idx = sample(1:length(samplepaths[i]), Weights(weights[i]))
+        # Sanitize weights: handle NaN/Inf by replacing with uniform weights
+        w = weights[i]
+        if any(isnan, w) || any(isinf, w) || all(w .== 0)
+            # Fallback to uniform sampling if weights are invalid
+            idx = rand(1:length(samplepaths[i]))
+        else
+            # Sample one path proportional to normalized weights
+            idx = sample(1:length(samplepaths[i]), Weights(w))
+        end
         selected[i] = samplepaths[i][idx]
     end
     return selected
@@ -208,7 +215,7 @@ end
 """
     _init_from_surrogate_rates!(model; surrogate_constraints, surrogate_parameters)
 
-Initialize parameters using log rates from fitted Markov surrogate.
+Initialize parameters using rates from fitted Markov surrogate.
 
 This is the implementation for `method = :markov`.
 
@@ -220,6 +227,9 @@ will be fitted.
 - `model::MultistateProcess`: Model to initialize
 - `surrogate_constraints`: Constraints for surrogate fitting (only used if new fit needed)
 - `surrogate_parameters`: Fixed surrogate parameters (optional)
+
+# Note
+As of v0.3.0, parameters are on natural scale (rates, not log rates).
 """
 function _init_from_surrogate_rates!(model::MultistateProcess;
                                       surrogate_constraints = nothing,
@@ -237,13 +247,13 @@ function _init_from_surrogate_rates!(model::MultistateProcess;
         hazard = model.hazards[i]
         hazname = hazard.hazname
         
-        # Get log-scale baseline parameter from surrogate's nested structure
-        # Surrogate always has exponential hazards with one baseline param (log rate)
+        # v0.3.0+: Get natural-scale baseline parameter from surrogate
+        # Surrogate always has exponential hazards with one baseline param (rate)
         surrog_nested = surrog.parameters.nested[hazname]
-        surrog_log_rate = first(values(surrog_nested.baseline))
+        surrog_rate = first(values(surrog_nested.baseline))
         
-        # Initialize baseline params using the surrogate log rate
-        set_par_to = init_par(hazard, surrog_log_rate)
+        # Initialize baseline params using the surrogate rate
+        set_par_to = init_par(hazard, surrog_rate)
 
         # Copy covariate effects if there are any
         if hazard.has_covariates && haskey(surrog_nested, :covariates)

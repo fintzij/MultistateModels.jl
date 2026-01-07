@@ -93,7 +93,7 @@ function compute_subject_gradients(params::AbstractVector, model::MultistateMode
         
         # closure for subject i's log-likelihood
         function ll_subj_i(pars)
-            pars_nested = unflatten_natural(pars, model)
+            pars_nested = unflatten_parameters(pars, model)
             subj_inds = model.subjectindices[path.subj]
             subj_dat = view(model.data, subj_inds, :)
             subjdat_df = make_subjdat(path, subj_dat)
@@ -266,7 +266,7 @@ function compute_subject_hessians(params::AbstractVector, model::MultistateModel
         
         # closure for subject i's log-likelihood
         function ll_subj_i(pars)
-            pars_nested = unflatten_natural(pars, model)
+            pars_nested = unflatten_parameters(pars, model)
             subj_inds = model.subjectindices[path.subj]
             subj_dat = view(model.data, subj_inds, :)
             subjdat_df = make_subjdat(path, subj_dat)
@@ -363,7 +363,7 @@ function compute_subject_hessians_batched(params::AbstractVector, model::Multist
     
     # Define function that returns all subject log-likelihoods as a vector
     function all_subject_logliks(pars)
-        pars_nested = unflatten_natural(pars, model)
+        pars_nested = unflatten_parameters(pars, model)
         hazards = model.hazards
         totalhazards = model.totalhazards
         tmat = model.tmat
@@ -455,7 +455,7 @@ function compute_subject_hessians_threaded(params::AbstractVector, model::Multis
     Threads.@threads for i in 1:nsubj
         # Define log-likelihood for subject i (closure captures i)
         function single_loglik(pars)
-            pars_nested = unflatten_natural(pars, model)
+            pars_nested = unflatten_parameters(pars, model)
             path = samplepaths[i]
             w = model.SubjectWeights[i]
             subj_inds = model.subjectindices[path.subj]
@@ -579,7 +579,7 @@ function loglik_weighted_with_params(θw::AbstractVector{T}, npaths::Int, nparam
     w = @view θw[nparams+1:end]
     
     # unflatten parameters to natural scale
-    pars_nested = unflatten_natural(θ, model)
+    pars_nested = unflatten_parameters(θ, model)
     hazards = model.hazards
     
     # remake spline parameters if needed (no-op for RuntimeSplineHazard)
@@ -628,7 +628,7 @@ function loglik_paths_subject(pars::AbstractVector{T}, subject_paths::Vector{Sam
     lls = Vector{T}(undef, npaths)
     
     # unflatten parameters to natural scale
-    pars_nested = unflatten_natural(pars, model)
+    pars_nested = unflatten_parameters(pars, model)
     hazards = model.hazards
     
     # remake spline parameters if needed (no-op for RuntimeSplineHazard)
@@ -680,7 +680,7 @@ function loglik_weighted_subject(pars::AbstractVector{T}, subject_paths::Vector{
     ll_weighted = zero(T)
     
     # unflatten parameters to natural scale
-    pars_nested = unflatten_natural(pars, model)
+    pars_nested = unflatten_parameters(pars, model)
     hazards = model.hazards
     
     # remake spline parameters if needed (no-op for RuntimeSplineHazard)

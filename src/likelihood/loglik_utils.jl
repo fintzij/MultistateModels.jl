@@ -35,18 +35,15 @@ _unwrap_to_float(x::ForwardDiff.Dual) = _unwrap_to_float(ForwardDiff.value(x))
 Normalize parameter representations for downstream hazard calls.
 Uses multiple dispatch to handle different parameter container types.
 
-For flat vectors, this is equivalent to calling `unflatten_natural(p, model)`.
+For flat vectors, this is equivalent to calling `unflatten_parameters(p, model)`.
 
 # Supported types
 - `Tuple`: Nested parameters indexed by hazard number (returned as-is)
 - `NamedTuple`: Parameters keyed by hazard name (returned as-is)
 - `AbstractVector{<:AbstractVector}`: Already nested format (returned as-is)
-- `AbstractVector{<:Real}`: Flat parameter vector (unflattened via `unflatten_natural`)
+- `AbstractVector{<:Real}`: Flat parameter vector (unflattened via `unflatten_parameters`)
 
-# Note on AD Compatibility
-Uses `unflatten_natural` to handle both Float64 and ForwardDiff.Dual types correctly.
-
-See also: [`unflatten_natural`](@ref), [`unflatten_estimation`](@ref)
+See also: [`unflatten_parameters`](@ref)
 """
 prepare_parameters(p::Tuple, ::MultistateProcess) = p
 prepare_parameters(p::NamedTuple, ::MultistateProcess) = p
@@ -55,7 +52,7 @@ prepare_parameters(p::AbstractVector{<:AbstractVector}, ::MultistateProcess) = p
 function prepare_parameters(p::AbstractVector{<:Real}, model::MultistateProcess)
     # Return NamedTuple indexed by hazard name (not Tuple of values)
     # Downstream code accesses parameters[hazard.hazname]
-    return unflatten_natural(p, model)
+    return unflatten_parameters(p, model)
 end
 
 # =============================================================================
@@ -134,7 +131,7 @@ loglik_path = function(pars, subjectdata::DataFrame, hazards::Vector{<:_Hazard},
                 cache_context = tt_context,
                 hazard_slot = transind)
             
-            ll += log(haz_value)
+            ll += NaNMath.log(haz_value)
         end
      end
  

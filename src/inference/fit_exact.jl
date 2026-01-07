@@ -65,6 +65,9 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         println("Using penalized likelihood with $(penalty_config.n_lambda) smoothing parameter(s)")
     end
 
+    # Generate parameter bounds for box-constrained optimization
+    lb, ub = generate_parameter_bounds(model)
+
     # parse constraints, or not, and solve
     if isnothing(constraints) 
         # Create likelihood function - parallel or sequential
@@ -87,7 +90,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             end
         end
         
-        # get estimates - use Ipopt for unconstrained
+        # get estimates - use Ipopt for box-constrained optimization
         # Use SecondOrder AD if solver requires it (Newton, Ipopt) to avoid warnings
         adtype = Optimization.AutoForwardDiff()
         if isnothing(solver) || (solver isa Optim.Newton) || (solver isa Optim.NewtonTrustRegion) || (solver isa IpoptOptimizer)
@@ -95,7 +98,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         end
 
         optf = OptimizationFunction(loglik_fn, adtype)
-        prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths))
+        prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths); lb=lb, ub=ub)
 
         # solve with user-specified solver or default Ipopt
         sol = _solve_optimization(prob, solver)
@@ -161,7 +164,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         end
 
         optf = OptimizationFunction(loglik_fn, adtype, cons = consfun_multistate)
-        prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths), lcons = constraints.lcons, ucons = constraints.ucons)
+        prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths); lb=lb, ub=ub, lcons = constraints.lcons, ucons = constraints.ucons)
         
         # solve with user-specified solver or default Ipopt
         sol = _solve_optimization(prob, solver)

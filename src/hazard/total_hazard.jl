@@ -38,14 +38,14 @@ end
 
 Return the log-total cumulative hazard out of a transient state over the interval [lb, ub].
 
-PARAMETER CONVENTION: Expects natural-scale parameters (from unflatten_natural or get_hazard_params).
+PARAMETER CONVENTION: Expects natural-scale parameters (from unflatten_parameters or get_hazard_params).
 """
 function total_cumulhaz(lb, ub, parameters, subjdat_row, _totalhazard::_TotalHazardTransient, _hazards;
                         give_log = true,
                         apply_transform::Bool = false,
                         cache_context::Union{Nothing,TimeTransformContext}=nothing) 
 
-    # Parameters should already be on natural scale (from unflatten_natural or get_hazard_params)
+    # Parameters should already be on natural scale (from unflatten_parameters or get_hazard_params)
     # Use directly without additional transformation
     
     # log total cumulative hazard

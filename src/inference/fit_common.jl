@@ -86,24 +86,69 @@ See also: [`get_vcov`](@ref), [`get_ij_vcov`](@ref), [`compare_variance_estimate
 """
     _is_ipopt_solver(solver)
 
-Check if solver is Ipopt (supports print_level option).
+Check if solver is Ipopt (supports Ipopt-specific options).
 """
 _is_ipopt_solver(solver) = isnothing(solver) || solver isa IpoptOptimizer
 
 """
-    _solve_optimization(prob, solver)
+    DEFAULT_IPOPT_OPTIONS
+
+Default Ipopt options for robust optimization with proper boundary handling.
+
+These defaults are tuned for multistate model fitting:
+- `print_level=0`: Suppress output
+- `honor_original_bounds="yes"`: Ensure solution exactly satisfies box constraints
+- `bound_relax_factor=1e-10`: Tight bound relaxation (default 1e-8 can be too loose)
+- `bound_push=1e-4`: Don't push initial point far from bounds
+- `bound_frac=0.001`: Small relative push from bounds
+- `mu_strategy="adaptive"`: More robust barrier parameter strategy
+- `tol=1e-7`: Convergence tolerance
+- `acceptable_tol=1e-5`: "Good enough" tolerance
+- `acceptable_iter=10`: Iterations at acceptable before terminating
+
+Users can override any of these by passing keyword arguments to `_solve_optimization`.
+"""
+const DEFAULT_IPOPT_OPTIONS = (
+    # Output control
+    print_level = 0,
+    
+    # Boundary handling (critical for constrained parameters like β ≥ 0)
+    honor_original_bounds = "yes",
+    bound_relax_factor = 1e-10,
+    bound_push = 1e-4,
+    bound_frac = 0.001,
+    
+    # Adaptive barrier (more robust for difficult problems)
+    mu_strategy = "adaptive",
+    
+    # Convergence tolerances
+    tol = 1e-7,
+    acceptable_tol = 1e-5,
+    acceptable_iter = 10,
+)
+
+"""
+    _solve_optimization(prob, solver; ipopt_options...)
 
 Solve optimization problem with solver-appropriate options.
-Ipopt is configured with:
-- print_level=0: Suppress output
-- honor_original_bounds="yes": Ensure solution exactly satisfies box constraints (β ≥ 0)
+
+For Ipopt, uses robust defaults from `DEFAULT_IPOPT_OPTIONS` which can be
+overridden by passing keyword arguments:
+
+```julia
+_solve_optimization(prob, solver; tol=1e-8, mu_strategy="monotone")
+```
+
+See `DEFAULT_IPOPT_OPTIONS` for the full list of default options.
 """
-function _solve_optimization(prob, solver)
+function _solve_optimization(prob, solver; ipopt_options...)
     _solver = isnothing(solver) ? IpoptOptimizer() : solver
     if _is_ipopt_solver(solver)
-        return solve(prob, _solver; print_level = 0, honor_original_bounds = "yes")
+        # Merge defaults with user overrides (user options take precedence)
+        merged_options = merge(DEFAULT_IPOPT_OPTIONS, ipopt_options)
+        return solve(prob, _solver; merged_options...)
     else
-        # Optim.jl and other solvers don't support print_level/honor_original_bounds
+        # Optim.jl and other solvers don't support Ipopt options
         return solve(prob, _solver)
     end
 end

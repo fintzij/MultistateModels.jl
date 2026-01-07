@@ -1,11 +1,11 @@
 # ============================================================================
-# Parameter Scale Transformations
+# Parameter Utility Functions
 # ============================================================================
 #
 # PARAMETER SCALE CONVENTION (v0.3.0+):
 #
 # ALL parameters are stored on NATURAL scale. Box constraints handle non-negativity.
-# There is NO separate "estimation scale" - all transform functions are now identity.
+# There is NO separate "estimation scale" - no transformations needed.
 #
 # This simplified design:
 #   1. Enables truly quadratic penalties P(β) = (λ/2)βᵀSβ for PIJCV
@@ -13,134 +13,7 @@
 #   3. Eliminates confusion about which scale parameters are on
 #   4. Makes hazard functions simpler (no internal transformations)
 #
-# The transform functions below are now identity operations for backward compatibility
-# with calling code. They will be removed in a future version.
-#
 # ============================================================================
-
-"""
-    transform_baseline_to_natural(baseline::NamedTuple, family::Symbol, ::Type{T}) where T
-
-IDENTITY TRANSFORM (v0.3.0+): Returns baseline unchanged.
-
-Previously transformed parameters from estimation scale to natural scale.
-Now all parameters are stored on natural scale, so this is identity.
-
-# Arguments
-- `baseline`: NamedTuple of baseline parameters (already on natural scale)
-- `family`: Hazard family (unused, kept for API compatibility)
-- `T`: Element type (unused, kept for API compatibility)
-
-# Returns
-Unchanged baseline NamedTuple
-"""
-@inline function transform_baseline_to_natural(baseline::NamedTuple, family::Symbol, ::Type{T}) where T
-    # v0.3.0+: All parameters on natural scale, identity transform
-    return baseline
-end
-
-"""
-    transform_baseline_to_estimation(baseline::NamedTuple, family::Symbol)
-
-IDENTITY TRANSFORM (v0.3.0+): Returns baseline unchanged.
-
-Previously transformed parameters from natural scale to estimation scale.
-Now all parameters are stored on natural scale, so this is identity.
-
-# Arguments
-- `baseline`: NamedTuple of baseline parameters (on natural scale)
-- `family`: Hazard family (unused, kept for API compatibility)
-
-# Returns
-Unchanged baseline NamedTuple
-"""
-@inline function transform_baseline_to_estimation(baseline::NamedTuple, family::Symbol)
-    # v0.3.0+: All parameters on natural scale, identity transform
-    return baseline
-end
-
-"""
-    to_natural_scale(params_nested::NamedTuple, hazards, ::Type{T}) where T
-
-IDENTITY TRANSFORM (v0.3.0+): Returns params_nested unchanged.
-
-Previously transformed parameters from estimation scale to natural scale.
-Now all parameters are stored on natural scale, so this is identity.
-
-# Arguments
-- `params_nested`: NamedTuple of per-hazard parameter NamedTuples (already on natural scale)
-- `hazards`: Vector of hazard objects (kept for API compatibility)
-- `T`: Element type for AD compatibility
-
-# Returns
-Unchanged NamedTuple of per-hazard parameter NamedTuples
-"""
-function to_natural_scale(params_nested::NamedTuple, hazards, ::Type{T}) where T
-    hazard_keys = keys(params_nested)
-    transformed_hazards = map(enumerate(hazard_keys)) do (idx, hazname)
-        hazard_params = params_nested[hazname]
-        
-        # Find the hazard with the matching name
-        # We cannot assume hazards[idx] corresponds to hazname because params_nested keys 
-        # might be sorted differently than the hazards vector
-        h_idx = findfirst(h -> h.hazname == hazname, hazards)
-        if isnothing(h_idx)
-            throw(ArgumentError("Hazard $hazname found in parameters but not in hazards vector. " *
-                               "Check that parameter names match hazard definitions."))
-        end
-        hazard = hazards[h_idx]
-        
-        family = hazard.family
-        
-        # Transform baseline to natural scale (family-aware)
-        baseline_natural = transform_baseline_to_natural(hazard_params.baseline, family, T)
-        
-        # Keep covariates unchanged
-        if haskey(hazard_params, :covariates)
-            hazname => (baseline = baseline_natural, covariates = hazard_params.covariates)
-        else
-            hazname => (baseline = baseline_natural,)
-        end
-    end
-    
-    return NamedTuple(transformed_hazards)
-end
-
-"""
-    to_estimation_scale(params_nested::NamedTuple, hazards)
-
-IDENTITY TRANSFORM (v0.3.0+): Returns params_nested unchanged.
-
-Previously transformed parameters from natural scale to estimation scale.
-Now all parameters are stored on natural scale, so this is identity.
-
-# Arguments
-- `params_nested`: NamedTuple of per-hazard parameter NamedTuples (on natural scale)
-- `hazards`: Vector of hazard objects (kept for API compatibility)
-
-# Returns
-Unchanged NamedTuple of per-hazard parameter NamedTuples
-"""
-function to_estimation_scale(params_nested::NamedTuple, hazards)
-    hazard_keys = keys(params_nested)
-    transformed_hazards = map(enumerate(hazard_keys)) do (idx, hazname)
-        hazard_params = params_nested[hazname]
-        hazard = hazards[idx]
-        family = hazard.family
-        
-        # Transform baseline to estimation scale (family-aware)
-        baseline_estimation = transform_baseline_to_estimation(hazard_params.baseline, family)
-        
-        # Keep covariates unchanged
-        if haskey(hazard_params, :covariates)
-            hazname => (baseline = baseline_estimation, covariates = hazard_params.covariates)
-        else
-            hazname => (baseline = baseline_estimation,)
-        end
-    end
-    
-    return NamedTuple(transformed_hazards)
-end
 
 """
     set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVector)

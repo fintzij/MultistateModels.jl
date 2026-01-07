@@ -16,7 +16,7 @@
 function loglik_semi_markov(parameters, data::SMPanelData; neg=true, use_sampling_weight=true, parallel=false)
 
     # Unflatten parameters to natural scale (AD-compatible)
-    pars = unflatten_natural(parameters, data.model)
+    pars = unflatten_parameters(parameters, data.model)
 
     # Get hazards and model components
     hazards = data.model.hazards
@@ -152,7 +152,7 @@ ODE solvers would be invoked instead of analytic cumulative hazard formulas.
 function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
 
     # Unflatten parameters to natural scale (AD-compatible)
-    pars = unflatten_natural(parameters, data.model)
+    pars = unflatten_parameters(parameters, data.model)
 
     # snag the hazards and model components
     hazards = data.model.hazards
@@ -221,7 +221,7 @@ Arguments:
 """
 function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}}, data::SMPanelData)
     # Unflatten parameters to natural scale (AD-compatible)
-    pars = unflatten_natural(parameters, data.model)
+    pars = unflatten_parameters(parameters, data.model)
     
     # Get hazards
     hazards = data.model.hazards
@@ -299,7 +299,7 @@ function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}
                     apply_transform = use_transform,
                     cache_context = tt_context,
                     hazard_slot = h)
-                ll_flat[sd.path_idx[i]] += log(haz_value)
+                ll_flat[sd.path_idx[i]] += NaNMath.log(haz_value)
             end
         end
     end
@@ -349,7 +349,7 @@ function loglik_semi_markov_penalized(parameters, data::SMPanelData, penalty_con
     has_penalties(penalty_config) || return neg ? nll_base : -nll_base
     
     # Extract natural-scale baseline coefficients for penalty
-    pars_natural = unflatten_natural(parameters, data.model)
+    pars_natural = unflatten_parameters(parameters, data.model)
     
     # Build flat natural-scale vector for penalty computation
     T = eltype(parameters)

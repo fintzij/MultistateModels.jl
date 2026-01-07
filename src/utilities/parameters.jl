@@ -2,60 +2,41 @@
 # Parameter Manipulation Functions
 # ============================================================================
 # Functions for unflattening, setting, getting, and managing model parameters.
-# Handles AD-compatible transformations and cached parameter updates.
+#
+# PARAMETER SCALE CONVENTION (v0.3.0+):
+# All parameters are stored on NATURAL scale. No transformations needed.
+# Box constraints (lb/ub) enforce positivity instead of exp() transforms.
 # ============================================================================
 
 """
-    unflatten_natural(flat_params::AbstractVector, model::MultistateProcess)
+    unflatten_parameters(flat_params::AbstractVector, model::MultistateProcess)
 
-Unflatten parameter vector to nested NamedTuple and transform to NATURAL SCALE.
+Unflatten parameter vector to nested NamedTuple structure.
 
 This is the primary function for converting flat optimization parameters to the
-nested NamedTuple format used by hazard evaluation functions. It applies the
-appropriate scale transformation (exp for baseline parameters).
-
-# What it does
-1. Unflattens the flat parameter vector to nested NamedTuple structure
-2. Transforms baseline parameters from estimation scale (log) to natural scale (exp)
-
-# When to use
-- Likelihood computation (hazard evaluation requires natural-scale parameters)
-- Simulation (hazard rates must be positive)
-- Any place that calls `eval_hazard`, `eval_cumhaz`, etc.
+nested NamedTuple format used by hazard evaluation functions.
 
 # Arguments
-- `flat_params`: Flat parameter vector on estimation scale (Float64 or Dual)
+- `flat_params`: Flat parameter vector (Float64 or Dual for AD)
 - `model`: MultistateProcess model containing ReConstructor
 
 # Returns
-NamedTuple of nested parameters on NATURAL SCALE:
-- Baseline parameters: exp() applied (positive values)
-- Covariate coefficients: unchanged (already unconstrained)
-
-# Note
-Uses AD-compatible transformation that preserves ForwardDiff.Dual types.
+NamedTuple of nested parameters with structure:
+- `(hazname = (baseline = (...), covariates = (...)), ...)`
 
 # Example
 ```julia
-# flat_params = [log(0.5), 0.3]  # log-rate and covariate coefficient
+flat_params = [0.5, 0.3]  # rate and covariate coefficient
 # Returns: (h12 = (baseline = (h12_Intercept = 0.5,), covariates = (h12_x = 0.3,)),)
-#          ↑ exp(log(0.5)) = 0.5 on natural scale
 ```
-
-See also: [`unflatten_estimation`](@ref)
 """
-function unflatten_natural(flat_params::AbstractVector{T}, model::MultistateProcess) where {T<:Real}
-    # Unflatten to estimation-scale nested structure
+function unflatten_parameters(flat_params::AbstractVector{T}, model::MultistateProcess) where {T<:Real}
     if T === Float64
-        params_estimation = unflatten(model.parameters.reconstructor, flat_params)
+        return unflatten(model.parameters.reconstructor, flat_params)
     else
         # For Dual or other types, use AD-compatible unflatten
-        params_estimation = unflattenAD(model.parameters.reconstructor, flat_params)
+        return unflattenAD(model.parameters.reconstructor, flat_params)
     end
-    
-    # Transform baseline parameters to natural scale (exp applied where needed)
-    # Pass hazards so we know which parameters need transformation
-    return to_natural_scale(params_estimation, model.hazards, T)
 end
 
 """
@@ -64,14 +45,15 @@ end
 Update mutable parameter vectors in-place from flat parameter vector.
 This avoids allocating new NamedTuples on each likelihood call.
 
-For Float64 parameters only - AD types should use unflatten_natural.
+For Float64 parameters only - AD types should use unflatten_parameters.
 
 # Arguments
 - `pars_cache::Vector{Vector{Float64}}`: Pre-allocated parameter vectors (one per hazard)
-- `flat_params::Vector{Float64}`: Flat parameter vector on estimation scale
+- `flat_params::Vector{Float64}`: Flat parameter vector (already on natural scale)
 - `hazards::Vector{<:_Hazard}`: Hazard objects with npar_total info
 
-The function transforms baseline parameters to natural scale (exp) in-place.
+# Note
+As of v0.3.0, all parameters are stored on natural scale. No transformation needed.
 """
 function update_pars_cache!(pars_cache::Vector{Vector{Float64}}, 
                             flat_params::AbstractVector{Float64}, 
@@ -79,16 +61,10 @@ function update_pars_cache!(pars_cache::Vector{Vector{Float64}},
     offset = 0
     @inbounds for (h, hazard) in enumerate(hazards)
         npars = hazard.npar_total
-        nbase = hazard.npar_baseline
         pars_h = pars_cache[h]
         
-        # Copy baseline parameters with exp transformation (natural scale)
-        for i in 1:nbase
-            pars_h[i] = exp(flat_params[offset + i])
-        end
-        
-        # Copy covariate parameters as-is
-        for i in (nbase + 1):npars
+        # v0.3.0+: Copy all parameters directly (already on natural scale)
+        for i in 1:npars
             pars_h[i] = flat_params[offset + i]
         end
         
@@ -143,45 +119,6 @@ This is the allocation-free path for cached parameters.
                                         covars::NamedTuple)
     # Call the hazard with vector parameters directly
     return hazard(t, pars_vec, covars)
-end
-
-"""
-    unflatten_estimation(flat_params, model)
-
-Unflatten parameter vector to nested NamedTuple structure on ESTIMATION SCALE.
-Returns parameters with baseline on log scale (no exp() transformation applied).
-
-This function is used when you need the raw estimation-scale parameters, such as:
-- Spline remake code which needs log-scale coefficients
-- Constraint checking before optimization
-- Parameter initialization
-
-Unlike `unflatten_natural`, this does NOT apply exp() to baseline parameters.
-
-# Arguments
-- `flat_params`: Flat parameter vector on estimation scale (Float64 or Dual)
-- `model`: MultistateProcess model containing ReConstructor
-
-# Returns
-NamedTuple of nested parameters on ESTIMATION SCALE:
-- Baseline parameters: log scale (as stored in optimization)
-- Covariate coefficients: unchanged (already unconstrained)
-
-# Example
-```julia
-# flat_params = [log(0.5), 0.3]  # log-rate and covariate coefficient
-# Returns: (h12 = (baseline = (h12_Intercept = log(0.5),), covariates = (h12_x = 0.3,)),)
-#          ↑ still on log scale
-```
-
-See also: [`unflatten_natural`](@ref)
-"""
-function unflatten_estimation(flat_params::AbstractVector{T}, model::MultistateProcess) where {T<:Real}
-    if T === Float64
-        return unflatten(model.parameters.reconstructor, flat_params)
-    else
-        return unflattenAD(model.parameters.reconstructor, flat_params)
-    end
 end
 
 """
@@ -270,8 +207,9 @@ end
 """
     set_parameters!(model::MultistateProcess, newvalues::Tuple)
 
-Set model parameters given a tuple of vectors parameterizing transition intensities. 
-Values should be on log scale for baseline parameters, as-is for covariate coefficients.
+Set model parameters given a tuple of vectors parameterizing transition intensities.
+v0.3.0+: Values should be on natural scale for baseline parameters (e.g., rates, shapes),
+as-is for covariate coefficients.
 
 Assigns new values by hazard index in order.
 """
@@ -310,7 +248,8 @@ end
     set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
 
 Set model parameters given a NamedTuple with hazard names as keys.
-Values should be on log scale for baseline parameters, as-is for covariate coefficients.
+v0.3.0+: Values should be on natural scale for baseline parameters (e.g., rates, shapes),
+as-is for covariate coefficients.
 
 Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.
 """
@@ -437,17 +376,17 @@ end
 # ============================================================================
 
 """
-    build_hazard_params(log_scale_params, parnames, npar_baseline, npar_total)
+    build_hazard_params(params, parnames, npar_baseline, npar_total)
 
 Create a NamedTuple with baseline and covariate parameters using named fields.
 
-Parameters are stored on log scale for baseline, as-is for covariates.
-No transformations are applied - hazard functions expect log scale.
+v0.3.0+: All parameters are stored on natural scale. No transformations are applied.
+Baseline parameters are positive-constrained via Ipopt box constraints during optimization.
 
 This function is type-generic to support ForwardDiff.Dual during automatic differentiation.
 
 # Arguments
-- `log_scale_params`: Full parameter vector - log scale for baseline, as-is for covariates
+- `params`: Full parameter vector - natural scale for baseline, as-is for covariates
 - `parnames`: Vector of parameter names (e.g., [:h12_shape, :h12_scale, :h12_age])
 - `npar_baseline`: Number of baseline parameters
 - `npar_total`: Total number of parameters
@@ -458,19 +397,19 @@ This function is type-generic to support ForwardDiff.Dual during automatic diffe
 
 # Examples
 ```julia
-# Weibull with covariates
-params = build_hazard_params([log(1.5), log(0.2), 0.3, 0.1], 
+# Weibull with covariates (natural scale)
+params = build_hazard_params([1.5, 0.2, 0.3, 0.1], 
                              [:h12_shape, :h12_scale, :h12_age, :h12_sex], 2, 4)
-# Returns: (baseline = (h12_shape = 0.405, h12_scale = -1.609), 
+# Returns: (baseline = (h12_shape = 1.5, h12_scale = 0.2), 
 #           covariates = (h12_age = 0.3, h12_sex = 0.1))
 
 # Exponential without covariates  
-params = build_hazard_params([log(0.5)], [:h12_intercept], 1, 1)
-# Returns: (baseline = (h12_intercept = -0.693),)
+params = build_hazard_params([0.5], [:h12_intercept], 1, 1)
+# Returns: (baseline = (h12_intercept = 0.5),)
 ```
 
 # Note
-All parameters are stored on log scale for baseline (as expected by hazard functions).
+All parameters are stored on natural scale (as expected by hazard functions).
 Covariate coefficients are stored as-is (unconstrained).
 """
 function build_hazard_params(log_scale_params::AbstractVector{<:Real}, parnames::Vector{Symbol}, npar_baseline::Int, npar_total::Int)
@@ -620,10 +559,10 @@ end
 """
     get_hazard_params(parameters, hazards)
 
-Extract parameters for hazard function evaluation (v0.3.0+: already on natural scale).
+Extract parameters for hazard function evaluation.
 
-As of v0.3.0, all parameters are stored on natural scale, so this function is
-essentially an identity operation via `to_natural_scale` (which is now identity).
+As of v0.3.0, all parameters are stored on natural scale, so this function
+simply extracts the nested parameters without transformation.
 
 # Arguments
 - `parameters`: A NamedTuple with `nested` field, or already-extracted nested parameters
@@ -641,10 +580,8 @@ haz_pars = get_hazard_params(model.parameters, model.hazards)
 ```
 """
 function get_hazard_params(parameters, hazards)
-    # Get estimation-scale params first
-    est_params = get_estimation_scale_params(parameters)
-    # Transform to natural scale for hazard evaluation (family-aware)
-    return to_natural_scale(est_params, hazards, Float64)
+    # v0.3.0+: params already on natural scale, just extract
+    return get_estimation_scale_params(parameters)
 end
 
 """
@@ -690,9 +627,7 @@ end
 
 # AD-compatible version that preserves element types
 @inline function get_hazard_params_indexed(parameters, hazards, ::Type{T}) where T
-    # Get estimation-scale params first
+    # v0.3.0+: params already on natural scale, just extract and convert to Tuple
     est_params = get_estimation_scale_params(parameters)
-    # Transform to natural scale (family-aware)
-    params_named = to_natural_scale(est_params, hazards, T)
-    return values(params_named)
+    return values(est_params)
 end

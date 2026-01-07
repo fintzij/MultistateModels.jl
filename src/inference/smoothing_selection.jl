@@ -163,7 +163,7 @@ function fit_penalized_beta(model::MultistateProcess, data::ExactData,
                             lambda::Vector{Float64}, penalty_config::PenaltyConfig,
                             beta_init::Vector{Float64};
                             maxiters::Int=100, use_polyalgorithm::Bool=false,
-                            verbose::Bool=false)
+                            verbose::Bool=false, ipopt_options...)
     
     # Define penalized negative log-likelihood objective
     function penalized_nll(β, p)
@@ -182,6 +182,9 @@ function fit_penalized_beta(model::MultistateProcess, data::ExactData,
     optf = OptimizationFunction(penalized_nll, adtype)
     prob = OptimizationProblem(optf, beta_init, nothing)
     
+    # Merge default options with user overrides
+    merged_options = merge(DEFAULT_IPOPT_OPTIONS, (maxiters=maxiters, tol=1e-6), ipopt_options)
+    
     if use_polyalgorithm
         # Phase 1: LBFGS warm-start with loose tolerance
         if verbose
@@ -198,17 +201,13 @@ function fit_penalized_beta(model::MultistateProcess, data::ExactData,
             println("    β fit: Ipopt refinement...")
         end
         prob_refined = remake(prob, u0=sol_warmstart.u)
-        sol = solve(prob_refined, IpoptOptimizer();
-                    maxiters=maxiters, print_level=0, tol=1e-6,
-                    honor_original_bounds="yes")
+        sol = solve(prob_refined, IpoptOptimizer(); merged_options...)
     else
         # Pure Ipopt from warm start
         if verbose
             println("    β fit: Ipopt from warm start...")
         end
-        sol = solve(prob, IpoptOptimizer();
-                    maxiters=maxiters, print_level=0, tol=1e-6,
-                    honor_original_bounds="yes")
+        sol = solve(prob, IpoptOptimizer(); merged_options...)
     end
     
     return sol.u
@@ -794,6 +793,12 @@ function _solve_loo_newton_step(chol_H::Cholesky, H_i::Matrix{Float64}, g_i::Abs
     # Copy Cholesky factor as a regular Matrix (we'll modify it)
     L = Matrix(chol_H.L)
     n = size(L, 1)
+    
+    # Validate Hessian before eigendecomposition
+    if !all(isfinite.(H_i))
+        @warn "Subject Hessian contains NaN/Inf values, falling back to direct solve" maxlog=5
+        return nothing
+    end
     
     # Eigendecompose subject Hessian to get rank-k representation
     # H_i = V * D * V' where D = diag(eigenvalues)

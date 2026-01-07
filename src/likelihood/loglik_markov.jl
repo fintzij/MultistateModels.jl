@@ -74,8 +74,8 @@ See also: [`loglik_exact`](@ref), [`ExactDataAD`](@ref)
 """
 function loglik_AD(parameters, data::ExactDataAD; neg = true)
 
-    # unflatten parameters to natural scale (AD-compatible)
-    pars = unflatten_natural(parameters, data.model)
+    # unflatten parameters
+    pars = unflatten_parameters(parameters, data.model)
 
     # snag the hazards
     hazards = data.model.hazards
@@ -185,7 +185,7 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
         
         # Unflatten to NamedTuple structure (required by hazard functions)
         # NamedTuple allocations are minimal (~13) and mostly stack-allocated
-        pars = unflatten_natural(parameters, data.model)
+        pars = unflatten_parameters(parameters, data.model)
         
         # Pre-compute hazard rates once for all patterns (Markov models only)
         if can_use_rate_cache
@@ -235,7 +235,7 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
         end
     else
         # Allocate fresh arrays for AD (element type must be Dual)
-        pars = unflatten_natural(parameters, data.model)
+        pars = unflatten_parameters(parameters, data.model)
         hazmat_book = build_hazmat_book(T, data.model.tmat, data.books[1])
         tpm_book = build_tpm_book(T, data.model.tmat, data.books[1])
         exp_cache = ExponentialUtilities.alloc_mem(similar(hazmat_book[1]), ExpMethodGeneric())
@@ -335,7 +335,7 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                         hazard = hazards[trans_idx]
                         hazard_pars = pars[hazard.hazname]
                         haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
-                        obs_ll += log(haz_value)
+                        obs_ll += NaNMath.log(haz_value)
                     end
                     
                     subj_ll += obs_ll * obs_weight
@@ -361,7 +361,7 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                             prob_sum += tpm[statefrom_i, s] * emission_prob
                         end
                     end
-                    subj_ll += log(prob_sum) * obs_weight
+                    subj_ll += NaNMath.log(prob_sum) * obs_weight
                 end
             end
 
@@ -470,7 +470,7 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                                     hazard = hazards[trans_idx]
                                     hazard_pars = pars[hazard.hazname]
                                     haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
-                                    q[r, s] += log(haz_value)
+                                    q[r, s] += NaNMath.log(haz_value)
                                 end
                             end
 
@@ -501,7 +501,7 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
             end
 
             # log likelihood
-            subj_ll=log(sum(lmat[:,size(lmat, 2)]))
+            subj_ll=NaNMath.log(sum(lmat[:,size(lmat, 2)]))
         end
 
         if return_ll_subj

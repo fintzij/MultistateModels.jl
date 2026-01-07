@@ -78,7 +78,7 @@ This is the primary interface for hazard evaluation. It handles:
 # Arguments
 - `hazard::_Hazard`: The hazard function struct
 - `t::Real`: Time at which to evaluate hazard (effective time if `use_effective_time=true`)
-- `pars::AbstractVector`: Parameters (log-scale for baseline, natural for covariates)
+- `pars::AbstractVector`: Parameters (v0.3.0+: natural scale for baseline, as-is for covariates)
 - `covars`: Covariate values - can be NamedTuple (cached) or DataFrameRow (direct view, zero-copy)
 - `apply_transform::Bool=false`: Use time transform optimization if hazard supports it
 - `cache_context::Union{Nothing,TimeTransformContext}=nothing`: Cache for repeated evaluations
@@ -166,7 +166,7 @@ This is the primary interface for cumulative hazard evaluation.
 - `hazard::_Hazard`: The hazard function struct
 - `lb::Real`: Lower bound of interval (effective time if `use_effective_time=true`)
 - `ub::Real`: Upper bound of interval (effective time if `use_effective_time=true`)
-- `pars::AbstractVector`: Parameters (log-scale for baseline, natural for covariates)
+- `pars::AbstractVector`: Parameters (v0.3.0+: natural scale for baseline, as-is for covariates)
 - `covars`: Covariate values - can be NamedTuple (cached) or DataFrameRow (direct view, zero-copy)
 - `apply_transform::Bool=false`: Use time transform optimization if hazard supports it
 - `cache_context::Union{Nothing,TimeTransformContext}=nothing`: Cache for repeated evaluations

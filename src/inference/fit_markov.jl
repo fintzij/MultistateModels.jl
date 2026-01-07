@@ -57,11 +57,14 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
     # Create closure that dispatches to correct implementation based on backend
     loglik_fn = (p, d) -> loglik_markov(p, d; backend=adbackend)
 
+    # Generate parameter bounds for box-constrained optimization
+    lb, ub = generate_parameter_bounds(model)
+
     # parse constraints, or not, and solve
     if isnothing(constraints)
-        # get estimates - use Ipopt for unconstrained
+        # get estimates - use Ipopt for box-constrained optimization
         optf = OptimizationFunction(loglik_fn, get_optimization_ad(adbackend))
-        prob = OptimizationProblem(optf, parameters, MPanelData(model, books))
+        prob = OptimizationProblem(optf, parameters, MPanelData(model, books); lb=lb, ub=ub)
         
         # solve with user-specified solver or default Ipopt
         sol = _solve_optimization(prob, solver)
@@ -100,7 +103,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         end
 
         optf = OptimizationFunction(loglik_fn, get_optimization_ad(adbackend), cons = consfun_markov)
-        prob = OptimizationProblem(optf, parameters, MPanelData(model, books), lcons = constraints.lcons, ucons = constraints.ucons)
+        prob = OptimizationProblem(optf, parameters, MPanelData(model, books); lb=lb, ub=ub, lcons = constraints.lcons, ucons = constraints.ucons)
         
         # solve with user-specified solver or default Ipopt
         sol = _solve_optimization(prob, solver)

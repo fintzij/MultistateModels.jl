@@ -11,6 +11,7 @@ using ExponentialUtilities
 using ForwardDiff
 using LinearAlgebra
 using MacroTools
+using NaNMath
 using Optim # for simulation - keep
 using Optimization # for fitting - keep
 using OptimizationIpopt

@@ -338,7 +338,7 @@ the sequential path). Use parallel for objective evaluation during line search.
 """
 function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false, parallel=false)
     # Unflatten parameters to natural scale - preserves dual number types (AD-compatible)
-    pars = unflatten_natural(parameters, data.model)
+    pars = unflatten_parameters(parameters, data.model)
     
     # Get model components
     hazards = data.model.hazards
@@ -588,7 +588,7 @@ function _compute_path_loglik_fused(
                             use_effective_time = false)
                     end
                     
-                    ll += log(haz_value)
+                    ll += NaNMath.log(haz_value)
                 end
             end
             
@@ -668,7 +668,7 @@ function _compute_path_loglik_fused(
                             use_effective_time = false)
                     end
                     
-                    ll += log(haz_value)
+                    ll += NaNMath.log(haz_value)
                 end
             end
         end
@@ -745,7 +745,7 @@ function loglik_subject(parameters, data::ExactData, subject_idx::Int)
     w = model.SubjectWeights[path.subj]
     
     # Unflatten parameters to natural scale (preserves AD types)
-    pars = unflatten_natural(parameters, model)
+    pars = unflatten_parameters(parameters, model)
     
     # Get model components
     hazards = model.hazards
