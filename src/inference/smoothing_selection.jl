@@ -199,14 +199,16 @@ function fit_penalized_beta(model::MultistateProcess, data::ExactData,
         end
         prob_refined = remake(prob, u0=sol_warmstart.u)
         sol = solve(prob_refined, IpoptOptimizer();
-                    maxiters=maxiters, print_level=0, tol=1e-6)
+                    maxiters=maxiters, print_level=0, tol=1e-6,
+                    honor_original_bounds="yes")
     else
         # Pure Ipopt from warm start
         if verbose
             println("    β fit: Ipopt from warm start...")
         end
         sol = solve(prob, IpoptOptimizer();
-                    maxiters=maxiters, print_level=0, tol=1e-6)
+                    maxiters=maxiters, print_level=0, tol=1e-6,
+                    honor_original_bounds="yes")
     end
     
     return sol.u
@@ -370,6 +372,10 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
         
         # Compute LOO parameters: β̂⁻ⁱ = β̂ + Δ⁻ⁱ
         beta_loo = state.beta_hat .+ delta_i
+        
+        # Project to feasible region: β ≥ 0 for non-negative constrained params
+        # This handles cases where Newton step overshoots into infeasible region
+        beta_loo = max.(beta_loo, zero(T))
         
         # CORE OF NCV: Evaluate ACTUAL likelihood at LOO parameters
         ll_loo = loglik_subject(beta_loo, state.data, i)
