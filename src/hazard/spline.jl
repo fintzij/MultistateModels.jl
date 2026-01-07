@@ -253,7 +253,9 @@ function build_spline_hazard_info(hazard::RuntimeSplineHazard; penalty_order::In
     basis = _rebuild_spline_basis(hazard)
     
     # Build penalty matrix
-    S = build_penalty_matrix(basis, penalty_order; knots=hazard.knots)
+    # NOTE: Don't pass hazard.knots - it contains simple breakpoints, not the full
+    # clamped knot vector. Let build_penalty_matrix extract knots from the basis.
+    S = build_penalty_matrix(basis, penalty_order)
     
     return SplineHazardInfo(
         hazard.statefrom,
@@ -1058,7 +1060,7 @@ single call site for spline parameter updates.
 
 # Arguments
 - `hazards`: Vector of hazard objects
-- `pars`: Nested parameter vectors (log-scale for splines)
+- `pars`: Nested parameter vectors (natural-scale for splines as of v0.3.0)
 
 This helper reduces code duplication across likelihood, sampling, and fitting code.
 """

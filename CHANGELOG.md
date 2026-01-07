@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- **GPS Penalty Matrix Implementation**: Added Li & Cao (2022) General P-Spline penalty matrix construction as the default method for spline smoothing. This correctly handles non-uniform knot spacing through weighted difference matrices.
+  - New function `build_general_difference_matrix(knots, d, m)` implements the GPS algorithm
+  - New function `build_penalty_matrix_gps(basis, order)` applies GPS to BSplineKit bases
+  - Original O-Sullivan implementation preserved as `build_penalty_matrix_integral(basis, order)`
+  - Wrapper `build_penalty_matrix(basis, order; method=:gps)` dispatches to either method
+  - GPS matches R `gps` package exactly for both uniform and non-uniform knots
+  - Supports both `BSplineBasis` and `RecombinedBSplineBasis` (natural splines)
+
+### Changed
+
+- **Default penalty method**: `build_penalty_matrix()` now defaults to `:gps` method instead of `:integral`
+- **Error types**: Hazard validation now throws `ArgumentError` instead of `AssertionError` for invalid state indices
+
 ### Breaking Changes: Deprecation Removal
 
 The following deprecated functions and keywords have been removed:

@@ -299,12 +299,11 @@ function loglik_exact_penalized(parameters, data::ExactData, penalty_config::Pen
     # If no penalties, return base likelihood
     has_penalties(penalty_config) || return neg ? nll_base : -nll_base
     
-    # Compute penalty on PARAMETER SCALE (log-scale for spline coefficients)
-    # The penalty matrix S penalizes roughness/curvature of the log-hazard spline.
-    # Since parameters are stored on log-scale (θ) and hazard coefficients are exp(θ),
-    # the penalty should be θᵀSθ (not exp(θ)ᵀS exp(θ)).
-    # This matches standard P-spline practice where we penalize the spline coefficients
-    # directly, not their exponentiated values.
+    # Compute penalty on parameters.
+    # As of v0.3.0, spline parameters are stored on NATURAL scale (β, not log(β)).
+    # The penalty is quadratic: P(β) = λ/2 β'Sβ, where S penalizes roughness.
+    # This enables correct Newton approximation in PIJCV λ selection.
+    # Box constraints (β ≥ POSITIVE_LB) enforce positivity.
     penalty = compute_penalty(parameters, penalty_config)
     
     # Return penalized negative log-likelihood

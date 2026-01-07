@@ -268,8 +268,10 @@ PENALTY OPTIONS:
 
 SMOOTHING PARAMETER SELECTION:
 - LAML (default): Laplace approximate marginal likelihood
-- GCV/LCV: Leave-one-out cross-validation
-- NCV: Neighborhood cross-validation (Wood 2020)
+- LOOCV/k-fold CV: Leave-one-out cross-validation (exact)
+- PIJCV: Newton-approximated k-fold CV (Wood 2024)
+- EFS: Extended Fellner-Schall (REML-based)
+- PERF: Performance iteration (AIC-based)
 
 IMPLEMENTATION PLAN:
 [ ] PenaltyTerm abstract type

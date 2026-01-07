@@ -5,24 +5,271 @@
 # Shared utilities for B-spline basis construction and penalty matrices.
 # Used by both baseline splines (SplineHazard) and covariate splines (s()).
 #
+# Penalty matrix construction methods:
+# - GPS (default): Li & Cao (2022) general P-spline via weighted differences
+# - Integral: O'Sullivan (1986) O-spline via quadrature of ∫B''B''dt
+#
 # =============================================================================
 
 using BSplineKit
 using LinearAlgebra
 using QuadGK
 
+# =============================================================================
+# General P-Spline (GPS) Implementation - Li & Cao (2022)
+# =============================================================================
+
 """
-    build_penalty_matrix(basis, order::Int; knots::Vector{Float64}=Float64[])
+    build_general_difference_matrix(knots::Vector{Float64}, d::Int, m::Int) -> Matrix{Float64}
 
-Construct the derivative-based penalty matrix using Wood's (2016) algorithm.
+Construct the general difference matrix D_m for Li & Cao's general P-spline penalty.
 
-For a B-spline basis of order m₁ and penalty order m₂, computes:
-    S_{ij} = ∫ B_i^(m₂)(t) B_j^(m₂)(t) dt
+For B-splines of order `d` (degree `d-1`) with penalty order `m`, this computes the
+weighted difference matrix that correctly accounts for non-uniform knot spacing.
 
-The algorithm uses Gauss-Legendre quadrature on each knot interval with enough
-points to integrate the product exactly.
+# Arguments
+- `knots`: Full knot sequence (with repeated boundary knots for clamped splines).
+  For K basis functions with order d, this should have length K + d.
+- `d`: B-spline order (degree + 1). For cubic splines, d = 4.
+- `m`: Penalty order. m = 2 for curvature penalty.
+
+# Returns
+- `D_m`: General difference matrix of size (K - m) × K, where K = length(knots) - d
+
+# Mathematical Details
+The matrix is computed iteratively:
+
+    D_m = W_m⁻¹ Δ W_{m-1}⁻¹ Δ ⋯ W_1⁻¹ Δ
+
+where:
+- Δ is the first-difference matrix: Δ_{i,i} = -1, Δ_{i,i+1} = +1
+- W_j is diagonal with entries: (W_j)_{ii} = (t_{i+d-j+1} - t_{i+1}) / (d-j)
+
+The indexing uses 1-based Julia conventions. For the j-th iteration processing
+row i, the weights use knot indices i+1 and i+d-j+1.
+
+# Notes
+For clamped B-splines (like those from BSplineKit), the knot vector has 
+repeated boundary knots (e.g., [0,0,0,0, ..., 1,1,1,1] for cubic). This function
+handles such knot vectors correctly.
+
+# References
+- Li, Z. & Cao, J. (2022). "General P-Splines for Non-Uniform B-Splines." 
+  arXiv:2201.06808
 """
-function build_penalty_matrix(basis, order::Int; knots::Vector{Float64}=Float64[])
+function build_general_difference_matrix(knots::Vector{Float64}, d::Int, m::Int)
+    n_knots = length(knots)
+    K = n_knots - d  # Number of basis functions
+    
+    @assert m >= 1 "Penalty order must be ≥ 1, got m=$m"
+    @assert m < d "Penalty order must be < spline order (m=$m, d=$d)"
+    @assert K >= m "Need at least m basis functions for order-m penalty (K=$K, m=$m)"
+    
+    # Algorithm from gps R package (Li & Cao 2022):
+    # Iteratively build D_m = W_m^{-1} Δ W_{m-1}^{-1} Δ ... W_1^{-1} Δ
+    # where Δ is first-difference and W_j has entries h_j[i] = (t[i+k] - t[i]) / k
+    # with k = d - j and starting index shifting by 1 each iteration.
+    
+    # Start with identity (K × K)
+    D = Matrix{Float64}(I, K, K)
+    
+    for j in 1:m
+        n_current = K - j + 1  # Current number of rows/cols in D
+        n_next = K - j         # Number of rows after this iteration
+        
+        # Compute knot-spacing weights
+        # h[i] = (t[i + k] - t[i]) / k where:
+        #   k = d - j (the "lag" in knot positions)
+        #   i runs from (j + 1) to (j + n_next) in 1-based Julia indexing
+        # This matches R's Diff(xt, k=d-j, n=K-2*j, xi=j+1)
+        k = d - j
+        W_diag = zeros(n_next)
+        for i in 1:n_next
+            # In R's convention: i goes from (j+1) to (K-j)
+            # Julia index: i_knot = j + i
+            i_knot = j + i
+            t_high = knots[i_knot + k]
+            t_low = knots[i_knot]
+            W_diag[i] = (t_high - t_low) / k
+        end
+        
+        # Check for zero weights (would indicate coincident knots in interior)
+        if any(abs.(W_diag) .< 1e-14)
+            @warn "Near-zero weight in general difference matrix at iteration j=$j (coincident knots?)"
+            # Replace near-zero with small value to avoid division by zero
+            W_diag[abs.(W_diag) .< 1e-14] .= 1e-14
+        end
+        
+        # Build weighted difference matrix: (n_next × n_current)
+        # Entry (i, i) = -1/h[i], entry (i, i+1) = 1/h[i]
+        WtDelta = zeros(n_next, n_current)
+        for i in 1:n_next
+            WtDelta[i, i] = -1.0 / W_diag[i]
+            WtDelta[i, i + 1] = 1.0 / W_diag[i]
+        end
+        
+        # Update D: D ← W_j^{-1} Δ D
+        D = WtDelta * D
+    end
+    
+    return D
+end
+
+"""
+    build_penalty_matrix_gps(basis, order::Int; knots::Vector{Float64}=Float64[])
+
+Construct the penalty matrix using Li & Cao's General P-Spline (GPS) algorithm.
+
+The penalty matrix is S = D_m' D_m where D_m is the weighted m-th order difference 
+matrix from the GPS algorithm. The weighting accounts for non-uniform knot spacing.
+
+# Arguments
+- `basis`: BSplineKit basis object (BSplineBasis or RecombinedBSplineBasis)
+- `order::Int`: Difference order (m). Default 2 = curvature penalty.
+- `knots`: Full knot vector for GPS weighting. If empty, extracted from basis.
+
+# Returns
+- `S`: Symmetric positive semi-definite penalty matrix (K × K)
+
+# Notes
+The penalty matrix has:
+- Symmetry: S = S'
+- Positive semi-definiteness: all eigenvalues ≥ 0
+- Null space of dimension `order`: polynomials of degree < `order` are unpenalized
+
+The GPS algorithm correctly handles both uniform and non-uniform knot spacing.
+For BSplineKit bases (which use clamped B-splines), this function extracts the 
+full knot vector including repeated boundary knots.
+
+# Mathematical Details
+The GPS algorithm builds the weighted difference matrix iteratively:
+
+    D_m = W_m⁻¹ Δ W_{m-1}⁻¹ Δ ⋯ W_1⁻¹ Δ
+
+where Δ is first-difference and W_j has diagonal entries h_j[i] = (t[i+k] - t[i]) / k
+with k = d - j. This weighting ensures the penalty correctly accounts for 
+non-uniform knot spacing.
+
+# References
+- Li, Z. & Cao, J. (2022). "General P-Splines for Non-Uniform B-Splines." 
+  arXiv:2201.06808
+- Eilers, P.H.C. & Marx, B.D. (1996). "Flexible Smoothing with B-splines and Penalties."
+  Statistical Science 11(2), 89-121.
+"""
+function build_penalty_matrix_gps(basis, order::Int; knots::Vector{Float64}=Float64[])
+    order >= 1 || throw(ArgumentError("Penalty order must be ≥ 1, got $order"))
+    
+    # Handle RecombinedBSplineBasis by building penalty for parent and projecting
+    if basis isa BSplineKit.Recombinations.RecombinedBSplineBasis
+        # Get parent basis and build penalty for it
+        # Note: we don't pass explicit knots to parent - let it extract from parent basis
+        parent_basis = BSplineKit.parent(basis)
+        S_parent = build_penalty_matrix_gps(parent_basis, order)
+        
+        # Get recombination matrix R (transforms from reduced to parent coefficients)
+        R = BSplineKit.Recombinations.recombination_matrix(basis)
+        R_dense = Matrix{Float64}(R)
+        
+        # Project penalty into reduced basis: S_reduced = R^T * S_parent * R
+        S_reduced = transpose(R_dense) * S_parent * R_dense
+        return S_reduced
+    end
+    
+    # Standard BSplineBasis case
+    # Get spline order (degree + 1)
+    d = BSplineKit.order(basis)
+    K = length(basis)
+    
+    # Check if penalty order is valid
+    if order >= d
+        # Derivative order exceeds spline degree, penalty is identically zero
+        return zeros(K, K)
+    end
+    
+    # Get full knot vector from basis if not provided
+    # For BSplineKit, this includes repeated boundary knots (clamped splines)
+    if isempty(knots)
+        knots = collect(BSplineKit.knots(basis))
+    end
+    
+    # Verify knot vector length: should be K + d for K basis functions
+    n_knots = length(knots)
+    if n_knots != K + d
+        throw(ArgumentError("Knot vector length ($n_knots) != K + d ($K + $d = $(K+d))"))
+    end
+    
+    # Use GPS algorithm with full knot vector
+    D_m = build_general_difference_matrix(knots, d, order)
+    
+    # Penalty matrix is D'D
+    S = transpose(D_m) * D_m
+    
+    return S
+end
+
+"""
+    _build_difference_matrix(K::Int, m::Int) -> Matrix{Float64}
+
+Build the m-th order difference matrix of size (K-m) × K.
+
+The difference matrix is computed iteratively by applying first differences m times.
+"""
+function _build_difference_matrix(K::Int, m::Int)
+    @assert K > m "Need K > m for difference matrix, got K=$K, m=$m"
+    
+    # Start with identity (K × K)
+    D = Matrix{Float64}(I, K, K)
+    
+    for j in 1:m
+        n_rows = K - j
+        n_cols = K - j + 1
+        
+        # First-difference matrix
+        Delta = zeros(n_rows, n_cols)
+        for i in 1:n_rows
+            Delta[i, i] = -1.0
+            Delta[i, i + 1] = 1.0
+        end
+        
+        # Update D
+        D = Delta * D
+    end
+    
+    return D
+end
+
+# =============================================================================
+# Integral-based (O-Spline) Implementation - O'Sullivan (1986)
+# =============================================================================
+
+"""
+    build_penalty_matrix_integral(basis, order::Int; knots::Vector{Float64}=Float64[])
+
+Construct the penalty matrix using the integral/derivative (O-spline) formulation.
+
+Computes S^(m)_{ij} = ∫ B_i^(m)(t) B_j^(m)(t) dt via Gauss-Legendre quadrature.
+
+# Arguments
+- `basis`: BSplineKit basis object (BSplineBasis or RecombinedBSplineBasis)
+- `order::Int`: Derivative order (m). Default 2 = curvature penalty.
+- `knots`: Optional explicit knot sequence. If empty, extracted from basis.
+
+# Returns
+- `S`: Symmetric positive semi-definite penalty matrix (K × K)
+
+# Notes
+This is the original O-spline formulation (O'Sullivan, 1986). Uses Gauss-Legendre
+quadrature on each knot interval with enough points to integrate exactly.
+
+Preserved for comparison with the GPS formulation. Use `method=:integral` in
+`build_penalty_matrix` to select this method.
+
+# References
+- O'Sullivan, F. (1986). "A Statistical Perspective on Ill-Posed Inverse Problems."
+  Statistical Science 1(4), 502-518.
+- Wood, S.N. (2017). Generalized Additive Models: An Introduction with R. 2nd ed.
+"""
+function build_penalty_matrix_integral(basis, order::Int; knots::Vector{Float64}=Float64[])
     order >= 1 || throw(ArgumentError("Penalty order must be ≥ 1, got $order"))
     
     # Get knot vector - handle both BSplineBasis and RecombinedBSplineBasis
@@ -98,6 +345,87 @@ function build_penalty_matrix(basis, order::Int; knots::Vector{Float64}=Float64[
     
     return S
 end
+
+# =============================================================================
+# Wrapper Function with Method Selection
+# =============================================================================
+
+"""
+    build_penalty_matrix(basis, order::Int; knots::Vector{Float64}=Float64[], method::Symbol=:gps)
+
+Construct the penalty matrix for penalized B-splines.
+
+# Arguments
+- `basis`: BSplineKit basis object (BSplineBasis or RecombinedBSplineBasis)
+- `order::Int`: Derivative/difference order (m). Default 2 = curvature penalty.
+- `knots`: Optional explicit knot sequence. If empty, extracted from basis.
+- `method`: Penalty construction method:
+  - `:gps` (default): General P-Spline (Li & Cao, 2022) — weighted difference D'D
+  - `:integral`: O-spline (O'Sullivan, 1986) — integral ∫B''B''dt via quadrature
+
+# Returns
+- `S`: Symmetric positive semi-definite penalty matrix (K × K)
+
+# Mathematical Details
+Both methods produce penalty matrices that have:
+- **Symmetry**: S = S'
+- **Positive semi-definiteness**: all eigenvalues ≥ 0
+- **Null space of dimension m**: polynomials of degree < m are unpenalized
+
+## GPS Method (default)
+Uses the general difference matrix D_m from Li & Cao (2022):
+    S = D_m' D_m
+This correctly handles non-uniform knot spacing and is O(K²) to compute.
+
+## Integral Method
+Computes the integral of products of m-th derivatives:
+    S_{ij} = ∫ B_i^(m)(t) B_j^(m)(t) dt
+This is computed via Gauss-Legendre quadrature and is O(K² × n_quad).
+
+# Notes
+- **Scale difference**: λ values are NOT directly comparable between methods.
+  Use effective degrees of freedom (EDF) for comparison.
+- **Non-uniform knots**: Both methods correctly handle non-uniform spacing.
+- **Performance**: GPS is faster (no quadrature) and matches the P-spline literature.
+
+# Examples
+```julia
+using BSplineKit
+
+# Create cubic B-spline basis with 10 interior knots
+knots = collect(range(0, 1, length=14))  # 10 interior + 4 boundary
+basis = BSplineBasis(BSplineOrder(4), knots)
+
+# Default: GPS method (recommended)
+S_gps = build_penalty_matrix(basis, 2)
+
+# Alternative: integral method (O'Sullivan formulation)
+S_int = build_penalty_matrix(basis, 2; method=:integral)
+```
+
+# References
+- Li, Z. & Cao, J. (2022). "General P-Splines for Non-Uniform B-Splines."
+  arXiv:2201.06808
+- O'Sullivan, F. (1986). "A Statistical Perspective on Ill-Posed Inverse Problems."
+  Statistical Science 1(4), 502-518.
+- Eilers, P.H.C. & Marx, B.D. (1996). "Flexible Smoothing with B-splines and Penalties."
+  Statistical Science 11(2), 89-121.
+"""
+function build_penalty_matrix(basis, order::Int; 
+                              knots::Vector{Float64}=Float64[], 
+                              method::Symbol=:gps)
+    if method == :gps
+        return build_penalty_matrix_gps(basis, order; knots=knots)
+    elseif method == :integral
+        return build_penalty_matrix_integral(basis, order; knots=knots)
+    else
+        throw(ArgumentError("Unknown penalty method: $method. Use :gps or :integral"))
+    end
+end
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
 
 """
     _evaluate_basis_derivatives(basis, t::Real, order::Int) -> Vector{Float64}

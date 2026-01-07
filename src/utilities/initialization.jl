@@ -36,14 +36,17 @@ function set_crude_init!(model::MultistateProcess; constraints = nothing)
     crude_par = calculate_crude(model)
 
     for i in model.hazards
-        set_par_to = init_par(i, log(crude_par[i.statefrom, i.stateto]))
+        # v0.3.0+: Pass crude rate directly (natural scale), not log-transformed
+        set_par_to = init_par(i, crude_par[i.statefrom, i.stateto])
         set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
     end
 
     for i in eachindex(model.hazards)
         if isa(model.hazards[i], _SplineHazard)
-            log_params = get_estimation_scale_params(model.parameters)
-            remake_splines!(model.hazards[i], log_params[i])
+            # v0.3.0+: Parameters are already on natural scale
+            # remake_splines! is a no-op for RuntimeSplineHazard
+            params = get_estimation_scale_params(model.parameters)
+            remake_splines!(model.hazards[i], params[i])
             set_riskperiod!(model.hazards[i])
         end
     end
@@ -254,8 +257,9 @@ function _init_from_surrogate_rates!(model::MultistateProcess;
         set_parameters!(model, NamedTuple{(hazname,)}((set_par_to,)))
 
         if isa(hazard, _SplineHazard)
-            log_params = get_estimation_scale_params(model.parameters)
-            remake_splines!(hazard, log_params[i])
+            # v0.3.0+: Parameters are already on natural scale
+            params = get_estimation_scale_params(model.parameters)
+            remake_splines!(hazard, params[i])
             set_riskperiod!(hazard)
         end
     end
@@ -553,36 +557,38 @@ end
 Initialize parameters for new hazard types (MarkovHazard, SemiMarkovHazard, RuntimeSplineHazard).
 
 Dispatches based on family and has_covariates to determine parameter initialization.
+
+Note: As of v0.3.0, parameters are initialized on NATURAL scale (not log-transformed).
+The input `crude_rate` should be a positive rate value (not log-transformed).
 """
-function init_par(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, crude_log_rate=0.0)
+function init_par(hazard::Union{MarkovHazard,SemiMarkovHazard,_SplineHazard}, crude_rate=1.0)
     family = hazard.family
     has_covs = hazard.has_covariates
     ncovar = hazard.npar_total - hazard.npar_baseline
     
     if family == :exp
-        # Exponential: [log_baseline] or [log_baseline, β1, β2, ...]
-        return has_covs ? vcat(crude_log_rate, zeros(ncovar)) : [crude_log_rate]
+        # Exponential: [rate] or [rate, β1, β2, ...]
+        return has_covs ? vcat(crude_rate, zeros(ncovar)) : [crude_rate]
         
     elseif family == :wei
-        # Weibull: [log_shape, log_scale] or [log_shape, log_scale, β1, β2, ...]
-        # Initialize shape=1 (log_shape=0) to start as exponential
-        baseline = [0.0, crude_log_rate]  # log(shape=1), log_scale
+        # Weibull: [shape, scale] or [shape, scale, β1, β2, ...]
+        # Initialize shape=1 to start as exponential-like
+        baseline = [1.0, crude_rate]  # shape=1, scale
         return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
         
     elseif family == :gom
-        # Gompertz: [shape, log_rate] or [shape, log_rate, β1, β2, ...]
+        # Gompertz: [shape, rate] or [shape, rate, β1, β2, ...]
         # shape is unconstrained (can be positive, negative, or zero)
-        # rate is positive, stored on log scale
+        # rate is positive
         # Initialize shape=0 so hazard starts as exponential: h(t) = rate * exp(0*t) = rate
-        baseline = [0.0, crude_log_rate]  # shape=0 (not log-transformed), log_rate
+        baseline = [0.0, crude_rate]  # shape=0, rate
         return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
         
     elseif family == :sp
-        # Spline: Initialize all spline coefficients to give constant hazard
-        # log(coef) = 0 → coef = 1 → constant hazard at value 1
-        # The crude_log_rate can be used to shift the overall level
+        # Spline: all coefficients non-negative (natural scale)
+        # Initialize all to same value so hazard starts as approximately constant
         nbasis = hazard.npar_baseline
-        baseline = fill(crude_log_rate, nbasis)
+        baseline = fill(crude_rate, nbasis)  # Natural scale
         return has_covs ? vcat(baseline, zeros(ncovar)) : baseline
         
     else

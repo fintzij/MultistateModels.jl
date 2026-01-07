@@ -401,13 +401,14 @@ end
 """
     _extract_original_natural_vector(hazard_params::NamedTuple)
 
-Extract natural-scale parameter vector from original phase-type hazard params.
-All baseline parameters are rates (positive), so apply exp transform.
+Extract parameter vector from original phase-type hazard params.
+As of v0.3.0, all parameters are already on natural scale (no exp transform needed).
 Covariate coefficients are unconstrained (kept as-is).
 """
 function _extract_original_natural_vector(hazard_params::NamedTuple)
     baseline_vals = collect(values(hazard_params.baseline))
-    baseline_natural = exp.(baseline_vals)
+    # v0.3.0+: Parameters already on natural scale, no exp() needed
+    baseline_natural = baseline_vals
     
     if haskey(hazard_params, :covariates)
         covar_vals = collect(values(hazard_params.covariates))

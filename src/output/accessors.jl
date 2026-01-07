@@ -121,12 +121,12 @@ function get_phasetype_parameters(model::MultistateModelFitted; scale::Symbol=:n
     if scale == :natural
         return params_natural
     elseif scale == :flat || scale == :estimation || scale == :log
-        # Flatten to log scale
-        return reduce(vcat, [log.(v) for v in values(params_natural)])
+        # v0.3.0+: All parameters on natural scale, flatten directly (no log transform)
+        return reduce(vcat, [v for v in values(params_natural)])
     elseif scale == :nested
-        # Convert to nested format
+        # v0.3.0+: Convert to nested format on natural scale (no log transform)
         nested_pairs = [
-            name => (baseline = NamedTuple{Tuple([Symbol("p$i") for i in 1:length(v)])}(log.(v)),)
+            name => (baseline = NamedTuple{Tuple([Symbol("p$i") for i in 1:length(v)])}(v),)
             for (name, v) in result_pairs
         ]
         return NamedTuple(nested_pairs)

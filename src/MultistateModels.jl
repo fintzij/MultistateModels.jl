@@ -184,6 +184,7 @@ export
     cumulative_incidence,
     draw_paths,
     estimate_loglik,
+    generate_parameter_bounds,
     make_constraints,
     path_to_dataframe,
     paths_to_dataset,
@@ -298,6 +299,9 @@ include("inference/mcem.jl")
 # miscellaneous functions
 include("utilities/misc.jl")
 
+# parameter bounds for box-constrained optimization
+include("utilities/bounds.jl")
+
 # phase-type distributions for improved surrogates (split for maintainability)
 include("phasetype/types.jl")
 include("phasetype/surrogate.jl")
@@ -351,7 +355,7 @@ include("utilities/penalty_config.jl")
 # cross-validation and robust covariance estimation
 include("output/variance.jl")
 
-# smoothing parameter selection (PIJCV, GCV) - must be after variance.jl
+# smoothing parameter selection (PIJCV, EFS, PERF, CV) - must be after variance.jl
 include("inference/smoothing_selection.jl")
 
 end

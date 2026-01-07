@@ -2,124 +2,78 @@
 # Parameter Scale Transformations
 # ============================================================================
 #
-# PARAMETER SCALE CONVENTION:
+# PARAMETER SCALE CONVENTION (v0.3.0+):
 #
-# Estimation Scale (what optimizers see):
-#   - Baseline parameters (intercept, shape, scale): log scale (unconstrained)
-#   - Covariate coefficients: as-is (already unconstrained)
+# ALL parameters are stored on NATURAL scale. Box constraints handle non-negativity.
+# There is NO separate "estimation scale" - all transform functions are now identity.
 #
-# Natural/Model Scale (what hazard functions use):
-#   - Baseline parameters: natural scale (exp applied, positive)
-#   - Covariate coefficients: as-is
+# This simplified design:
+#   1. Enables truly quadratic penalties P(β) = (λ/2)βᵀSβ for PIJCV
+#   2. Uses Ipopt box constraints (lb ≥ 0) instead of exp() transforms
+#   3. Eliminates confusion about which scale parameters are on
+#   4. Makes hazard functions simpler (no internal transformations)
 #
-# The transformation happens at the boundary:
-#   - to_natural_scale: Called in unflatten_natural (estimation → natural)
-#   - to_estimation_scale: Called when storing/outputting parameters
-#
-# This design:
-#   1. Avoids repeated exp() calls in hazard function hot loops
-#   2. Makes hazard functions simpler (no internal transformations)
-#   3. Centralizes transformation logic for extensibility (SODEN, etc.)
+# The transform functions below are now identity operations for backward compatibility
+# with calling code. They will be removed in a future version.
 #
 # ============================================================================
 
 """
     transform_baseline_to_natural(baseline::NamedTuple, family::Symbol, ::Type{T}) where T
 
-Transform baseline parameters from estimation scale to natural scale.
-Applies exp() to parameters that are constrained positive, identity to unconstrained.
+IDENTITY TRANSFORM (v0.3.0+): Returns baseline unchanged.
 
-For Gompertz: shape is unconstrained (identity), scale/rate is positive (exp)
-For Weibull/Exponential: all baseline parameters are positive (exp)
+Previously transformed parameters from estimation scale to natural scale.
+Now all parameters are stored on natural scale, so this is identity.
 
 # Arguments
-- `baseline`: NamedTuple of baseline parameters on estimation scale
-- `family`: Hazard family (`:exp`, `:wei`, `:gom`, `:sp`)
-- `T`: Element type (Float64 or ForwardDiff.Dual)
+- `baseline`: NamedTuple of baseline parameters (already on natural scale)
+- `family`: Hazard family (unused, kept for API compatibility)
+- `T`: Element type (unused, kept for API compatibility)
 
 # Returns
-NamedTuple with same keys but values transformed appropriately
+Unchanged baseline NamedTuple
 """
 @inline function transform_baseline_to_natural(baseline::NamedTuple, family::Symbol, ::Type{T}) where T
-    if family == :sp
-        # Splines: parameters stay on log scale - hazard function applies exp() internally
-        # via _spline_ests2coefs, so no transformation here
-        return baseline
-    elseif family == :gom
-        # Gompertz: shape is unconstrained (first param), rate is positive (second param)
-        # Parameter order: [shape, scale/rate]
-        ks = keys(baseline)
-        vs = values(baseline)
-        # First param (shape): identity transform
-        # Second param (scale/rate): exp transform
-        transformed_values = ntuple(i -> i == 1 ? vs[i] : exp(vs[i]), length(vs))
-        return NamedTuple{ks}(transformed_values)
-    elseif family in (:exp, :wei)
-        # Exponential and Weibull: all baseline parameters are positive (exp)
-        transformed_values = map(v -> exp(v), values(baseline))
-        return NamedTuple{keys(baseline)}(transformed_values)
-    else
-        throw(ArgumentError("Unknown hazard family :$family for baseline transformation. Expected one of :exp, :wei, :gom, :sp"))
-    end
+    # v0.3.0+: All parameters on natural scale, identity transform
+    return baseline
 end
 
 """
     transform_baseline_to_estimation(baseline::NamedTuple, family::Symbol)
 
-Transform baseline parameters from natural scale to estimation scale.
-Applies log() to positive-constrained parameters, identity to unconstrained.
+IDENTITY TRANSFORM (v0.3.0+): Returns baseline unchanged.
 
-For Gompertz: shape is unconstrained (identity), scale/rate is positive (log)
-For Weibull/Exponential: all baseline parameters are positive (log)
+Previously transformed parameters from natural scale to estimation scale.
+Now all parameters are stored on natural scale, so this is identity.
 
 # Arguments
-- `baseline`: NamedTuple of baseline parameters on natural scale
-- `family`: Hazard family (`:exp`, `:wei`, `:gom`, `:sp`)
+- `baseline`: NamedTuple of baseline parameters (on natural scale)
+- `family`: Hazard family (unused, kept for API compatibility)
 
 # Returns
-NamedTuple with same keys but values transformed appropriately
+Unchanged baseline NamedTuple
 """
 @inline function transform_baseline_to_estimation(baseline::NamedTuple, family::Symbol)
-    if family == :sp
-        # Splines: parameters are already on log/estimation scale - hazard function 
-        # applies exp() internally, so no transformation here
-        return baseline
-    elseif family == :gom
-        # Gompertz: shape is unconstrained (first param), rate is positive (second param)
-        ks = keys(baseline)
-        vs = values(baseline)
-        # First param (shape): identity transform
-        # Second param (scale/rate): log transform
-        transformed_values = ntuple(i -> i == 1 ? vs[i] : log(vs[i]), length(vs))
-        return NamedTuple{ks}(transformed_values)
-    elseif family in (:exp, :wei)
-        # Exponential and Weibull: all baseline parameters are positive (log)
-        transformed_values = map(v -> log(v), values(baseline))
-        return NamedTuple{keys(baseline)}(transformed_values)
-    else
-        throw(ArgumentError("Unknown hazard family :$family for baseline transformation. Expected one of :exp, :wei, :gom, :sp"))
-    end
+    # v0.3.0+: All parameters on natural scale, identity transform
+    return baseline
 end
 
 """
     to_natural_scale(params_nested::NamedTuple, hazards, ::Type{T}) where T
 
-Transform nested parameters from estimation scale to natural scale.
-Applies exp() to positive-constrained baseline parameters, identity to unconstrained.
+IDENTITY TRANSFORM (v0.3.0+): Returns params_nested unchanged.
+
+Previously transformed parameters from estimation scale to natural scale.
+Now all parameters are stored on natural scale, so this is identity.
 
 # Arguments
-- `params_nested`: NamedTuple of per-hazard parameter NamedTuples (estimation scale)
-- `hazards`: Vector of hazard objects (used to determine transformation per family)
+- `params_nested`: NamedTuple of per-hazard parameter NamedTuples (already on natural scale)
+- `hazards`: Vector of hazard objects (kept for API compatibility)
 - `T`: Element type for AD compatibility
 
 # Returns
-NamedTuple of per-hazard parameter NamedTuples on natural scale
-
-# Example
-```julia
-# Estimation scale: (h12 = (baseline = (h12_Intercept = -0.5,), covariates = (h12_x = 0.3,)))
-# Natural scale:    (h12 = (baseline = (h12_Intercept = 0.606,), covariates = (h12_x = 0.3,)))
-```
+Unchanged NamedTuple of per-hazard parameter NamedTuples
 """
 function to_natural_scale(params_nested::NamedTuple, hazards, ::Type{T}) where T
     hazard_keys = keys(params_nested)
@@ -153,22 +107,19 @@ function to_natural_scale(params_nested::NamedTuple, hazards, ::Type{T}) where T
 end
 
 """
-    to_estimation_scale(params_nested::NamedTuple)
+    to_estimation_scale(params_nested::NamedTuple, hazards)
 
-Transform nested parameters from natural scale to estimation scale.
-Applies log() to all baseline parameters, leaves covariate coefficients unchanged.
+IDENTITY TRANSFORM (v0.3.0+): Returns params_nested unchanged.
+
+Previously transformed parameters from natural scale to estimation scale.
+Now all parameters are stored on natural scale, so this is identity.
 
 # Arguments
-- `params_nested`: NamedTuple of per-hazard parameter NamedTuples (natural scale)
+- `params_nested`: NamedTuple of per-hazard parameter NamedTuples (on natural scale)
+- `hazards`: Vector of hazard objects (kept for API compatibility)
 
 # Returns
-NamedTuple of per-hazard parameter NamedTuples on estimation scale
-
-# Example
-```julia
-# Natural scale:    (h12 = (baseline = (h12_Intercept = 0.606,), covariates = (h12_x = 0.3,)))
-# Estimation scale: (h12 = (baseline = (h12_Intercept = -0.5,), covariates = (h12_x = 0.3,)))
-```
+Unchanged NamedTuple of per-hazard parameter NamedTuples
 """
 function to_estimation_scale(params_nested::NamedTuple, hazards)
     hazard_keys = keys(params_nested)
@@ -204,6 +155,7 @@ The flat vector is unflattened using ParameterHandling's unflatten function.
 # Note
 This is the primary method for updating parameters during optimization.
 Spline hazards are remade with the new parameters.
+As of v0.3.0, all parameters are on natural scale.
 """
 function set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVector)
     # Unflatten to get nested structure
@@ -212,17 +164,17 @@ function set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVec
     # Get new flat version (reconstructor stays the same)
     new_flat = flatten(model.parameters.reconstructor, params_nested)
     
-    # Update spline hazards if needed - extract log-scale params properly
+    # Update spline hazards if needed - v0.3.0+: params are on natural scale
     for i in eachindex(model.hazards)
         if isa(model.hazards[i], _SplineHazard)
             hazard_params = values(params_nested)[i]
-            log_params = extract_params_vector(hazard_params)
-            remake_splines!(model.hazards[i], log_params)
+            params_vec = extract_params_vector(hazard_params)
+            remake_splines!(model.hazards[i], params_vec)
             set_riskperiod!(model.hazards[i])
         end
     end
     
-    # Compute natural scale parameters (family-aware transformation)
+    # v0.3.0+: nested == natural (no transformation needed, but kept for API compatibility)
     params_natural_pairs = [
         hazname => extract_natural_vector(params_nested[hazname], model.hazards[idx].family)
         for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])

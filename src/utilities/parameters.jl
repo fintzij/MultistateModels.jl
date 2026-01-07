@@ -556,29 +556,23 @@ end
 """
     extract_natural_vector(hazard_params, family::Symbol)
 
-Extract the natural-scale parameter vector from a hazard's NamedTuple params structure.
-Applies appropriate transformation based on hazard family.
+IDENTITY TRANSFORM (v0.3.0+): Extracts parameter values without transformation.
 
-For Gompertz: shape is unconstrained (identity), rate is positive (exp)
-For other families: all baseline parameters are positive (exp)
+Previously applied exp() transforms to baseline parameters.
+Now all parameters are stored on natural scale, so this just extracts and concatenates.
 
 # Arguments
 - `hazard_params`: NamedTuple with `baseline` (named NamedTuple) and optionally `covariates` (named NamedTuple)
-- `family`: Hazard family (`:exp`, `:wei`, `:gom`, `:sp`)
+- `family`: Hazard family (unused, kept for API compatibility)
 
 # Returns
-- Vector with natural-scale baseline values followed by covariate coefficients (as-is)
+- Vector with baseline values followed by covariate coefficients (all unchanged)
 """
 function extract_natural_vector(hazard_params::NamedTuple, family::Symbol)
     baseline_vals = collect(values(hazard_params.baseline))
     
-    if family == :gom
-        # Gompertz: shape is unconstrained (first), rate is positive (second)
-        baseline_natural = [i == 1 ? baseline_vals[i] : exp(baseline_vals[i]) for i in eachindex(baseline_vals)]
-    else
-        # All other families: all baseline params are positive
-        baseline_natural = exp.(baseline_vals)
-    end
+    # v0.3.0+: All parameters on natural scale, no exp() transformation
+    baseline_natural = baseline_vals
     
     if haskey(hazard_params, :covariates)
         covar_vals = collect(values(hazard_params.covariates))
@@ -591,30 +585,26 @@ end
 """
     get_estimation_scale_params(parameters)
 
-Extract estimation-scale parameters from a parameters structure.
-Returns parameters on LOG scale for baseline, as-is for covariates.
+Extract nested parameters from a parameters structure (v0.3.0+: returns natural scale).
 
-This function extracts the `nested` field from model.parameters, which stores
-parameters on estimation scale (the scale used by optimizers).
+As of v0.3.0, there is no separate "estimation scale" - all parameters are stored on
+natural scale. This function extracts the `nested` field for backward compatibility.
 
 # Arguments
 - `parameters`: A NamedTuple with `nested` field, or already-extracted nested parameters
 
 # Returns
-- `NamedTuple`: Estimation-scale parameters indexed by hazard name
+- `NamedTuple`: Parameters indexed by hazard name (on natural scale)
 
 # Note
-For hazard evaluation, use `get_hazard_params()` instead, which returns natural scale.
-This function is primarily for:
-- Storing/outputting parameter values
-- Initialization routines
-- Converting back from natural scale
+As of v0.3.0, this returns the same values as get_hazard_params (both on natural scale).
+The function name is kept for backward compatibility with existing code.
 
 # Example
 ```julia
-# Get estimation-scale params (for storage/output)
-est_pars = get_estimation_scale_params(model.parameters)
-# est_pars[:h12].baseline contains log-scale values
+# Get params (now on natural scale)
+pars = get_estimation_scale_params(model.parameters)
+# pars[:h12].baseline contains natural-scale values
 ```
 """
 function get_estimation_scale_params(parameters)
@@ -630,25 +620,21 @@ end
 """
     get_hazard_params(parameters, hazards)
 
-Extract natural-scale parameters ready for hazard function evaluation.
-Family-aware version that correctly transforms parameters based on hazard type.
+Extract parameters for hazard function evaluation (v0.3.0+: already on natural scale).
 
-For Gompertz: shape is kept as-is (unconstrained), rate is exp-transformed
-For other families: all baseline parameters are exp-transformed
-
-This is the primary function for getting parameters for hazard evaluation.
-The returned NamedTuple can be passed directly to hazard functions.
+As of v0.3.0, all parameters are stored on natural scale, so this function is
+essentially an identity operation via `to_natural_scale` (which is now identity).
 
 # Arguments
 - `parameters`: A NamedTuple with `nested` field, or already-extracted nested parameters
-- `hazards`: Vector of hazard objects (used to determine transformation per family)
+- `hazards`: Vector of hazard objects (kept for API compatibility)
 
 # Returns
-- `NamedTuple`: Natural-scale parameters indexed by hazard name
+- `NamedTuple`: Parameters indexed by hazard name (on natural scale)
 
 # Example
 ```julia
-# Get natural-scale params for hazard evaluation
+# Get params for hazard evaluation
 haz_pars = get_hazard_params(model.parameters, model.hazards)
 # haz_pars[:h12].baseline contains natural-scale values
 # Pass to hazard: eval_hazard(hazard, t, haz_pars[:h12], covars)

@@ -1,8 +1,8 @@
 # Penalized Splines Implementation Reference
 
 **Branch:** `penalized_splines`  
-**Last Updated:** January 5, 2026  
-**Status:** Feature-complete (Phase 3); spline comparison benchmarks in progress
+**Last Updated:** January 6, 2026  
+**Status:** Feature-complete (Phase 3); GPS penalty matrix now default
 
 ---
 
@@ -28,7 +28,7 @@ The `penalized_splines` branch adds comprehensive support for flexible, semi-par
 
 1. **Baseline Hazard Splines (`:sp` family)**: B-spline basis representation with derivative-based penalties
 2. **Smooth Covariate Effects**: GAM-style `s(x)` and `te(x,y)` syntax for smooth functions of covariates
-3. **Automatic Smoothing Parameter Selection**: Four methods (PIJCV, GCV, PERF, EFS)
+3. **Automatic Smoothing Parameter Selection**: Multiple methods (PIJCV, PIJCV5, PIJCV10, PIJCV20, LOOCV, CV5, CV10, CV20, PERF, EFS)
 
 ### Key Design Decisions
 
@@ -47,7 +47,7 @@ The `penalized_splines` branch adds comprehensive support for flexible, semi-par
 | 2 | Smooth covariate terms `s(x)` | ✅ Complete |
 | 3 | Tensor product smooths `te(x,y)` and lambda sharing | ✅ Complete |
 | 4 | PIJCV smoothing selection (Wood 2024) | ✅ Complete |
-| 5 | GCV, PERF, EFS smoothing methods | ✅ Complete |
+| 5 | PERF, EFS, k-fold CV smoothing methods | ✅ Complete |
 | 6 | R package benchmark comparison | 🔄 In progress |
 
 ---
@@ -109,12 +109,32 @@ where:
 
 ### 3.2 Penalty Matrix Construction
 
-The derivative-based penalty matrix:
+Two methods are available, with GPS as the default:
+
+#### GPS Method (Default)
+
+The **General P-Spline (GPS)** penalty from Li & Cao (2022) uses a weighted difference matrix that properly accounts for non-uniform knot spacing:
+
+$$D_m = W_m^{-1} \Delta \cdots W_1^{-1} \Delta$$
+
+where $\Delta$ is the first-difference matrix and $W_j$ are diagonal weighting matrices with elements:
+$$w_j[i] = \frac{t_{i+k} - t_i}{k}, \quad k = d - j$$
+
+The penalty matrix is:
+$$S = D_m^\top D_m$$
+
+**Important clarification**: GPS and integral (O-spline) penalties are **different** penalty matrices. They have the same null space (polynomials of degree < m) but different penalty magnitudes. Li & Cao (2022) show GPS performs at least as well as O-spline in practice while being computationally cheaper.
+
+**Key advantage**: GPS correctly handles both uniform and non-uniform knot spacing without requiring numerical quadrature.
+
+#### Integral Method (O'Sullivan)
+
+The traditional derivative-based penalty matrix:
 $$S_{ij} = \int B_i^{(m)}(t) B_j^{(m)}(t) \, dt$$
 
-where $m$ is the penalty order (default 2 = curvature penalty).
+where $m$ is the penalty order (default 2 = curvature penalty). This method is exact but requires numerical integration.
 
-**Properties of S**:
+**Properties of S (both methods)**:
 - Symmetric: $S = S^\top$
 - Positive semi-definite: $x^\top S x \geq 0$
 - Null space: polynomials of degree < $m$ (dimension = $m$)
@@ -263,7 +283,7 @@ h12 = Hazard(@formula(0 ~ s(age) + treatment), "gom", 1, 2)
 
 ```julia
 select_smoothing_parameters(model, data, penalty_config, beta_init;
-                            method=:pijcv,     # :pijcv, :gcv, :perf, :efs
+                            method=:pijcv,     # :pijcv, :perf, :efs, :loocv, :cv10
                             scope=:all,        # :all, :baseline, :covariates
                             maxiter=100,
                             verbose=false)
@@ -302,19 +322,9 @@ $$\hat\beta^{-i} = \hat\beta + H_{\lambda,-i}^{-1} g_i$$
 
 **Validation**: PIJCV matches exact LOOCV within 1% for n=100, same optimal λ selected in all test scenarios.
 
-### 5.3 GCV (Generalized Cross-Validation)
+### 5.3 GCV (Generalized Cross-Validation) - REMOVED
 
-**Reference**: Wood (2017), Craven & Wahba (1979)
-
-**Criterion**:
-$$V_{GCV} = \frac{n \cdot D(\hat\beta)}{(n - \gamma \cdot \text{EDF})^2}$$
-
-where:
-- $D(\hat\beta) = \sum_i D_i(\hat\beta)$ is the total deviance
-- $\text{EDF} = \text{tr}(H_{unpen} \cdot H_\lambda^{-1})$
-- $\gamma \geq 1$ is a bias-correction factor (default 1.4)
-
-**When to prefer GCV**: Simpler, fewer numerical issues, good for well-specified models.
+**Status**: Removed from package. GCV was derived for Gaussian regression (Craven & Wahba 1979) and lacks theoretical justification for exact survival likelihoods. Use PIJCV, EFS, or PERF instead.
 
 ### 5.4 PERF (Performance Iteration)
 
@@ -344,9 +354,9 @@ $$\lambda_k^{[a+1]} = \lambda_k^{[a]} \times \frac{\text{tr}(S_{\lambda}^{-1} \p
 | Priority | Task | Status | Validation |
 |----------|------|--------|------------|
 | 1 | Fix `test_penalty_infrastructure.jl` | ✅ Complete | 62/62 tests pass |
-| 2 | Verify GCV formula | ✅ Complete | `longtest_gcv_mgcv.jl` (14/14 pass) |
+| 2 | Implement PIJCV k-fold variants | ✅ Complete | `test_pijcv.jl` |
 | 3 | Implement PERF method | ✅ Complete | `test_perf.jl` (26/26 pass) |
-| 4 | Implement EFS method | ✅ Complete | `test_efs.jl` (28/28 pass) |
+| 4 | Implement EFS method | ✅ Complete | `test_efs.jl` (27/27 pass) |
 | 5 | Benchmark against R packages | ✅ Complete | mgcv, flexsurv comparison |
 
 ### 6.2 Test Summary
@@ -354,11 +364,10 @@ $$\lambda_k^{[a+1]} = \lambda_k^{[a]} \times \frac{\text{tr}(S_{\lambda}^{-1} \p
 | Test File | Tests | Status |
 |-----------|-------|--------|
 | `test_penalty_infrastructure.jl` | 62 | ✅ Pass |
-| `test_pijcv.jl` | 75 | ✅ Pass |
+| `test_pijcv.jl` | 75+ | ✅ Pass |
 | `test_perf.jl` | 26 | ✅ Pass |
-| `test_efs.jl` | 28 | ✅ Pass |
+| `test_efs.jl` | 27 | ✅ Pass |
 | `longtest_pijcv_loocv.jl` | 15 | ✅ Pass |
-| `longtest_gcv_mgcv.jl` | 14 | ✅ Pass |
 
 ### 6.3 PIJCV Validation Results
 
@@ -373,7 +382,6 @@ $$\lambda_k^{[a+1]} = \lambda_k^{[a]} \times \frac{\text{tr}(S_{\lambda}^{-1} \p
 | Package | Method | Status | Optimal λ | EDF | Notes |
 |---------|--------|--------|-----------|-----|-------|
 | Julia | PIJCV | ✅ Works | 20.09 | 2.12 | Exact likelihood |
-| Julia | GCV | ✅ Works | 54.60 | 1.75 | Exact likelihood |
 | Julia | PERF | ✅ Works | 20.09 | 2.12 | Exact likelihood |
 | Julia | EFS | ✅ Works | 9.97 | 2.40 | Exact likelihood |
 | mgcv | GCV.Cp | ✅ Works | 0.46 | ~4 | PAM/Poisson |
@@ -406,8 +414,8 @@ $$\lambda_k^{[a+1]} = \lambda_k^{[a]} \times \frac{\text{tr}(S_{\lambda}^{-1} \p
 |------|-------------|
 | `src/hazard/spline.jl` | Spline hazard types, knot placement, calibration |
 | `src/hazard/smooth_terms.jl` | `SmoothTerm`, `TensorProductTerm`, StatsModels integration |
-| `src/utilities/spline_utils.jl` | `build_penalty_matrix`, `build_tensor_penalty_matrix` |
-| `src/inference/smoothing_selection.jl` | PIJCV, GCV, PERF, EFS implementations |
+| `src/utilities/spline_utils.jl` | `build_penalty_matrix` (GPS default), `build_penalty_matrix_integral`, `build_general_difference_matrix`, `build_tensor_penalty_matrix` |
+| `src/inference/smoothing_selection.jl` | PIJCV, k-fold CV, PERF, EFS implementations |
 | `src/utilities/penalty_config.jl` | `build_penalty_config`, penalty term builders |
 | `src/types/infrastructure.jl` | `SplinePenalty`, `PenaltyConfig`, `compute_penalty` |
 | `src/types/hazard_structs.jl` | `SmoothTermInfo`, hazard struct definitions |
@@ -472,6 +480,7 @@ The following features have infrastructure but need validation:
 
 ### Primary References
 
+- **Li, Y. & Cao, J. (2022)**. "General P-splines for non-uniform B-splines." arXiv:2201.06808 — GPS penalty matrix construction
 - **Wood, S.N. (2024)**. "On Neighbourhood Cross Validation." arXiv:2404.16490v4 — PIJCV algorithm
 - **Wood, S.N. & Fasiolo, M. (2017)**. "A generalized Fellner-Schall method for smoothing parameter estimation." *Statistics and Computing* 27(3):759-773 — EFS method
 - **Marra, G. & Radice, R. (2020)**. "Copula link-based additive models for right-censored event time data." *JASA* 115(530):886-895 — PERF method
