@@ -659,19 +659,21 @@ end
 """
     _spline_ests2coefs(ests, basis, monotone)
 
-Transform spline parameter estimates (log scale) to spline coefficients.
+Transform spline parameter estimates to spline coefficients.
 
-For monotone == 0: simple exponentiation (positivity constraint)
+For monotone == 0: identity (parameters ARE coefficients, non-negativity via box constraints)
 For monotone == 1: I-spline-like cumulative sum (increasing hazard)
 For monotone == -1: reverse cumulative sum (decreasing hazard)
+
+Note: Parameters are now on NATURAL scale (not log). Box constraints ensure β ≥ 0.
 """
 function _spline_ests2coefs(ests::AbstractVector{T}, basis, monotone::Int) where T
     if monotone == 0
-        # Simple positivity: exp(θ)
-        return exp.(ests)
+        # Non-negative coefficients directly (box constraints ensure ≥ 0)
+        return ests
     else
         # I-spline transformation for monotonicity
-        ests_nat = exp.(ests)
+        # ests are non-negative increments (box constrained to ≥ 0)
         coefs = zeros(T, length(ests))
         
         if length(coefs) > 1
@@ -679,12 +681,12 @@ function _spline_ests2coefs(ests::AbstractVector{T}, basis, monotone::Int) where
             t = BSplineKit.knots(basis)
             
             for i in 2:length(coefs)
-                coefs[i] = coefs[i-1] + ests_nat[i] * (t[i + k] - t[i]) / k
+                coefs[i] = coefs[i-1] + ests[i] * (t[i + k] - t[i]) / k
             end
         end
         
         # Add intercept
-        coefs .+= ests_nat[1]
+        coefs .+= ests[1]
         
         # Reverse for decreasing monotone
         if monotone == -1
@@ -698,43 +700,45 @@ end
 """
     _spline_coefs2ests(coefs, basis, monotone; clamp_zeros=false)
 
-Transform spline coefficients back to log-scale parameter estimates.
+Transform spline coefficients back to natural-scale parameter estimates.
 Inverse of `_spline_ests2coefs`.
 
-For monotone == 0: simple log (inverse of exp)
+For monotone == 0: identity (coefficients ARE parameters)
 For monotone == 1: difference transformation (inverse of cumsum)
 For monotone == -1: reverse then difference
+
+Note: Parameters are now on NATURAL scale (not log). Box constraints ensure β ≥ 0.
 """
 function _spline_coefs2ests(coefs::AbstractVector{T}, basis, monotone::Int; clamp_zeros::Bool=false) where T
     if monotone == 0
-        # Inverse of exp
-        ests_nat = coefs
+        # Identity: coefficients are parameters directly
+        return copy(coefs)
     else
         # Reverse if decreasing
         coefs_nat = monotone == 1 ? copy(coefs) : reverse(coefs)
         
-        ests_nat = zeros(T, length(coefs_nat))
+        ests = zeros(T, length(coefs_nat))
         
         if length(coefs) > 1
             k = BSplineKit.order(basis)
             t = BSplineKit.knots(basis)
             
             # Inverse of the cumsum: take differences
-            for i in length(ests_nat):-1:2
-                ests_nat[i] = (coefs_nat[i] - coefs_nat[i - 1]) * k / (t[i + k] - t[i])
+            for i in length(ests):-1:2
+                ests[i] = (coefs_nat[i] - coefs_nat[i - 1]) * k / (t[i + k] - t[i])
             end
         end
         
         # Intercept
-        ests_nat[1] = coefs_nat[1]
+        ests[1] = coefs_nat[1]
+        
+        # Clamp numerical zeros
+        if clamp_zeros
+            ests[findall(isapprox.(ests, 0.0; atol = sqrt(eps())))] .= zero(T)
+        end
+        
+        return ests
     end
-    
-    # Clamp numerical zeros
-    if clamp_zeros
-        ests_nat[findall(isapprox.(ests_nat, 0.0; atol = sqrt(eps())))] .= zero(T)
-    end
-    
-    return log.(ests_nat)
 end
 
 """

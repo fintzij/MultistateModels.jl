@@ -394,9 +394,13 @@ Internal representation of a single penalty term in the penalized likelihood.
 # Fields
 - `hazard_indices::UnitRange{Int}`: Indices into flat parameter vector
 - `S::Matrix{Float64}`: Penalty matrix (K × K)
-- `lambda::Float64`: Current smoothing parameter (log-scale internally)
+- `lambda::Float64`: Current smoothing parameter
 - `order::Int`: Derivative order
 - `hazard_names::Vector{Symbol}`: Names of hazards covered by this term
+
+# Notes
+Parameters are on natural scale with box constraints. The penalty is quadratic:
+P(β) = (λ/2) βᵀSβ
 """
 struct PenaltyTerm
     hazard_indices::UnitRange{Int}
@@ -524,46 +528,48 @@ Check if the penalty configuration contains any active penalty terms.
 has_penalties(config::PenaltyConfig) = !isempty(config.terms) || !isempty(config.total_hazard_terms) || !isempty(config.smooth_covariate_terms)
 
 """
-    compute_penalty(beta::AbstractVector, config::PenaltyConfig) -> Float64
+    compute_penalty(parameters::AbstractVector, config::PenaltyConfig) -> Float64
 
-Compute the total penalty contribution for given coefficients.
+Compute the total penalty contribution for given parameters.
 
 # Arguments
-- `beta`: Coefficient vector on natural scale (not log-transformed)
+- `parameters`: Parameter vector (natural scale)
 - `config`: Resolved penalty configuration
 
 # Returns
 Penalty value: (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ + total hazard penalties + smooth covariate penalties
 
 # Notes
-- Coefficients must be on natural scale (positive for hazard splines)
+- Parameters are on natural scale with box constraints (β ≥ 0)
+- Penalty is quadratic: P(β) = (λ/2) βᵀSβ
 - Returns 0.0 if config has no penalties
 """
-function compute_penalty(beta::AbstractVector{T}, config::PenaltyConfig) where T
+function compute_penalty(parameters::AbstractVector{T}, config::PenaltyConfig) where T
     has_penalties(config) || return zero(T)
     
     penalty = zero(T)
     
-    # Individual baseline hazard penalties
+    # Baseline hazard penalties - parameters on natural scale
     for term in config.terms
-        β_j = @view beta[term.hazard_indices]
+        β_j = @view parameters[term.hazard_indices]
         penalty += term.lambda * dot(β_j, term.S * β_j)
     end
     
-    # Total hazard penalties (if any)
+    # Total hazard penalties (if any) - sum of natural-scale coefficients
     for term in config.total_hazard_terms
         # Sum coefficients across competing hazards for total hazard
         K = size(term.S, 1)
         β_total = zeros(T, K)
         for idx_range in term.hazard_indices
-            β_total .+= @view beta[idx_range]
+            β_k = @view parameters[idx_range]
+            β_total .+= β_k  # Parameters already on natural scale
         end
         penalty += term.lambda_H * dot(β_total, term.S * β_total)
     end
     
-    # Smooth covariate penalties
+    # Smooth covariate penalties - no transformation (linear predictor scale)
     for term in config.smooth_covariate_terms
-        β_k = beta[term.param_indices]  # Use Vector indexing (may not be contiguous)
+        β_k = parameters[term.param_indices]  # Use Vector indexing (may not be contiguous)
         penalty += term.lambda * dot(β_k, term.S * β_k)
     end
     

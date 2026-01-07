@@ -7,10 +7,9 @@
 #
 # Based on Wood (2024): "Neighbourhood Cross-Validation" arXiv:2404.16490
 #
-# Algorithm: mgcv-style "performance iteration" that alternates:
-#   1. Given β, update Hessians and optimize λ
-#   2. Given λ, update β with warm-started optimization
-# This is more accurate than one-shot approximation when β(λ*) differs from β(0).
+# Algorithm: Profile likelihood optimization of V(λ, β(λ)) where β(λ) is the
+# penalized MLE at each λ. Uses golden section search for 1D optimization 
+# (single λ) or Nelder-Mead for multi-dimensional λ optimization.
 #
 # Key insight: Inner optimization uses PENALIZED loss, outer optimization
 # minimizes UNPENALIZED prediction error via leave-one-out approximation.
@@ -22,7 +21,7 @@ using LinearAlgebra
 """
     SmoothingSelectionState
 
-Internal state for smoothing parameter selection via PIJCV/GCV, storing cached matrices and intermediate results.
+Internal state for smoothing parameter selection via PIJCV/CV, storing cached matrices and intermediate results.
 
 Note: This is separate from `PIJCVState` in variance.jl which is the lower-level
 state for computing PIJCV criterion from matrices.
@@ -65,37 +64,43 @@ takes explicit lambda values as an argument. Used during optimization when
 lambda is being varied.
 
 # Arguments
-- `beta`: Coefficient vector (flat, on estimation scale)
+- `beta`: Coefficient vector (natural scale)
 - `lambda`: Vector of smoothing parameters
 - `config`: Penalty configuration containing S matrices and index mappings
 
 # Returns
 Scalar penalty value (half the quadratic form)
+
+# Notes
+- Parameters are on natural scale with box constraints (β ≥ 0)
+- Penalty is quadratic: P(β) = (λ/2) βᵀSβ
+- This must match the behavior of `compute_penalty` in infrastructure.jl
 """
 function compute_penalty_from_lambda(beta::AbstractVector{T}, lambda::AbstractVector, 
                                       config::PenaltyConfig) where T
     penalty = zero(T)
     lambda_idx = 1
     
-    # Baseline hazard penalties
+    # Baseline hazard penalties - parameters on natural scale
     for term in config.terms
         β_j = @view beta[term.hazard_indices]
         penalty += lambda[lambda_idx] * dot(β_j, term.S * β_j)
         lambda_idx += 1
     end
     
-    # Total hazard penalties
+    # Total hazard penalties - sum natural-scale coefficients
     for term in config.total_hazard_terms
         K = size(term.S, 1)
         β_total = zeros(T, K)
         for idx_range in term.hazard_indices
-            β_total .+= @view beta[idx_range]
+            β_k = @view beta[idx_range]
+            β_total .+= β_k  # Parameters already on natural scale
         end
         penalty += lambda[lambda_idx] * dot(β_total, term.S * β_total)
         lambda_idx += 1
     end
     
-    # Smooth covariate penalties (handle shared groups)
+    # Smooth covariate penalties - no transformation (linear predictor scale)
     if !isempty(config.shared_smooth_groups)
         # Build term -> lambda mapping
         term_to_lambda = Dict{Int, Int}()
@@ -207,100 +212,9 @@ function fit_penalized_beta(model::MultistateProcess, data::ExactData,
     return sol.u
 end
 
-"""
-    optimize_lambda(state::SmoothingSelectionState, log_lambda_init::Vector{Float64};
-                    method::Symbol=:pijcv, maxiter::Int=100, verbose::Bool=false,
-                    use_polyalgorithm::Bool=true) -> Tuple{Vector{Float64}, Float64, Bool}
-
-Optimize smoothing parameters given fixed Hessians.
-
-# Arguments
-- `state`: SmoothingSelectionState with current β and cached Hessians
-- `log_lambda_init`: Initial log-smoothing parameters (warm start)
-- `method`: Selection method (:pijcv, :gcv, :perf, or :efs)
-- `maxiter`: Maximum iterations for λ optimization
-- `verbose`: Print progress
-- `use_polyalgorithm`: If true, use LBFGS→Ipopt; if false, pure Ipopt
-
-# Returns
-- `lambda`: Optimal smoothing parameters (natural scale)
-- `criterion`: Final criterion value
-- `converged`: Whether optimization succeeded
-"""
-function optimize_lambda(state::SmoothingSelectionState, log_lambda_init::Vector{Float64};
-                         method::Symbol=:pijcv, maxiter::Int=100, verbose::Bool=false,
-                         use_polyalgorithm::Bool=true)
-    
-    n_lambda = length(log_lambda_init)
-    
-    # Bounds on log-lambda (λ from 1e-6 to 1e6)
-    lower_bounds = fill(-13.8, n_lambda)
-    upper_bounds = fill(13.8, n_lambda)
-    
-    # Select criterion function
-    objective = if method == :pijcv
-        (log_lam, p) -> compute_pijcv_criterion(log_lam, state)
-    else
-        (log_lam, p) -> compute_gcv_criterion(log_lam, state)
-    end
-    
-    optf = OptimizationFunction(objective, AutoForwardDiff())
-    prob = OptimizationProblem(optf, log_lambda_init, nothing;
-                               lb=lower_bounds, ub=upper_bounds)
-    
-    result = try
-        if use_polyalgorithm
-            # Phase 1: LBFGS warm-start
-            if verbose
-                println("    λ opt: LBFGS warm-start...")
-            end
-            sol_warmstart = solve(prob, LBFGS();
-                                  maxiters=min(maxiter, 50),
-                                  abstol=1e-2,
-                                  reltol=1e-2,
-                                  show_trace=false)
-            
-            # Phase 2: Ipopt refinement
-            if verbose
-                println("    λ opt: Ipopt refinement...")
-            end
-            prob_refined = remake(prob, u0=sol_warmstart.u)
-            solve(prob_refined, IpoptOptimizer();
-                  maxiters=maxiter, print_level=0, tol=1e-6)
-        else
-            # Pure Ipopt
-            if verbose
-                println("    λ opt: Ipopt from warm start...")
-            end
-            solve(prob, IpoptOptimizer();
-                  maxiters=maxiter, print_level=0, tol=1e-6)
-        end
-    catch e
-        if verbose
-            println("    λ optimization failed: ", e)
-        end
-        nothing
-    end
-    
-    if !isnothing(result) && (result.retcode == ReturnCode.Success || result.retcode == ReturnCode.MaxIters)
-        lambda = exp.(result.u)
-        criterion = result.objective
-        converged = (result.retcode == ReturnCode.Success)
-        
-        # Check for degenerate solution
-        if any(lambda .< 1e-10) || any(lambda .> 1e10)
-            if verbose
-                println("    λ optimization produced degenerate values")
-            end
-            converged = false
-        end
-        
-        return (lambda, criterion, converged)
-    else
-        # Failed - return initial values
-        return (exp.(log_lambda_init), Inf, false)
-    end
-end
+# NOTE: optimize_lambda() function was deleted on 2025-01-05 as part of dead code cleanup.
+# It was only called by _select_smoothing_parameters_legacy() which is also deleted.
+# The current approach uses grid search with profile optimization instead of alternating optimization.
 
 """
     extract_lambda_vector(config::PenaltyConfig) -> Vector{Float64}
@@ -344,7 +258,7 @@ function extract_lambda_vector(config::PenaltyConfig)
 end
 
 # =============================================================================
-# PIJCV and GCV Criterion Functions
+# PIJCV and Cross-Validation Criterion Functions
 # =============================================================================
 
 """
@@ -392,17 +306,29 @@ only when the actual likelihood is non-finite (Wood 2024, Section 4.1).
 function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
     lambda = exp.(log_lambda)
     
-    # Build penalized Hessian: H_λ = H + Σⱼ λⱼ Sⱼ
+    # Build penalized Hessian (penalty is quadratic: λ βᵀSβ)
     # Create matrix with appropriate eltype for AD
-    H_lambda = _build_penalized_hessian(state.H_unpenalized, lambda, state.penalty_config)
+    H_lambda = _build_penalized_hessian(state.H_unpenalized, lambda, state.penalty_config; 
+                                         beta=state.beta_hat)
+    
+    # Check if we're in AD mode (Dual numbers)
+    # In AD mode, skip Cholesky downdate optimization and use direct solves
+    use_cholesky_downdate = (T === Float64)
     
     # Try Cholesky factorization of full penalized Hessian
     H_lambda_sym = Symmetric(H_lambda)
-    chol_fact = try
-        cholesky(H_lambda_sym)
-    catch e
-        # If Cholesky fails, H_λ is not positive definite
-        # Return a large value to steer optimization away
+    chol_fact = if use_cholesky_downdate
+        try
+            cholesky(H_lambda_sym)
+        catch e
+            nothing
+        end
+    else
+        nothing  # Skip factorization for AD mode
+    end
+    
+    # If Cholesky failed and not in AD mode, return large value
+    if chol_fact === nothing && use_cholesky_downdate
         return T(1e10)
     end
     
@@ -413,10 +339,6 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
     # Following Wood (2024): evaluate ACTUAL likelihood at LOO parameters
     V = zero(T)
     n_fallback = 0  # Track how many times we fall back to V_q
-    n_downdate_fallback = 0  # Track Cholesky downdate failures
-    
-    # Precompute inverse for fallback (only needed if downdates fail)
-    H_inv_fallback = nothing
     
     for i in 1:state.n_subjects
         # Get subject i's gradient and Hessian (of negative log-likelihood)
@@ -425,48 +347,39 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
         H_i = state.subject_hessians[i]
         
         # Solve for coefficient perturbation: Δ⁻ⁱ = H_{λ,-i}⁻¹ gᵢ
-        # Use Cholesky downdate for efficiency (Wood 2024, Section 2.1)
-        delta_i = _solve_loo_newton_step(chol_fact, H_i, g_i)
+        delta_i = if use_cholesky_downdate && chol_fact !== nothing
+            # Use Cholesky downdate for efficiency (Wood 2024, Section 2.1)
+            _solve_loo_newton_step(chol_fact, H_i, g_i)
+        else
+            nothing  # Will use direct solve below
+        end
         
         if delta_i === nothing
-            # Cholesky downdate failed (indefinite H_{λ,-i})
-            # Try direct solve as fallback
-            n_downdate_fallback += 1
-            
+            # Either Cholesky downdate failed or we're in AD mode
+            # Use direct solve: (H_λ - H_i)⁻¹ g_i
             H_lambda_loo = H_lambda - H_i
             H_loo_sym = Symmetric(H_lambda_loo)
             
             delta_i = try
-                H_loo_sym \ g_i
+                H_loo_sym \ collect(g_i)
             catch e
                 # If solve fails (e.g., indefinite Hessian), return large value
-                # This handles Wood's "Degeneracy 1" (Section 3.1)
                 return T(1e10)
             end
         end
         
         # Compute LOO parameters: β̂⁻ⁱ = β̂ + Δ⁻ⁱ
-        #
-        # Derivation (loss convention):
-        # At penalized MLE: ∇D(β̂) + λSβ̂ = 0, where D = Σⱼ Dⱼ
-        # LOO gradient at β̂: ∇D⁻ⁱ(β̂) = Σⱼ≠ᵢ gⱼ + λSβ̂ = -gᵢ
-        # Newton step: β̂⁻ⁱ = β̂ - H_{λ,-i}⁻¹(-gᵢ) = β̂ + H_{λ,-i}⁻¹ gᵢ
         beta_loo = state.beta_hat .+ delta_i
         
         # CORE OF NCV: Evaluate ACTUAL likelihood at LOO parameters
-        # This is what makes NCV correct - NOT a Taylor approximation
         ll_loo = loglik_subject(beta_loo, state.data, i)
         
         # Check if likelihood is finite
         if isfinite(ll_loo)
             # Normal case: use actual likelihood
-            # D_i = -ℓ_i(β̂⁻ⁱ)
             D_i = -ll_loo
         else
             # Fallback to quadratic approximation V_q (Wood 2024, Section 4.1)
-            # This handles "Degeneracy 3" (infinite LOO loss)
-            #
-            # V_q uses Taylor expansion: Dᵢ(β̂ + δ) ≈ Dᵢ(β̂) + gᵢᵀδ + ½δᵀHᵢδ
             linear_term = dot(g_i, delta_i)
             quadratic_term = T(0.5) * dot(delta_i, H_i * delta_i)
             D_i = -ll_subj_base[i] + linear_term + quadratic_term
@@ -476,13 +389,144 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
         V += D_i
     end
     
-    # Note: Could log n_fallback if verbose mode is needed
-    # if n_fallback > 0
-    #     @info "NCV: Used V_q fallback for $n_fallback of $(state.n_subjects) subjects"
-    # end
-    # if n_downdate_fallback > 0
-    #     @info "NCV: Cholesky downdate failed for $n_downdate_fallback subjects"
-    # end
+    return V
+end
+
+"""
+    compute_pijkfold_criterion(log_lambda::Vector{Float64}, state::SmoothingSelectionState, 
+                               nfolds::Int) -> Float64
+
+Compute the k-fold PIJCV criterion V(λ) using Newton-approximated fold-out estimates.
+
+This is a generalization of the LOO-based PIJCV (Wood 2024) to k-fold cross-validation.
+Instead of approximating each subject's leave-one-out estimate via a Newton step,
+we approximate each fold's leave-fold-out estimate.
+
+# k-fold NCV Criterion
+
+The criterion is the sum of fold-out prediction errors:
+
+    V(λ) = Σₖ Σᵢ∈foldₖ Dᵢ(β̂⁻ᵏ)
+
+where:
+- Dᵢ(β) = -ℓᵢ(β) is subject i's negative log-likelihood contribution
+- β̂⁻ᵏ is the penalized MLE with fold k omitted
+
+# Efficient Computation via Newton Approximation
+
+Rather than refit k times, we use Newton's approximation (generalizing Wood 2024):
+
+    β̂⁻ᵏ ≈ β̂ + Δ⁻ᵏ,  where  Δ⁻ᵏ = H_{λ,-k}⁻¹ gₖ
+
+where:
+- gₖ = Σᵢ∈foldₖ gᵢ is the sum of gradients for subjects in fold k
+- H_{λ,-k} = H_λ - Hₖ is the leave-fold-out penalized Hessian
+- Hₖ = Σᵢ∈foldₖ Hᵢ is the sum of Hessians for subjects in fold k
+
+# Complexity
+- Exact k-fold: O(k × fitting_cost) — requires k refits
+- PIJKFOLD: O(k × p³) — only k linear solves, no refitting
+
+# Arguments
+- `log_lambda`: Vector of log-smoothing parameters (one per penalty term)
+- `state`: SmoothingSelectionState with cached gradients/Hessians
+- `nfolds`: Number of folds (e.g., 5, 10, 20)
+
+# Returns
+- `Float64`: k-fold PIJCV criterion value (lower is better)
+
+# Notes
+- For nfolds = n_subjects, this is equivalent to `compute_pijcv_criterion` (LOO)
+- Uses deterministic fold assignment: subject i goes to fold (i-1) % nfolds + 1
+- Falls back to quadratic approximation V_q when actual likelihood is non-finite
+
+# References
+- Wood, S.N. (2024). "On Neighbourhood Cross Validation." arXiv:2404.16490v4
+  (This extends Wood's LOO approximation to k-fold)
+"""
+function compute_pijkfold_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState, 
+                                    nfolds::Int) where T<:Real
+    lambda = exp.(log_lambda)
+    n_subjects = state.n_subjects
+    
+    # Validate nfolds
+    nfolds >= 2 || throw(ArgumentError("nfolds must be at least 2, got $nfolds"))
+    nfolds <= n_subjects || throw(ArgumentError("nfolds ($nfolds) cannot exceed n_subjects ($n_subjects)"))
+    
+    # Build penalized Hessian (penalty is quadratic: λ βᵀSβ)
+    H_lambda = _build_penalized_hessian(state.H_unpenalized, lambda, state.penalty_config;
+                                         beta=state.beta_hat)
+    
+    # Try Cholesky factorization of full penalized Hessian
+    H_lambda_sym = Symmetric(H_lambda)
+    chol_fact = try
+        cholesky(H_lambda_sym)
+    catch e
+        # If Cholesky fails, H_λ is not positive definite
+        return T(1e10)
+    end
+    
+    # Get subject-level likelihoods at current estimate (for V_q fallback)
+    ll_subj_base = loglik_exact(state.beta_hat, state.data; neg=false, return_ll_subj=true)
+    
+    # Create fold assignments (deterministic, in order)
+    # Subject i goes to fold (i-1) % nfolds + 1
+    fold_assignments = [(i - 1) % nfolds + 1 for i in 1:n_subjects]
+    
+    # Compute k-fold NCV criterion: V = Σₖ Σᵢ∈foldₖ Dᵢ(β̂⁻ᵏ)
+    V = zero(T)
+    n_fallback = 0
+    
+    for k in 1:nfolds
+        # Get indices for this fold
+        fold_indices = findall(==(k), fold_assignments)
+        
+        # Compute fold-level gradient and Hessian
+        # gₖ = Σᵢ∈foldₖ gᵢ,  Hₖ = Σᵢ∈foldₖ Hᵢ
+        p = state.n_params
+        g_k = zeros(T, p)
+        H_k = zeros(T, p, p)
+        
+        for i in fold_indices
+            g_k .+= @view state.subject_grads[:, i]
+            H_k .+= state.subject_hessians[i]
+        end
+        
+        # Solve for fold-out coefficient perturbation: Δ⁻ᵏ = H_{λ,-k}⁻¹ gₖ
+        # H_{λ,-k} = H_λ - Hₖ
+        H_lambda_fold = H_lambda - H_k
+        H_fold_sym = Symmetric(H_lambda_fold)
+        
+        delta_k = try
+            H_fold_sym \ g_k
+        catch e
+            # If solve fails (e.g., indefinite Hessian), return large value
+            return T(1e10)
+        end
+        
+        # Compute fold-out parameters: β̂⁻ᵏ = β̂ + Δ⁻ᵏ
+        beta_fold_out = state.beta_hat .+ delta_k
+        
+        # Evaluate ACTUAL likelihood for each subject in this fold at fold-out parameters
+        for i in fold_indices
+            ll_fold = loglik_subject(beta_fold_out, state.data, i)
+            
+            if isfinite(ll_fold)
+                # Normal case: use actual likelihood
+                D_i = -ll_fold
+            else
+                # Fallback to quadratic approximation V_q
+                g_i = @view state.subject_grads[:, i]
+                H_i = state.subject_hessians[i]
+                linear_term = dot(g_i, delta_k)
+                quadratic_term = T(0.5) * dot(delta_k, H_i * delta_k)
+                D_i = -ll_subj_base[i] + linear_term + quadratic_term
+                n_fallback += 1
+            end
+            
+            V += D_i
+        end
+    end
     
     return V
 end
@@ -581,7 +625,126 @@ function compute_loocv_criterion(lambda::Vector{Float64}, beta_init::Vector{Floa
         total_criterion += D_i
         
         if verbose
-            @printf("  Subject %d/%d: D_i = %.4f\n", i, n_subjects, D_i)
+            println("  Subject $i/$n_subjects: D_i = $(round(D_i, digits=4))")
+        end
+    end
+    
+    # Restore all original weights (safety)
+    model.SubjectWeights .= original_weights
+    
+    return total_criterion
+end
+
+"""
+    compute_kfold_cv_criterion(lambda::Vector{Float64}, beta_init::Vector{Float64},
+                               model::MultistateProcess, data::ExactData,
+                               penalty_config::PenaltyConfig, nfolds::Int;
+                               maxiters::Int=50, verbose::Bool=false) -> Float64
+
+Compute k-fold cross-validation criterion by refitting k times.
+
+This is a standard k-fold CV criterion:
+```math
+V_{k-fold}(\\lambda) = \\sum_{k=1}^{K} \\sum_{i \\in \\text{fold}_k} D_i(\\hat\\beta^{-\\text{fold}_k})
+```
+
+where ``\\hat\\beta^{-\\text{fold}_k}`` is the penalized MLE with fold k excluded from the data.
+This is a computationally cheaper alternative to exact LOOCV.
+
+# Computational Cost
+- O(k × fitting_cost) — k times cheaper than LOOCV for same effective CV
+- For k=5 with 100 subjects: 5 refits (vs 100 for LOOCV)
+
+# Implementation
+Uses subject weights to exclude observations: sets weight=0 for all subjects in fold k,
+refits the model, then evaluates those subjects' likelihood at the fold-out estimate.
+Subjects are assigned to folds in order (subject 1..n/k → fold 1, etc.).
+
+# Arguments
+- `lambda`: Smoothing parameter vector (natural scale, not log)
+- `beta_init`: Initial coefficient estimate (warm start for each fold fit)
+- `model`: MultistateProcess model (subject weights will be temporarily modified)
+- `data`: ExactData container
+- `penalty_config`: Penalty configuration
+- `nfolds`: Number of folds (e.g., 5, 10, 20)
+- `maxiters`: Maximum iterations for each fold fit (default 50)
+- `verbose`: Print progress for each fold (default false)
+
+# Returns
+- `Float64`: k-fold CV criterion value (sum of fold-out deviances, lower is better)
+
+# Notes
+- This function temporarily modifies `model.SubjectWeights` (restored after each fold)
+- Folds are created deterministically: subjects are assigned to folds by index order
+- For reproducibility with different orderings, shuffle your data before model creation
+
+# References
+- Hastie, T., Tibshirani, R., & Friedman, J. (2009). "The Elements of Statistical Learning."
+  2nd edition, Springer. Chapter 7.
+
+# Example
+```julia
+# Compute 5-fold CV at a specific λ
+cv5_value = compute_kfold_cv_criterion(
+    [10.0],           # lambda
+    beta_mle,         # starting coefficients
+    model, data, penalty_config,
+    5                 # number of folds
+)
+```
+
+See also: [`compute_loocv_criterion`](@ref), [`select_smoothing_parameters`](@ref)
+"""
+function compute_kfold_cv_criterion(lambda::Vector{Float64}, beta_init::Vector{Float64},
+                                    model::MultistateProcess, data::ExactData,
+                                    penalty_config::PenaltyConfig, nfolds::Int;
+                                    maxiters::Int=50, verbose::Bool=false)
+    n_subjects = length(data.paths)
+    
+    # Validate nfolds
+    nfolds >= 2 || throw(ArgumentError("nfolds must be at least 2, got $nfolds"))
+    nfolds <= n_subjects || throw(ArgumentError("nfolds ($nfolds) cannot exceed n_subjects ($n_subjects)"))
+    
+    # Store original weights
+    original_weights = copy(model.SubjectWeights)
+    
+    # Create fold assignments (deterministic, in order)
+    # Subject i goes to fold (i-1) % nfolds + 1
+    fold_assignments = [(i - 1) % nfolds + 1 for i in 1:n_subjects]
+    
+    total_criterion = 0.0
+    
+    for k in 1:nfolds
+        # Get indices for this fold
+        fold_indices = findall(==(k), fold_assignments)
+        
+        # Exclude fold k by setting weights to 0
+        for i in fold_indices
+            model.SubjectWeights[i] = 0.0
+        end
+        
+        # Fit model on data excluding fold k
+        # Warm-start from the provided initial estimate
+        beta_fold = fit_penalized_beta(model, data, lambda, penalty_config, beta_init;
+                                       maxiters=maxiters, verbose=false)
+        
+        # Restore original weights for this fold
+        for i in fold_indices
+            model.SubjectWeights[i] = original_weights[i]
+        end
+        
+        # Compute deviance contribution for all subjects in fold k
+        fold_criterion = 0.0
+        for i in fold_indices
+            ll_i = loglik_subject(beta_fold, data, i)
+            D_i = -ll_i
+            fold_criterion += D_i
+        end
+        
+        total_criterion += fold_criterion
+        
+        if verbose
+            println("  Fold $k/$nfolds (n=$(length(fold_indices))): D = $(round(fold_criterion, digits=4))")
         end
     end
     
@@ -798,41 +961,52 @@ end
 
 """
     _build_penalized_hessian(H_unpen::Matrix{Float64}, lambda::AbstractVector{T}, 
-                              config::PenaltyConfig) where T<:Real
+                              config::PenaltyConfig;
+                              beta::Union{Nothing, AbstractVector{<:Real}}=nothing) where T<:Real
 
 Build penalized Hessian with proper element type for AD compatibility.
-Returns: H + Σⱼ λⱼ Sⱼ
 
-This is a non-mutating version of `_add_penalty_to_hessian!` that creates 
-a new matrix with the appropriate type (Float64 or Dual).
+Parameters are on natural scale with box constraints. The penalty is quadratic:
+P(β) = (λ/2) βᵀSβ, so the penalty Hessian is simply λS.
+
+Returns: H_unpen + penalty Hessian
+
+This is a non-mutating version that creates a new matrix with the appropriate type.
 """
 function _build_penalized_hessian(H_unpen::Matrix{Float64}, lambda::AbstractVector{T}, 
-                                   config::PenaltyConfig) where T<:Real
+                                   config::PenaltyConfig;
+                                   beta::Union{Nothing, AbstractVector{<:Real}}=nothing) where T<:Real
     # Convert to eltype compatible with lambda
     H = convert(Matrix{T}, copy(H_unpen))
     
     lambda_idx = 1
     
-    # Baseline hazard penalty terms
+    # Baseline hazard penalty terms - quadratic penalty with Hessian = λS
     for term in config.terms
         idx = term.hazard_indices
+        lam = lambda[lambda_idx]
+        
+        # Penalty Hessian is λS (penalty is quadratic in natural-scale β)
         @inbounds for i in idx, j in idx
-            H[i, j] += lambda[lambda_idx] * term.S[i - first(idx) + 1, j - first(idx) + 1]
+            H[i, j] += lam * term.S[i - first(idx) + 1, j - first(idx) + 1]
         end
         lambda_idx += 1
     end
     
-    # Total hazard terms (for competing risks)
+    # Total hazard terms (for competing risks) - sum of natural-scale coefficients
     for term in config.total_hazard_terms
+        # Total hazard: H(t) = Σ h_k(t), penalty on sum of coefficients
+        # For natural-scale params, Hessian is simply λS per competing hazard
+        lam = lambda[lambda_idx]
         for idx_range in term.hazard_indices
             @inbounds for i in idx_range, j in idx_range
-                H[i, j] += lambda[lambda_idx] * term.S[i - first(idx_range) + 1, j - first(idx_range) + 1]
+                H[i, j] += lam * term.S[i - first(idx_range) + 1, j - first(idx_range) + 1]
             end
         end
         lambda_idx += 1
     end
     
-    # Smooth covariate penalty terms
+    # Smooth covariate penalty terms - no transformation needed
     if !isempty(config.shared_smooth_groups)
         term_to_lambda = Dict{Int, Int}()
         
@@ -1007,7 +1181,7 @@ end
 User-friendly interface for smoothing parameter selection using performance iteration.
 
 This function implements mgcv-style "performance iteration" that alternates:
-1. Given β, compute Hessians and optimize λ via PIJCV/GCV/PERF
+1. Given β, compute Hessians and optimize λ via PIJCV/PERF/EFS
 2. Given λ, update β via penalized maximum likelihood
 
 This is more accurate than one-shot approximation when the penalized solution β(λ*)
@@ -1016,7 +1190,10 @@ differs significantly from the unpenalized solution β(0).
 # Arguments
 - `model`: MultistateModel
 - `penalty`: SplinePenalty specification
-- `method`: Selection method (:pijcv, :gcv, :perf, :efs, or :loocv)
+- `method`: Selection method. Options:
+  - Newton-approximated CV (fast): `:pijcv`/`:pijlcv` (LOO), `:pijcv5`, `:pijcv10`, `:pijcv20` (k-fold)
+  - Exact CV (slow but gold standard): `:loocv`, `:cv5`, `:cv10`, `:cv20`
+  - Other: `:perf`, `:efs`
 - `scope`: Which splines to calibrate (:all, :baseline, or :covariates)
 - `max_outer_iter`: Maximum outer iterations (β-λ alternation)
 - `inner_maxiter`: Maximum iterations for β update per outer iteration
@@ -1030,17 +1207,23 @@ differs significantly from the unpenalized solution β(0).
 NamedTuple with:
 - `lambda`: Optimal smoothing parameters
 - `beta`: Final coefficient estimate
+- `edf`: NamedTuple with `total` (total model EDF) and `per_term` (Vector of per-term EDFs)
 - `criterion`: Final criterion value
 - `converged`: Whether optimization converged
-- `method_used`: Actual method used (may fall back from PIJCV to GCV)
+- `method_used`: Actual method used (may fall back from PIJCV to EFS)
 - `penalty_config`: Updated penalty configuration with optimal λ
 - `n_outer_iter`: Number of outer iterations performed
 
-# Notes on LOOCV Method
-When `method=:loocv`, exact leave-one-out cross-validation is performed. This is
-computationally expensive (O(n² × grid_points)) but serves as the gold standard
-for smoothing parameter selection. For approximate LOOCV that is O(n) per grid
-point, use `:pijcv` instead.
+# Notes on Cross-Validation Methods
+
+**Exact CV methods** (require refitting for each fold/subject):
+- `:loocv`: Exact leave-one-out CV. O(n × grid_points × fitting_cost)
+- `:cv5`, `:cv10`, `:cv20`: Exact K-fold CV with 5, 10, or 20 folds. O(k × grid_points × fitting_cost)
+
+**Newton-approximated CV methods** (fast, no refitting):
+- `:pijcv` / `:pijlcv`: Newton-approximated leave-one-out CV (NCV from Wood 2024). O(grid_points × n × p²)
+- `:pijcv5`, `:pijcv10`, `:pijcv20`: Newton-approximated K-fold CV. O(grid_points × k × p³)
+  These generalize Wood's NCV to k-fold by approximating β̂⁻ᵏ via a Newton step.
 """
 function select_smoothing_parameters(model::MultistateModel, penalty::SplinePenalty;
                                       method::Symbol=:pijcv,
@@ -1126,7 +1309,7 @@ Select smoothing parameters using mgcv-style performance iteration.
 Algorithm:
 1. Initialize β from unpenalized fit, λ from penalty config
 2. Outer loop:
-   a. Given β, compute Hessians and optimize λ via PIJCV/GCV/PERF
+   a. Given β, compute Hessians and optimize λ via PIJCV/PERF/EFS
    b. Given λ, update β via penalized maximum likelihood (warm-started)
    c. Check convergence
 3. Return final (β, λ)
@@ -1136,7 +1319,10 @@ Algorithm:
 - `data`: ExactData container
 - `penalty_config`: Penalty configuration with initial λ values
 - `beta_init`: Initial coefficient estimate (warm start)
-- `method`: Selection method (:pijcv, :gcv, :perf, :efs, or :loocv)
+- `method`: Selection method. Options:
+  - Newton-approximated CV (fast): `:pijcv`/`:pijlcv` (LOO), `:pijcv5`, `:pijcv10`, `:pijcv20` (k-fold)
+  - Exact CV (slow but gold standard): `:loocv`, `:cv5`, `:cv10`, `:cv20`
+  - Other: `:perf`, `:efs`
 - `scope`: Which splines to calibrate:
   - `:all` (default): Calibrate all spline penalties (baseline + covariates)
   - `:baseline`: Calibrate only baseline hazard splines
@@ -1152,17 +1338,27 @@ Algorithm:
 NamedTuple with:
 - `lambda`: Optimal smoothing parameters (for calibrated terms only)
 - `beta`: Final coefficient estimate
+- `edf`: NamedTuple with `total` (total model EDF) and `per_term` (Vector of per-term EDFs)
 - `criterion`: Final criterion value
 - `converged`: Whether optimization converged
-- `method_used`: Actual method used (may fall back from PIJCV to GCV)
+- `method_used`: Actual method used (may fall back from PIJCV to EFS)
 - `penalty_config`: Updated penalty configuration with optimal λ
 - `n_outer_iter`: Number of outer iterations performed
 
-# Notes on LOOCV Method
-When `method=:loocv`, exact leave-one-out cross-validation is performed. This is
-computationally expensive (O(n × grid_points × fitting_cost)) but serves as the
-gold standard for smoothing parameter selection. For approximate LOOCV that is
-O(n) per grid point, use `:pijcv` instead.
+# Notes on EDF Computation
+EDF is only computed for exact data models. For MCEM-fitted models, the EDF
+fields will contain NaN values. See `compute_edf` for details.
+
+# Notes on Cross-Validation Methods
+
+**Exact CV methods** (require refitting for each fold/subject):
+- `:loocv`: Exact leave-one-out CV. O(n × grid_points × fitting_cost)
+- `:cv5`, `:cv10`, `:cv20`: Exact K-fold CV with 5, 10, or 20 folds. O(k × grid_points × fitting_cost)
+
+**Newton-approximated CV methods** (fast, no refitting):
+- `:pijcv` / `:pijlcv`: Newton-approximated leave-one-out CV (NCV from Wood 2024). O(grid_points × n × p²)
+- `:pijcv5`, `:pijcv10`, `:pijcv20`: Newton-approximated K-fold CV. O(grid_points × k × p³)
+  These generalize Wood's NCV to k-fold by approximating β̂⁻ᵏ via a Newton step.
 """
 function select_smoothing_parameters(model::MultistateProcess, data::ExactData,
                                       penalty_config::PenaltyConfig,
@@ -1176,8 +1372,9 @@ function select_smoothing_parameters(model::MultistateProcess, data::ExactData,
                                       lambda_tol::Float64=1e-3,
                                       verbose::Bool=false)
     # Validate method
-    method ∈ (:pijcv, :gcv, :perf, :efs, :loocv) || 
-        throw(ArgumentError("method must be :pijcv, :gcv, :perf, :efs, or :loocv, got :$method"))
+    valid_methods = (:pijcv, :pijlcv, :pijcv5, :pijcv10, :pijcv20, :perf, :efs, :loocv, :cv5, :cv10, :cv20)
+    method ∈ valid_methods || 
+        throw(ArgumentError("method must be one of $valid_methods, got :$method"))
     
     # Validate scope
     scope ∈ (:all, :baseline, :covariates) || 
@@ -1187,268 +1384,62 @@ function select_smoothing_parameters(model::MultistateProcess, data::ExactData,
     scoped_config, fixed_baseline_lambdas, fixed_covariate_lambdas = _create_scoped_penalty_config(penalty_config, scope)
     
     n_lambda = scoped_config.n_lambda
-    n_lambda > 0 || return (lambda=Float64[], beta=beta_init, criterion=NaN, 
-                            converged=true, method_used=:none, penalty_config=penalty_config,
-                            n_outer_iter=0)
-    
-    # Use PROFILE OPTIMIZATION instead of alternating optimization
-    # The alternating approach fails because V(λ) at fixed β is monotonic in λ.
-    # Profile optimization evaluates V(λ, β(λ)) where β(λ) is fitted at each λ.
-    
-    if verbose
-        println("Using profile optimization (grid search) for λ selection")
-        println("  Method: $method")
-    end
+    n_lambda > 0 || return (lambda=Float64[], beta=beta_init, edf=(total=0.0, per_term=Float64[]), 
+                            criterion=NaN, converged=true, method_used=:none, 
+                            penalty_config=penalty_config, n_outer_iter=0)
     
     samplepaths = data.paths
     n_params = length(beta_init)
     n_subjects = length(samplepaths)
     
-    # Grid search over log(λ)
-    # Wide range to capture both under-penalized and over-penalized regimes
-    # log(λ) from -8 to 8 covers λ from ~0.0003 to ~3000
-    log_lambda_grid = collect(-8.0:1.0:8.0)
+    # Check if method supports direct λ optimization (Newton-approximated methods)
+    # Exact CV methods require refitting at each λ - use simpler approach
+    use_direct_optimization = method ∈ (:pijcv, :pijlcv, :pijcv5, :pijcv10, :pijcv20, :perf, :efs)
     
-    best_lambda = Float64[]
-    best_beta = copy(beta_init)
+    if !use_direct_optimization
+        # For exact CV methods, fall back to coarse grid + refinement
+        return _select_lambda_grid_search(model, data, scoped_config, beta_init, method, 
+                                          inner_maxiter, verbose, samplepaths, n_subjects, n_params,
+                                          penalty_config, fixed_baseline_lambdas, fixed_covariate_lambdas, scope)
+    end
+    
+    if verbose
+        println("Optimizing λ via performance iteration (Wood 2024)")
+        println("  Method: $method")
+        println("  n_lambda: $n_lambda")
+    end
+    
+    # Warn user about multi-λ shared optimization
+    if n_lambda > 1
+        @warn """Multiple smoothing parameters detected (n_lambda=$n_lambda).
+        Current implementation uses shared λ for all smooth terms.
+        Consider calibrating each term separately with `scope=:baseline` or `scope=:covariates`."""
+    end
+    
+    # Performance iteration: alternate between optimizing λ and updating β
+    # At each iteration:
+    #   1. Given β, optimize λ via AD on V(λ) (criterion is differentiable w.r.t. λ)
+    #   2. Given λ, update β via penalized MLE
+    
+    current_beta = copy(beta_init)
+    current_log_lambda = zeros(n_lambda)  # Start at λ = 1
     best_criterion = Inf
-    grid_results = Vector{NamedTuple{(:log_lambda, :lambda, :criterion), Tuple{Float64, Float64, Float64}}}()
+    n_total_evals = 0
+    converged = false
     
-    if verbose
-        println("  Grid search over log(λ) ∈ [$(log_lambda_grid[1]), $(log_lambda_grid[end])]")
-        if method == :loocv
-            println("  WARNING: Exact LOOCV is computationally expensive (n refits per λ)")
-        end
-        println("\n  log(λ)    λ          criterion")
-        println("  " * "-"^40)
-    end
-    
-    for log_lam in log_lambda_grid
-        lam = exp(log_lam)
-        lambda_vec = fill(lam, n_lambda)
+    for outer_iter in 1:max_outer_iter
+        # Step 1: Compute subject gradients and Hessians at current β
+        subject_grads_ll = compute_subject_gradients(current_beta, model, samplepaths)
+        subject_hessians_ll = compute_subject_hessians_fast(current_beta, model, samplepaths)
         
-        # Fit β at this λ
-        beta_lam = fit_penalized_beta(model, data, lambda_vec, scoped_config, beta_init;
-                                       maxiters=inner_maxiter,
-                                       use_polyalgorithm=true,
-                                       verbose=false)
-        
-        # Compute criterion at (λ, β(λ))
-        # LOOCV uses a different pathway that doesn't need precomputed Hessians
-        criterion = if method == :loocv
-            # Exact LOOCV: refit n times, each leaving out one subject
-            compute_loocv_criterion(lambda_vec, beta_lam, model, data, scoped_config;
-                                    maxiters=inner_maxiter, verbose=false)
-        else
-            # Other methods use precomputed subject-level Hessians
-            # Compute Hessians at β(λ)
-            subject_grads_ll = compute_subject_gradients(beta_lam, model, samplepaths)
-            subject_hessians_ll = compute_subject_hessians_fast(beta_lam, model, samplepaths)
-            
-            # Convert to loss convention
-            subject_grads = -subject_grads_ll
-            subject_hessians = [-H for H in subject_hessians_ll]
-            H_unpenalized = sum(subject_hessians)
-            
-            # Create state for criterion evaluation
-            state = SmoothingSelectionState(
-                copy(beta_lam),
-                H_unpenalized,
-                subject_grads,
-                subject_hessians,
-                scoped_config,
-                n_subjects,
-                n_params,
-                model,
-                data
-            )
-            
-            # Compute criterion based on method
-            log_lambda_vec = fill(log_lam, n_lambda)
-            if method == :pijcv
-                compute_pijcv_criterion(log_lambda_vec, state)
-            elseif method == :perf
-                compute_perf_criterion(log_lambda_vec, state)
-            elseif method == :efs
-                compute_efs_criterion(log_lambda_vec, state)
-            else
-                compute_gcv_criterion(log_lambda_vec, state)
-            end
-        end
-        
-        push!(grid_results, (log_lambda=log_lam, lambda=lam, criterion=criterion))
-        
-        if verbose
-            println("  $(round(log_lam, digits=1))\t$(round(lam, sigdigits=3))\t$(round(criterion, digits=3))")
-        end
-        
-        if criterion < best_criterion
-            best_criterion = criterion
-            best_lambda = lambda_vec
-            best_beta = copy(beta_lam)
-        end
-    end
-    
-    # Refine around the best point with finer grid
-    best_log_lam = log(best_lambda[1])
-    fine_grid = range(max(-2.0, best_log_lam - 1.5), min(8.0, best_log_lam + 1.5), length=11)
-    
-    if verbose
-        println("\n  Refining around log(λ) = $(round(best_log_lam, digits=2))")
-    end
-    
-    for log_lam in fine_grid
-        # Skip if already evaluated
-        any(r -> abs(r.log_lambda - log_lam) < 0.01, grid_results) && continue
-        
-        lam = exp(log_lam)
-        lambda_vec = fill(lam, n_lambda)
-        
-        beta_lam = fit_penalized_beta(model, data, lambda_vec, scoped_config, best_beta;
-                                       maxiters=inner_maxiter,
-                                       use_polyalgorithm=false,
-                                       verbose=false)
-        
-        # Compute criterion at (λ, β(λ))
-        # LOOCV uses a different pathway that doesn't need precomputed Hessians
-        criterion = if method == :loocv
-            compute_loocv_criterion(lambda_vec, beta_lam, model, data, scoped_config;
-                                    maxiters=inner_maxiter, verbose=false)
-        else
-            subject_grads_ll = compute_subject_gradients(beta_lam, model, samplepaths)
-            subject_hessians_ll = compute_subject_hessians_fast(beta_lam, model, samplepaths)
-            subject_grads = -subject_grads_ll
-            subject_hessians = [-H for H in subject_hessians_ll]
-            H_unpenalized = sum(subject_hessians)
-            
-            state = SmoothingSelectionState(
-                copy(beta_lam),
-                H_unpenalized,
-                subject_grads,
-                subject_hessians,
-                scoped_config,
-                n_subjects,
-                n_params,
-                model,
-                data
-            )
-            
-            log_lambda_vec = fill(log_lam, n_lambda)
-            if method == :pijcv
-                compute_pijcv_criterion(log_lambda_vec, state)
-            elseif method == :perf
-                compute_perf_criterion(log_lambda_vec, state)
-            elseif method == :efs
-                compute_efs_criterion(log_lambda_vec, state)
-            else
-                compute_gcv_criterion(log_lambda_vec, state)
-            end
-        end
-        
-        if criterion < best_criterion
-            best_criterion = criterion
-            best_lambda = lambda_vec
-            best_beta = copy(beta_lam)
-        end
-    end
-    
-    if verbose
-        println("\n  Optimal λ: $(round.(best_lambda, sigdigits=4))")
-        println("  Final criterion: $(round(best_criterion, digits=4))")
-    end
-    
-    # Update penalty config with final λ
-    updated_config = _merge_scoped_lambdas(penalty_config, scoped_config, best_lambda, 
-                                           fixed_baseline_lambdas, fixed_covariate_lambdas, scope)
-    
-    return (
-        lambda = best_lambda,
-        beta = best_beta,
-        criterion = best_criterion,
-        converged = true,  # Grid search always "converges"
-        method_used = method,
-        penalty_config = updated_config,
-        n_outer_iter = length(log_lambda_grid) + length(fine_grid)
-    )
-end
-
-
-"""
-    _select_smoothing_parameters_legacy(...)
-
-Legacy alternating optimization approach (deprecated).
-Kept for reference but not recommended - see PIJCV_ALGORITHM_FIX_NEEDED.md
-
-The issue is that at any fixed β, V(λ) is monotonically decreasing with λ,
-causing the optimizer to always select λ → ∞.
-"""
-function _select_smoothing_parameters_legacy(model::MultistateProcess, data::ExactData,
-                                      penalty_config::PenaltyConfig,
-                                      beta_init::Vector{Float64};
-                                      method::Symbol=:pijcv,
-                                      scope::Symbol=:all,
-                                      max_outer_iter::Int=20,
-                                      inner_maxiter::Int=50,
-                                      lambda_maxiter::Int=100,
-                                      beta_tol::Float64=1e-4,
-                                      lambda_tol::Float64=1e-3,
-                                      verbose::Bool=false)
-    # ... original alternating implementation preserved for reference ...
-    # Validate scope
-    scope ∈ (:all, :baseline, :covariates) || 
-        throw(ArgumentError("scope must be :all, :baseline, or :covariates, got :$scope"))
-    
-    # Create scoped penalty config based on scope parameter
-    scoped_config, fixed_baseline_lambdas, fixed_covariate_lambdas = _create_scoped_penalty_config(penalty_config, scope)
-    
-    n_lambda = scoped_config.n_lambda
-    n_lambda > 0 || return (lambda=Float64[], beta=beta_init, criterion=NaN, 
-                            converged=true, method_used=:none, penalty_config=penalty_config,
-                            n_outer_iter=0)
-    
-    # Initialize λ from scoped penalty config
-    lambda = extract_lambda_vector(scoped_config)
-    
-    # Initialize β
-    beta = copy(beta_init)
-    
-    samplepaths = data.paths
-    n_params = length(beta)
-    n_subjects = length(samplepaths)
-    
-    if verbose
-        println("Starting performance iteration (max $max_outer_iter outer iterations)")
-        println("  β tolerance: $beta_tol, λ tolerance: $lambda_tol")
-    end
-    
-    for iter in 1:max_outer_iter
-        outer_iter = iter
-        
-        # ========== Step 1: Compute Hessians at current β ==========
-        if verbose
-            println("\nOuter iteration $iter:")
-            println("  Computing subject-level gradients and Hessians...")
-        end
-        
-        # Use fast batched/threaded variants - O(p) AD passes instead of O(n)
-        # Note: These return gradients/Hessians of LOG-LIKELIHOOD (not loss)
-        subject_grads_ll = compute_subject_gradients(beta, model, samplepaths)
-        subject_hessians_ll = compute_subject_hessians_fast(beta, model, samplepaths)
-        
-        # Convert from log-likelihood to negative log-likelihood (loss) convention
-        # This makes H_unpenalized positive definite at the MLE, as required for Cholesky
+        # Convert to loss convention (negative log-likelihood)
         subject_grads = -subject_grads_ll
-        subject_hessians = [-H_i for H_i in subject_hessians_ll]
+        subject_hessians = [-H for H in subject_hessians_ll]
+        H_unpenalized = sum(subject_hessians)
         
-        # Aggregate unpenalized Hessian (of loss, so positive definite at MLE)
-        H_unpenalized = zeros(n_params, n_params)
-        for H_i in subject_hessians
-            H_unpenalized .+= H_i
-        end
-        
-        # Create state for λ optimization
+        # Create state for criterion evaluation
         state = SmoothingSelectionState(
-            copy(beta),
+            copy(current_beta),
             H_unpenalized,
             subject_grads,
             subject_hessians,
@@ -1459,146 +1450,220 @@ function _select_smoothing_parameters_legacy(model::MultistateProcess, data::Exa
             data
         )
         
-        # ========== Step 2: Optimize λ given current β and Hessians ==========
-        log_lambda_init = log.(lambda)
-        
-        # Try primary method first
-        lambda_new, criterion, lambda_ok = optimize_lambda(state, log_lambda_init;
-                                                            method=method_used, 
-                                                            maxiter=lambda_maxiter,
-                                                            verbose=verbose,
-                                                            use_polyalgorithm=(iter == 1))
-        
-        # Fall back to GCV if PIJCV failed
-        if !lambda_ok && method_used == :pijcv
-            if verbose
-                println("  PIJCV failed, trying GCV...")
+        # Step 2: Optimize λ at fixed β via AD
+        # The criterion V(λ) is directly differentiable w.r.t. log(λ)
+        function criterion_at_fixed_beta(log_lambda_vec, _)
+            if method ∈ (:pijcv, :pijlcv)
+                compute_pijcv_criterion(log_lambda_vec, state)
+            elseif method == :pijcv5
+                compute_pijkfold_criterion(log_lambda_vec, state, 5)
+            elseif method == :pijcv10
+                compute_pijkfold_criterion(log_lambda_vec, state, 10)
+            elseif method == :pijcv20
+                compute_pijkfold_criterion(log_lambda_vec, state, 20)
+            elseif method == :perf
+                compute_perf_criterion(log_lambda_vec, state)
+            else  # :efs
+                compute_efs_criterion(log_lambda_vec, state)
             end
-            method_used = :gcv
-            lambda_new, criterion, lambda_ok = optimize_lambda(state, log_lambda_init;
-                                                                method=:gcv, 
-                                                                maxiter=lambda_maxiter,
-                                                                verbose=verbose,
-                                                                use_polyalgorithm=false)
         end
         
-        # If both methods fail, use high penalty fallback
-        if !lambda_ok
-            if verbose
-                @warn "λ optimization failed. Using default high penalty (λ=100)."
-            end
-            lambda_new = fill(100.0, n_lambda)
-            criterion = NaN
-            method_used = :fallback
-        end
+        # Set up bounded optimization on log(λ) ∈ [-8, 8]
+        lb = fill(-8.0, n_lambda)
+        ub = fill(8.0, n_lambda)
         
-        final_criterion = criterion
+        # Use ForwardDiff for gradients - criterion is AD-compatible
+        adtype = Optimization.AutoForwardDiff()
+        optf = OptimizationFunction(criterion_at_fixed_beta, adtype)
+        prob = OptimizationProblem(optf, current_log_lambda, nothing; lb=lb, ub=ub)
         
-        # ========== Step 3: Update β given new λ ==========
-        # Use polyalgorithm on first iteration (β hasn't been penalized yet),
-        # pure Ipopt thereafter (β is warm-started from previous penalized solution)
-        use_polyalgorithm = (iter == 1)
+        # Solve with LBFGS (gradient-based, bounded)
+        sol = solve(prob, LBFGS();
+                    maxiters=lambda_maxiter,
+                    abstol=lambda_tol,
+                    reltol=lambda_tol)
+        
+        new_log_lambda = sol.u
+        new_criterion = sol.objective
+        n_total_evals += 1  # Count outer iterations
         
         if verbose
-            println("  Fitting penalized β (λ = $(round.(lambda_new, sigdigits=3)))...")
+            lambda_val = exp(new_log_lambda[1])
+            println("  Iter $outer_iter: log(λ)=$(round(new_log_lambda[1], digits=2)), λ=$(round(lambda_val, sigdigits=3)), V=$(round(new_criterion, digits=3))")
         end
         
-        beta_new = fit_penalized_beta(model, data, lambda_new, scoped_config, beta;
+        # Check convergence in λ
+        lambda_change = maximum(abs.(new_log_lambda .- current_log_lambda))
+        
+        # Step 3: Update β at new λ
+        new_lambda = exp.(new_log_lambda)
+        lambda_vec = n_lambda == 1 ? fill(new_lambda[1], scoped_config.n_lambda) : new_lambda
+        
+        new_beta = fit_penalized_beta(model, data, lambda_vec, scoped_config, current_beta;
                                       maxiters=inner_maxiter,
-                                      use_polyalgorithm=use_polyalgorithm,
-                                      verbose=verbose)
+                                      use_polyalgorithm=false,
+                                      verbose=false)
         
-        # ========== Step 4: Check convergence ==========
-        beta_norm = norm(beta)
-        beta_change = norm(beta_new - beta) / (beta_norm + 1e-8)
+        # Check convergence in β
+        beta_change = maximum(abs.(new_beta .- current_beta))
         
-        log_lambda_new = log.(lambda_new .+ 1e-10)  # Add small value to avoid log(0)
-        log_lambda_old = log.(lambda .+ 1e-10)
-        lambda_norm = norm(log_lambda_old)
-        lambda_change = norm(log_lambda_new - log_lambda_old) / (lambda_norm + 1e-8)
+        # Update state
+        current_log_lambda = new_log_lambda
+        current_beta = new_beta
+        best_criterion = new_criterion
         
-        if verbose
-            println("  β_change = $(round(beta_change, sigdigits=4)), λ_change = $(round(lambda_change, sigdigits=4)), criterion = $(round(criterion, sigdigits=6))")
-        end
-        
-        if beta_change < beta_tol && lambda_change < lambda_tol
+        # Check convergence
+        if lambda_change < lambda_tol && beta_change < beta_tol
             converged = true
-            beta = beta_new
-            lambda = lambda_new
             if verbose
-                println("\nConverged after $iter outer iterations")
+                println("  Converged after $outer_iter iterations")
             end
             break
         end
-        
-        # Update for next iteration
-        beta = beta_new
-        lambda = lambda_new
     end
     
-    if !converged && verbose
-        println("\nReached maximum outer iterations ($max_outer_iter) without convergence")
+    # Final results
+    best_lambda = exp.(current_log_lambda)
+    best_lambda_vec = n_lambda == 1 ? fill(best_lambda[1], scoped_config.n_lambda) : best_lambda
+    
+    if verbose && !converged
+        println("  Warning: Did not converge after $max_outer_iter iterations")
+    end
+    
+    if verbose
+        println("\n  Optimal log(λ): $(round.(current_log_lambda, digits=3))")
+        println("  Optimal λ: $(round.(best_lambda, sigdigits=4))")
+        println("  Final criterion: $(round(best_criterion, digits=4))")
     end
     
     # Update penalty config with final λ
-    updated_config = _merge_scoped_lambdas(penalty_config, scoped_config, lambda, 
+    updated_config = _merge_scoped_lambdas(penalty_config, scoped_config, best_lambda_vec, 
                                            fixed_baseline_lambdas, fixed_covariate_lambdas, scope)
     
+    # Compute EDF at optimal (lambda, beta)
+    edf_vec = compute_edf(current_beta, best_lambda_vec, updated_config, model, data)
+    
     return (
-        lambda = lambda,
-        beta = beta,
-        criterion = final_criterion,
+        lambda = best_lambda_vec,
+        beta = current_beta,
+        edf = edf_vec,
+        criterion = best_criterion,
         converged = converged,
-        method_used = method_used,
+        method_used = method,
         penalty_config = updated_config,
-        n_outer_iter = outer_iter
+        n_outer_iter = n_total_evals
     )
 end
 
 """
-    compute_gcv_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
+    _select_lambda_grid_search(...)
 
-Compute Generalized Cross-Validation criterion.
-
-GCV approximates leave-one-out CV using the effective degrees of freedom:
-    V_GCV(λ) = n * deviance / (n - edf)²
-
-where edf = tr(A) is the trace of the influence matrix.
+Fallback grid search for exact CV methods that require refitting at each λ.
+Used for :loocv, :cv5, :cv10, :cv20 methods.
 """
-function compute_gcv_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
-    lambda = exp.(log_lambda)
+function _select_lambda_grid_search(model, data, scoped_config, beta_init, method,
+                                    inner_maxiter, verbose, samplepaths, n_subjects, n_params,
+                                    penalty_config, fixed_baseline_lambdas, fixed_covariate_lambdas, scope)
+    n_lambda = scoped_config.n_lambda
     
-    # Build penalized Hessian with proper type
-    H_lambda = _build_penalized_hessian(state.H_unpenalized, lambda, state.penalty_config)
-    
-    # Compute influence matrix trace: edf = tr(H_unpen * H_lambda^{-1})
-    H_lambda_sym = Symmetric(H_lambda)
-    
-    H_lambda_inv = try
-        inv(H_lambda_sym)
-    catch e
-        return T(1e10)
+    if verbose
+        println("Using grid search for exact CV method: $method")
+        println("  WARNING: This requires n refits per λ value")
     end
     
-    # edf = trace of influence matrix
-    # Convert H_unpenalized to same type for matrix multiply
-    H_unpen_T = convert(Matrix{T}, state.H_unpenalized)
-    edf = tr(H_unpen_T * H_lambda_inv)
+    # Coarse grid + refinement
+    log_lambda_grid = collect(-4.0:1.0:4.0)  # 9 points
     
-    # Compute deviance (sum of unpenalized losses)
-    ll_subj = loglik_exact(state.beta_hat, state.data; neg=false, return_ll_subj=true)
-    deviance = -sum(ll_subj)
+    best_lambda = Float64[]
+    best_beta = copy(beta_init)
+    best_criterion = Inf
     
-    n = state.n_subjects
-    
-    # GCV criterion
-    if n <= edf
-        return T(1e10)  # Invalid: more parameters than data
+    for log_lam in log_lambda_grid
+        lam = exp(log_lam)
+        lambda_vec = fill(lam, n_lambda)
+        
+        beta_lam = fit_penalized_beta(model, data, lambda_vec, scoped_config, beta_init;
+                                       maxiters=inner_maxiter, verbose=false)
+        
+        criterion = if method == :loocv
+            compute_loocv_criterion(lambda_vec, beta_lam, model, data, scoped_config;
+                                    maxiters=inner_maxiter, verbose=false)
+        elseif method == :cv5
+            compute_kfold_cv_criterion(lambda_vec, beta_lam, model, data, scoped_config, 5;
+                                       maxiters=inner_maxiter, verbose=false)
+        elseif method == :cv10
+            compute_kfold_cv_criterion(lambda_vec, beta_lam, model, data, scoped_config, 10;
+                                       maxiters=inner_maxiter, verbose=false)
+        else  # :cv20
+            compute_kfold_cv_criterion(lambda_vec, beta_lam, model, data, scoped_config, 20;
+                                       maxiters=inner_maxiter, verbose=false)
+        end
+        
+        if verbose
+            println("  log(λ)=$(round(log_lam, digits=1)), V=$(round(criterion, digits=3))")
+        end
+        
+        if criterion < best_criterion
+            best_criterion = criterion
+            best_lambda = lambda_vec
+            best_beta = copy(beta_lam)
+        end
     end
     
-    gcv = n * deviance / (n - edf)^2
-    return gcv
+    # Refinement around best
+    best_log_lam = log(best_lambda[1])
+    fine_grid = range(best_log_lam - 0.5, best_log_lam + 0.5, length=5)
+    
+    for log_lam in fine_grid
+        lam = exp(log_lam)
+        lambda_vec = fill(lam, n_lambda)
+        
+        beta_lam = fit_penalized_beta(model, data, lambda_vec, scoped_config, best_beta;
+                                       maxiters=inner_maxiter, verbose=false)
+        
+        criterion = if method == :loocv
+            compute_loocv_criterion(lambda_vec, beta_lam, model, data, scoped_config;
+                                    maxiters=inner_maxiter, verbose=false)
+        elseif method == :cv5
+            compute_kfold_cv_criterion(lambda_vec, beta_lam, model, data, scoped_config, 5;
+                                       maxiters=inner_maxiter, verbose=false)
+        elseif method == :cv10
+            compute_kfold_cv_criterion(lambda_vec, beta_lam, model, data, scoped_config, 10;
+                                       maxiters=inner_maxiter, verbose=false)
+        else
+            compute_kfold_cv_criterion(lambda_vec, beta_lam, model, data, scoped_config, 20;
+                                       maxiters=inner_maxiter, verbose=false)
+        end
+        
+        if criterion < best_criterion
+            best_criterion = criterion
+            best_lambda = lambda_vec
+            best_beta = copy(beta_lam)
+        end
+    end
+    
+    # Update penalty config
+    updated_config = _merge_scoped_lambdas(penalty_config, scoped_config, best_lambda, 
+                                           fixed_baseline_lambdas, fixed_covariate_lambdas, scope)
+    
+    edf_vec = compute_edf(best_beta, best_lambda, updated_config, model, data)
+    
+    return (
+        lambda = best_lambda,
+        beta = best_beta,
+        edf = edf_vec,
+        criterion = best_criterion,
+        converged = true,
+        method_used = method,
+        penalty_config = updated_config,
+        n_outer_iter = length(log_lambda_grid) + 5
+    )
 end
+
+# NOTE: _select_smoothing_parameters_legacy() function was deleted on 2025-01-05 as part of dead code cleanup.
+# The legacy alternating optimization approach failed because at any fixed β, V(λ) is 
+# monotonically decreasing with λ, causing the optimizer to always select λ → ∞.
+# The current approach uses grid search with profile optimization: V(λ, β(λ)) where β is re-fitted at each λ.
 
 """
     compute_perf_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
@@ -1633,9 +1698,9 @@ and suppresses them, providing stable smoothing parameter selection.
 function compute_perf_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
     lambda = exp.(log_lambda)
     
-    # Build penalized Hessian: H_λ = H + S_λ
+    # Build penalized Hessian (penalty is quadratic: λ βᵀSβ)
     H = state.H_unpenalized
-    H_lambda = _build_penalized_hessian(H, lambda, state.penalty_config)
+    H_lambda = _build_penalized_hessian(H, lambda, state.penalty_config; beta=state.beta_hat)
     
     n = state.n_subjects
     p = state.n_params
@@ -1740,9 +1805,9 @@ This function returns the NEGATIVE of ℓ_LA so that minimization corresponds to
 function compute_efs_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
     lambda = exp.(log_lambda)
     
-    # Build penalized Hessian: H_λ = H + S_λ
+    # Build penalized Hessian (penalty is quadratic: λ βᵀSβ)
     H = state.H_unpenalized
-    H_lambda = _build_penalized_hessian(H, lambda, state.penalty_config)
+    H_lambda = _build_penalized_hessian(H, lambda, state.penalty_config; beta=state.beta_hat)
     
     p = state.n_params
     beta = state.beta_hat
@@ -1799,106 +1864,9 @@ function compute_efs_criterion(log_lambda::AbstractVector{T}, state::SmoothingSe
     return -reml
 end
 
-"""
-    compute_efs_update(lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
-
-Compute one EFS (Extended Fellner-Schall) update for smoothing parameters.
-
-The EFS update formula for each λₖ is:
-    λₖ^{new} = λₖ × [tr(S_λ⁻¹ ∂S_λ/∂λₖ) - tr((H + S_λ)⁻¹ ∂S_λ/∂λₖ)] / [θ̂ᵀ (∂S_λ/∂λₖ) θ̂]
-
-For our parameterization where S_λ = Σⱼ λⱼ Sⱼ, we have ∂S_λ/∂λₖ = Sₖ.
-
-# Arguments
-- `lambda`: Current smoothing parameters (natural scale)
-- `state`: SmoothingSelectionState with cached matrices
-
-# Returns
-- `Vector{Float64}`: Updated smoothing parameters
-
-# References
-- Wood, S.N. & Fasiolo (2017), Eq. 6
-"""
-function compute_efs_update(lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
-    p = state.n_params
-    n_lambda = length(lambda)
-    beta = state.beta_hat
-    H = state.H_unpenalized
-    
-    # Build total penalty matrix and penalized Hessian
-    S_lambda = zeros(T, p, p)
-    H_lambda = convert(Matrix{T}, copy(H))
-    
-    lambda_idx = 1
-    for term in state.penalty_config.terms
-        idx = term.hazard_indices
-        for i in idx, j in idx
-            S_lambda[i, j] += lambda[lambda_idx] * term.S[i - first(idx) + 1, j - first(idx) + 1]
-            H_lambda[i, j] += lambda[lambda_idx] * term.S[i - first(idx) + 1, j - first(idx) + 1]
-        end
-        lambda_idx += 1
-    end
-    
-    # Compute (H + S_λ)⁻¹
-    H_lambda_inv = try
-        inv(Symmetric(H_lambda))
-    catch e
-        # If inversion fails, return unchanged lambda
-        return collect(lambda)
-    end
-    
-    # Compute pseudo-inverse of S_λ for trace computation
-    # For rank-deficient S, we use the Moore-Penrose pseudo-inverse
-    eig_S = eigen(Symmetric(S_lambda))
-    S_lambda_pinv = zeros(T, p, p)
-    for i in 1:p
-        if abs(eig_S.values[i]) > 1e-10
-            v = eig_S.vectors[:, i]
-            S_lambda_pinv .+= (1.0 / eig_S.values[i]) .* (v * v')
-        end
-    end
-    
-    # Compute update for each λₖ
-    lambda_new = similar(lambda)
-    beta_T = convert(Vector{T}, beta)
-    
-    lambda_idx = 1
-    for (term_idx, term) in enumerate(state.penalty_config.terms)
-        idx = term.hazard_indices
-        K = length(idx)
-        
-        # Build ∂S_λ/∂λₖ = Sₖ (the k-th penalty matrix, embedded in full space)
-        dS_k = zeros(T, p, p)
-        for i in idx, j in idx
-            dS_k[i, j] = term.S[i - first(idx) + 1, j - first(idx) + 1]
-        end
-        
-        # Numerator: tr(S_λ⁻¹ Sₖ) - tr((H + S_λ)⁻¹ Sₖ)
-        # Note: tr(A⁻¹ B) = tr(A \ B)
-        trace_S_inv_Sk = tr(S_lambda_pinv * dS_k)
-        trace_H_inv_Sk = tr(H_lambda_inv * dS_k)
-        numerator = trace_S_inv_Sk - trace_H_inv_Sk
-        
-        # Denominator: θ̂ᵀ Sₖ θ̂
-        beta_k = beta_T[idx]
-        denominator = dot(beta_k, term.S * beta_k)
-        
-        # Update: λₖ^{new} = λₖ × numerator / denominator
-        if abs(denominator) < 1e-10
-            # Avoid division by zero - keep current lambda
-            lambda_new[lambda_idx] = lambda[lambda_idx]
-        else
-            ratio = numerator / denominator
-            # Bound the update to avoid extreme changes
-            ratio = clamp(ratio, 0.1, 10.0)
-            lambda_new[lambda_idx] = lambda[lambda_idx] * ratio
-        end
-        
-        lambda_idx += 1
-    end
-    
-    return lambda_new
-end
+# NOTE: compute_efs_update() function was deleted on 2025-01-05 as part of dead code cleanup.
+# It was designed for iterative EFS updates within alternating optimization, but was never called.
+# The EFS criterion (compute_efs_criterion) is still available for grid search λ selection.
 
 """
     _update_penalty_lambda(config::PenaltyConfig, lambda::Vector{Float64}) -> PenaltyConfig
@@ -1991,4 +1959,103 @@ function _update_penalty_lambda(config::PenaltyConfig, lambda::Vector{Float64})
         config.shared_smooth_groups,
         config.n_lambda
     )
+end
+
+"""
+    compute_edf(beta::Vector{Float64}, lambda::Vector{Float64}, 
+                penalty_config::PenaltyConfig, model::MultistateProcess,
+                data::ExactData) -> Vector{Float64}
+
+Compute effective degrees of freedom (EDF) for each spline penalty term.
+
+EDF measures the effective number of parameters used by each smooth term,
+accounting for the shrinkage imposed by the penalty. For an unpenalized
+term, EDF equals the number of basis functions; as λ → ∞, EDF → 0.
+
+The EDF for term j is computed as:
+    edf_j = tr(H_j * H_λ^{-1})
+
+where:
+- A = H_unpen × H_λ⁻¹ is the influence (hat) matrix
+- H_λ is the full penalized Hessian
+
+The per-term EDF is the sum of diagonal elements of A for that term's parameter indices.
+The total model EDF is the sum of all per-term EDFs (= tr(A)).
+
+# Arguments
+- `beta`: Current coefficient estimate
+- `lambda`: Current smoothing parameters
+- `penalty_config`: Penalty configuration
+- `model`: MultistateProcess model  
+- `data`: ExactData container
+
+# Returns
+NamedTuple with:
+- `total`: Total model EDF (scalar)
+- `per_term`: Vector of EDF values, one per penalty term
+
+# Limitations
+- **Exact data only**: This function requires exact observation times. For MCEM-fitted
+  models with panel data, the observed information matrix has a different structure
+  that accounts for the Monte Carlo variance. EDF computation for MCEM is not yet
+  implemented.
+- **Subject weights**: Subject weights from `model.SubjectWeights` are included in the
+  Hessian computation via `compute_subject_hessians_fast`.
+
+# References
+- Wood, S.N. (2017). Generalized Additive Models: An Introduction with R. 2nd ed.
+  Section 6.1.2 discusses EDF computation for penalized models.
+"""
+function compute_edf(beta::Vector{Float64}, lambda::Vector{Float64},
+                     penalty_config::PenaltyConfig, model::MultistateProcess,
+                     data::ExactData)
+    # Compute subject-level Hessians (includes subject weights)
+    samplepaths = extract_paths(model)
+    subject_hessians_ll = compute_subject_hessians_fast(beta, model, samplepaths)
+    
+    # Aggregate to full Hessian (negative because we want Fisher information)
+    H_unpenalized = -sum(subject_hessians_ll)
+    
+    # Build penalized Hessian (penalty is quadratic: λ βᵀSβ)
+    H_lambda = _build_penalized_hessian(H_unpenalized, lambda, penalty_config; beta=beta)
+    
+    # Invert penalized Hessian
+    H_lambda_inv = try
+        inv(Symmetric(H_lambda))
+    catch e
+        @warn "Failed to invert penalized Hessian for EDF computation: $e"
+        n_terms = length(penalty_config.terms) + length(penalty_config.smooth_covariate_terms)
+        return (total = NaN, per_term = fill(NaN, n_terms))
+    end
+    
+    # Compute influence matrix A = H_unpen * H_lambda_inv
+    # EDF for term j = sum of diagonal elements of A for indices in term j
+    # Total EDF = tr(A) = sum of all diagonal elements
+    A = H_unpenalized * H_lambda_inv
+    
+    # Compute per-term EDF
+    edf_vec = Float64[]
+    
+    # Process baseline hazard terms
+    for term in penalty_config.terms
+        idx = term.hazard_indices
+        # Per-term EDF = sum of A[i,i] for i in this term's indices
+        edf_j = sum(A[i, i] for i in idx)
+        push!(edf_vec, edf_j)
+    end
+    
+    # Process smooth covariate terms
+    for term in penalty_config.smooth_covariate_terms
+        idx = term.param_indices
+        # Per-term EDF = sum of A[i,i] for i in this term's indices
+        edf_j = sum(A[i, i] for i in idx)
+        push!(edf_vec, edf_j)
+    end
+    
+    # Total EDF = tr(A) = sum of all per-term EDFs
+    # (Note: this equals sum(edf_vec) only if all parameters belong to some term,
+    #  which should be true for properly constructed penalty configs)
+    total_edf = tr(A)
+    
+    return (total = total_edf, per_term = edf_vec)
 end
