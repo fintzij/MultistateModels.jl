@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Implementation of s(x) and te(x, y) for smooth covariate effects.
-# Extends StatsModels.jl formula DSL.
+# Extends StatsModels.jl formula DSL following mgcv conventions.
 #
 # =============================================================================
 
@@ -16,24 +16,81 @@ using LinearAlgebra
 # -----------------------------------------------------------------------------
 
 """
-    s(x; k=10, bs="ps", m=2)
+    s(x; k=10, m=2, order=4)
+    s(x, k)
+    s(x, k, m)
+    s(x, k, m, order)
 
-Specify a smooth term in a hazard formula.
+Specify a smooth term in a hazard formula, following mgcv conventions.
 
-# Arguments
-- `x`: Covariate name
+# Arguments (positional in formula)
+- `x`: Covariate name (required)
 - `k`: Number of basis functions (default 10)
-- `bs`: Basis type (default "ps" for P-splines/B-splines with derivative penalty)
-- `m`: Penalty order (default 2 for curvature)
+- `m`: Penalty order for derivative penalty (default 2 = curvature penalty)
+- `order`: B-spline order (default 4 = cubic). Order 3 = quadratic, order 2 = linear.
+
+# Examples
+```julia
+# Cubic spline with 10 basis functions and curvature penalty (defaults)
+Hazard(@formula(0 ~ s(age)), :sp, 1, 2)
+
+# 15 basis functions
+Hazard(@formula(0 ~ s(age, 15)), :sp, 1, 2)
+
+# 15 basis functions with 3rd derivative penalty
+Hazard(@formula(0 ~ s(age, 15, 3)), :sp, 1, 2)
+
+# Quadratic splines (order 3) with 15 basis functions
+Hazard(@formula(0 ~ s(age, 15, 2, 3)), :sp, 1, 2)
+```
+
+# Notes
+- `order=4` (cubic) is most common and recommended for smooth curves
+- `order=3` (quadratic) useful when cubic is overparameterized
+- `order=2` (linear) for piecewise linear splines
+- The penalty matrix uses m-th derivative differences
+- Follows R's mgcv package conventions where possible
 """
-s(x; k=10, bs="ps", m=2) = x # Dummy for syntax
+s(x; k=10, m=2, order=4) = x # Dummy for syntax
 
 """
-    te(x, y; k=5, bs="ps", m=2)
+    te(x, y; k=5, m=2, order=4)
+    te(x, y, k)
+    te(x, y, k, m)
+    te(x, y, kx, ky, m)
+    te(x, y, kx, ky, m, order)
 
 Specify a tensor product smooth term in a hazard formula.
+
+The basis is the row-wise Kronecker product of two B-spline bases, producing
+`kx * ky` basis functions. The penalty uses isotropic sum: S = Sx ⊗ Iy + Ix ⊗ Sy.
+
+# Arguments (positional in formula)
+- `x`, `y`: Covariate names (required)
+- `k` or `kx`, `ky`: Number of basis functions per dimension (default 5 each)
+- `m`: Penalty order (default 2 = curvature penalty)
+- `order`: B-spline order (default 4 = cubic)
+
+# Examples
+```julia
+# Default tensor product smooth
+Hazard(@formula(0 ~ te(age, bmi)), :sp, 1, 2)
+
+# 8 basis functions per dimension
+Hazard(@formula(0 ~ te(age, bmi, 8)), :sp, 1, 2)
+
+# Different k per dimension: 10 for age, 6 for bmi
+Hazard(@formula(0 ~ te(age, bmi, 10, 6, 2)), :sp, 1, 2)
+
+# Quadratic splines with custom k
+Hazard(@formula(0 ~ te(age, bmi, 8, 8, 2, 3)), :sp, 1, 2)
+```
+
+# Notes
+- Total parameters = kx × ky, so be mindful of dimensionality
+- For two continuous covariates, consider starting with k=5 per dimension (25 params)
 """
-te(x, y; k=5, bs="ps", m=2) = (x, y) # Dummy for syntax
+te(x, y; k=5, m=2, order=4) = (x, y) # Dummy for syntax
 
 # -----------------------------------------------------------------------------
 # Term Types
@@ -80,21 +137,36 @@ function StatsModels.apply_schema(t::FunctionTerm{typeof(s)}, sch::StatsModels.S
     var_term = apply_schema(t.args[1], sch, Mod)
     isa(var_term, ContinuousTerm) || throw(ArgumentError("s() only works with continuous terms, got $(typeof(var_term))"))
     
-    # Extract options from positional args
-    k = 10  # number of basis functions
-    m = 2   # penalty order (derivative)
-    spline_order = 4  # cubic splines
+    # Extract options from positional args: s(x, k, m, order)
+    # Defaults follow mgcv conventions
+    k = 10            # number of basis functions
+    m = 2             # penalty order (2 = curvature penalty)
+    spline_order = 4  # B-spline order (4 = cubic, 3 = quadratic, 2 = linear)
     
+    # Parse k (2nd arg)
     if length(t.args) > 1
         if t.args[2] isa ConstantTerm
-            k = t.args[2].n
+            k = Int(t.args[2].n)
         end
     end
     
+    # Parse m (3rd arg) - penalty order
     if length(t.args) > 2
         if t.args[3] isa ConstantTerm
-            m = t.args[3].n
+            m = Int(t.args[3].n)
         end
+    end
+    
+    # Parse order (4th arg) - B-spline order
+    if length(t.args) > 3
+        if t.args[4] isa ConstantTerm
+            spline_order = Int(t.args[4].n)
+        end
+    end
+    
+    # Validate spline order
+    if spline_order < 1 || spline_order > 6
+        throw(ArgumentError("spline order must be between 1 and 6, got $spline_order"))
     end
     
     # Data range
@@ -102,10 +174,11 @@ function StatsModels.apply_schema(t::FunctionTerm{typeof(s)}, sch::StatsModels.S
     max_val = var_term.max
     
     # BSplineKit augments boundary knots with (order-1) repetitions
-    # To get k basis functions with order m: n_input_knots = k + 2 - order
+    # To get k basis functions with given order: n_input_knots = k + 2 - order
     n_input_knots = k + 2 - spline_order
     if n_input_knots < 2
-        throw(ArgumentError("k must be at least $(spline_order) for cubic splines, got $k"))
+        throw(ArgumentError("k=$k is too small for spline order $spline_order. " *
+                           "Need k ≥ $(spline_order) (minimum $spline_order basis functions)"))
     end
     
     # Create evenly spaced input knots
@@ -126,9 +199,12 @@ end
 """
     apply_schema for te(x, y, ...) tensor product smooth
 
-Supports two syntaxes:
-- `te(x, y, k, m)`: Same k for both dimensions
-- `te(x, y, kx, ky, m)`: Different k per dimension
+Supports multiple syntaxes:
+- `te(x, y)`: defaults kx=ky=5, m=2, order=4
+- `te(x, y, k)`: same k for both dimensions
+- `te(x, y, k, m)`: same k for both, custom penalty order
+- `te(x, y, kx, ky, m)`: different k per dimension
+- `te(x, y, kx, ky, m, order)`: full control including spline order
 """
 function StatsModels.apply_schema(t::FunctionTerm{typeof(te)}, sch::StatsModels.Schema, Mod::Type{<:Any})
     # Must have at least 2 variable arguments
@@ -142,46 +218,68 @@ function StatsModels.apply_schema(t::FunctionTerm{typeof(te)}, sch::StatsModels.
     isa(var_term_y, ContinuousTerm) || throw(ArgumentError("te() second argument must be continuous, got $(typeof(var_term_y))"))
     
     # Extract options from positional args
-    # Syntax: te(x, y, k, m) or te(x, y, kx, ky, m)
-    spline_order = 4  # cubic splines
-    kx = 5  # default number of basis functions
+    # Syntax: te(x, y), te(x, y, k), te(x, y, k, m), te(x, y, kx, ky, m), te(x, y, kx, ky, m, order)
+    spline_order = 4  # default: cubic splines
+    kx = 5            # default number of basis functions
     ky = 5
-    m = 2   # penalty order
+    m = 2             # default: curvature penalty
     
     n_extra_args = length(t.args) - 2
     
     if n_extra_args == 0
-        # Use defaults: kx=ky=5, m=2
+        # te(x, y) - Use defaults: kx=ky=5, m=2, order=4
     elseif n_extra_args == 1
-        # te(x, y, k) - same k for both, m=2
+        # te(x, y, k) - same k for both, m=2, order=4
         if t.args[3] isa ConstantTerm
-            kx = ky = t.args[3].n
+            kx = ky = Int(t.args[3].n)
         end
     elseif n_extra_args == 2
-        # te(x, y, k, m) - same k for both
+        # te(x, y, k, m) - same k for both, custom m, order=4
         if t.args[3] isa ConstantTerm
-            kx = ky = t.args[3].n
+            kx = ky = Int(t.args[3].n)
         end
         if t.args[4] isa ConstantTerm
-            m = t.args[4].n
+            m = Int(t.args[4].n)
         end
-    elseif n_extra_args >= 3
-        # te(x, y, kx, ky, m) - different k per dimension
+    elseif n_extra_args == 3
+        # te(x, y, kx, ky, m) - different k per dimension, order=4
         if t.args[3] isa ConstantTerm
-            kx = t.args[3].n
+            kx = Int(t.args[3].n)
         end
         if t.args[4] isa ConstantTerm
-            ky = t.args[4].n
+            ky = Int(t.args[4].n)
         end
         if t.args[5] isa ConstantTerm
-            m = t.args[5].n
+            m = Int(t.args[5].n)
         end
+    elseif n_extra_args >= 4
+        # te(x, y, kx, ky, m, order) - full control
+        if t.args[3] isa ConstantTerm
+            kx = Int(t.args[3].n)
+        end
+        if t.args[4] isa ConstantTerm
+            ky = Int(t.args[4].n)
+        end
+        if t.args[5] isa ConstantTerm
+            m = Int(t.args[5].n)
+        end
+        if t.args[6] isa ConstantTerm
+            spline_order = Int(t.args[6].n)
+        end
+    end
+    
+    # Validate spline order
+    if spline_order < 1 || spline_order > 6
+        throw(ArgumentError("spline order must be between 1 and 6, got $spline_order"))
     end
     
     # Build basis for x
     min_x, max_x = var_term_x.min, var_term_x.max
     n_input_knots_x = kx + 2 - spline_order
-    n_input_knots_x >= 2 || throw(ArgumentError("kx must be at least $spline_order for cubic splines, got $kx"))
+    if n_input_knots_x < 2
+        throw(ArgumentError("kx=$kx is too small for spline order $spline_order. " *
+                           "Need kx ≥ $spline_order"))
+    end
     knots_x = collect(range(min_x, max_x, length=n_input_knots_x))
     basis_x = BSplineBasis(BSplineOrder(spline_order), knots_x)
     @assert length(basis_x) == kx "Expected $kx basis functions for x, got $(length(basis_x))"
@@ -189,7 +287,10 @@ function StatsModels.apply_schema(t::FunctionTerm{typeof(te)}, sch::StatsModels.
     # Build basis for y
     min_y, max_y = var_term_y.min, var_term_y.max
     n_input_knots_y = ky + 2 - spline_order
-    n_input_knots_y >= 2 || throw(ArgumentError("ky must be at least $spline_order for cubic splines, got $ky"))
+    if n_input_knots_y < 2
+        throw(ArgumentError("ky=$ky is too small for spline order $spline_order. " *
+                           "Need ky ≥ $spline_order"))
+    end
     knots_y = collect(range(min_y, max_y, length=n_input_knots_y))
     basis_y = BSplineBasis(BSplineOrder(spline_order), knots_y)
     @assert length(basis_y) == ky "Expected $ky basis functions for y, got $(length(basis_y))"

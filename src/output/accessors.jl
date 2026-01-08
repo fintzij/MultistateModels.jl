@@ -525,10 +525,10 @@ Return the parameter names.
 # Example
 ```julia
 # Per-hazard grouping (default)
-get_parnames(model)  # [[:log_λ_h12], [:log_λ_h21, :log_shape_h21]]
+get_parnames(model)  # [[:h12_Rate], [:h21_shape, :h21_scale]]
 
 # Flattened for constraint specification
-get_parnames(model; flatten=true)  # [:log_λ_h12, :log_λ_h21, :log_shape_h21]
+get_parnames(model; flatten=true)  # [:h12_Rate, :h21_shape, :h21_scale]
 ```
 """
 function get_parnames(model::MultistateProcess; flatten::Bool = false)

@@ -183,7 +183,9 @@ function fit_penalized_beta(model::MultistateProcess, data::ExactData,
     prob = OptimizationProblem(optf, beta_init, nothing)
     
     # Merge default options with user overrides
-    merged_options = merge(DEFAULT_IPOPT_OPTIONS, (maxiters=maxiters, tol=1e-6), ipopt_options)
+    # Convert kwargs to NamedTuple to enable merging
+    ipopt_options_nt = (;ipopt_options...)
+    merged_options = merge(DEFAULT_IPOPT_OPTIONS, (maxiters=maxiters, tol=1e-6), ipopt_options_nt)
     
     if use_polyalgorithm
         # Phase 1: LBFGS warm-start with loose tolerance

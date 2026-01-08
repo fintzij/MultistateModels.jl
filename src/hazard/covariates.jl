@@ -11,11 +11,11 @@
     extract_covar_names(parnames::Vector{Symbol})
 
 Extract covariate names from parameter names by removing hazard prefix and 
-excluding baseline parameters (Intercept, shape, scale, and spline basis sp1, sp2, ...).
+excluding baseline parameters (Rate, shape, scale, and spline basis sp1, sp2, ...).
 
 # Example
 ```julia
-parnames = [:h12_Intercept, :h12_age, :h12_trt]
+parnames = [:h12_Rate, :h12_age, :h12_trt]
 extract_covar_names(parnames)  # Returns [:age, :trt]
 
 parnames_wei = [:h12_shape, :h12_scale, :h12_age]
@@ -30,13 +30,19 @@ function extract_covar_names(parnames::Vector{Symbol})
     for pname in parnames
         pname_str = String(pname)
         # Skip baseline parameters (not covariates)
-        # Exponential: "Intercept", Weibull/Gompertz: "shape" and "scale"
+        # Exponential: "Rate" (or legacy "Intercept"), Weibull/Gompertz: "shape" and "scale"
         # Spline: "sp1", "sp2", etc. (spline basis coefficients)
-        if occursin("Intercept", pname_str) || occursin("shape", pname_str) || occursin("scale", pname_str)
+        if occursin("Rate", pname_str) || occursin("Intercept", pname_str) || occursin("shape", pname_str) || occursin("scale", pname_str)
             continue
         end
-        # Remove hazard prefix (e.g., "h12_age" -> "age")
-        covar_name = replace(pname_str, r"^h\d+_" => "")
+        # Remove hazard prefix. Patterns handled:
+        #   Standard:             h12_age        -> age
+        #   Phase-type exit:      h12_a_age      -> age  
+        #   Phase-type progression: h1_ab_Rate   -> (skipped by Rate check above)
+        # Regex: h followed by digits, then optionally _[a-z]{1,3} for phase-type suffix, then final _
+        # Phase-type suffixes are limited to 1-3 letters (a, ab, abc) to avoid matching
+        # covariate names that start with underscores (e.g., blood_pressure)
+        covar_name = replace(pname_str, r"^h\d+(?:_[a-z]{1,3})?_" => "")
         # Skip spline basis parameters (sp1, sp2, ...)
         if occursin(r"^sp\d+$", covar_name)
             continue
@@ -48,6 +54,7 @@ end
 
 """
     _lookup_covariate_value(subjdat, cname)
+
 
 Look up a covariate value from subject data, handling interaction terms.
 """
@@ -77,7 +84,7 @@ Extract covariates from a DataFrame row as a NamedTuple, using parameter names t
 
 # Arguments
 - `subjdat`: A DataFrameRow containing covariate values
-- `parnames`: Vector of parameter names (e.g., [:h12_Intercept, :h12_age, :h12_trt])
+- `parnames`: Vector of parameter names (e.g., [:h12_Rate, :h12_age, :h12_trt])
 
 # Returns
 - Empty NamedTuple() if no covariates
@@ -86,7 +93,7 @@ Extract covariates from a DataFrame row as a NamedTuple, using parameter names t
 # Example
 ```julia
 row = DataFrame(id=1, tstart=0.0, tstop=10.0, statefrom=1, stateto=2, obstype=1, age=50, trt=1)[1, :]
-parnames = [:h12_Intercept, :h12_age, :h12_trt]
+parnames = [:h12_Rate, :h12_age, :h12_trt]
 extract_covariates(row, parnames)  # Returns (age=50, trt=1)
 ```
 """
@@ -225,11 +232,13 @@ function _build_linear_pred_expr_named(parnames::Vector{Symbol})
         pname_str = String(pname)
         # Skip baseline parameters
         if occursin("Intercept", pname_str) || occursin("shape", pname_str) || 
-           occursin("scale", pname_str) || occursin(r"^h\d+_sp\d+$", pname_str)
+           occursin("scale", pname_str) || occursin(r"^h\d+(?:_[a-z]{1,3})?_sp\d+$", pname_str)
             continue
         end
         # Get covariate name (without prefix)
-        covar_name = Symbol(replace(pname_str, r"^h\d+_" => ""))
+        # Handles: h12_age -> age, h12_a_age -> age (phase-type)
+        # Phase-type suffix limited to 1-3 letters to avoid matching covariate underscores
+        covar_name = Symbol(replace(pname_str, r"^h\d+(?:_[a-z]{1,3})?_" => ""))
         covar_to_par[covar_name] = pname
     end
     

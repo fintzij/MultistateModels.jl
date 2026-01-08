@@ -143,7 +143,7 @@ function _build_progression_hazard(observed_state::Int, phase_index::Int, n_phas
     from_letter = _phase_index_to_letter(phase_index)
     to_letter = _phase_index_to_letter(phase_index + 1)
     hazname = Symbol("h$(observed_state)_$(from_letter)$(to_letter)")
-    parname = Symbol("log_λ_$(hazname)")
+    parname = Symbol("$(hazname)_Rate")
     
     # Simple exponential hazard function (no covariates)
     # pars is a NamedTuple with baseline on NATURAL scale (no exp needed)
@@ -172,7 +172,8 @@ function _build_progression_hazard(observed_state::Int, phase_index::Int, n_phas
         SmoothTermInfo[]   # smooth_info (progression hazards have no covariates)
     )
     
-    return haz, [0.0]  # Initial rate = exp(0) = 1
+    # v0.3.0+: Parameters on natural scale (rate = 1.0, not log(rate) = 0)
+    return haz, [1.0]
 end
 
 """
@@ -192,7 +193,7 @@ function _build_exit_hazard(pt_spec::PhaseTypeHazard,
     # Parameter name using letter convention: h12_a, h12_b, etc.
     phase_letter = _phase_index_to_letter(phase_index)
     hazname = Symbol("h$(observed_from)$(observed_to)_$(phase_letter)")
-    baseline_parname = Symbol("log_λ_$(hazname)")
+    baseline_parname = Symbol("$(hazname)_Rate")
     
     # Get covariate info from original specification
     schema = StatsModels.schema(pt_spec.hazard, data)
@@ -235,7 +236,11 @@ function _build_exit_hazard(pt_spec::PhaseTypeHazard,
         SmoothTermInfo[]   # smooth_info (exit hazards don't yet support smooth terms)
     )
     
-    return haz, zeros(Float64, npar_total)
+    # v0.3.0+: Parameters on natural scale
+    # Rate = 1.0 (not log-rate = 0.0), covariate coefficients = 0.0
+    init_pars = zeros(Float64, npar_total)
+    init_pars[1] = 1.0  # baseline rate
+    return haz, init_pars
 end
 
 """

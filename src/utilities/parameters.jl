@@ -27,7 +27,7 @@ NamedTuple of nested parameters with structure:
 # Example
 ```julia
 flat_params = [0.5, 0.3]  # rate and covariate coefficient
-# Returns: (h12 = (baseline = (h12_Intercept = 0.5,), covariates = (h12_x = 0.3,)),)
+# Returns: (h12 = (baseline = (h12_Rate = 0.5,), covariates = (h12_x = 0.3,)),)
 ```
 """
 function unflatten_parameters(flat_params::AbstractVector{T}, model::MultistateProcess) where {T<:Real}
@@ -133,11 +133,29 @@ Parameters are stored on log scale for baseline, as-is for covariates.
 
 # Returns
 - NamedTuple with flat, nested, natural, and unflatten fields
+
+# Note
+For phase-type models with shared hazards, `model.hazkeys` maps hazard names to 
+*parameter* indices, not hazard indices. This function builds a reverse mapping
+to find the correct hazard for each parameter index (which has the correct parnames).
 """
 function rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::MultistateProcess)
+    # Build reverse mapping: parameter index -> hazard index
+    # For phase-type models, multiple hazards may share the same parameter index,
+    # but they all have the same parnames, so we just need one representative hazard.
+    params_idx_to_hazard_idx = Dict{Int, Int}()
+    for (haz_idx, h) in enumerate(model.hazards)
+        params_idx = model.hazkeys[h.hazname]
+        if !haskey(params_idx_to_hazard_idx, params_idx)
+            params_idx_to_hazard_idx[params_idx] = haz_idx
+        end
+    end
+    
     params_nested_pairs = [
-        hazname => build_hazard_params(new_param_vectors[idx], model.hazards[idx].parnames, model.hazards[idx].npar_baseline, model.hazards[idx].npar_total)
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+        let haz_idx = params_idx_to_hazard_idx[params_idx]
+            hazname => build_hazard_params(new_param_vectors[params_idx], model.hazards[haz_idx].parnames, model.hazards[haz_idx].npar_baseline, model.hazards[haz_idx].npar_total)
+        end
+        for (hazname, params_idx) in sort(collect(model.hazkeys), by = x -> x[2])
     ]
     
     params_nested = NamedTuple(params_nested_pairs)
@@ -148,8 +166,10 @@ function rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::M
     
     # Get natural scale parameters as flattened vectors per hazard (family-aware transformation)
     params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname], model.hazards[idx].family)
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+        let haz_idx = params_idx_to_hazard_idx[params_idx]
+            hazname => extract_natural_vector(params_nested[hazname], model.hazards[haz_idx].family)
+        end
+        for (hazname, params_idx) in sort(collect(model.hazkeys), by = x -> x[2])
     ]
     params_natural = NamedTuple(params_natural_pairs)
     
@@ -404,8 +424,8 @@ params = build_hazard_params([1.5, 0.2, 0.3, 0.1],
 #           covariates = (h12_age = 0.3, h12_sex = 0.1))
 
 # Exponential without covariates  
-params = build_hazard_params([0.5], [:h12_intercept], 1, 1)
-# Returns: (baseline = (h12_intercept = 0.5),)
+params = build_hazard_params([0.5], [:h12_Rate], 1, 1)
+# Returns: (baseline = (h12_Rate = 0.5),)
 ```
 
 # Note

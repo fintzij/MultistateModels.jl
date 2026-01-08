@@ -43,7 +43,7 @@ This is the importance-weighted expected complete-data log-likelihood:
 Q(θ|θ') = Σᵢ SubjectWeights[i] × Σⱼ ImportanceWeights[i][j] × logliks[i][j]
 ```
 
-See also: [`mcem_ase`](@ref), [`mcem_lml`](@ref)
+See also: [`mcem_ase`](@ref)
 """
 function mcem_mll(logliks, ImportanceWeights, SubjectWeights)
 
@@ -54,38 +54,6 @@ function mcem_mll(logliks, ImportanceWeights, SubjectWeights)
     end
 
     return obj
-end
-
-"""
-    mcem_lml(logliks, ImportanceWeights, SubjectWeights)
-
-Compute the log marginal likelihood for MCEM.
-"""
-function mcem_lml(logliks, ImportanceWeights, SubjectWeights)
-
-    obj = 0.0
-    
-    for i in eachindex(logliks)
-        obj += log(dot(exp.(logliks[i]), ImportanceWeights[i])) * SubjectWeights[i]
-    end
-
-    return obj
-end
-
-"""
-    mcem_lml_subj(logliks, ImportanceWeights)
-
-Compute the log marginal likelihood of each subject for MCEM.
-"""
-function mcem_lml_subj(logliks, ImportanceWeights)
-
-    subj_lml = zeros(length(logliks))
-    
-    for i in eachindex(logliks)
-        subj_lml[i] = log(sum(exp.(logliks[i]) .* ImportanceWeights[i])) 
-    end
-
-    return subj_lml
 end
 
 """

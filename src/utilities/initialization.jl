@@ -149,67 +149,119 @@ function _interpolate_covariates!(exact_data::DataFrame, original_data::DataFram
 end
 
 """
-    _select_one_path_per_subject(samplepaths, weights) -> Vector{SamplePath}
+    _interpolate_covariates_from_paths!(exact_data, original_data, samplepaths)
 
-Select one path per subject from importance-weighted samples.
+Interpolate covariates from original panel data into exact transition data when
+using pseudo-subject IDs from multiple paths per subject.
+
+Maps pseudo-subject IDs back to original subject IDs using the structure of
+samplepaths, then performs piecewise constant covariate interpolation.
 
 # Arguments
-- `samplepaths::Vector{Vector{SamplePath}}`: Paths for each subject (outer) and sample (inner)
-- `weights::Vector{Vector{Float64}}`: Normalized importance weights per subject
+- `exact_data::DataFrame`: Exact transition data with pseudo-subject IDs (modified in place)
+- `original_data::DataFrame`: Original panel data with covariates
+- `samplepaths::Vector{Vector{SamplePath}}`: Original paths structure (subjects × paths)
+  Used to map pseudo-IDs back to original subject IDs.
 
 # Returns
-- `Vector{SamplePath}`: One selected path per subject
+- The modified `exact_data` DataFrame with covariate columns added
 """
-function _select_one_path_per_subject(samplepaths::Vector{Vector{SamplePath}}, 
-                                       weights::Vector{Vector{Float64}})
-    selected = Vector{SamplePath}(undef, length(samplepaths))
-    for i in eachindex(samplepaths)
-        # Sanitize weights: handle NaN/Inf by replacing with uniform weights
-        w = weights[i]
-        if any(isnan, w) || any(isinf, w) || all(w .== 0)
-            # Fallback to uniform sampling if weights are invalid
-            idx = rand(1:length(samplepaths[i]))
-        else
-            # Sample one path proportional to normalized weights
-            idx = sample(1:length(samplepaths[i]), Weights(w))
-        end
-        selected[i] = samplepaths[i][idx]
+function _interpolate_covariates_from_paths!(exact_data::DataFrame, 
+                                              original_data::DataFrame,
+                                              samplepaths::Vector{Vector{SamplePath}})
+    # Identify covariate columns (all columns beyond standard 6)
+    standard_cols = ["id", "tstart", "tstop", "statefrom", "stateto", "obstype"]
+    covariate_cols = setdiff(names(original_data), standard_cols)
+    
+    if isempty(covariate_cols)
+        return exact_data  # No covariates to interpolate
     end
-    return selected
+    
+    # Build mapping from pseudo-subject ID to original subject ID
+    # Pseudo IDs were assigned sequentially: for subject i, path j, pseudo_id = (i-1)*npaths + j
+    # where npaths may vary per subject, so we reconstruct from samplepaths
+    pseudo_to_orig = Dict{Int, Int}()
+    pseudo_id = 0
+    for i in eachindex(samplepaths)
+        orig_subj_id = samplepaths[i][1].subj  # Original subject ID from the first path
+        for _ in samplepaths[i]
+            pseudo_id += 1
+            pseudo_to_orig[pseudo_id] = orig_subj_id
+        end
+    end
+    
+    # Add covariate columns to exact_data
+    for col in covariate_cols
+        exact_data[!, col] = Vector{eltype(original_data[!, col])}(undef, nrow(exact_data))
+    end
+    
+    # Group original data by subject for efficient lookup
+    orig_grouped = groupby(original_data, :id)
+    
+    # Interpolate for each row in exact_data
+    for i in 1:nrow(exact_data)
+        pseudo_subj_id = exact_data.id[i]
+        orig_subj_id = pseudo_to_orig[pseudo_subj_id]
+        t = exact_data.tstart[i]
+        
+        # Find original data for this subject
+        subj_orig = orig_grouped[(id = orig_subj_id,)]
+        
+        # Find interval containing t (tstart ≤ t < tstop, or last interval if t == final tstop)
+        row_idx = findfirst(r -> subj_orig.tstart[r] <= t < subj_orig.tstop[r], 1:nrow(subj_orig))
+        if isnothing(row_idx)
+            # Edge case: t equals final tstop, use last interval
+            row_idx = findlast(r -> subj_orig.tstop[r] >= t, 1:nrow(subj_orig))
+        end
+        
+        @assert !isnothing(row_idx) "Could not find interval for original subject $orig_subj_id (pseudo $pseudo_subj_id) at time $t"
+        
+        # Copy covariates
+        for col in covariate_cols
+            exact_data[i, col] = subj_orig[row_idx, col]
+        end
+    end
+    
+    return exact_data
 end
 
 """
     _transfer_parameters!(target_model, source_model)
 
-Transfer parameters from source model to target model.
+Transfer parameters from source model to target model by hazard name.
 
-Copies flat parameters and handles spline hazards if needed.
+Uses the nested parameter structure to match hazards by name, avoiding
+fragile index-based matching.
 
 # Arguments
 - `target_model::MultistateProcess`: Model to receive parameters
 - `source_model`: Model to copy parameters from (fitted or unfitted)
 """
 function _transfer_parameters!(target_model::MultistateProcess, source_model)
-    # Get flat parameters from source
-    source_params = get_parameters_flat(source_model)
+    source_nested = source_model.parameters.nested
     
-    # Sanitize parameters: replace Inf/-Inf with finite values to prevent optimization failures
-    # -Inf (log(0)) -> -20.0 (exp(-20) ≈ 2e-9)
-    # Inf -> 20.0 (exp(20) ≈ 4.8e8)
-    replace!(source_params, -Inf => -20.0, Inf => 20.0)
-    
-    # Build vectors per hazard for set_parameters!
-    n_hazards = length(target_model.hazards)
-    param_vectors = Vector{Vector{Float64}}(undef, n_hazards)
-    offset = 1
-    for i in 1:n_hazards
-        npar = target_model.hazards[i].npar_total
-        param_vectors[i] = source_params[offset:(offset + npar - 1)]
-        offset += npar
+    # Transfer parameters by hazard name (robust to ordering differences)
+    for hazard in target_model.hazards
+        hazname = hazard.hazname
+        
+        # Get source parameters for this hazard
+        source_haz_params = source_nested[hazname]
+        
+        # Extract as flat vector: baseline first, then covariates
+        baseline_vals = collect(values(source_haz_params.baseline))
+        if haskey(source_haz_params, :covariates)
+            covar_vals = collect(values(source_haz_params.covariates))
+            param_vec = vcat(baseline_vals, covar_vals)
+        else
+            param_vec = baseline_vals
+        end
+        
+        # Verify parameter count matches
+        @assert length(param_vec) == hazard.npar_total "Parameter count mismatch for $hazname: source has $(length(param_vec)), target expects $(hazard.npar_total)"
+        
+        # Set parameters for this hazard
+        set_parameters!(target_model, NamedTuple{(hazname,)}((param_vec,)))
     end
-    
-    # Use set_parameters! which properly rebuilds flat, nested, and natural
-    set_parameters!(target_model, param_vectors)
 end
 
 """
@@ -282,32 +334,50 @@ Initialize semi-Markov model parameters by simulating from surrogate and fitting
 
 # Algorithm
 1. Draw `npaths` paths per subject from the Markov surrogate
-2. Select one path per subject (weighted by importance weights)
-3. Convert paths to exact-observation data
-4. Interpolate covariates from original data
-5. Create new model with exact data and same hazard specifications
-6. Initialize and fit the exact-data model
-7. Transfer fitted parameters to original model
+2. Convert all paths to exact-observation data with pseudo-subject IDs
+3. Interpolate covariates from original data
+4. Create new model with exact data and same hazard specifications
+5. Initialize and fit the exact-data model
+6. Transfer fitted parameters to original model
 
 # Arguments
 - `model`: Semi-Markov model to initialize
 - `npaths::Int`: Number of paths to draw per subject
 - `constraints`: Parameter constraints for exact-data fitting
 - `surrogate_constraints`: Constraints for surrogate fitting
+
+# Note
+Unlike MCEM, initialization does not use importance weights. We simply draw paths
+from the surrogate and fit to those paths with uniform weights. The importance 
+weights from draw_paths are computed but ignored for initialization.
 """
 function _init_from_surrogate_paths!(model::MultistateSemiMarkovProcess,
                                       npaths::Int;
                                       constraints = nothing,
                                       surrogate_constraints = nothing)
     # Step 1: Draw paths from surrogate (will fit surrogate if needed)
+    # Note: draw_paths computes importance weights, but we ignore them for initialization
     result = draw_paths(model; npaths = npaths, paretosmooth = false)
     
-    # Step 2: Select one path per subject (weighted sample)
-    selected_paths = _select_one_path_per_subject(result.samplepaths, 
-                                                   result.ImportanceWeightsNormalized)
+    # Step 2: Convert all paths to exact data with pseudo-subject IDs
+    # result.samplepaths is Vector{Vector{SamplePath}} (subjects × paths per subject)
+    nsubj = length(result.samplepaths)
     
-    # Step 3: Convert to exact data
-    exact_data = paths_to_dataset(selected_paths)
+    # Flatten paths and create pseudo-subject IDs (sequential 1:n)
+    all_paths = SamplePath[]
+    pseudo_id = 0
+    
+    for i in 1:nsubj
+        subj_paths = result.samplepaths[i]
+        for j in eachindex(subj_paths)
+            pseudo_id += 1
+            path = subj_paths[j]
+            push!(all_paths, SamplePath(pseudo_id, path.times, path.states))
+        end
+    end
+    
+    # Convert to exact data
+    exact_data = paths_to_dataset(all_paths)
     
     # Check if we have any transitions
     if nrow(exact_data) == 0
@@ -316,26 +386,28 @@ function _init_from_surrogate_paths!(model::MultistateSemiMarkovProcess,
         return
     end
     
-    # Step 4: Interpolate covariates from original data
-    _interpolate_covariates!(exact_data, model.data)
+    # Step 3: Interpolate covariates from original data
+    # Map pseudo-subject IDs back to original subject IDs for covariate interpolation
+    _interpolate_covariates_from_paths!(exact_data, model.data, result.samplepaths)
     
-    # Step 5: Create model with exact data (same hazard specs)
+    # Step 4: Create model with exact data (same hazard specs)
     # IMPORTANT: initialize=false to avoid recursive initialization
+    # All paths have uniform weight (no importance weighting for initialization)
     exact_model = multistatemodel(model.modelcall.hazards...; 
                                    data = exact_data,
-                                   initialize = false,  # We initialize manually below
-                                   SubjectWeights = nothing,  # All subjects weighted equally
+                                   initialize = false,
+                                   SubjectWeights = nothing,  # Uniform weights
                                    CensoringPatterns = nothing)
     
-    # Step 6: Initialize exact model with :crude method (quick starting point)
+    # Step 5: Initialize exact model with :crude method (quick starting point)
     set_crude_init!(exact_model)
     
-    # Step 7: Fit exact model (fast - exact likelihood, no MCEM)
+    # Step 6: Fit exact model (fast - exact likelihood, no MCEM)
     exact_fitted = fit(exact_model; constraints = constraints, 
                        compute_vcov = false, compute_ij_vcov = false, 
                        compute_jk_vcov = false, verbose = false)
     
-    # Step 8: Transfer parameters to original model
+    # Step 7: Transfer parameters to original model
     _transfer_parameters!(model, exact_fitted)
 end
 
@@ -344,7 +416,7 @@ end
 # =============================================================================
 
 """
-    initialize_parameters!(model::MultistateProcess; method=:auto, npaths=10, ...)
+    initialize_parameters!(model::MultistateProcess; method=:auto, npaths=50, ...)
 
 Initialize model parameters using the specified method.
 
@@ -358,7 +430,7 @@ Initialize model parameters using the specified method.
   - `:crude` - Use crude rates from observed data
   - `:markov` - Fit Markov surrogate, use its log rates
   - `:surrogate` - Draw paths from surrogate, fit to exact data, use those parameters
-- `npaths::Int = 10`: Number of paths per subject for :surrogate method
+- `npaths::Int = 50`: Number of paths per subject for :surrogate method
 
 # Examples
 ```julia
@@ -521,12 +593,6 @@ function compute_number_transitions(data, tmat)
 
     return n_rs
 end
-
-# Raphael comment: what about progressive states. E.g. say you can go from 1 to 2 and 2 to 3, but directly from 1 to 3 is NOT allowed. But we have panel data and observe a 1 to 3 transition - that implies that someone definitely spent time in 2x, and as the above is currently written, we would accrue a 1 to 3 transition which is not allowed. 2023 June 6th.
-
-# Also, for panel crude inits maybe split time between states instead of put all in initial state
-
-# What about e.g. cancer case where someone is diagnosed at age 45, but realistically they probably have been in that "state" since 30. If fitting Markov model, who cares. But if Weibull or semi-markov, would want to make sure they are 15 years into the hazard function.
 
 """
     calculate_crude(model::MultistateProcess)

@@ -68,7 +68,7 @@ end
 """
     SharedBaselineKey
 
-Composite key describing a Tang-style shared baseline. Multiple hazards can share a
+Composite key describing a shared baseline. Multiple hazards can share a
 trajectory cache when both the origin state and the hashed baseline specification
 match. The `baseline_signature` is a deterministic hash of spline degree, knot
 locations, and any other parameters that influence α(t).
@@ -149,7 +149,7 @@ end
 """
     maybe_time_transform_context(pars, subjectdata, hazards; time_column = :sojourn)
 
-Return a `TimeTransformContext` when Tang transforms are enabled for at least one
+Return a `TimeTransformContext` when transforms are enabled for at least one
 hazard and caching remains active. Callers may override `time_column` when the
 relevant observation durations live under a different column name. When no
 hazards opt into time transforms (or caching is globally disabled), the

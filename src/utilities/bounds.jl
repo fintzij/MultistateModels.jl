@@ -15,8 +15,11 @@
 using LinearAlgebra
 
 # Default lower bound for non-negative parameters (rates, shapes, spline coefs)
-# Using 0.0 (non-negativity) rather than small positive value
-const NONNEG_LB = 0.0
+# Using small positive value rather than 0.0 to ensure numerical stability:
+# 1. Ipopt's bound_relax_factor allows solutions slightly outside bounds
+# 2. Very small rates can cause ill-conditioned Q matrices and TPM computation issues
+# 3. 1e-6 is small enough for practical models but large enough for numerical stability
+const NONNEG_LB = 1e-6
 
 """
     generate_parameter_bounds(model::MultistateProcess; user_bounds=nothing) -> (lb, ub)
@@ -97,6 +100,10 @@ These are the minimum constraints required for model validity.
 - `:pt` (Phase-type): all rates ≥ 0
 - Covariate coefficients: always unconstrained (lb = -Inf, ub = Inf)
 
+# Note
+For phase-type models with shared hazards, this iterates over unique parameter sets
+(via hazkeys) rather than individual hazards to avoid indexing beyond the parameter vector.
+
 # Returns
 - `(lb::Vector{Float64}, ub::Vector{Float64})`: Package bounds
 """
@@ -105,20 +112,32 @@ function _generate_package_bounds(model::MultistateProcess)
     lb = fill(-Inf, n_params)
     ub = fill(Inf, n_params)
     
-    param_idx = 1
-    for hazard in model.hazards
+    # Build reverse mapping: parameter index -> hazard index (for phase-type shared hazards)
+    params_idx_to_hazard_idx = Dict{Int, Int}()
+    for (haz_idx, hazard) in enumerate(model.hazards)
+        params_idx = model.hazkeys[hazard.hazname]
+        if !haskey(params_idx_to_hazard_idx, params_idx)
+            params_idx_to_hazard_idx[params_idx] = haz_idx
+        end
+    end
+    
+    # Iterate over unique parameter sets (sorted by parameter index)
+    param_offset = 0
+    for (hazname, params_idx) in sort(collect(model.hazkeys), by = x -> x[2])
+        haz_idx = params_idx_to_hazard_idx[params_idx]
+        hazard = model.hazards[haz_idx]
         family = hazard.family
         n_baseline = hazard.npar_baseline
         n_total = hazard.npar_total
         
         # Set bounds for baseline parameters based on family (on natural scale)
         baseline_lb = _get_baseline_lb(family, n_baseline)
-        lb[param_idx:param_idx+n_baseline-1] .= baseline_lb
+        lb[param_offset+1:param_offset+n_baseline] .= baseline_lb
         
         # Covariate coefficients are unconstrained (already initialized to -Inf/Inf)
         # No action needed
         
-        param_idx += n_total
+        param_offset += n_total
     end
     
     return lb, ub
