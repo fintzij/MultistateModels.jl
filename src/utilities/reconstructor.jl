@@ -50,7 +50,7 @@ Build a ReConstructor for the given parameter structure.
 
 # Arguments
 - `x`: Parameter structure (NamedTuple, Tuple, Vector, or Real)
-- `flattentype`: FlattenContinuous() or FlattenAll()
+- `flattentype`: FlattenContinuous() (default)
 - `unflattentype`: UnflattenStrict() or UnflattenFlexible()
 
 # Returns

@@ -274,13 +274,14 @@ function _build_phasetype_from_markov(model, markov_surrogate::MarkovSurrogate;
     # Build state mappings
     state_to_phases, phase_to_state, n_expanded = _build_state_mappings(n_states, n_phases_vec)
     
-    # Extract transition rates from Markov surrogate
+    # Extract transition rates from Markov surrogate (use nested parameters)
     transition_rates = Dict{Tuple{Int,Int}, Float64}()
-    surrogate_pars = values(markov_surrogate.parameters.natural)
     
     for (haz_idx, h) in enumerate(markov_surrogate.hazards)
         s, d = h.statefrom, h.stateto
-        rate = surrogate_pars[haz_idx][1]
+        # Get rate from nested structure
+        hazname = h.hazname
+        rate = markov_surrogate.parameters.nested[hazname].baseline[Symbol("$(hazname)_rate")]
         transition_rates[(s, d)] = rate
     end
     

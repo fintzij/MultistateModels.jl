@@ -18,13 +18,6 @@ Flatten only continuous parameters (default behavior).
 struct FlattenContinuous <: FlattenTypes end
 
 """
-    FlattenAll <: FlattenTypes
-
-Flatten all parameters including integers.
-"""
-struct FlattenAll <: FlattenTypes end
-
-"""
 Abstract type for unflatten mode selection.
 """
 abstract type UnflattenTypes end
@@ -104,8 +97,6 @@ end
                      unflattentype::UnflattenTypes, x::AbstractVector{<:Real})
 
 Build flatten/unflatten closures for Vector of Real numbers.
-
-Handles both FlattenContinuous and FlattenAll modes.
 """
 function construct_flatten(
     output::Type{T},

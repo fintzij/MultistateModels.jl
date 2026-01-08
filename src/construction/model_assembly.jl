@@ -53,15 +53,12 @@ Create a parameters structure from nested parameter vectors.
 Returns a NamedTuple with fields:
 - `flat`: Vector{Float64} of all parameters (log scale for baseline, as-is for covariates)
 - `nested`: NamedTuple of NamedTuples per hazard with `baseline` and optional `covariates` fields
-- `natural`: NamedTuple of Vectors for each hazard (natural scale for baseline, as-is for covariates)
 - `unflatten`: Function to reconstruct nested structure from flat vector
 
-Parameters are stored on log scale for baseline (rates, shapes, scales) because hazard 
-functions expect log-scale and apply exp() internally. Covariate coefficients are unconstrained.
+Parameters are stored on natural scale (v0.3.0+). Box constraints enforce positivity.
 """
 function build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Symbol, Int64}, hazards::Vector{<:_Hazard})
     # Build nested parameters structure per hazard
-    # Parameters are stored on log scale for baseline, as-is for covariates
     params_nested_pairs = [
         begin
             # Robustly find hazard by name
@@ -80,23 +77,11 @@ function build_parameters(parameters::Vector{Vector{Float64}}, hazkeys::Dict{Sym
     reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
     params_flat = flatten(reconstructor, params_nested)
     
-    # Get natural scale parameters (family-aware transformation)
-    params_natural_pairs = [
-        begin
-            h_idx = findfirst(h -> h.hazname == hazname, hazards)
-            hazard = hazards[h_idx]
-            hazname => extract_natural_vector(params_nested[hazname], hazard.family)
-        end
-        for (hazname, idx) in sort(collect(hazkeys), by = x -> x[2])
-    ]
-    params_natural = NamedTuple(params_natural_pairs)
-    
-    # Return structure
+    # Return structure (v0.3.0+: no separate .natural field, compute on-demand via accessors)
     return (
         flat = params_flat,
         nested = params_nested,
-        natural = params_natural,
-        reconstructor = reconstructor  # NEW: Store ReConstructor instead of unflatten_fn
+        reconstructor = reconstructor
     )
 end
 

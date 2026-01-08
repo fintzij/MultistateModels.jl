@@ -41,8 +41,8 @@ These functions are typically called internally by `fit()` when `compute_ij_vcov
 
 ```julia
 fitted = fit(model, data; compute_ij_vcov=true, compute_jk_vcov=true)
-ij_v = get_ij_vcov(fitted)           # Sandwich variance
-jk_v = get_jk_vcov(fitted)           # Jackknife variance  
+ij_v = get_vcov(fitted; type=:ij)     # Sandwich variance
+jk_v = get_vcov(fitted; type=:jk)     # Jackknife variance  
 grads = get_subject_gradients(fitted) # Subject-level scores
 deltas = get_loo_perturbations(fitted) # LOO perturbations
 ```
@@ -1324,10 +1324,10 @@ assume that Var(gᵢ) = -E[Hᵢ] (which holds only under correct specification).
 # Example
 ```julia
 fitted = fit(model, data; compute_ij_vcov=true)
-ij_se = sqrt.(diag(get_ij_vcov(fitted)))  # Robust standard errors
+ij_se = sqrt.(diag(get_vcov(fitted; type=:ij)))  # Robust standard errors
 ```
 
-See also: [`jk_vcov`](@ref), [`get_ij_vcov`](@ref)
+See also: [`jk_vcov`](@ref), [`get_vcov`](@ref)
 """
 function ij_vcov(H_inv::AbstractMatrix, subject_grads::AbstractMatrix)
     K = subject_grads * subject_grads'  # p × p, sum of outer products
@@ -1368,10 +1368,10 @@ The factor (n-1)/n is a finite-sample correction. For large n, JK ≈ IJ.
 # Example
 ```julia
 fitted = fit(model, data; compute_jk_vcov=true)
-jk_se = sqrt.(diag(get_jk_vcov(fitted)))  # Jackknife standard errors
+jk_se = sqrt.(diag(get_vcov(fitted; type=:jk)))  # Jackknife standard errors
 ```
 
-See also: [`ij_vcov`](@ref), [`get_jk_vcov`](@ref)
+See also: [`ij_vcov`](@ref), [`get_vcov`](@ref)
 """
 function jk_vcov(loo_deltas::AbstractMatrix)
     n = size(loo_deltas, 2)
@@ -2527,7 +2527,7 @@ end
 - This diagnostic is based on the sandwich estimator consistency property
 - NaN ratios may occur if a standard error is zero (e.g., boundary parameter)
 
-See also: [`get_vcov`](@ref), [`get_ij_vcov`](@ref), [`get_jk_vcov`](@ref)
+See also: [`get_vcov`](@ref)
 """
 function compare_variance_estimates(fitted; use_ij::Bool = true, threshold::Float64 = 1.5, verbose::Bool = true)
     # Get model-based variance
@@ -2537,7 +2537,7 @@ function compare_variance_estimates(fitted; use_ij::Bool = true, threshold::Floa
     end
     
     # Get robust variance
-    robust_vcov = use_ij ? get_ij_vcov(fitted) : get_jk_vcov(fitted)
+    robust_vcov = use_ij ? get_vcov(fitted; type=:ij) : get_vcov(fitted; type=:jk)
     if isnothing(robust_vcov)
         error_msg = use_ij ? "IJ variance not available. Fit model with compute_ij_vcov=true." :
                            "JK variance not available. Fit model with compute_jk_vcov=true."

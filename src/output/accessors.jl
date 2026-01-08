@@ -73,8 +73,8 @@ function get_phasetype_parameters(model::MultistateModelFitted; scale::Symbol=:n
                            "Use `get_parameters(model)` for standard models."))
     end
     
-    # Get fitted expanded parameters
-    exp_params = model.parameters.natural  # Expanded params on natural scale
+    # Get fitted expanded parameters (compute from nested on-demand)
+    exp_params = get_parameters_natural(model)
     
     # Get original hazard specifications to rebuild user-facing structure
     original_hazards = model.phasetype_expansion.original_hazards
@@ -324,7 +324,8 @@ function get_parameters(model::MultistateProcess; scale::Symbol=:natural, expand
     
     # Otherwise, return expanded/internal parameters
     if scale == :natural
-        return model.parameters.natural
+        # Compute per-hazard vectors on-demand from nested
+        return get_parameters_natural(model)
     elseif scale == :estimation || scale == :log || scale == :flat
         return model.parameters.flat
     elseif scale == :nested
@@ -341,8 +342,8 @@ Internal: Compute user-facing phase-type parameters from current expanded parame
 Used by `get_parameters` to ensure parameters are always up-to-date.
 """
 function _compute_phasetype_user_params(model::MultistateProcess, scale::Symbol)
-    # Get current expanded parameters on natural scale
-    exp_params = model.parameters.natural
+    # Get current expanded parameters on natural scale (compute from nested)
+    exp_params = get_parameters_natural(model)
     
     # Get original hazard specifications
     original_hazards = model.phasetype_expansion.original_hazards
@@ -453,7 +454,8 @@ function get_parameters(model::MultistateModelFitted; scale::Symbol=:natural, ex
     
     # Otherwise, return expanded/internal parameters
     if scale == :natural
-        return model.parameters.natural
+        # Compute per-hazard vectors on-demand from nested
+        return get_parameters_natural(model)
     elseif scale == :estimation || scale == :log || scale == :flat
         return model.parameters.flat
     elseif scale == :nested
@@ -491,7 +493,8 @@ function get_expanded_parameters(model::MultistateModel; scale::Symbol=:natural)
     # For unfitted models, expanded parameters are just the model's parameters
     # (which are already on the expanded space for phase-type models)
     if scale == :natural
-        return model.parameters.natural
+        # Compute per-hazard vectors on-demand from nested
+        return get_parameters_natural(model)
     elseif scale == :estimation || scale == :log || scale == :flat
         return model.parameters.flat
     elseif scale == :nested
@@ -614,15 +617,6 @@ function get_vcov(model::MultistateModelFitted; type::Symbol=:model)
     else
         throw(ArgumentError("type must be :model, :ij, or :jk (got :$type)"))
     end
-end
-
-# Internal helpers - prefer get_vcov(model; type=:ij/:jk) for new code
-function get_ij_vcov(model::MultistateModelFitted)
-    return get_vcov(model; type=:ij)
-end
-
-function get_jk_vcov(model::MultistateModelFitted)
-    return get_vcov(model; type=:jk)
 end
 
 """
@@ -1254,11 +1248,14 @@ function Base.show(io::IO, model::MultistateModelFitted)
         sorted_hazkeys = sort(collect(model.hazkeys), by = x -> x[2])
         par_offset = 0
         
+        # Compute per-hazard parameter vectors on-demand
+        natural_params_all = get_parameters_natural(model)
+        
         for (hazname, idx) in sorted_hazkeys
             haz = model.hazards[idx]
             parnames = haz.parnames
             npar = haz.npar_total
-            natural_pars = model.parameters.natural[hazname]
+            natural_pars = natural_params_all[hazname]
             
             # Format transition
             trans_str = "$(haz.statefrom)→$(haz.stateto)"

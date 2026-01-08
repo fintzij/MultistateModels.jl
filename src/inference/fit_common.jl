@@ -75,7 +75,7 @@ semimarkov = multistatemodel(h12_gom, h23_wei; data=panel_data)
 fitted = fit(semimarkov; proposal=:markov, maxiter=50)
 ```
 
-See also: [`get_vcov`](@ref), [`get_ij_vcov`](@ref), [`compare_variance_estimates`](@ref),
+See also: [`get_vcov`](@ref), [`compare_variance_estimates`](@ref),
           [`is_markov`](@ref), [`is_panel_data`](@ref)
 """
 

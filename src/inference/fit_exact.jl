@@ -211,23 +211,15 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
     # Use the unflatten function from the model to convert flat params back to nested
     params_nested = unflatten(model.parameters.reconstructor, sol.u)
     
-    # Compute natural scale parameters (family-aware transformation)
-    params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname], model.hazards[idx].family)
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
-    ]
-    params_natural = NamedTuple(params_natural_pairs)
-    
+    # v0.3.0+: No separate .natural field - compute on-demand via accessors
     parameters_fitted = (
         flat = Vector{Float64}(sol.u),
         nested = params_nested,
-        natural = params_natural,
         reconstructor = model.parameters.reconstructor  # Keep same reconstructor
     )
 
-    # Split sol.u into per-hazard log-scale vectors for spline remaking
-    natural_vals = values(model.parameters.natural)
-    block_sizes = [length(v) for v in natural_vals]
+    # Split sol.u into per-hazard vectors for spline remaking
+    block_sizes = [model.hazards[i].npar_total for i in 1:length(model.hazards)]
     log_scale_params = Vector{Vector{Float64}}(undef, length(block_sizes))
     offset = 0
     for i in eachindex(block_sizes)

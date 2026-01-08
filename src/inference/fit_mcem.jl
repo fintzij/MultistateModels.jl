@@ -153,7 +153,7 @@ I_obs = E[I_comp | Y] - Var[S_comp | Y]
 fitted = fit(semimarkov_model; ess_target_initial=100, verbose=true)
 
 # Use robust SEs for inference
-robust_se = sqrt.(diag(get_ij_vcov(fitted)))
+robust_se = sqrt.(diag(get_vcov(fitted; type=:ij)))
 
 # Diagnose model specification
 result = compare_variance_estimates(fitted)
@@ -1039,11 +1039,9 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         path = Array{SamplePath}(undef, 1)
         samplingweight = Vector{Float64}(undef, 1)
         
-        # Get hazard parameter blocks from parameters.natural
-        # Each hazard has a vector of parameters; compute block indices
-        natural_pars = model.parameters.natural
-        nhaz = length(natural_pars)
-        block_sizes = [length(natural_pars[k]) for k in 1:nhaz]
+        # Get hazard parameter block sizes from hazard objects
+        nhaz = length(model.hazards)
+        block_sizes = [model.hazards[k].npar_total for k in 1:nhaz]
         
         # Build index ranges for each hazard block
         elem_ptr = cumsum([1; block_sizes])
@@ -1268,12 +1266,11 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     ProposedPaths = return_proposed_paths ? (paths=samplepaths, weights=ImportanceWeights) : nothing
 
     # Build ParameterHandling structure for fitted parameters
-    # params_cur contains log-scale parameters; we need to split into per-hazard vectors
-    # Compute block sizes from model.parameters.natural structure
-    natural_vals = values(model.parameters.natural)
-    block_sizes = [length(v) for v in natural_vals]
+    # params_cur contains parameters; we need to split into per-hazard vectors
+    # Compute block sizes from hazard objects
+    block_sizes = [model.hazards[i].npar_total for i in 1:length(model.hazards)]
     
-    # Split params_cur into per-hazard log-scale vectors
+    # Split params_cur into per-hazard vectors
     log_scale_params = Vector{Vector{Float64}}(undef, length(block_sizes))
     offset = 0
     for i in eachindex(block_sizes)

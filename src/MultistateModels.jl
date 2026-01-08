@@ -132,8 +132,7 @@ export
     # --------------------------------------------------------------------------
     ADBackend,
     ForwardDiffBackend,
-    EnzymeBackend,
-    MooncakeBackend,
+    # Note: EnzymeBackend and MooncakeBackend are internal-only (not production-ready)
     
     # --------------------------------------------------------------------------
     # Spline penalty configuration

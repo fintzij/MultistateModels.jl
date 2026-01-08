@@ -34,21 +34,11 @@ function set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVec
     # Unflatten to get nested structure
     params_nested = unflatten(model.parameters.reconstructor, flat_params)
     
-    # Get new flat version (reconstructor stays the same)
-    new_flat = flatten(model.parameters.reconstructor, params_nested)
-    
-    # v0.3.0+: nested == natural (no transformation needed, but kept for API compatibility)
-    params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname], model.hazards[idx].family)
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
-    ]
-    params_natural = NamedTuple(params_natural_pairs)
-    
     # Update parameters (reconstructor stays the same)
+    # v0.3.0+: No separate .natural field, compute on-demand via accessors
     model.parameters = (
         flat = Vector{Float64}(flat_params),
         nested = params_nested,
-        natural = params_natural,
         reconstructor = model.parameters.reconstructor
     )
     
@@ -68,8 +58,21 @@ function get_parameters_nested(model::MultistateProcess)
     return model.parameters.nested
 end
 
+"""
+    get_parameters_natural(model::MultistateProcess)
+
+Compute per-hazard parameter vectors from nested structure.
+v0.3.0+: All parameters are on natural scale, so this just extracts and flattens per hazard.
+
+Returns a NamedTuple with hazard names as keys and parameter vectors as values.
+"""
 function get_parameters_natural(model::MultistateProcess)
-    return model.parameters.natural
+    # Compute on-demand from nested structure
+    params_natural_pairs = [
+        hazname => extract_natural_vector(model.parameters.nested[hazname], model.hazards[idx].family)
+        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
+    ]
+    return NamedTuple(params_natural_pairs)
 end
 
 """
@@ -135,17 +138,16 @@ params_nested = get_parameters(model, 1, scale=:nested)
 - [`set_parameters!`](@ref) - Set parameters for a hazard
 """
 function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natural)
-    # Validate hazard index using parameters structure
-    n_hazards = length(model.parameters.natural)
+    # Validate hazard index
+    n_hazards = length(model.hazards)
     if h < 1 || h > n_hazards
         throw(BoundsError(1:n_hazards, h))
     end
     
     if scale == :log
         # Compute log-scale parameters from parameters.flat
-        # Split flat vector into per-hazard vectors based on natural structure
-        natural_vals = values(model.parameters.natural)
-        block_sizes = [length(v) for v in natural_vals]
+        # Split flat vector into per-hazard vectors based on hazard npar_total
+        block_sizes = [model.hazards[i].npar_total for i in 1:n_hazards]
         offset = sum(block_sizes[1:h-1])
         return model.parameters.flat[(offset+1):(offset+block_sizes[h])]
     elseif scale == :natural || scale == :nested || scale == :transformed
@@ -163,7 +165,8 @@ function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natur
         
         # Return appropriate representation
         if scale == :natural
-            return model.parameters.natural[hazname]
+            # Compute per-hazard vector from nested on-demand
+            return extract_natural_vector(model.parameters.nested[hazname], model.hazards[h].family)
         elseif scale == :nested
             return model.parameters.nested[hazname]
         else

@@ -128,11 +128,11 @@ Rebuild the parameters structure from new parameter vectors.
 Parameters are stored on log scale for baseline, as-is for covariates.
 
 # Arguments
-- `new_param_vectors`: Vector of parameter vectors (one per hazard), on log scale for baseline
+- `new_param_vectors`: Vector of parameter vectors (one per hazard)
 - `model`: The model containing hazard info for npar_baseline
 
 # Returns
-- NamedTuple with flat, nested, natural, and unflatten fields
+- NamedTuple with flat, nested, and reconstructor fields
 
 # Note
 For phase-type models with shared hazards, `model.hazkeys` maps hazard names to 
@@ -164,20 +164,11 @@ function rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::M
     reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
     params_flat = flatten(reconstructor, params_nested)
     
-    # Get natural scale parameters as flattened vectors per hazard (family-aware transformation)
-    params_natural_pairs = [
-        let haz_idx = params_idx_to_hazard_idx[params_idx]
-            hazname => extract_natural_vector(params_nested[hazname], model.hazards[haz_idx].family)
-        end
-        for (hazname, params_idx) in sort(collect(model.hazkeys), by = x -> x[2])
-    ]
-    params_natural = NamedTuple(params_natural_pairs)
-    
+    # v0.3.0+: No separate .natural field - compute on-demand via accessors
     return (
         flat = params_flat,
         nested = params_nested,
-        natural = params_natural,
-        reconstructor = reconstructor  # NEW: Store ReConstructor instead of unflatten_fn
+        reconstructor = reconstructor
     )
 end
 
@@ -196,9 +187,8 @@ Updates model.parameters with the new values and remakes spline hazards as neede
 """
 function set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Float64}})
     
-    # Get current natural-scale parameters
-    current_natural = model.parameters.natural
-    n_hazards = length(current_natural)
+    # Get number of hazards and expected parameter counts
+    n_hazards = length(model.hazards)
     
     # check that we have the right number of parameters
     if length(newvalues) != n_hazards
@@ -206,9 +196,10 @@ function set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Floa
     end
 
     for i in 1:n_hazards
-        if length(current_natural[i]) != length(newvalues[i])
+        expected_len = model.hazards[i].npar_total
+        if expected_len != length(newvalues[i])
             throw(ArgumentError("New values for hazard $i and model parameters for that hazard are not of the same length. " *
-                               "Expected $(length(current_natural[i])), got $(length(newvalues[i]))."))
+                               "Expected $expected_len, got $(length(newvalues[i]))."))
         end
     end
     
@@ -228,9 +219,8 @@ as-is for covariate coefficients.
 Assigns new values by hazard index in order.
 """
 function set_parameters!(model::MultistateProcess, newvalues::Tuple)
-    # Get current natural-scale parameters
-    current_natural = model.parameters.natural
-    n_hazards = length(current_natural)
+    # Get expected parameter counts from hazard objects
+    n_hazards = length(model.hazards)
     
     # check that there is a vector of parameters for each cause-specific hazard
     if length(newvalues) != n_hazards
@@ -239,9 +229,10 @@ function set_parameters!(model::MultistateProcess, newvalues::Tuple)
 
     for i in eachindex(newvalues)
         # check that we have the right number of parameters
-        if length(current_natural[i]) != length(newvalues[i])
+        expected_len = model.hazards[i].npar_total
+        if expected_len != length(newvalues[i])
             throw(ArgumentError("New values and parameters for cause-specific hazard $i are not of the same length. " *
-                               "Expected $(length(current_natural[i])), got $(length(newvalues[i]))."))
+                               "Expected $expected_len, got $(length(newvalues[i]))."))
         end
     end
     
@@ -262,18 +253,18 @@ as-is for covariate coefficients.
 Assignment is made by matching tuple keys in `newvalues` to the key in `model.hazkeys`.
 """
 function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
-    # Get current natural-scale parameters
-    current_natural = model.parameters.natural
+    # Validate parameter lengths using hazard info
     value_keys = keys(newvalues)
 
     for k in eachindex(value_keys)
         vind = value_keys[k]
         mind = model.hazkeys[vind]
+        expected_len = model.hazards[mind].npar_total
 
         # check length of supplied parameters
-        if length(newvalues[vind]) != length(current_natural[mind])
+        if length(newvalues[vind]) != expected_len
             throw(ArgumentError("The new parameter values for $vind are not the expected length. " *
-                               "Expected $(length(current_natural[mind])), got $(length(newvalues[vind]))."))
+                               "Expected $expected_len, got $(length(newvalues[vind]))."))
         end
     end
     
@@ -315,8 +306,7 @@ set_parameters!(model, 2, [log(2.0), log(1.5), 0.3, -0.2])
 ```
 """
 function set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{Float64})
-    current_natural = model.parameters.natural
-    n_hazards = length(current_natural)
+    n_hazards = length(model.hazards)
     
     # Check hazard index
     if h < 1 || h > n_hazards
@@ -324,8 +314,9 @@ function set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{F
     end
     
     # Check parameter length
-    if length(newvalues) != length(current_natural[h])
-        throw(ArgumentError("New values length ($(length(newvalues))) does not match expected length ($(length(current_natural[h]))) for hazard $h."))
+    expected_len = model.hazards[h].npar_total
+    if length(newvalues) != expected_len
+        throw(ArgumentError("New values length ($(length(newvalues))) does not match expected length ($expected_len) for hazard $h."))
     end
     
     # Build new parameter vectors (keep current for other hazards)
