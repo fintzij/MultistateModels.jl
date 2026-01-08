@@ -113,7 +113,7 @@ Structural improvements that make later work easier.
 | 2.2 | #8 | Delete get_ij_vcov/get_jk_vcov wrappers | 🟢 LOW | 10 min | ✅ DONE |
 | 2.3 | #9 | Delete FlattenAll unused type | 🟢 LOW | 15 min | ✅ DONE |
 | 2.4 | #6 | Unexport unsupported AD backends | 🟡 MED | 15 min | ✅ DONE |
-| 2.5 | #10 | Review transform strategy abstraction | 🟡 MED | 30 min | ⏸️ Deferred (needs benchmarks) |
+| 2.5 | #10 | Review transform strategy abstraction | 🟡 MED | 30 min | ✅ RESOLVED: Keep both strategies (CachedTransformStrategy for production, DirectTransformStrategy for debugging). Added unit tests 2026-01-08. |
 
 **Wave 2 Success Criteria**: All tests pass, parameter structure simplified, API cleaner. ✅ COMPLETE
 
