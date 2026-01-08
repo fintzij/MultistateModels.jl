@@ -127,6 +127,12 @@ These must be understood/fixed BEFORE Item #19. Each affects penalty/spline infr
 | 3.3 | #5 | Verify rectify_coefs! with natural scale | 🟡 MED | 1 hr | Item #19 |
 | 3.4 | #17 | Fix knot placement for panel data | 🟡 MED | 2 hrs | Item #19 |
 | 3.5 | #18 | Investigate PIJCV Hessian NaN/Inf | 🟡 MED | 2-4 hrs | Item #19 |
+| 3.6 | #24 | Make splines penalized by default | 🟡 MED | 1-2 hrs | Item #19 |
+
+**Item #24 Details**: Change the `fit()` API so that spline hazards are penalized by default (automatic λ selection). The `penalty` argument should accept either:
+- A penalty constructor (e.g., `SplinePenalty(...)`) with default settings → automatic λ selection
+- `:none` → no penalty (current behavior)
+This is a breaking change to current behavior where penalty=nothing means unpenalized.
 
 **Wave 3 Success Criteria**: Mathematical correctness validated, penalty infrastructure sound.
 
