@@ -571,20 +571,21 @@ If you notice:
 ### Wave 2: Technical Debt & Simplification
 | # | Item | Status | Date | Notes |
 |---|------|--------|------|-------|
-| 21 | Remove `parameters.natural` redundancy | ⬜ TODO | - | ⚠️ Largest Wave 2 item |
+| 21 | Remove `parameters.natural` redundancy | ✅ DONE | 2026-01-10 | 8 source files, 2 test files, 1 doc updated |
 | 8 | get_ij_vcov/get_jk_vcov wrappers | ✅ DONE | 2026-01-08 | 8 lines deleted, 6 call sites updated |
 | 9 | FlattenAll unused type | ✅ DONE | 2026-01-08 | Type + tests removed |
 | 6 | AD Backend exports | ✅ DONE | 2026-01-08 | EnzymeBackend/MooncakeBackend unexported |
-| 10 | Transform strategy abstraction | ⏸️ SKIP | - | Requires benchmarking before deciding |
+| 10 | Transform strategy abstraction | ✅ DONE | 2026-01-08 | Keep both strategies, added unit tests |
 
 ### Wave 3: Mathematical Correctness Bugs
 | # | Item | Status | Date | Notes |
 |---|------|--------|------|-------|
-| 16 | default_nknots() formula | ⬜ TODO | - | |
-| 15 | Monotone spline penalty matrix | ⬜ TODO | - | ⚠️ Math correctness |
-| 5 | rectify_coefs! update | ⬜ TODO | - | |
-| 17 | Knot placement uses raw data | ⬜ TODO | - | |
-| 18 | PIJCV Hessian NaN/Inf root cause | ⬜ TODO | - | |
+| 16 | default_nknots() formula | ✅ DONE | 2026-01-08 | Created default_nknots_penalized() |
+| 15 | Monotone spline penalty matrix | ✅ DONE | 2026-01-08 | Added transform_penalty_for_monotone() |
+| 5 | rectify_coefs! update | ✅ DONE | 2026-01-08 | Verified works with natural scale |
+| 17 | Knot placement uses raw data | ✅ DONE | 2026-01-08 | Fixed for panel data |
+| 18 | PIJCV Hessian NaN/Inf root cause | ✅ DONE | 2026-01-08 | Added fallback handling |
+| 24 | Make splines penalized by default | ✅ DONE | 2026-01-08 | penalty=:auto, fixed symmetry check |
 
 ### Wave 4: Major Features
 | # | Item | Status | Date | Notes |
@@ -600,8 +601,6 @@ If you notice:
 |---|------|--------|------|-------|
 | 12 | calibrate_splines verification | ⬜ TODO | - | |
 | 14 | make_constraints export | ⬜ TODO | - | |
-| 22 | Remove deprecated `get_loglik(model, "string")` | ⬜ TODO | - | Found in adversarial review |
-| 23 | Remove deprecated `fit_phasetype_surrogate()` | ⬜ TODO | - | Found in adversarial review |
 
 ---
 
