@@ -33,6 +33,13 @@ automatically selected based on the model's data type and hazard structure:
 - `adtype`: AD backend for gradients/Hessians (default: `:auto` selects based on solver).
   Use `Optimization.AutoForwardDiff()` for small models (<100 params),
   `Optimization.AutoReverseDiff()` or `Optimization.AutoZygote()` for large models.
+- `penalty`: Penalty specification for spline hazards. Can be:
+  - `:auto` (default): Apply `SplinePenalty()` if model has spline hazards, `nothing` otherwise
+  - `:none`: Explicit opt-out for unpenalized fitting
+  - `SplinePenalty()`: Curvature penalty on all spline hazards
+  - `Vector{SplinePenalty}`: Multiple rules resolved by specificity
+  - `nothing`: DEPRECATED - use `:none` instead
+- `lambda_init::Float64=1.0`: Initial smoothing parameter value
 - `compute_vcov::Bool=true`: compute model-based variance-covariance matrix
 - `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse
 - `compute_ij_vcov::Bool=true`: compute infinitesimal jackknife (sandwich) variance
@@ -67,7 +74,10 @@ The fitting method is selected via traits:
 ```julia
 # Exact data (obstype=1 in data)
 exact_model = multistatemodel(h12, h23; data=exact_data)
-fitted = fit(exact_model)
+fitted = fit(exact_model)  # Automatic penalty for spline hazards
+
+# Explicit unpenalized fitting
+fitted_unpn = fit(exact_model; penalty=:none)
 
 # Panel data with Markov hazards (obstype=2, exponential/Weibull hazards)
 markov_panel = multistatemodel(h12_exp, h23_exp; data=panel_data)
@@ -79,7 +89,7 @@ fitted = fit(semimarkov; proposal=:markov, maxiter=50)
 ```
 
 See also: [`get_vcov`](@ref), [`compare_variance_estimates`](@ref),
-          [`is_markov`](@ref), [`is_panel_data`](@ref)
+          [`is_markov`](@ref), [`is_panel_data`](@ref), [`SplinePenalty`](@ref)
 """
 
 # =============================================================================
@@ -153,6 +163,57 @@ function _solve_optimization(prob, solver; ipopt_options...)
     else
         # Optim.jl and other solvers don't support Ipopt options
         return solve(prob, _solver)
+    end
+end
+
+# =============================================================================
+# Penalty Resolution
+# =============================================================================
+
+"""
+    _resolve_penalty(penalty, model::MultistateProcess) -> Union{Nothing, SplinePenalty, Vector{SplinePenalty}}
+
+Resolve the penalty specification to a concrete penalty configuration.
+
+# Arguments
+- `penalty`: User specification - can be:
+  - `:auto` (default): Apply `SplinePenalty()` if model has spline hazards, `nothing` otherwise
+  - `:none`: Explicit opt-out, equivalent to no penalty
+  - `nothing`: DEPRECATED - emits warning, treated as `:none`
+  - `SplinePenalty`: Explicit penalty specification
+  - `Vector{SplinePenalty}`: Multiple penalty rules
+- `model::MultistateProcess`: The model to check for spline hazards
+
+# Returns
+- `nothing` if no penalty should be applied
+- `SplinePenalty()` or the user-specified penalty otherwise
+
+# Deprecation Warning
+Using `penalty=nothing` is deprecated. Use `penalty=:none` for explicit unpenalized fitting.
+The default behavior is now `penalty=:auto`, which automatically applies appropriate
+penalization for spline hazards.
+
+See also: [`SplinePenalty`](@ref), [`has_spline_hazards`](@ref)
+"""
+function _resolve_penalty(penalty, model::MultistateProcess)
+    if penalty === :auto
+        # Automatic: penalize if model has spline hazards
+        if has_spline_hazards(model)
+            return SplinePenalty()
+        else
+            return nothing
+        end
+    elseif penalty === :none
+        # Explicit opt-out
+        return nothing
+    elseif penalty === nothing
+        # Deprecated - warn and treat as :none
+        @warn "penalty=nothing is deprecated. Use penalty=:none for explicit unpenalized fitting, " *
+              "or penalty=:auto (default) for automatic penalization of spline hazards."
+        return nothing
+    else
+        # User-specified penalty (SplinePenalty or Vector{SplinePenalty})
+        return penalty
     end
 end
 

@@ -129,7 +129,12 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
 - `loo_method::Symbol=:direct`: method for LOO perturbations Δᵢ (jackknife only, not IJ):
   - `:direct`: Δᵢ = H⁻¹gᵢ (faster)
   - `:cholesky`: exact H₋ᵢ⁻¹ via Cholesky downdates (stable)
-- `penalty::Union{Nothing, SplinePenalty, Vector{SplinePenalty}}=nothing`: penalty specification for spline hazards
+- `penalty`: Penalty specification for spline hazards. Can be:
+  - `:auto` (default): Apply `SplinePenalty()` if model has spline hazards, `nothing` otherwise
+  - `:none`: Explicit opt-out for unpenalized fitting
+  - `SplinePenalty()`: Curvature penalty on all spline hazards
+  - `Vector{SplinePenalty}`: Multiple rules resolved by specificity
+  - `nothing`: DEPRECATED - use `:none` instead
 - `lambda_init::Float64=1.0`: initial smoothing parameter value (used when penalty is specified)
 
 # Returns
@@ -171,7 +176,10 @@ fitted = fit(semimarkov_model; acceleration=:squarem)
 
 See also: [`fit`](@ref), [`compare_variance_estimates`](@ref)
 """
-function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = DEFAULT_MCEM_MAXITER, tol = DEFAULT_MCEM_TOL, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = DEFAULT_ESS_TARGET_INITIAL, max_ess = DEFAULT_MAX_ESS, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :squarem, sir::Symbol = :adaptive_lhs, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, sir_adaptive_threshold::Float64 = 2.0, sir_adaptive_min_iters::Int = 3, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, penalty = nothing, lambda_init = 1.0, kwargs...)
+function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = DEFAULT_MCEM_MAXITER, tol = DEFAULT_MCEM_TOL, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = DEFAULT_ESS_TARGET_INITIAL, max_ess = DEFAULT_MAX_ESS, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :squarem, sir::Symbol = :adaptive_lhs, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, sir_adaptive_threshold::Float64 = 2.0, sir_adaptive_min_iters::Int = 3, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, penalty = :auto, lambda_init = 1.0, kwargs...)
+
+    # Resolve penalty specification (handles :auto, :none, deprecation warning)
+    resolved_penalty = _resolve_penalty(penalty, model)
 
     # Validate acceleration parameter
     if acceleration ∉ (:none, :squarem)
@@ -295,9 +303,9 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # Phase 3: Use ParameterHandling.jl flat parameters (log scale)
     params_cur = get_parameters_flat(model)
 
-    # Build penalty configuration if penalty is specified
-    penalty_config = if !isnothing(penalty)
-        penalties = penalty isa SplinePenalty ? [penalty] : penalty
+    # Build penalty configuration from resolved penalty
+    penalty_config = if !isnothing(resolved_penalty)
+        penalties = resolved_penalty isa SplinePenalty ? [resolved_penalty] : resolved_penalty
         build_penalty_config(model, penalties; lambda_init=lambda_init)
     else
         PenaltyConfig()  # Empty config - no penalty

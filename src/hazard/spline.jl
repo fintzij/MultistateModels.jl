@@ -13,6 +13,48 @@
 # scratch/penalized_splines_literature_review.md.
 # =============================================================================
 
+# =============================================================================
+# Spline Hazard Detection
+# =============================================================================
+
+"""
+    has_spline_hazards(model::MultistateProcess) -> Bool
+
+Check if the model contains any spline hazards.
+
+This function is used internally to determine whether automatic penalization
+should be applied when `penalty=:auto` is specified in `fit()`.
+
+# Arguments
+- `model::MultistateProcess`: The multistate model to check
+
+# Returns
+- `true` if any hazard in the model is a spline hazard (`RuntimeSplineHazard`)
+- `false` otherwise
+
+# Examples
+```julia
+# Model with spline hazard
+h12 = Hazard(@formula(0 ~ 1), :sp, 1, 2)
+model_sp = multistatemodel(h12; data=data)
+has_spline_hazards(model_sp)  # true
+
+# Model with parametric hazard
+h12 = Hazard(@formula(0 ~ 1), :wei, 1, 2)
+model_wei = multistatemodel(h12; data=data)
+has_spline_hazards(model_wei)  # false
+```
+
+See also: [`SplinePenalty`](@ref), [`fit`](@ref)
+"""
+function has_spline_hazards(model::MultistateProcess)
+    return any(h -> h isa _SplineHazard, model.hazards)
+end
+
+# =============================================================================
+# Spline Hazard Info
+# =============================================================================
+
 """
     SplineHazardInfo
 
@@ -55,8 +97,10 @@ struct SplineHazardInfo{B<:Union{BSplineBasis, RecombinedBSplineBasis}}
         length(breakpoints) >= 2 || 
             throw(ArgumentError("breakpoints must have at least 2 elements"))
         
-        # Validate S is symmetric
-        norm(S - S') < 1e-10 * norm(S) || 
+        # Validate S is symmetric (handle zero matrix case where norm(S) == 0)
+        norm_S = norm(S)
+        tol = norm_S > 0 ? 1e-10 * norm_S : 1e-15
+        norm(S - S') < tol || 
             throw(ArgumentError("Penalty matrix S must be symmetric"))
         
         new{B}(origin, dest, nbasis, breakpoints, basis, S, penalty_order)

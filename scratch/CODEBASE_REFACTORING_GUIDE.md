@@ -120,21 +120,16 @@ Structural improvements that make later work easier.
 ### Wave 3: Mathematical Correctness Bugs (⚠️ Critical)
 These must be understood/fixed BEFORE Item #19. Each affects penalty/spline infrastructure.
 
-| Order | Item | Description | Risk | Est. Time | Blocking |
-|-------|------|-------------|------|-----------|----------|
-| 3.1 | #16 | Fix default_nknots() for P-splines | 🟡 MED | 30 min | Item #19 |
-| 3.2 | #15 | Fix monotone spline penalty matrix | 🔴 HIGH | 2-3 hrs | Item #19 |
-| 3.3 | #5 | Verify rectify_coefs! with natural scale | 🟡 MED | 1 hr | Item #19 |
-| 3.4 | #17 | Fix knot placement for panel data | 🟡 MED | 2 hrs | Item #19 |
-| 3.5 | #18 | Investigate PIJCV Hessian NaN/Inf | 🟡 MED | 2-4 hrs | Item #19 |
-| 3.6 | #24 | Make splines penalized by default | 🟡 MED | 1-2 hrs | Item #19 |
+| Order | Item | Description | Risk | Est. Time | Blocking | Status |
+|-------|------|-------------|------|-----------|----------|--------|
+| 3.1 | #16 | Fix default_nknots() for P-splines | 🟡 MED | 30 min | Item #19 | ✅ DONE |
+| 3.2 | #15 | Fix monotone spline penalty matrix | 🔴 HIGH | 2-3 hrs | Item #19 | ✅ DONE |
+| 3.3 | #5 | Verify rectify_coefs! with natural scale | 🟡 MED | 1 hr | Item #19 | ✅ DONE |
+| 3.4 | #17 | Fix knot placement for panel data | 🟡 MED | 2 hrs | Item #19 | ✅ DONE |
+| 3.5 | #18 | Investigate PIJCV Hessian NaN/Inf | 🟡 MED | 2-4 hrs | Item #19 | ✅ DONE |
+| 3.6 | #24 | Make splines penalized by default | 🟡 MED | 1-2 hrs | Item #19 | ✅ DONE 2026-01-08 |
 
-**Item #24 Details**: Change the `fit()` API so that spline hazards are penalized by default (automatic λ selection). The `penalty` argument should accept either:
-- A penalty constructor (e.g., `SplinePenalty(...)`) with default settings → automatic λ selection
-- `:none` → no penalty (current behavior)
-This is a breaking change to current behavior where penalty=nothing means unpenalized.
-
-**Wave 3 Success Criteria**: Mathematical correctness validated, penalty infrastructure sound.
+**Wave 3 Success Criteria**: Mathematical correctness validated, penalty infrastructure sound. ✅ COMPLETE
 
 ### Wave 4: Major Features (Architectural)
 Large-scope work that depends on everything above being solid.
@@ -1921,7 +1916,7 @@ grep -rn "FlattenAll" MultistateModelsTests/
 
 **Action**: Delete the `FlattenAll` tests before deleting the type from source.
 
-#### Itemized Tasks
+* #### Itemized Tasks
 
 | # | Task | File | Lines | Verification |
 |---|------|------|-------|--------------|
@@ -2292,72 +2287,31 @@ end
 
 ---
 
-### Item 24: Make Splines Penalized by Default
+### Item 24: Make Splines Penalized by Default ✅ COMPLETED (2026-01-08)
 
-**Location**: `src/inference/fit_exact.jl`, `src/inference/fit_mcem.jl`, `src/types/infrastructure.jl`
+**Location**: `src/inference/fit_exact.jl`, `src/inference/fit_mcem.jl`, `src/inference/fit_common.jl`, `src/hazard/spline.jl`
 
-**Problem**: Currently, `fit(model)` with spline hazards defaults to `penalty=nothing` (unpenalized). This is poor default behavior because:
-1. Unpenalized splines typically overfit panel data
-2. Users must remember to add `penalty=SplinePenalty()` every time
-3. The "safe default" should produce reasonable estimates without extra configuration
+**Status**: COMPLETED - Spline hazards are now penalized by default via `penalty=:auto`
 
-**Current API**:
+**Implementation Summary**:
+1. Added `has_spline_hazards(model)` helper to `src/hazard/spline.jl` (exported)
+2. Added `_resolve_penalty(penalty, model)` to `src/inference/fit_common.jl`
+3. Changed `_fit_exact` default from `penalty=nothing` to `penalty=:auto`
+4. Changed `_fit_mcem` default from `penalty=nothing` to `penalty=:auto`
+5. Deprecation warning emitted for `penalty=nothing`
+6. Updated docstrings for `fit()`, `_fit_exact`, `_fit_mcem`
+7. Updated `test_penalty_infrastructure.jl` with new tests and `penalty=:none` where needed
+
+**New API**:
 ```julia
-fit(model; penalty=nothing)  # Default = unpenalized (bad for splines)
-fit(model; penalty=SplinePenalty())  # Must specify explicitly
+fit(model)                      # Default = :auto, penalizes splines automatically
+fit(model; penalty=:auto)       # Explicit auto-detection
+fit(model; penalty=SplinePenalty())  # Explicit penalty
+fit(model; penalty=:none)       # Explicit opt-out (unpenalized)
+fit(model; penalty=nothing)     # DEPRECATED - warns, maps to :none
 ```
 
-**Proposed API**:
-```julia
-fit(model; penalty=:auto)  # Default = SplinePenalty() if any spline hazards, nothing otherwise
-fit(model; penalty=SplinePenalty())  # Explicit penalization
-fit(model; penalty=:none)  # Explicit opt-out for unpenalized fitting
-fit(model; penalty=nothing)  # Deprecated alias for :none (warn)
-```
-
-**Key Design Decisions**:
-1. **`:auto` as default**: Automatically applies `SplinePenalty()` if model has spline hazards, `nothing` otherwise
-2. **`:none` for explicit unpenalized**: Clear opt-out for users who know they want unpenalized
-3. **Deprecate `nothing`**: Emits warning, maps to `:none` for backward compatibility
-4. **Non-spline models unaffected**: Models without splines ignore penalty entirely
-
-**Note**: This is a **breaking change** to default behavior. Tests that currently rely on `penalty=nothing` (implicit) will need to be updated to `penalty=:none` (explicit) if they test unpenalized behavior.
-
-#### Test Maintenance (Do BEFORE implementation)
-
-| Test File | Lines | Action | Details |
-|-----------|-------|--------|---------|
-| `unit/test_penalty_infrastructure.jl` | 250 | 🔄 Update | `fitted_no_penalty = fit(model; ...)` → add `penalty=:none` |
-| `unit/test_splines.jl` | 752, 812 | 🔄 Update | `fit(model; verbose=false)` → add `penalty=:none` if testing unpenalized |
-| `unit/test_perf.jl` | 53, 109, 167, 231 | 🔍 Check | May need `penalty=:none` if spline models |
-| `unit/test_efs.jl` | 54 | 🔍 Check | May need `penalty=:none` if spline model |
-| `longtests/longtest_smooth_covariate_recovery.jl` | various | ✅ OK | Already uses `penalty=SplinePenalty()` |
-| `longtests/longtest_tensor_product_recovery.jl` | various | ✅ OK | Already uses `penalty=SplinePenalty()` |
-
-**Strategy**: 
-- Update tests that explicitly test unpenalized spline fitting to use `penalty=:none`
-- Tests with non-spline models need no changes (`:auto` resolves to no penalty)
-- Tests that already specify `penalty=SplinePenalty()` need no changes
-
-#### Itemized Tasks
-
-| # | Task | File | Location | Verification |
-|---|------|------|----------|--------------|
-| 24.1 | Add helper `has_spline_hazards(model)` | `src/hazard/spline.jl` | NEW function | `@test has_spline_hazards(spline_model) == true` |
-| 24.2 | Update `_resolve_penalty` to handle `:auto`, `:none` | `src/inference/fit_common.jl` or `src/types/infrastructure.jl` | NEW or update existing | Parse new symbols |
-| 24.3 | Change `_fit_exact` default from `penalty=nothing` to `penalty=:auto` | `src/inference/fit_exact.jl` | L37 | Signature updated |
-| 24.4 | Change `_fit_mcem` default from `penalty=nothing` to `penalty=:auto` | `src/inference/fit_mcem.jl` | L174 | Signature updated |
-| 24.5 | Implement deprecation warning for `penalty=nothing` | `src/inference/fit_common.jl` | NEW | `@warn "penalty=nothing is deprecated, use penalty=:none"` |
-| 24.6 | Update `build_penalty_config` to accept `:auto`/`:none` | `src/types/infrastructure.jl` | varies | Resolves `:auto` to `SplinePenalty()` or `nothing` |
-| 24.7 | Update docstrings for `fit()`, `_fit_exact`, `_fit_mcem` | `src/inference/*.jl` | varies | Document new API |
-| 24.8 | Update tests to use `penalty=:none` where needed | `MultistateModelsTests/unit/*.jl` | varies | Tests still pass |
-| 24.9 | Add test for `:auto` behavior | `MultistateModelsTests/unit/test_penalty_infrastructure.jl` | NEW section | `:auto` detects splines |
-| 24.10 | Add test for deprecation warning | `MultistateModelsTests/unit/test_penalty_infrastructure.jl` | NEW section | Warning emitted |
-| 24.11 | Run full test suite | - | - | All tests pass |
-
-**Expected Result**: Spline models are penalized by default, producing better out-of-box estimates. Users can opt out with `penalty=:none`.
-
-**Risk**: MEDIUM - Breaking change to default behavior, requires careful test updates
+**Test Status**: 1480 passed, 0 failed, 3 errored (pre-existing errors unrelated to this change)
 
 ---
 

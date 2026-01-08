@@ -23,9 +23,11 @@ This is called by `fit()` when `is_panel_data(model) == false`.
 
 # Keyword Arguments
 - `penalty`: Penalty specification for spline hazards. Can be:
-  - `nothing` (default): No penalty
+  - `:auto` (default): Apply `SplinePenalty()` if model has spline hazards, `nothing` otherwise
+  - `:none`: Explicit opt-out for unpenalized fitting
   - `SplinePenalty()`: Curvature penalty on all spline hazards
   - `Vector{SplinePenalty}`: Multiple rules resolved by specificity
+  - `nothing`: DEPRECATED - use `:none` instead
 - `lambda_init::Float64=1.0`: Initial smoothing parameter value
 
 See also: [`SplinePenalty`](@ref), [`build_penalty_config`](@ref)
@@ -35,7 +37,10 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
              parallel = false, nthreads = nothing,
              compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, 
              compute_jk_vcov = false, loo_method = :direct,
-             penalty = nothing, lambda_init::Float64 = 1.0, kwargs...)
+             penalty = :auto, lambda_init::Float64 = 1.0, kwargs...)
+
+    # Resolve penalty specification (handles :auto, :none, deprecation warning)
+    resolved_penalty = _resolve_penalty(penalty, model)
 
     # initialize array of sample paths
     samplepaths = extract_paths(model)
@@ -58,8 +63,8 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         println("Using $(threading_config.nthreads) threads for likelihood evaluation ($(n_paths) paths)")
     end
 
-    # Build penalty configuration if specified
-    penalty_config = build_penalty_config(model, penalty; lambda_init=lambda_init)
+    # Build penalty configuration from resolved penalty
+    penalty_config = build_penalty_config(model, resolved_penalty; lambda_init=lambda_init)
     use_penalty = has_penalties(penalty_config)
     
     if use_penalty && verbose
