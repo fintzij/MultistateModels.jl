@@ -794,7 +794,16 @@ function _solve_loo_newton_step(chol_H::Cholesky, H_i::Matrix{Float64}, g_i::Abs
     
     # Validate Hessian before eigendecomposition
     if !all(isfinite.(H_i))
-        @warn "Subject Hessian contains NaN/Inf values, falling back to direct solve" maxlog=5
+        # Provide diagnostic information about the non-finite values
+        nan_count = count(isnan, H_i)
+        inf_count = count(isinf, H_i)
+        nan_rows = unique(findall(isnan, H_i) .|> x -> x[1])
+        @warn "Subject Hessian contains non-finite values ($(nan_count) NaN, $(inf_count) Inf). " *
+              "This typically indicates:\n" *
+              "  1. Zero/negative hazard values (check parameter bounds)\n" *
+              "  2. Spline evaluation outside knot range\n" *
+              "  3. Extreme parameter values during optimization\n" *
+              "Affected parameter indices: $(nan_rows)" maxlog=3
         return nothing
     end
     
@@ -2013,17 +2022,36 @@ function compute_edf(beta::Vector{Float64}, lambda::Vector{Float64},
     samplepaths = extract_paths(model)
     subject_hessians_ll = compute_subject_hessians_fast(beta, model, samplepaths)
     
+    # Validate subject Hessians for NaN/Inf
+    nan_subjects = findall(H -> any(!isfinite, H), subject_hessians_ll)
+    if !isempty(nan_subjects)
+        @warn "$(length(nan_subjects)) subject Hessians contain NaN/Inf values. " *
+              "Check for extreme parameter values or zero hazards. " *
+              "Affected subjects: $(first(nan_subjects, 5))..." maxlog=3
+    end
+    
     # Aggregate to full Hessian (negative because we want Fisher information)
     H_unpenalized = -sum(subject_hessians_ll)
     
     # Build penalized Hessian (penalty is quadratic: λ βᵀSβ)
     H_lambda = _build_penalized_hessian(H_unpenalized, lambda, penalty_config; beta=beta)
     
+    # Validate penalized Hessian
+    if !all(isfinite.(H_lambda))
+        nan_count = count(isnan, H_lambda)
+        inf_count = count(isinf, H_lambda)
+        @warn "Penalized Hessian contains non-finite values ($(nan_count) NaN, $(inf_count) Inf). " *
+              "Returning NaN EDFs."
+        n_terms = length(penalty_config.terms) + length(penalty_config.smooth_covariate_terms)
+        return (total = NaN, per_term = fill(NaN, n_terms))
+    end
+    
     # Invert penalized Hessian
     H_lambda_inv = try
         inv(Symmetric(H_lambda))
     catch e
-        @warn "Failed to invert penalized Hessian for EDF computation: $e"
+        @warn "Failed to invert penalized Hessian for EDF computation: $e. " *
+              "Matrix may be singular or ill-conditioned. cond(H) = $(cond(H_lambda))"
         n_terms = length(penalty_config.terms) + length(penalty_config.smooth_covariate_terms)
         return (total = NaN, per_term = fill(NaN, n_terms))
     end

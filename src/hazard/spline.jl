@@ -247,15 +247,29 @@ penalized likelihood evaluation.
 
 # Returns
 - `SplineHazardInfo`: Struct containing penalty matrix and basis information
+
+# Notes
+For monotone splines (hazard.monotone ≠ 0), the penalty matrix is automatically
+transformed from B-spline coefficient space to I-spline parameter space using
+`transform_penalty_for_monotone`. This ensures the penalty correctly penalizes
+the curvature of the underlying function, not the raw optimization parameters.
 """
 function build_spline_hazard_info(hazard::RuntimeSplineHazard; penalty_order::Int=2)
     # Rebuild basis from hazard (same logic as _rebuild_spline_basis)
     basis = _rebuild_spline_basis(hazard)
     
-    # Build penalty matrix
+    # Build penalty matrix for B-spline coefficients
     # NOTE: Don't pass hazard.knots - it contains simple breakpoints, not the full
     # clamped knot vector. Let build_penalty_matrix extract knots from the basis.
-    S = build_penalty_matrix(basis, penalty_order)
+    S_bspline = build_penalty_matrix(basis, penalty_order)
+    
+    # For monotone splines, transform penalty to I-spline parameter space
+    # P(ests) = (λ/2) ests' (L' S L) ests where coefs = L * ests
+    if hazard.monotone != 0
+        S = transform_penalty_for_monotone(S_bspline, basis; direction=hazard.monotone)
+    else
+        S = S_bspline
+    end
     
     return SplineHazardInfo(
         hazard.statefrom,
@@ -413,18 +427,59 @@ end
 """
     default_nknots(n_observations::Integer)
 
-Uses floor(n^(1/5)) for sieve estimation. For typical survival data sizes:
+Uses floor(n^(1/5)) for sieve estimation (unpenalized splines).
+
+For typical survival data sizes:
 - n = 100: 2-3 knots
 - n = 500: 3-4 knots  
 - n = 1000: 4 knots
 - n = 10000: 6 knots
 
 For small samples, returns at least 2 knots for flexibility.
+
+**Note**: This formula is appropriate for **unpenalized** (regression) splines
+where the number of knots controls model complexity. For penalized splines,
+use `default_nknots_penalized()` instead.
+
 survextrap uses a fixed 10 knots by default.
+
+See also: [`default_nknots_penalized`](@ref)
 """
 function default_nknots(n_observations::Integer)
     n_observations <= 0 && return 0
     return max(2, floor(Int, n_observations^(1/5)))
+end
+
+"""
+    default_nknots_penalized(n_observations::Integer)
+
+Default number of interior knots for penalized (P-spline) estimation.
+
+Uses floor(n^(1/3)) following recommendations in the smoothing literature.
+For penalized splines, the penalty controls overfitting, so more knots are 
+acceptable (and often desirable) for flexibility. The key is having enough 
+knots to capture the underlying shape—the penalty prevents overfitting.
+
+For typical survival data sizes:
+- n = 100: 4 knots
+- n = 500: 7 knots
+- n = 1000: 10 knots
+- n = 10000: 21 knots
+
+Bounded to [4, 40] knots: at least 4 for flexibility, at most 40 to avoid
+computational overhead.
+
+# References
+- Ruppert, D. (2002). "Selecting the number of knots for penalized splines."
+  JCGS 11(4), 735-757.
+- Wood, S.N. (2017). "Generalized Additive Models: An Introduction with R."
+  2nd ed. Chapman & Hall/CRC, Chapter 5.
+
+See also: [`default_nknots`](@ref)
+"""
+function default_nknots_penalized(n_observations::Integer)
+    n_observations <= 0 && return 0
+    return clamp(floor(Int, n_observations^(1/3)), 4, 40)
 end
 
 # =============================================================================
@@ -971,41 +1026,48 @@ Pass model estimates through spline coefficient transformations to remove numeri
 For spline hazards, the I-spline transformation can accumulate numerical errors
 during optimization. This function applies a round-trip transformation
 (ests → coefs → ests) with zero-clamping to clean up near-zero values.
+
+# Note
+All parameters are stored on **natural scale** (v0.3.0+). Box constraints enforce
+positivity where needed (e.g., spline coefficients ≥ 0). No log/exp transforms are
+applied during the round-trip; the transformation is purely for numerical cleanup
+of accumulated floating-point errors.
+
+# AD Compatibility
+This function is called **post-optimization only** and is never in the AD-traced path.
+The likelihood functions (`loglik_exact`, `loglik_path`, etc.) that ARE differentiated
+during optimization are fully AD-compatible with both forward and reverse modes.
+
+# Arguments
+- `ests::AbstractVector`: Flat parameter vector (natural scale) to be modified in-place
+- `model::MultistateProcess`: The multistate model containing hazard definitions
+
+# See Also
+- [`_spline_ests2coefs`](@ref): Transform estimates to B-spline coefficients
+- [`_spline_coefs2ests`](@ref): Transform B-spline coefficients back to estimates
 """
 function rectify_coefs!(ests, model)
-    nested = unflatten(model.parameters.reconstructor, ests)
-
-    # Get hazard names in sorted order
-    haznames_sorted = [hazname for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])]
+    offset = 0
     
-    # Process each hazard
-    for (i, hazname) in enumerate(haznames_sorted)
-        haz = model.hazards[i]
-        if isa(haz, RuntimeSplineHazard)
-            # New functional design - use basis stored in the hazard functions
-            # We need to rebuild the basis from the knots
+    for haz in model.hazards
+        if haz isa RuntimeSplineHazard
             nbasis = haz.npar_baseline
             basis = _rebuild_spline_basis(haz)
             
-            # Extract baseline parameters from nested structure
-            hazard_params = nested[hazname]
-            baseline_values = collect(values(hazard_params.baseline))
+            # Extract baseline parameters directly from flat vector
+            baseline_view = @view ests[offset+1:offset+nbasis]
             
-            # Round-trip transformation to clean up numerical zeros
-            coefs = _spline_ests2coefs(baseline_values, basis, haz.monotone)
+            # Round-trip: ests → coefs → ests with zero-clamping
+            coefs = _spline_ests2coefs(baseline_view, basis, haz.monotone)
+            rectified = _spline_coefs2ests(coefs, basis, haz.monotone; clamp_zeros=true)
             
-            # Clamp numerical zeros in coefficients
-            coefs[findall(isapprox.(coefs, 0.0; atol = sqrt(eps())))] .= zero(eltype(coefs))
-            
-            # Transform back
-            rectified_baseline = _spline_coefs2ests(coefs, basis, haz.monotone; clamp_zeros=true)
-            
-            # Update ests vector directly (need to find position in flat vector)
-            # Compute offset for this hazard's parameters in flat vector
-            offset = sum(model.hazards[j].npar_total for j in 1:(i-1); init=0)
-            ests[offset+1:offset+nbasis] .= rectified_baseline
+            # Update in-place
+            baseline_view .= rectified
         end
+        offset += haz.npar_total
     end
+    
+    return nothing
 end
 
 """

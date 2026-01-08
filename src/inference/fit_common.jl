@@ -30,6 +30,9 @@ automatically selected based on the model's data type and hazard structure:
 - `constraints`: parameter constraints (see Constraints documentation)
 - `verbose::Bool=true`: print optimization/convergence messages
 - `solver`: optimization solver (default: Ipopt)
+- `adtype`: AD backend for gradients/Hessians (default: `:auto` selects based on solver).
+  Use `Optimization.AutoForwardDiff()` for small models (<100 params),
+  `Optimization.AutoReverseDiff()` or `Optimization.AutoZygote()` for large models.
 - `compute_vcov::Bool=true`: compute model-based variance-covariance matrix
 - `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse
 - `compute_ij_vcov::Bool=true`: compute infinitesimal jackknife (sandwich) variance
@@ -150,6 +153,46 @@ function _solve_optimization(prob, solver; ipopt_options...)
     else
         # Optim.jl and other solvers don't support Ipopt options
         return solve(prob, _solver)
+    end
+end
+
+"""
+    _resolve_adtype(adtype, solver)
+
+Resolve the AD backend based on user specification and solver requirements.
+
+# Arguments
+- `adtype`: User specification - `:auto`, an ADType, or `nothing`
+- `solver`: Optimization solver
+
+# Returns
+- ADType suitable for the solver
+
+# Behavior
+- `:auto` (default): Uses ForwardDiff with SecondOrder for Newton/Ipopt solvers
+- Explicit ADType: Used as-is (user takes responsibility for Hessian support)
+- For reverse-mode AD with Ipopt, consider using a gradient-only method or
+  providing Hessian approximation via `Optimization.AutoForwardDiff()` for Hessian.
+
+# Future: For large models (>100 params), use:
+```julia
+fit(model; adtype=Optimization.AutoReverseDiff())  # or AutoZygote()
+```
+"""
+function _resolve_adtype(adtype, solver)
+    if adtype === :auto
+        # Default behavior: ForwardDiff, with SecondOrder for solvers that need Hessians
+        base_ad = Optimization.AutoForwardDiff()
+        if isnothing(solver) || solver isa IpoptOptimizer || 
+           (isdefined(Optim, :Newton) && solver isa Optim.Newton) ||
+           (isdefined(Optim, :NewtonTrustRegion) && solver isa Optim.NewtonTrustRegion)
+            return DifferentiationInterface.SecondOrder(base_ad, base_ad)
+        else
+            return base_ad
+        end
+    else
+        # User-specified ADType - use as-is
+        return adtype
     end
 end
 

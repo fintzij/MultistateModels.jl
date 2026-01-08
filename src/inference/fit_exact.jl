@@ -30,7 +30,8 @@ This is called by `fit()` when `is_panel_data(model) == false`.
 
 See also: [`SplinePenalty`](@ref), [`build_penalty_config`](@ref)
 """
-function _fit_exact(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing, 
+function _fit_exact(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing,
+             adtype = :auto,
              parallel = false, nthreads = nothing,
              compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, 
              compute_jk_vcov = false, loo_method = :direct,
@@ -91,13 +92,10 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         end
         
         # get estimates - use Ipopt for box-constrained optimization
-        # Use SecondOrder AD if solver requires it (Newton, Ipopt) to avoid warnings
-        adtype = Optimization.AutoForwardDiff()
-        if isnothing(solver) || (solver isa Optim.Newton) || (solver isa Optim.NewtonTrustRegion) || (solver isa IpoptOptimizer)
-            adtype = DifferentiationInterface.SecondOrder(Optimization.AutoForwardDiff(), Optimization.AutoForwardDiff())
-        end
+        # Resolve AD backend: :auto selects based on solver requirements
+        resolved_adtype = _resolve_adtype(adtype, solver)
 
-        optf = OptimizationFunction(loglik_fn, adtype)
+        optf = OptimizationFunction(loglik_fn, resolved_adtype)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths); lb=lb, ub=ub)
 
         # solve with user-specified solver or default Ipopt
@@ -157,13 +155,10 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             end
         end
 
-        # Use SecondOrder AD if solver requires it
-        adtype = Optimization.AutoForwardDiff()
-        if isnothing(solver) || (solver isa Optim.Newton) || (solver isa Optim.NewtonTrustRegion) || (solver isa IpoptOptimizer)
-            adtype = DifferentiationInterface.SecondOrder(Optimization.AutoForwardDiff(), Optimization.AutoForwardDiff())
-        end
+        # Resolve AD backend
+        resolved_adtype = _resolve_adtype(adtype, solver)
 
-        optf = OptimizationFunction(loglik_fn, adtype, cons = consfun_multistate)
+        optf = OptimizationFunction(loglik_fn, resolved_adtype, cons = consfun_multistate)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths); lb=lb, ub=ub, lcons = constraints.lcons, ucons = constraints.ucons)
         
         # solve with user-specified solver or default Ipopt

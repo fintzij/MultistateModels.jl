@@ -25,6 +25,18 @@ function _build_spline_hazard(ctx::HazardBuildContext)
     hazard = ctx.hazard::SplineHazard
     data = ctx.data
     
+    # Check for panel data with automatic knots
+    # Panel data (obstype=2) has observation times, not exact transition times.
+    # Using observation intervals for knot placement may be misleading.
+    has_panel_data = any(data.obstype .== 2)
+    using_auto_knots = hazard.knots === nothing
+    if has_panel_data && using_auto_knots
+        @warn "Automatic knot placement with panel data uses observation intervals, not true " *
+              "transition times. For better knot placement, consider:\n" *
+              "  1. Specify knots explicitly: Hazard(...; knots=[0.2, 0.5, 0.8])\n" *
+              "  2. Call calibrate_splines!(model) after model creation to use surrogate simulation"
+    end
+    
     # Covariate parameter names (if any)
     covar_pars = _semimarkov_covariate_parnames(ctx)
     covar_names = Symbol.(_covariate_labels(ctx.rhs_names))

@@ -514,3 +514,142 @@ function build_tensor_penalty_matrix(Sx::Matrix{Float64}, Sy::Matrix{Float64})
     
     return S_te
 end
+# =============================================================================
+# Monotone Spline Penalty Transformation
+# =============================================================================
+
+"""
+    build_ispline_transform_matrix(basis; direction::Int=1) -> Matrix{Float64}
+
+Build the transformation matrix L for I-spline (monotone) parameterization.
+
+For monotone splines, parameters are non-negative increments (`ests`) that are
+transformed to B-spline coefficients (`coefs`) via:
+    coefs = L * ests
+
+where L encodes the cumulative sum transformation with knot-spacing weights.
+
+# Arguments
+- `basis`: BSplineKit basis object
+- `direction::Int=1`: Direction of monotonicity (+1 for increasing, -1 for decreasing)
+
+# Returns
+- `L`: Transformation matrix (K × K) where K is the number of basis functions
+
+# Details
+The transformation in _spline_ests2coefs is:
+1. Start with coefs = 0
+2. For i = 2, ..., K: coefs[i] = coefs[i-1] + ests[i] * w[i]
+   where w[i] = (t[i+k] - t[i]) / k
+3. Add intercept: coefs .+= ests[1]
+
+This means:
+- coefs[1] = ests[1] + 0 = ests[1]
+- coefs[i] = ests[1] + Σⱼ₌₂ⁱ ests[j] * w[j] for i ≥ 2
+
+So L has the structure:
+- L[i,1] = 1 for all i (intercept contributes everywhere)
+- L[i,j] = w[j] for 2 ≤ j ≤ i (cumulative weighted sum)
+
+For decreasing monotonicity (direction=-1), the output is reversed.
+
+# Mathematical Background
+The I-spline transformation ensures that when the parameters (ests) are constrained
+to be non-negative (via box constraints), the resulting B-spline has non-negative
+derivatives, producing a monotone function.
+
+The penalty on B-spline coefficients P(coefs) = (λ/2) coefs' S coefs must be
+transformed to parameter space:
+    P(ests) = (λ/2) (L * ests)' S (L * ests) = (λ/2) ests' (L' S L) ests
+
+Use `transform_penalty_for_monotone` to apply this transformation.
+
+# References
+- Ramsay, J.O. (1988). "Monotone Regression Splines in Action."
+  Statistical Science 3(4), 425-441.
+
+See also: [`transform_penalty_for_monotone`](@ref), [`_spline_ests2coefs`](@ref)
+"""
+function build_ispline_transform_matrix(basis; direction::Int=1)
+    direction ∈ [-1, 1] || throw(ArgumentError("direction must be ±1, got $direction"))
+    
+    k = BSplineKit.order(basis)
+    t = collect(BSplineKit.knots(basis))
+    K = length(basis)  # Number of basis functions
+    
+    # Build transformation matrix L matching _spline_ests2coefs
+    # coefs[1] = ests[1]
+    # coefs[i] = ests[1] + Σⱼ₌₂ⁱ ests[j] * w[j] for i ≥ 2
+    L = zeros(K, K)
+    
+    # First column: intercept contributes to all coefficients
+    L[:, 1] .= 1.0
+    
+    # Compute weights w[j] = (t[j+k] - t[j]) / k for j = 2, ..., K
+    # Then L[i,j] = w[j] for j ≤ i
+    for j in 2:K
+        w_j = (t[j + k] - t[j]) / k
+        # This weight contributes to coefs[j], coefs[j+1], ..., coefs[K]
+        for i in j:K
+            L[i, j] = w_j
+        end
+    end
+    
+    # For decreasing monotonicity, we need to account for the reverse operation
+    # In _spline_ests2coefs with monotone=-1, we compute increasing then reverse!(coefs)
+    # This reverses only the output, not the input
+    # So L_dec = P * L_inc where P is the permutation matrix that reverses rows
+    if direction == -1
+        # Reverse rows only (output reversal)
+        L = L[K:-1:1, :]
+    end
+    
+    return L
+end
+
+"""
+    transform_penalty_for_monotone(S::Matrix{Float64}, basis; direction::Int=1) -> Matrix{Float64}
+
+Transform a B-spline penalty matrix for use with monotone (I-spline) parameterization.
+
+For monotone splines, the optimization parameters are I-spline increments (`ests`),
+not B-spline coefficients (`coefs`). The relationship is:
+    coefs = L * ests
+
+where L is the I-spline transformation matrix.
+
+The penalty P(β) = (λ/2) β'Sβ on B-spline coefficients must be transformed:
+    P(ests) = (λ/2) (L * ests)' S (L * ests) = (λ/2) ests' (L' S L) ests
+
+This function computes S_monotone = L' * S * L.
+
+# Arguments
+- `S`: Penalty matrix for B-spline coefficients (K × K)
+- `basis`: BSplineKit basis object used to build L
+- `direction::Int=1`: Monotonicity direction (+1 increasing, -1 decreasing)
+
+# Returns
+- `S_monotone`: Transformed penalty matrix for monotone parameters (K × K)
+
+# Notes
+This transformation is **required** for correct penalized fitting of monotone splines.
+Without it, the penalty acts on the wrong parameter space, leading to incorrect
+smoothing behavior.
+
+The transformed matrix S_monotone inherits the positive semi-definiteness of S,
+but may have additional null space dimensions due to the structure of L (particularly
+for boundary basis functions with zero knot-spacing weights).
+
+# Example
+```julia
+basis = BSplineBasis(4, [0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0])
+S_bspline = build_penalty_matrix(basis, 2)  # Penalty for B-spline coefs
+S_monotone = transform_penalty_for_monotone(S_bspline, basis)  # Penalty for I-spline ests
+```
+
+See also: [`build_ispline_transform_matrix`](@ref), [`build_penalty_matrix`](@ref)
+"""
+function transform_penalty_for_monotone(S::Matrix{Float64}, basis; direction::Int=1)
+    L = build_ispline_transform_matrix(basis; direction=direction)
+    return L' * S * L
+end
