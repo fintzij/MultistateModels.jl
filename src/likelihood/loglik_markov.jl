@@ -80,15 +80,6 @@ function loglik_AD(parameters, data::ExactDataAD; neg = true)
     # snag the hazards
     hazards = data.model.hazards
 
-    # Remake spline parameters if needed
-    # Note: For RuntimeSplineHazard, remake_splines! is a no-op
-    for i in eachindex(hazards)
-        if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], nothing)
-            set_riskperiod!(hazards[i])
-        end
-    end
-
     # send each element of samplepaths to loglik
     # Convert SamplePath to DataFrame using make_subjdat
     path = data.path[1]
@@ -171,7 +162,7 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
     # Check if we can use pre-computed hazard rates (Markov models only)
     # For Markov hazards, rates are time-invariant and can be computed once per likelihood call
     # But interaction terms (e.g., trt * age) can't be pre-cached, so check validity
-    is_markov = data.model isa MultistateMarkovProcess
+    is_markov = data.model isa MultistateProcess
     can_use_rate_cache = is_markov && T === Float64 && 
                          !isempty(data.cache.hazard_rates_cache) &&
                          _covars_cache_valid(data.cache.covars_cache, data.model.hazards)

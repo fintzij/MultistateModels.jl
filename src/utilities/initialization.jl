@@ -40,16 +40,6 @@ function set_crude_init!(model::MultistateProcess; constraints = nothing)
         set_par_to = init_par(i, crude_par[i.statefrom, i.stateto])
         set_parameters!(model, NamedTuple{(i.hazname,)}((set_par_to,)))
     end
-
-    for i in eachindex(model.hazards)
-        if isa(model.hazards[i], _SplineHazard)
-            # v0.3.0+: Parameters are already on natural scale
-            # remake_splines! is a no-op for RuntimeSplineHazard
-            params = get_estimation_scale_params(model.parameters)
-            remake_splines!(model.hazards[i], params[i])
-            set_riskperiod!(model.hazards[i])
-        end
-    end
     
     # Check constraints if provided
     if !isnothing(constraints)
@@ -317,13 +307,6 @@ function _init_from_surrogate_rates!(model::MultistateProcess;
         end
         
         set_parameters!(model, NamedTuple{(hazname,)}((set_par_to,)))
-
-        if isa(hazard, _SplineHazard)
-            # v0.3.0+: Parameters are already on natural scale
-            params = get_estimation_scale_params(model.parameters)
-            remake_splines!(hazard, params[i])
-            set_riskperiod!(hazard)
-        end
     end
 end
 
@@ -351,7 +334,7 @@ Unlike MCEM, initialization does not use importance weights. We simply draw path
 from the surrogate and fit to those paths with uniform weights. The importance 
 weights from draw_paths are computed but ignored for initialization.
 """
-function _init_from_surrogate_paths!(model::MultistateSemiMarkovProcess,
+function _init_from_surrogate_paths!(model::MultistateProcess,
                                       npaths::Int;
                                       constraints = nothing,
                                       surrogate_constraints = nothing)
@@ -500,7 +483,7 @@ function initialize_parameters!(model::MultistateProcess;
         # 1. Must have semi-Markov hazards
         # 2. Must be a model type that has panel/censored observations (not exact data)
         supports_surrogate = _is_semimarkov(model) && 
-                             isa(model, MultistateSemiMarkovProcess)
+                             isa(model, MultistateProcess)
         
         if !supports_surrogate
             if !_is_semimarkov(model)

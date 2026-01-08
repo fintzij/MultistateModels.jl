@@ -215,10 +215,6 @@ function fit_penalized_beta(model::MultistateProcess, data::ExactData,
     return sol.u
 end
 
-# NOTE: optimize_lambda() function was deleted on 2025-01-05 as part of dead code cleanup.
-# It was only called by _select_smoothing_parameters_legacy() which is also deleted.
-# The current approach uses grid search with profile optimization instead of alternating optimization.
-
 """
     extract_lambda_vector(config::PenaltyConfig) -> Vector{Float64}
 
@@ -1673,11 +1669,6 @@ function _select_lambda_grid_search(model, data, scoped_config, beta_init, metho
     )
 end
 
-# NOTE: _select_smoothing_parameters_legacy() function was deleted on 2025-01-05 as part of dead code cleanup.
-# The legacy alternating optimization approach failed because at any fixed β, V(λ) is 
-# monotonically decreasing with λ, causing the optimizer to always select λ → ∞.
-# The current approach uses grid search with profile optimization: V(λ, β(λ)) where β is re-fitted at each λ.
-
 """
     compute_perf_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
 
@@ -1876,10 +1867,6 @@ function compute_efs_criterion(log_lambda::AbstractVector{T}, state::SmoothingSe
     # Return negative for minimization
     return -reml
 end
-
-# NOTE: compute_efs_update() function was deleted on 2025-01-05 as part of dead code cleanup.
-# It was designed for iterative EFS updates within alternating optimization, but was never called.
-# The EFS criterion (compute_efs_criterion) is still available for grid search λ selection.
 
 """
     _update_penalty_lambda(config::PenaltyConfig, lambda::Vector{Float64}) -> PenaltyConfig

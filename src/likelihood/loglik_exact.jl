@@ -347,18 +347,6 @@ function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=fals
     n_hazards = length(hazards)
     n_paths = length(data.paths)
     
-    # Remake spline parameters if needed
-    # Note: For RuntimeSplineHazard (the current implementation), remake_splines! is a no-op
-    # since splines are constructed on-the-fly during evaluation. We still call it for 
-    # future-proofing if other spline implementations need parameter updates.
-    for i in eachindex(hazards)
-        if isa(hazards[i], _SplineHazard)
-            # RuntimeSplineHazard.remake_splines! is a no-op, but call for extensibility
-            remake_splines!(hazards[i], nothing)
-            set_riskperiod!(hazards[i])
-        end
-    end
-    
     # Build subject covariate cache (this is type-stable, no parameters involved)
     subject_covars = build_subject_covar_cache(data.model)
     
@@ -445,18 +433,6 @@ This function is the core likelihood computation shared by `loglik_exact` and `l
 It uses a path-centric approach that iterates over sojourn intervals in a sample path, 
 accumulating log-survival contributions (via `eval_cumhaz`) and transition hazard 
 contributions (via `eval_hazard`).
-
-# Neural ODE Extension Point
-The `eval_cumhaz` invocations are the extension points for neural ODE-based hazards.
-When `is_separable(hazard) == false` for an ODE-based hazard, `eval_cumhaz` should be 
-extended to invoke a numerical ODE solver (e.g., DifferentialEquations.jl) to compute 
-the cumulative hazard as an integral: Λ(t₀, t₁) = ∫_{t₀}^{t₁} λ(s) ds.
-
-For reverse-mode AD compatibility with neural ODEs:
-- Use SciMLSensitivity.jl adjoints (BacksolveAdjoint, QuadratureAdjoint)
-- Ensure the hazard's metadata declares supported adjoint methods
-- The functional accumulation style in this function avoids in-place mutation 
-  required for Zygote/Enzyme compatibility
 
 See also: `loglik_exact`, `loglik_semi_markov`, `eval_cumhaz`
 """

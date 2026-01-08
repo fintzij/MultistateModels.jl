@@ -103,7 +103,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         # solve with user-specified solver or default Ipopt
         sol = _solve_optimization(prob, solver)
 
-        # rectify spline coefs
+        # rectify spline coefs - CHECK THIS!!!!
         if any(isa.(model.hazards, _SplineHazard))
             rectify_coefs!(sol.u, model)
         end
@@ -258,14 +258,6 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall,
         model.phasetype_expansion)
-
-    # remake splines and calculate risk periods using log-scale parameters
-    for i in eachindex(model_fitted.hazards)
-        if isa(model_fitted.hazards[i], _SplineHazard)
-            remake_splines!(model_fitted.hazards[i], log_scale_params[i])
-            set_riskperiod!(model_fitted.hazards[i])
-        end
-    end
 
     # return fitted object
     return model_fitted;

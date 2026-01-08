@@ -983,15 +983,6 @@ end
 ### Data Structures
 
 ```julia
-# Batched ODE data for vectorized likelihood
-struct BatchedODEData
-    intervals::Vector{Tuple{Float64,Float64}}
-    statefrom::Vector{Int}
-    stateto::Vector{Int}
-    path_indices::Vector{Int}
-    # ...
-end
-
 struct StackedHazardData
     hazard_idx::Int
     intervals::Vector{Tuple{Float64,Float64}}
@@ -1116,7 +1107,6 @@ loglik_path(pars_nested, subjdat_df, hazards, totalhazards, tmat)
 # Caching
 cache_path_data(paths, model) -> Vector{CachedPathData}
 stack_intervals_for_hazard(hazard_idx, cached_paths, ...) -> StackedHazardData
-to_batched_ode_data(sd::StackedHazardData; use_views=false) -> BatchedODEData
 ```
 
 ### Model Output

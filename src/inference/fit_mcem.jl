@@ -64,7 +64,7 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
 # Arguments
 
 **Model and constraints:**
-- `model::MultistateSemiMarkovProcess`: semi-Markov model
+- `model::MultistateProcess`: semi-Markov model
 - `constraints`: parameter constraints tuple
 
 **Optimization:**
@@ -401,7 +401,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     emat_ph = nothing
     
     if use_phasetype
-        phasetype_surrogate = fit_phasetype_surrogate(model, markov_surrogate; 
+        phasetype_surrogate = _build_phasetype_from_markov(model, markov_surrogate; 
                                                        config=proposal_config, verbose=verbose)
     end
     
@@ -1307,14 +1307,6 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         ProposedPaths,
         model.modelcall,
         model.phasetype_expansion)
-
-    # remake splines and calculate risk periods using log-scale parameters
-    for i in eachindex(model_fitted.hazards)
-        if isa(model_fitted.hazards[i], _SplineHazard)
-            remake_splines!(model_fitted.hazards[i], log_scale_params[i])
-            set_riskperiod!(model_fitted.hazards[i])
-        end
-    end
 
     # return fitted object
     return model_fitted;

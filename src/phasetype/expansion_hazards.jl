@@ -143,7 +143,7 @@ function _build_progression_hazard(observed_state::Int, phase_index::Int, n_phas
     from_letter = _phase_index_to_letter(phase_index)
     to_letter = _phase_index_to_letter(phase_index + 1)
     hazname = Symbol("h$(observed_state)_$(from_letter)$(to_letter)")
-    parname = Symbol("$(hazname)_Rate")
+    parname = Symbol("$(hazname)_rate")
     
     # Simple exponential hazard function (no covariates)
     # pars is a NamedTuple with baseline on NATURAL scale (no exp needed)
@@ -193,7 +193,7 @@ function _build_exit_hazard(pt_spec::PhaseTypeHazard,
     # Parameter name using letter convention: h12_a, h12_b, etc.
     phase_letter = _phase_index_to_letter(phase_index)
     hazname = Symbol("h$(observed_from)$(observed_to)_$(phase_letter)")
-    baseline_parname = Symbol("$(hazname)_Rate")
+    baseline_parname = Symbol("$(hazname)_rate")
     
     # Get covariate info from original specification
     schema = StatsModels.schema(pt_spec.hazard, data)

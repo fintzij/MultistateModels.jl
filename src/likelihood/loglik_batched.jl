@@ -3,76 +3,12 @@
 # =============================================================================
 #
 # Contents:
-# - Separability traits for hazard functions
-# - StackedHazardData: Batched data structure for ODE-based likelihood
+# - StackedHazardData: Batched data structure for likelihood
 # - ExactDataAD: Container for AD-compatible exact data
 # - Batched interval stacking and caching
 #
 # Split from loglik.jl for maintainability (January 2026)
 # =============================================================================
-
-# =============================================================================
-# Separability trait for hazard functions
-# =============================================================================
-
-"""
-    is_separable(hazard::_Hazard) -> Bool
-
-Determine whether a hazard has a separable form that admits an analytic cumulative hazard.
-
-# Tang's Separability Condition
-
-A hazard is separable if it can be written in the form:
-
-```math
-\\Lambda'(t | x) = \\alpha(t) \\cdot \\exp(x^\\top \\beta) \\cdot q(\\Lambda)
-```
-
-where:
-- `α(t)` is the baseline hazard (depends only on time)
-- `exp(x'β)` is the covariate effect (PH) or time-rescaling factor (AFT)
-- `q(Λ)` depends only on the cumulative hazard (constant = 1 for PH models)
-
-When `is_separable` returns `true`, the cumulative hazard can be computed analytically
-using the closed-form `cumulative_hazard` function, avoiding expensive ODE solves.
-
-# Current Implementation
-
-All existing hazard types return `true`:
-- `MarkovHazard`: Exponential family with constant baseline → separable
-- `SemiMarkovHazard`: Weibull/Gompertz with known cumulative hazards → separable
-- `RuntimeSplineHazard`: Spline baseline with known integral → separable
-
-# Future Extensions
-
-Future hazard types may return `false`:
-- `:ode` hazards with non-separable RHS
-- `:ode_neural` hazards where `f(t, Λ, x)` is a neural network
-
-When `is_separable` returns `false`, the likelihood must use ODE solvers
-(via DifferentialEquations.jl) to compute cumulative hazards numerically.
-
-# Usage Sites
-
-This trait is checked in several locations:
-- `loglik_exact`: Use analytic cumhaz when separable
-- `survprob`: Skip ODE solve when all exit hazards are separable
-- `TimeTransformContext`: Separability is prerequisite for Tang-style caching
-- `simulate`: Cumulative incidence/survival computations
-
-# References
-
-- Tang, W., He, K., Xu, G., & Zhu, J. (2022). Survival Analysis via Ordinary 
-  Differential Equations. JASA. arXiv:2009.03449
-
-See also: [`cumulative_hazard`](@ref), [`TimeTransformContext`](@ref)
-"""
-is_separable(::_Hazard) = true  # Default: all current hazards are separable
-
-# Explicit dispatches for documentation clarity
-is_separable(::MarkovHazard) = true
-is_separable(::SemiMarkovHazard) = true
-is_separable(::_SplineHazard) = true
 
 # =============================================================================
 # Cached path data for efficient batched likelihood
@@ -106,11 +42,6 @@ is_separable(::_SplineHazard) = true
 #    - Stored in StackedHazardData.linpreds
 #    - Passed via `pars=pars` argument to stack_intervals_for_hazard
 #
-# 4. ODE DATA CONVERSION (BatchedODEData)
-#    - Converts NamedTuple covariates to Matrix format
-#    - Matrix layout: (n_features × n_intervals) for Lux compatibility
-#    - Use: `ode_data = to_batched_ode_data(stacked)`
-#
 # Data Flow:
 #
 #   paths → cache_path_data → CachedPathData[]
@@ -118,10 +49,6 @@ is_separable(::_SplineHazard) = true
 #                    stack_intervals_for_hazard (per hazard)
 #                              ↓
 #                    StackedHazardData (per hazard)
-#                              ↓
-#                    [Optional] to_batched_ode_data (for neural hazards)
-#                              ↓
-#                    BatchedODEData (for ODE solves)
 #
 # Performance Notes:
 # - Batched approach provides ~10-15% speedup on typical datasets
@@ -172,53 +99,8 @@ struct CachedPathData
 end
 
 # =============================================================================
-# Batched ODE-compatible data structures
+# Batched data structures for hazard-centric computation
 # =============================================================================
-
-"""
-    BatchedODEData
-
-Pre-processed interval data organized for batched ODE solves via `EnsembleProblem`.
-
-This struct organizes integration limits and covariates in a layout compatible with
-SciML's `EnsembleProblem` for future neural ODE hazards. The covariate matrix uses
-Lux's preferred batch-last layout (features × n_intervals).
-
-# Fields
-- `tspans::Matrix{Float64}`: Integration limits, 2 × n_intervals (row 1 = lb, row 2 = ub)
-- `covars::Matrix{Float64}`: Covariate values, n_features × n_intervals (Lux batch-last)
-- `path_idx::Vector{Int}`: Maps each interval back to its source path for accumulation
-- `is_transition::Vector{Bool}`: Whether interval ends with transition via this hazard
-- `transition_times::Vector{Float64}`: Time of transition (when is_transition is true)
-
-# Compatibility with SciML
-
-For future ODE-based hazards, this struct enables:
-
-```julia
-# Construct EnsembleProblem with varying tspans
-function prob_func(prob, i, repeat)
-    remake(prob, tspan = (data.tspans[1,i], data.tspans[2,i]))
-end
-ensemble_prob = EnsembleProblem(ode_prob, prob_func = prob_func)
-sol = solve(ensemble_prob, Tsit5(), EnsembleThreads(), trajectories = n_intervals)
-```
-
-# Covariate Layout
-
-Covariates are stored with batch dimension last to match Lux conventions:
-- Shape: (n_features, n_intervals) 
-- Access: `covars[:, i]` gives feature vector for interval i
-
-See also: [`StackedHazardData`](@ref), [`is_separable`](@ref)
-"""
-struct BatchedODEData
-    tspans::Matrix{Float64}      # 2 × n_intervals (lb, ub)
-    covars::Matrix{Float64}      # n_features × n_intervals (Lux batch-last)
-    path_idx::Vector{Int}        # Maps intervals to paths
-    is_transition::Vector{Bool}  # Transition indicator
-    transition_times::Vector{Float64}  # Time of transition
-end
 
 """
     StackedHazardData
@@ -252,99 +134,6 @@ struct StackedHazardData
     path_idx::Vector{Int}
     is_transition::Vector{Bool}
     transition_times::Vector{Float64}
-end
-
-"""
-    to_batched_ode_data(sd::StackedHazardData) -> BatchedODEData
-
-Convert `StackedHazardData` to `BatchedODEData` format suitable for neural network hazards.
-
-This function transforms the covariate representation from a vector of NamedTuples
-(efficient for parametric hazards) to a matrix format (efficient for neural network
-batched evaluation with Lux).
-
-# Arguments
-- `sd::StackedHazardData`: Pre-processed interval data with NamedTuple covariates
-
-# Returns
-- `BatchedODEData`: Same data with covariates in matrix format (n_features × n_intervals)
-
-# Covariate Layout
-The returned `covars` matrix has shape `(n_features, n_intervals)` with batch dimension
-last to match Lux conventions. Feature order matches the order in the NamedTuples.
-
-# Example
-```julia
-# After stacking intervals for a hazard
-stacked = stack_intervals_for_hazard(h, cached_paths, hazards, totalhazards, tmat)
-
-# Convert to ODE-ready format
-ode_data = to_batched_ode_data(stacked)
-
-# Use with neural network hazard
-# predictions = nn_model(ode_data.covars, ps, st)
-```
-
-See also: [`StackedHazardData`](@ref), [`BatchedODEData`](@ref), [`is_separable`](@ref)
-"""
-function to_batched_ode_data(sd::StackedHazardData; use_views::Bool=false)
-    n_intervals = length(sd.lb)
-    
-    if n_intervals == 0
-        return BatchedODEData(
-            zeros(2, 0),
-            zeros(0, 0),
-            Int[],
-            Bool[],
-            Float64[]
-        )
-    end
-    
-    # Determine number of features from first covariate tuple
-    first_covar = sd.covars[1]
-    n_features = length(first_covar)
-    
-    # Build time spans matrix (2 × n_intervals)
-    # Note: tspans must be a Matrix, so we can't use views here
-    tspans = Matrix{Float64}(undef, 2, n_intervals)
-    for i in 1:n_intervals
-        tspans[1, i] = sd.lb[i]
-        tspans[2, i] = sd.ub[i]
-    end
-    
-    # Build covariate matrix (n_features × n_intervals)
-    if n_features == 0
-        covars = zeros(0, n_intervals)
-    else
-        covars = Matrix{Float64}(undef, n_features, n_intervals)
-        for i in 1:n_intervals
-            covar_tuple = sd.covars[i]
-            for (j, val) in enumerate(covar_tuple)
-                covars[j, i] = Float64(val)
-            end
-        end
-    end
-    
-    # For vectors, optionally use views to avoid allocation
-    # SAFETY: Views are only safe if the source StackedHazardData remains in scope
-    # during all operations using the BatchedODEData
-    if use_views
-        return BatchedODEData(
-            tspans,
-            covars,
-            sd.path_idx,         # View (actually reference to same array)
-            sd.is_transition,    # View
-            sd.transition_times  # View
-        )
-    else
-        return BatchedODEData(
-            tspans,
-            covars,
-            copy(sd.path_idx),
-            copy(sd.is_transition),
-            copy(sd.transition_times)
-        )
-    end
 end
 
 """

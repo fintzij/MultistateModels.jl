@@ -25,9 +25,6 @@ function loglik_semi_markov(parameters, data::SMPanelData; neg=true, use_samplin
     n_hazards = length(hazards)
     nsubj = length(data.paths)
 
-    # Update spline hazards with current parameters (no-op for functional splines)
-    _update_spline_hazards!(hazards, pars)
-
     # Build subject covariate cache (reusable across all paths)
     subject_covars = build_subject_covar_cache(data.model)
     
@@ -143,11 +140,6 @@ Update log-likelihood for each individual and each path of panel data in a semi-
 
 This implementation uses the fused path-centric approach from `loglik_exact`, calling
 `_compute_path_loglik_fused` directly to avoid DataFrame allocation overhead.
-
-# Notes on future neural ODE compatibility:
-When `is_separable(hazard) == false` for ODE-based hazards, the `eval_cumhaz` 
-function in `_compute_path_loglik_fused` is the extension point where numerical 
-ODE solvers would be invoked instead of analytic cumulative hazard formulas.
 """
 function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
 
@@ -159,15 +151,6 @@ function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
     totalhazards = data.model.totalhazards
     tmat = data.model.tmat
     n_hazards = length(hazards)
-
-    # Remake spline parameters if needed
-    # Note: For RuntimeSplineHazard, remake_splines! is a no-op
-    for i in eachindex(hazards)
-        if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], nothing)
-            set_riskperiod!(hazards[i])
-        end
-    end
 
     # Build subject covariate cache (reusable across all paths)
     subject_covars = build_subject_covar_cache(data.model)
@@ -226,15 +209,6 @@ function loglik_semi_markov_batched!(parameters, logliks::Vector{Vector{Float64}
     # Get hazards
     hazards = data.model.hazards
     n_hazards = length(hazards)
-    
-    # Remake spline parameters if needed
-    # Note: For RuntimeSplineHazard, remake_splines! is a no-op
-    for i in eachindex(hazards)
-        if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], nothing)
-            set_riskperiod!(hazards[i])
-        end
-    end
     
     # Flatten paths for batched processing
     # Build mapping from flat index to (subject_idx, path_idx)

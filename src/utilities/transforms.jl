@@ -37,16 +37,6 @@ function set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVec
     # Get new flat version (reconstructor stays the same)
     new_flat = flatten(model.parameters.reconstructor, params_nested)
     
-    # Update spline hazards if needed - v0.3.0+: params are on natural scale
-    for i in eachindex(model.hazards)
-        if isa(model.hazards[i], _SplineHazard)
-            hazard_params = values(params_nested)[i]
-            params_vec = extract_params_vector(hazard_params)
-            remake_splines!(model.hazards[i], params_vec)
-            set_riskperiod!(model.hazards[i])
-        end
-    end
-    
     # v0.3.0+: nested == natural (no transformation needed, but kept for API compatibility)
     params_natural_pairs = [
         hazname => extract_natural_vector(params_nested[hazname], model.hazards[idx].family)

@@ -82,8 +82,9 @@ end
 
 @inline function _prefixed_symbols(hazname::Symbol, labels::Vector{String})
     prefix = string(hazname) * "_"
-    clean = replace.(labels, "(Intercept)" => "Intercept")
-    return Symbol.(prefix .* clean)
+    # Covariate labels from StatsModels; baseline "(Intercept)" is handled separately
+    # so we don't expect it here, but clean it just in case for robustness
+    return Symbol.(prefix .* labels)
 end
 
 """
@@ -147,7 +148,7 @@ function _build_parametric_hazard_common(
 end
 
 function _build_exponential_hazard(ctx::HazardBuildContext)
-    baseline = Symbol[Symbol(string(ctx.hazname), "_Rate")]
+    baseline = Symbol[Symbol(string(ctx.hazname), "_rate")]
     return _build_parametric_hazard_common(ctx, baseline, generate_exponential_hazard, MarkovHazard)
 end
 

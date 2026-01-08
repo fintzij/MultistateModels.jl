@@ -27,7 +27,7 @@ NamedTuple of nested parameters with structure:
 # Example
 ```julia
 flat_params = [0.5, 0.3]  # rate and covariate coefficient
-# Returns: (h12 = (baseline = (h12_Rate = 0.5,), covariates = (h12_x = 0.3,)),)
+# Returns: (h12 = (baseline = (h12_rate = 0.5,), covariates = (h12_x = 0.3,)),)
 ```
 """
 function unflatten_parameters(flat_params::AbstractVector{T}, model::MultistateProcess) where {T<:Real}
@@ -210,12 +210,6 @@ function set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Floa
             throw(ArgumentError("New values for hazard $i and model parameters for that hazard are not of the same length. " *
                                "Expected $(length(current_natural[i])), got $(length(newvalues[i]))."))
         end
-
-        # remake if a spline hazard
-        if isa(model.hazards[i], _SplineHazard) 
-            remake_splines!(model.hazards[i], newvalues[i])
-            set_riskperiod!(model.hazards[i])
-        end
     end
     
     # Rebuild parameters with proper constraints
@@ -249,12 +243,6 @@ function set_parameters!(model::MultistateProcess, newvalues::Tuple)
             throw(ArgumentError("New values and parameters for cause-specific hazard $i are not of the same length. " *
                                "Expected $(length(current_natural[i])), got $(length(newvalues[i]))."))
         end
-        
-        # remake if a spline hazard
-        if isa(model.hazards[i], _SplineHazard)
-            remake_splines!(model.hazards[i], newvalues[i])
-            set_riskperiod!(model.hazards[i])
-        end
     end
     
     # Convert tuple to vector and rebuild
@@ -286,12 +274,6 @@ function set_parameters!(model::MultistateProcess, newvalues::NamedTuple)
         if length(newvalues[vind]) != length(current_natural[mind])
             throw(ArgumentError("The new parameter values for $vind are not the expected length. " *
                                "Expected $(length(current_natural[mind])), got $(length(newvalues[vind]))."))
-        end
-
-        # remake if a spline hazard
-        if isa(model.hazards[mind], _SplineHazard)
-            remake_splines!(model.hazards[mind], newvalues[vind])
-            set_riskperiod!(model.hazards[mind])
         end
     end
     
@@ -344,12 +326,6 @@ function set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{F
     # Check parameter length
     if length(newvalues) != length(current_natural[h])
         throw(ArgumentError("New values length ($(length(newvalues))) does not match expected length ($(length(current_natural[h]))) for hazard $h."))
-    end
-    
-    # Remake splines if needed
-    if isa(model.hazards[h], _SplineHazard)
-        remake_splines!(model.hazards[h], newvalues)
-        set_riskperiod!(model.hazards[h])
     end
     
     # Build new parameter vectors (keep current for other hazards)
@@ -424,8 +400,8 @@ params = build_hazard_params([1.5, 0.2, 0.3, 0.1],
 #           covariates = (h12_age = 0.3, h12_sex = 0.1))
 
 # Exponential without covariates  
-params = build_hazard_params([0.5], [:h12_Rate], 1, 1)
-# Returns: (baseline = (h12_Rate = 0.5),)
+params = build_hazard_params([0.5], [:h12_rate], 1, 1)
+# Returns: (baseline = (h12_rate = 0.5),)
 ```
 
 # Note

@@ -558,14 +558,14 @@ If you notice:
 ### Wave 1: Foundation & Quick Wins
 | # | Item | Status | Date | Notes |
 |---|------|--------|------|-------|
-| 3 | Commented statetable() | ⬜ TODO | - | |
-| 13 | Deleted function notes | ⬜ TODO | - | |
-| 1 | BatchedODEData zombie code | ⬜ TODO | - | |
-| 2 | is_separable() trait | ⬜ TODO | - | |
-| 4 | Deprecated draw_paths overload | ⬜ TODO | - | |
-| 11 | Legacy type aliases | ⬜ TODO | - | |
-| 22 | Deprecated get_loglik string arg | ⬜ TODO | - | Found in adversarial review |
-| 23 | Deprecated fit_phasetype_surrogate | ⬜ TODO | - | Found in adversarial review |
+| 3 | Commented statetable() | ✅ DONE | 2026-01-08 | 23 lines deleted |
+| 13 | Deleted function notes | ✅ DONE | 2026-01-08 | 3 comment blocks deleted |
+| 1 | BatchedODEData zombie code | ✅ DONE | 2026-01-08 | ~100 lines deleted |
+| 2 | is_separable() trait | ✅ DONE | 2026-01-08 | ~60 lines deleted |
+| 4 | Deprecated draw_paths overload | ✅ DONE | 2026-01-08 | ~15 lines deleted |
+| 11 | Legacy type aliases | ✅ DONE | 2026-01-08 | 4 aliases + all usages updated |
+| 22 | Deprecated get_loglik string arg | ✅ DONE | 2026-01-08 | ~10 lines removed |
+| 23 | Deprecated fit_phasetype_surrogate | ✅ DONE | 2026-01-08 | ~25 lines removed |
 
 ### Wave 2: Technical Debt & Simplification
 | # | Item | Status | Date | Notes |

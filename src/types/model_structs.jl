@@ -10,7 +10,7 @@
 # =============================================================================
 # Model Classification Traits
 # =============================================================================
-# These traits replace the previous MultistateMarkovProcess/MultistateSemiMarkovProcess
+# These traits replace the previous MultistateProcess/MultistateProcess
 # abstract types. Behavior is now determined by model content, not struct type.
 # =============================================================================
 
@@ -45,11 +45,6 @@ function is_panel_data(model::MultistateProcess)
     # Check data directly: obstype 1 = exact, obstype >= 2 = panel/censored
     return any(model.data.obstype .>= 2)
 end
-
-# Legacy type aliases for backward compatibility (deprecation period)
-# These can be removed in a future version
-const MultistateMarkovProcess = MultistateProcess
-const MultistateSemiMarkovProcess = MultistateProcess
 
 # =============================================================================
 # Surrogate Types
@@ -159,7 +154,7 @@ When a model contains phase-type hazards, the model's main fields (`data`, `tmat
 `hazards`, `parameters`) operate on the **expanded** state space, while this struct
 stores information needed to map back to the **observed** state space.
 
-This design keeps the user-facing API simple: they work with a MultistateMarkovModel
+This design keeps the user-facing API simple: they work with a MultistateModel
 and the phase-type expansion is handled internally. The `has_phasetype_expansion(m)`
 trait indicates whether a model has this expansion.
 
@@ -181,7 +176,7 @@ has_phasetype_expansion(m::MultistateProcess) = !isnothing(m.phasetype_expansion
 h12 = Hazard(:pt, 1, 2)  # 3-phase Coxian for transition 1→2
 model = multistatemodel(h12; data=data, n_phases=Dict(1=>3))
 
-# Internally, model is MultistateMarkovModel on expanded space
+# Internally, model is MultistateModel on expanded space
 # model.phasetype_expansion contains mappings back to observed space
 has_phasetype_expansion(model)  # true
 model.phasetype_expansion.mappings.n_observed  # 2 (original states)
@@ -296,10 +291,6 @@ mutable struct MultistateModel <: MultistateProcess
     modelcall::NamedTuple
     phasetype_expansion::Union{Nothing, PhaseTypeExpansion}  # Phase-type expansion metadata
 end
-
-# Legacy type aliases for backward compatibility
-const MultistateMarkovModel = MultistateModel
-const MultistateSemiMarkovModel = MultistateModel
 
 """
     MultistateModelFitted

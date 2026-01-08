@@ -21,7 +21,7 @@ PARAMETER CONVENTION: Receives natural-scale baseline parameters (exp already ap
 function generate_exponential_hazard(parnames::Vector{Symbol}, linpred_effect::Symbol)
     linear_pred_expr = _build_linear_pred_expr_named(parnames)
     
-    # Extract baseline parameter name (should be :h*_Rate)
+    # Extract baseline parameter name (should be :h*_rate)
     baseline_parname = parnames[1]
     
     if linpred_effect == :ph

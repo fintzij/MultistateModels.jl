@@ -247,7 +247,7 @@ end
 # phase-type specific info stored in modelcall. Use is_phasetype_fitted() to check.
 
 """
-    get_loglik(model::MultistateModelFitted; type::Symbol=:loglik, ll::Union{Nothing,String}=nothing) 
+    get_loglik(model::MultistateModelFitted; type::Symbol=:loglik) 
 
 Return the log likelihood at the maximum likelihood estimates. 
 
@@ -256,7 +256,6 @@ Return the log likelihood at the maximum likelihood estimates.
 - `type::Symbol=:loglik`: one of:
   - `:loglik` (default) - observed data log likelihood
   - `:subj_lml` - log marginal likelihood at the subject level
-- `ll::String` (deprecated): use `type` instead
 
 # Examples
 ```julia
@@ -264,13 +263,7 @@ get_loglik(fitted)                  # Total log-likelihood
 get_loglik(fitted; type=:subj_lml)  # Subject-level marginal log-likelihoods
 ```
 """
-function get_loglik(model::MultistateModelFitted; type::Symbol=:loglik, ll::Union{Nothing,String}=nothing)
-    # Handle deprecated string argument
-    if !isnothing(ll)
-        Base.depwarn("String argument `ll` is deprecated, use `type::Symbol` instead (e.g., `type=:loglik`)", :get_loglik)
-        type = Symbol(ll)
-    end
-    
+function get_loglik(model::MultistateModelFitted; type::Symbol=:loglik)
     if type === :loglik
         return model.loglik.loglik
     elseif type === :subj_lml
@@ -525,10 +518,10 @@ Return the parameter names.
 # Example
 ```julia
 # Per-hazard grouping (default)
-get_parnames(model)  # [[:h12_Rate], [:h21_shape, :h21_scale]]
+get_parnames(model)  # [[:h12_rate], [:h21_shape, :h21_scale]]
 
 # Flattened for constraint specification
-get_parnames(model; flatten=true)  # [:h12_Rate, :h21_shape, :h21_scale]
+get_parnames(model; flatten=true)  # [:h12_rate, :h21_shape, :h21_scale]
 ```
 """
 function get_parnames(model::MultistateProcess; flatten::Bool = false)

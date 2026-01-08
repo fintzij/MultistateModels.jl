@@ -107,7 +107,7 @@ function compute_subject_gradients(params::AbstractVector, model::MultistateMode
 end
 
 """
-    compute_subject_gradients(params, model::MultistateMarkovProcess, books)
+    compute_subject_gradients(params, model::MultistateProcess, books)
 
 Compute subject-level score vectors (gradients of log-likelihood) for Markov panel data.
 
@@ -119,7 +119,7 @@ where P is the transition probability matrix computed via matrix exponentials.
 
 # Arguments
 - `params::AbstractVector`: parameter vector (flat, on transformed scale)
-- `model::MultistateMarkovProcess`: Markov model
+- `model::MultistateProcess`: Markov model
 - `books::Tuple`: bookkeeping structure for transition probability matrix computation
 
 # Returns
@@ -129,7 +129,7 @@ where P is the transition probability matrix computed via matrix exponentials.
 - Handles both fully observed and censored state observations
 - Gradients computed via ForwardDiff through the matrix exponential
 """
-function compute_subject_gradients(params::AbstractVector, model::MultistateMarkovProcess, books::Tuple)
+function compute_subject_gradients(params::AbstractVector, model::MultistateProcess, books::Tuple)
     nsubj = length(model.subjectindices)
     nparams = length(params)
     
@@ -155,7 +155,7 @@ function compute_subject_gradients(params::AbstractVector, model::MultistateMark
 end
 
 """
-    compute_subject_gradients(params, model::MultistateSemiMarkovProcess, 
+    compute_subject_gradients(params, model::MultistateProcess, 
                              samplepaths, ImportanceWeights)
 
 Compute subject-level score vectors (gradients of expected complete-data log-likelihood) for MCEM.
@@ -171,7 +171,7 @@ where:
 
 # Arguments
 - `params::AbstractVector`: parameter vector (flat, on transformed scale)
-- `model::MultistateSemiMarkovProcess`: semi-Markov model
+- `model::MultistateProcess`: semi-Markov model
 - `samplepaths::Vector{Vector{SamplePath}}`: sampled paths for each subject (outer vector over subjects)
 - `ImportanceWeights::Vector{Vector{Float64}}`: normalized importance weights
 
@@ -183,7 +183,7 @@ where:
 - The sum Σᵢ gᵢ should be approximately zero at the MCEM solution
 """
 function compute_subject_gradients(params::AbstractVector, 
-                                   model::MultistateSemiMarkovProcess,
+                                   model::MultistateProcess,
                                    samplepaths::Vector{Vector{SamplePath}},
                                    ImportanceWeights::Vector{Vector{Float64}})
     nsubj = length(model.subjectindices)
@@ -368,14 +368,6 @@ function compute_subject_hessians_batched(params::AbstractVector, model::Multist
         totalhazards = model.totalhazards
         tmat = model.tmat
         
-        # Remake splines if needed
-        for h in hazards
-            if isa(h, _SplineHazard)
-                remake_splines!(h, nothing)
-                set_riskperiod!(h)
-            end
-        end
-        
         lls = similar(pars, nsubj)
         for i in 1:nsubj
             path = samplepaths[i]
@@ -462,15 +454,6 @@ function compute_subject_hessians_threaded(params::AbstractVector, model::Multis
             subj_dat = view(model.data, subj_inds, :)
             subjdat_df = make_subjdat(path, subj_dat)
             
-            # Remake splines if needed for this evaluation
-            hazards = model.hazards
-            for h in hazards
-                if isa(h, _SplineHazard)
-                    remake_splines!(h, nothing)
-                    set_riskperiod!(h)
-                end
-            end
-            
             return loglik_path(pars_nested, subjdat_df, hazards, model.totalhazards, model.tmat) * w
         end
         
@@ -519,13 +502,13 @@ function compute_subject_hessians_fast(params::AbstractVector, model::Multistate
 end
 
 """
-    compute_subject_hessians(params, model::MultistateMarkovProcess, books)
+    compute_subject_hessians(params, model::MultistateProcess, books)
 
 Compute subject-level Hessian contributions for Markov panel data.
 
 Returns Vector{Matrix{Float64}} of length n, each matrix is p × p.
 """
-function compute_subject_hessians(params::AbstractVector, model::MultistateMarkovProcess, books::Tuple)
+function compute_subject_hessians(params::AbstractVector, model::MultistateProcess, books::Tuple)
     nsubj = length(model.subjectindices)
     nparams = length(params)
     
@@ -582,14 +565,6 @@ function loglik_weighted_with_params(θw::AbstractVector{T}, npaths::Int, nparam
     pars_nested = unflatten_parameters(θ, model)
     hazards = model.hazards
     
-    # remake spline parameters if needed (no-op for RuntimeSplineHazard)
-    for i in eachindex(hazards)
-        if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], nothing)
-            set_riskperiod!(hazards[i])
-        end
-    end
-    
     # compute weighted sum of log-likelihoods
     ll_weighted = zero(T)
     for j in 1:npaths
@@ -630,14 +605,6 @@ function loglik_paths_subject(pars::AbstractVector{T}, subject_paths::Vector{Sam
     # unflatten parameters to natural scale
     pars_nested = unflatten_parameters(pars, model)
     hazards = model.hazards
-    
-    # remake spline parameters if needed (no-op for RuntimeSplineHazard)
-    for i in eachindex(hazards)
-        if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], nothing)
-            set_riskperiod!(hazards[i])
-        end
-    end
     
     # compute log-likelihood for each path
     for j in 1:npaths
@@ -683,14 +650,6 @@ function loglik_weighted_subject(pars::AbstractVector{T}, subject_paths::Vector{
     pars_nested = unflatten_parameters(pars, model)
     hazards = model.hazards
     
-    # remake spline parameters if needed (no-op for RuntimeSplineHazard)
-    for i in eachindex(hazards)
-        if isa(hazards[i], _SplineHazard)
-            remake_splines!(hazards[i], nothing)
-            set_riskperiod!(hazards[i])
-        end
-    end
-    
     # compute weighted sum of log-likelihoods
     for j in 1:npaths
         path = subject_paths[j]
@@ -727,7 +686,7 @@ The subject-level gradient is then: gᵢ = Σⱼ wᵢⱼ J[j,:]
 - `path_grads::Vector{Matrix{Float64}}`: vector of p × n_paths_i matrices for each subject
 """
 function compute_subject_gradients_batched(params::AbstractVector,
-                                           model::MultistateSemiMarkovProcess,
+                                           model::MultistateProcess,
                                            samplepaths::Vector{Vector{SamplePath}},
                                            ImportanceWeights::Vector{Vector{Float64}})
     nsubj = length(model.subjectindices)
@@ -794,7 +753,7 @@ This gives us:
 NamedTuple with fishinf, subject_grads, subject_hessians
 """
 function compute_fisher_via_mixed_hessian(params::AbstractVector,
-                                          model::MultistateSemiMarkovProcess,
+                                          model::MultistateProcess,
                                           samplepaths::Vector{Vector{SamplePath}},
                                           ImportanceWeights::Vector{Vector{Float64}})
     nsubj = length(model.subjectindices)
@@ -896,7 +855,7 @@ NamedTuple with:
 - `subject_hessians::Vector{Matrix{Float64}}`: length-n vector of subject Fisher contributions
 """
 function compute_subject_fisher_louis_batched(params::AbstractVector,
-                                              model::MultistateSemiMarkovProcess,
+                                              model::MultistateProcess,
                                               samplepaths::Vector{Vector{SamplePath}},
                                               ImportanceWeights::Vector{Vector{Float64}})
     nsubj = length(model.subjectindices)
@@ -958,7 +917,7 @@ end
 # ============================================================================
 
 """
-    compute_subject_hessians(params, model::MultistateSemiMarkovProcess, 
+    compute_subject_hessians(params, model::MultistateProcess, 
                             samplepaths, ImportanceWeights)
 
 Compute subject-level observed Fisher information contributions for MCEM using Louis's identity.
@@ -983,7 +942,7 @@ where:
 
 # Arguments
 - `params::AbstractVector`: parameter vector (flat, on transformed scale)
-- `model::MultistateSemiMarkovProcess`: semi-Markov model
+- `model::MultistateProcess`: semi-Markov model
 - `samplepaths::Vector{Vector{SamplePath}}`: sampled paths for each subject
 - `ImportanceWeights::Vector{Vector{Float64}}`: normalized importance weights
 
@@ -995,7 +954,7 @@ where:
   Journal of the Royal Statistical Society: Series B, 44(2), 226-233.
 """
 function compute_subject_hessians(params::AbstractVector, 
-                                  model::MultistateSemiMarkovProcess,
+                                  model::MultistateProcess,
                                   samplepaths::Vector{Vector{SamplePath}},
                                   ImportanceWeights::Vector{Vector{Float64}})
     nsubj = length(model.subjectindices)
@@ -1118,7 +1077,7 @@ function compute_fisher_components(params::AbstractVector,
 end
 
 function compute_fisher_components(params::AbstractVector,
-                                   model::MultistateMarkovProcess,
+                                   model::MultistateProcess,
                                    books::Tuple;
                                    compute_subject_contributions::Bool = false)
     nparams = length(params)
@@ -1152,7 +1111,7 @@ function compute_fisher_components(params::AbstractVector,
 end
 
 function compute_fisher_components(params::AbstractVector,
-                                   model::MultistateSemiMarkovProcess,
+                                   model::MultistateProcess,
                                    samplepaths::Vector{Vector{SamplePath}},
                                    ImportanceWeights::Vector{Vector{Float64}};
                                    compute_subject_contributions::Bool = false,
@@ -1538,7 +1497,7 @@ function compute_robust_vcov(params::AbstractVector,
 end
 
 function compute_robust_vcov(params::AbstractVector,
-                            model::MultistateMarkovProcess,
+                            model::MultistateProcess,
                             books::Tuple;
                             compute_ij::Bool = true,
                             compute_jk::Bool = false,
@@ -1605,7 +1564,7 @@ function compute_robust_vcov(params::AbstractVector,
 end
 
 """
-    compute_robust_vcov(params, model::MultistateSemiMarkovProcess,
+    compute_robust_vcov(params, model::MultistateProcess,
                        samplepaths, ImportanceWeights; kwargs...)
 
 Compute robust variance estimates for semi-Markov models fitted via MCEM.
@@ -1639,7 +1598,7 @@ The IJ/sandwich estimator remains valid because:
 
 # Arguments
 - `params::AbstractVector`: parameter vector (flat, on transformed scale)
-- `model::MultistateSemiMarkovProcess`: fitted semi-Markov model
+- `model::MultistateProcess`: fitted semi-Markov model
 - `samplepaths::Vector{Vector{SamplePath}}`: sampled paths for each subject
 - `ImportanceWeights::Vector{Vector{Float64}}`: normalized importance weights
 
@@ -1662,7 +1621,7 @@ NamedTuple with fields:
 - Morsomme, R. et al. (2025). MultistateModels.jl technical supplement.
 """
 function compute_robust_vcov(params::AbstractVector,
-                            model::MultistateSemiMarkovProcess,
+                            model::MultistateProcess,
                             samplepaths::Vector{Vector{SamplePath}},
                             ImportanceWeights::Vector{Vector{Float64}};
                             compute_ij::Bool = true,

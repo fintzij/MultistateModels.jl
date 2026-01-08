@@ -2,7 +2,7 @@
 # Phase-Type Model Building
 # =============================================================================
 #
-# Build MultistateMarkovModel with phase-type expansion from user hazard specs.
+# Build MultistateModel with phase-type expansion from user hazard specs.
 # Called by multistatemodel() when any hazard is :pt.
 #
 # Contents:
@@ -17,9 +17,9 @@
 # =============================================================================
 
 """
-    _build_phasetype_model_from_hazards(hazards, data; kwargs...) -> MultistateMarkovModel
+    _build_phasetype_model_from_hazards(hazards, data; kwargs...) -> MultistateModel
 
-Build a MultistateMarkovModel with phase-type expansion from user hazard specs.
+Build a MultistateModel with phase-type expansion from user hazard specs.
 
 Called by `multistatemodel()` when any hazard is `:pt`. Builds expanded state space,
 expands hazards and data, and stores metadata in `phasetype_expansion` field.
@@ -32,7 +32,7 @@ expands hazards and data, and stores metadata in `phasetype_expansion` field.
 - Other kwargs: `constraints`, `SubjectWeights`, `CensoringPatterns`, etc.
 
 # Returns
-`MultistateMarkovModel` on expanded state space with `phasetype_expansion` metadata.
+`MultistateModel` on expanded state space with `phasetype_expansion` metadata.
 
 See also: [`PhaseTypeExpansion`](@ref), [`build_phasetype_mappings`](@ref)
 """
@@ -224,9 +224,9 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
         original_parameters
     )
     
-    # Step 15: Assemble the MultistateMarkovModel on expanded space
+    # Step 15: Assemble the MultistateModel on expanded space
     # The model operates on expanded state space; phasetype_expansion holds original mappings
-    model = MultistateMarkovModel(
+    model = MultistateModel(
         expanded_data,
         expanded_parameters,
         expanded_hazards,
@@ -249,7 +249,7 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
     end
     
     if verbose
-        println("  MultistateMarkovModel (phase-type) created successfully")
+        println("  MultistateModel (phase-type) created successfully")
     end
     
     return model

@@ -14,7 +14,7 @@ Otherwise, builds surrogate hazards from scratch using the model's hazard specif
 - `model`: multistate model object
 
 # Returns
-- `MultistateMarkovModel` suitable for fitting as a Markov model
+- `MultistateModel` suitable for fitting as a Markov model
 """
 function make_surrogate_model(model::MultistateProcess)
     if isnothing(model.markovsurrogate)
@@ -29,7 +29,7 @@ function make_surrogate_model(model::MultistateProcess)
         markov_surrogate = model.markovsurrogate
     end
     
-    MultistateModels.MultistateMarkovModel(
+    MultistateModels.MultistateModel(
         model.data,
         markov_surrogate.parameters,  # Use surrogate's parameters
         markov_surrogate.hazards,
@@ -365,7 +365,7 @@ as `fitted=true`. For models created with `surrogate=:markov` and `fit_surrogate
 (the default), the surrogate is already fitted and calling this function will refit it.
 
 # Arguments
-- `model`: A mutable multistate model (MultistateModel, MultistateSemiMarkovModel, etc.)
+- `model`: A mutable multistate model (MultistateModel, MultistateModel, etc.)
 
 # Keywords
 - `type::Symbol = :markov`: Surrogate type (:markov or :phasetype)
@@ -427,31 +427,6 @@ function set_surrogate!(model::MultistateProcess;
     end
     
     return model
-end
-
-
-"""
-    fit_phasetype_surrogate(model, markov_surrogate; config, verbose)
-
-Build a phase-type surrogate from a fitted Markov surrogate.
-
-!!! note "Deprecated"
-    This function is deprecated. Use `fit_surrogate(model; type=:phasetype, ...)` 
-    or `_build_phasetype_from_markov()` instead.
-
-# Arguments
-- `model`: The semi-Markov model being fitted
-- `markov_surrogate::MarkovSurrogate`: Fitted Markov surrogate
-- `config::ProposalConfig`: Proposal configuration with n_phases specification
-- `verbose::Bool`: Print progress information
-
-# Returns
-- `PhaseTypeSurrogate`: Expanded surrogate for importance sampling
-"""
-function fit_phasetype_surrogate(model, markov_surrogate::MarkovSurrogate; 
-                                  config::ProposalConfig, verbose::Bool=true)
-    # Delegate to new implementation
-    return _build_phasetype_from_markov(model, markov_surrogate; config = config, verbose = verbose)
 end
 
 
@@ -593,7 +568,7 @@ where νᵢ are the importance weights for subject i.
 """
 function compute_markov_marginal_loglik(model::MultistateProcess, surrogate::MarkovSurrogate)
     # Build a temporary Markov model with the surrogate's hazards and parameters
-    surrogate_model = MultistateMarkovModel(
+    surrogate_model = MultistateModel(
         model.data,
         surrogate.parameters,
         surrogate.hazards,

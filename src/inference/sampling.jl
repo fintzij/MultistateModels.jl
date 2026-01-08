@@ -185,9 +185,6 @@ function DrawSamplePaths!(model::MultistateProcess; ess_target, ess_cur, max_sam
     # unflatten parameters to natural scale (AD-compatible)
     pars = unflatten_parameters(params_cur, model)
 
-    # update spline hazards with current parameters (no-op for functional splines)
-    _update_spline_hazards!(model.hazards, pars)
-
     for i in eachindex(model.subjectindices)
         DrawSamplePaths!(i, model; 
             ess_target = ess_target,
@@ -481,24 +478,6 @@ function draw_paths(model::MultistateProcess;
     else
         return (; samplepaths, ImportanceWeightsNormalized)
     end
-end
-
-# Backward compatibility: positional npaths argument (deprecated)
-"""
-    draw_paths(model::MultistateProcess, npaths::Int; paretosmooth=true, return_logliks=false)
-
-Draw a fixed number of sample paths. This is a convenience method equivalent to
-`draw_paths(model; npaths=npaths, ...)`.
-
-!!! note
-    This positional argument form is deprecated. Use `draw_paths(model; npaths=n)` instead.
-"""
-function draw_paths(model::MultistateProcess, npaths::Int; paretosmooth::Bool = true, return_logliks::Bool = false)
-    Base.depwarn(
-        "draw_paths(model, npaths) is deprecated. Use draw_paths(model; npaths=npaths) instead.",
-        :draw_paths
-    )
-    return draw_paths(model; npaths=npaths, paretosmooth=paretosmooth, return_logliks=return_logliks)
 end
 
 # ============================================================================
