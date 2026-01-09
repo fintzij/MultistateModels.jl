@@ -230,9 +230,8 @@ struct type, using traits like `is_markov()` and `is_panel_data()` for dispatch.
 # Fields
 - `data::DataFrame`: Long-format dataset with observations
 - `parameters::NamedTuple`: Parameter structure containing:
-  - `flat::Vector{Float64}` - flat parameter vector for optimizer (log scale for baseline)
+  - `flat::Vector{Float64}` - flat parameter vector for optimizer (natural scale since v0.3.0)
   - `nested::NamedTuple` - nested parameters by hazard name with baseline/covariates fields
-  - `natural::NamedTuple` - natural scale parameters by hazard name
   - `reconstructor` - reconstructor for unflatten operations
 - `hazards::Vector{_Hazard}`: Cause-specific hazard functions
 - `totalhazards::Vector{_TotalHazard}`: Total hazard functions per state
@@ -296,11 +295,15 @@ end
     MultistateModelFitted
 
 Struct that fully specifies a fitted multistate model.
-Parameters are stored in `parameters` as (flat, nested, natural, reconstructor).
+Parameters are stored in `parameters` as (flat, nested, reconstructor).
+
+# Penalty/Smoothing Fields (for penalized spline models)
+- `smoothing_parameters`: Selected λ values from cross-validation (nothing if unpenalized)
+- `edf`: Effective degrees of freedom NamedTuple with `total` and `per_term` (nothing if unpenalized)
 """
 mutable struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
-    parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, reconstructor)
+    parameters::NamedTuple  # Sole parameter storage: (flat, nested, reconstructor)
     loglik::NamedTuple
     vcov::Union{Nothing,Matrix{Float64}}
     ij_vcov::Union{Nothing,Matrix{Float64}}  # Infinitesimal jackknife variance-covariance
@@ -320,4 +323,6 @@ mutable struct MultistateModelFitted <: MultistateProcess
     ProposedPaths::Union{Nothing, NamedTuple}
     modelcall::NamedTuple
     phasetype_expansion::Union{Nothing, PhaseTypeExpansion}  # Phase-type expansion metadata
+    smoothing_parameters::Union{Nothing, Vector{Float64}}    # Selected λ from penalized fitting
+    edf::Union{Nothing, NamedTuple}                          # Effective degrees of freedom
 end

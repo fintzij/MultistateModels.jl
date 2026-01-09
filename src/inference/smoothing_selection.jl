@@ -370,9 +370,9 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
         # Compute LOO parameters: β̂⁻ⁱ = β̂ + Δ⁻ⁱ
         beta_loo = state.beta_hat .+ delta_i
         
-        # Project to feasible region: β ≥ 0 for non-negative constrained params
-        # This handles cases where Newton step overshoots into infeasible region
-        beta_loo = max.(beta_loo, zero(T))
+        # Note: As of v0.3.0, baseline parameters are on NATURAL scale (positive values).
+        # Box constraints ensure positivity during optimization.
+        # Some spline coefficients may be negative when they control log-hazard scale.
         
         # CORE OF NCV: Evaluate ACTUAL likelihood at LOO parameters
         ll_loo = loglik_subject(beta_loo, state.data, i)

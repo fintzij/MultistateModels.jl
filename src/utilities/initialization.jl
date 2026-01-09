@@ -386,9 +386,12 @@ function _init_from_surrogate_paths!(model::MultistateProcess,
     set_crude_init!(exact_model)
     
     # Step 6: Fit exact model (fast - exact likelihood, no MCEM)
+    # Use select_lambda=:none to skip automatic λ selection during initialization
+    # (λ selection on small simulated samples is unreliable and expensive)
     exact_fitted = fit(exact_model; constraints = constraints, 
                        compute_vcov = false, compute_ij_vcov = false, 
-                       compute_jk_vcov = false, verbose = false)
+                       compute_jk_vcov = false, verbose = false,
+                       select_lambda = :none)
     
     # Step 7: Transfer parameters to original model
     _transfer_parameters!(model, exact_fitted)

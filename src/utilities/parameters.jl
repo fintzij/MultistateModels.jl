@@ -125,10 +125,11 @@ end
     rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::MultistateProcess)
 
 Rebuild the parameters structure from new parameter vectors.
-Parameters are stored on log scale for baseline, as-is for covariates.
+v0.3.0+: Parameters are stored on NATURAL scale (rates, shapes as positive values).
+Covariate coefficients are unconstrained.
 
 # Arguments
-- `new_param_vectors`: Vector of parameter vectors (one per hazard)
+- `new_param_vectors`: Vector of parameter vectors (one per hazard), on natural scale
 - `model`: The model containing hazard info for npar_baseline
 
 # Returns
@@ -176,14 +177,24 @@ end
     set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Float64}})
 
 Set model parameters given a nested vector of values (one vector per hazard).
-Values should be on log scale for baseline parameters, as-is for covariate coefficients.
+v0.3.0+: Values should be on NATURAL scale for baseline parameters (e.g., rate=0.5, shape=1.2).
+Covariate coefficients are on their natural scale (unconstrained).
 
 # Arguments
 - `model::MultistateProcess`: The model to update
-- `newvalues`: Nested vector with parameters for each hazard
+- `newvalues`: Nested vector with parameters for each hazard (natural scale for baseline)
 
 # Note
 Updates model.parameters with the new values and remakes spline hazards as needed.
+
+# Example
+```julia
+# Set exponential rate to 0.5 (NOT log(0.5))
+set_parameters!(model, [[0.5]])
+
+# Set Weibull shape=1.5, scale=0.3, covariate effect=0.2
+set_parameters!(model, [[1.5, 0.3, 0.2]])
+```
 """
 function set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Float64}})
     
@@ -289,20 +300,21 @@ end
     set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{Float64})
 
 Set parameters for a single hazard by hazard index.
-Values should be on log scale for baseline parameters, as-is for covariate coefficients.
+v0.3.0+: Values should be on NATURAL scale for baseline parameters (e.g., rate=0.5).
+Covariate coefficients are on their natural scale (unconstrained).
 
 # Arguments
 - `model::MultistateProcess`: The model to update
 - `h::Int64`: Index of the hazard to update
-- `newvalues::Vector{Float64}`: New parameter values (log scale for baseline, as-is for covariates)
+- `newvalues::Vector{Float64}`: New parameter values (natural scale for baseline, as-is for covariates)
 
 # Example
 ```julia
-# Update hazard 1 with new baseline parameter
-set_parameters!(model, 1, [log(0.5)])
+# Update hazard 1 with exponential rate = 0.5
+set_parameters!(model, 1, [0.5])
 
-# Update hazard with baseline and covariate effects
-set_parameters!(model, 2, [log(2.0), log(1.5), 0.3, -0.2])
+# Update hazard with Weibull shape=2.0, scale=1.5, covariate effects
+set_parameters!(model, 2, [2.0, 1.5, 0.3, -0.2])
 ```
 """
 function set_parameters!(model::MultistateProcess, h::Int64, newvalues::Vector{Float64})
@@ -399,14 +411,14 @@ params = build_hazard_params([0.5], [:h12_rate], 1, 1)
 All parameters are stored on natural scale (as expected by hazard functions).
 Covariate coefficients are stored as-is (unconstrained).
 """
-function build_hazard_params(log_scale_params::AbstractVector{<:Real}, parnames::Vector{Symbol}, npar_baseline::Int, npar_total::Int)
-    @assert length(log_scale_params) == npar_total "Parameter vector length mismatch"
+function build_hazard_params(params::AbstractVector{<:Real}, parnames::Vector{Symbol}, npar_baseline::Int, npar_total::Int)
+    @assert length(params) == npar_total "Parameter vector length mismatch"
     @assert length(parnames) == npar_total "Parameter names length must match parameter vector length"
     @assert npar_baseline <= npar_total "Baseline parameters cannot exceed total parameters"
     
-    # Extract baseline parameter names and values
+    # Extract baseline parameter names and values (natural scale)
     baseline_names = parnames[1:npar_baseline]
-    baseline_values = log_scale_params[1:npar_baseline]
+    baseline_values = params[1:npar_baseline]
     
     # Create NamedTuple for baseline with named fields
     baseline = NamedTuple{Tuple(baseline_names)}(baseline_values)
@@ -414,7 +426,7 @@ function build_hazard_params(log_scale_params::AbstractVector{<:Real}, parnames:
     # Handle covariates if present
     if npar_total > npar_baseline
         covar_names = parnames[(npar_baseline+1):npar_total]
-        covar_values = log_scale_params[(npar_baseline+1):npar_total]
+        covar_values = params[(npar_baseline+1):npar_total]
         covariates = NamedTuple{Tuple(covar_names)}(covar_values)
         return (baseline = baseline, covariates = covariates)
     else

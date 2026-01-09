@@ -1007,16 +1007,27 @@ to match the new hazard dimensions, using the same `rebuild_parameters` function
 that `set_parameters!` uses to ensure consistency.
 
 # Notes
-- Parameters are initialized to zero on log scale (rates = 1.0)
+- Parameters are initialized to sensible defaults:
+  - Spline coefficients: 1.0 (natural scale, gives constant hazard)
+  - Covariate coefficients: 0.0 (no effect)
 - The resulting parameter structure includes a proper `reconstructor` field
   for AD-compatible flatten/unflatten operations
 """
 function _rebuild_model_parameters!(model::MultistateProcess)
-    # Build new parameter vectors (zeros on log scale) for each hazard
+    # Build new parameter vectors for each hazard
+    # Spline coefficients: initialize to 1.0 (constant hazard)
+    # Covariate coefficients: initialize to 0.0 (no effect)
     new_param_vectors = Vector{Vector{Float64}}(undef, length(model.hazards))
     for i in eachindex(model.hazards)
         haz = model.hazards[i]
-        new_param_vectors[i] = zeros(Float64, haz.npar_total)
+        params = zeros(Float64, haz.npar_total)
+        
+        # Initialize baseline spline coefficients to 1.0 for non-zero hazard
+        if haz isa _SplineHazard
+            params[1:haz.npar_baseline] .= 1.0
+        end
+        
+        new_param_vectors[i] = params
     end
     
     # Use rebuild_parameters to create proper parameter structure with reconstructor

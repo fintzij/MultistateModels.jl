@@ -37,7 +37,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
     books = build_tpm_mapping(model.data)
 
     # extract model parameters
-    # Phase 3: Use ParameterHandling.jl flat parameters (log scale)
+    # Phase 3: Use ParameterHandling.jl flat parameters (natural scale since v0.3.0)
     parameters = get_parameters_flat(model)
 
     # number of subjects
@@ -181,5 +181,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         (solution = sol,), # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall,
-        model.phasetype_expansion);
+        model.phasetype_expansion,
+        nothing,  # smoothing_parameters (not yet implemented for Markov panel)
+        nothing); # edf
 end

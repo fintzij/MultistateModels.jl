@@ -300,7 +300,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     absorbingstates = findall(map(x -> all(x .== 0), eachrow(model.tmat)))
 
     # extract and initialize model parameters
-    # Phase 3: Use ParameterHandling.jl flat parameters (log scale)
+    # Phase 3: Use ParameterHandling.jl flat parameters (natural scale since v0.3.0)
     params_cur = get_parameters_flat(model)
 
     # Build penalty configuration from resolved penalty
@@ -1278,16 +1278,16 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # Compute block sizes from hazard objects
     block_sizes = [model.hazards[i].npar_total for i in 1:length(model.hazards)]
     
-    # Split params_cur into per-hazard vectors
-    log_scale_params = Vector{Vector{Float64}}(undef, length(block_sizes))
+    # Split params_cur into per-hazard vectors (natural scale since v0.3.0)
+    fitted_params = Vector{Vector{Float64}}(undef, length(block_sizes))
     offset = 0
     for i in eachindex(block_sizes)
-        log_scale_params[i] = params_cur[(offset+1):(offset+block_sizes[i])]
+        fitted_params[i] = params_cur[(offset+1):(offset+block_sizes[i])]
         offset += block_sizes[i]
     end
     
     # Rebuild parameters with proper constraints using model's hazard info
-    parameters_fitted = rebuild_parameters(log_scale_params, model)
+    parameters_fitted = rebuild_parameters(fitted_params, model)
 
     # wrap results
     model_fitted = MultistateModelFitted(
@@ -1311,7 +1311,9 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         ConvergenceRecords,
         ProposedPaths,
         model.modelcall,
-        model.phasetype_expansion)
+        model.phasetype_expansion,
+        nothing,  # smoothing_parameters (not yet implemented for MCEM)
+        nothing)  # edf
 
     # return fitted object
     return model_fitted;

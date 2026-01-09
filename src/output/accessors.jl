@@ -1,5 +1,75 @@
 
 # =============================================================================
+# Smoothing Parameter Accessors (Penalized Spline Models)
+# =============================================================================
+
+"""
+    get_smoothing_parameters(model::MultistateModelFitted) -> Union{Nothing, Vector{Float64}}
+
+Return the selected smoothing parameters (λ) from penalized likelihood fitting.
+
+Returns `nothing` if the model was fit without a penalty or with fixed λ.
+
+# Example
+```julia
+# Fit with automatic λ selection
+fitted = fit(model; penalty=SplinePenalty())
+λ = get_smoothing_parameters(fitted)  # e.g., [0.23, 0.15]
+
+# Fit without penalty
+fitted_unpn = fit(model; penalty=:none)
+get_smoothing_parameters(fitted_unpn)  # nothing
+```
+
+See also: [`get_edf`](@ref), [`fit`](@ref), [`SplinePenalty`](@ref)
+"""
+function get_smoothing_parameters(model::MultistateModelFitted)
+    return model.smoothing_parameters
+end
+
+# Fallback for unfitted models
+get_smoothing_parameters(::MultistateModel) = nothing
+
+"""
+    get_edf(model::MultistateModelFitted) -> Union{Nothing, NamedTuple}
+
+Return the effective degrees of freedom (EDF) from penalized likelihood fitting.
+
+Returns `nothing` if the model was fit without a penalty or with fixed λ.
+
+The returned NamedTuple contains:
+- `total::Float64`: Total effective degrees of freedom
+- `per_term::Vector{Float64}`: EDF for each penalty term
+
+# Example
+```julia
+# Fit with automatic λ selection
+fitted = fit(model; penalty=SplinePenalty())
+edf = get_edf(fitted)
+edf.total      # e.g., 5.3
+edf.per_term   # e.g., [3.2, 2.1]
+
+# Fit without penalty
+fitted_unpn = fit(model; penalty=:none)
+get_edf(fitted_unpn)  # nothing
+```
+
+# Notes
+- EDF measures effective model complexity after penalization
+- For unpenalized models, EDF equals the number of parameters
+- As λ → ∞, EDF → 0 (maximum smoothing)
+- As λ → 0, EDF → number of spline coefficients (minimum smoothing)
+
+See also: [`get_smoothing_parameters`](@ref), [`fit`](@ref)
+"""
+function get_edf(model::MultistateModelFitted)
+    return model.edf
+end
+
+# Fallback for unfitted models
+get_edf(::MultistateModel) = nothing
+
+# =============================================================================
 # Phase-Type Fitted Model Detection and Accessors
 # =============================================================================
 

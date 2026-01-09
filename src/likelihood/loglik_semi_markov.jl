@@ -300,7 +300,7 @@ This wraps `loglik_semi_markov` and adds the spline penalty term:
     ℓₚ(β; λ) = ℓ(β) - (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ
 
 # Arguments
-- `parameters`: Flat parameter vector on estimation scale
+- `parameters`: Flat parameter vector (natural scale for baseline as of v0.3.0)
 - `data::SMPanelData`: Semi-Markov panel data with paths and importance weights
 - `penalty_config::PenaltyConfig`: Penalty specification with matrices and lambdas
 - `neg::Bool=true`: Return negative log-likelihood for minimization
@@ -310,7 +310,7 @@ This wraps `loglik_semi_markov` and adds the spline penalty term:
 Scalar (penalized) log-likelihood
 
 # Notes
-- Penalty is computed on natural-scale coefficients (exp-transformed baseline)
+- As of v0.3.0, all parameters are on natural scale. Box constraints enforce positivity.
 - Used in MCEM M-step when fitting penalized spline models
 - For unpenalized likelihood, use `loglik_semi_markov` directly
 """

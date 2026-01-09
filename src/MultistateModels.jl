@@ -143,6 +143,8 @@ export
     compute_penalty,
     build_penalty_config,
     select_smoothing_parameters,
+    get_smoothing_parameters,
+    get_edf,
     
     # --------------------------------------------------------------------------
     # MCEM proposal configuration

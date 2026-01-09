@@ -263,7 +263,7 @@ The penalized objective combines the data log-likelihood with a roughness penalt
     -ℓ_p(β) = -ℓ(β) + (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ
 
 # Arguments
-- `parameters`: Flat parameter vector on estimation scale (log-transformed baseline)
+- `parameters`: Flat parameter vector (natural scale for baseline as of v0.3.0)
 - `data::ExactData`: Exact data containing model and sample paths
 - `penalty_config::PenaltyConfig`: Resolved penalty configuration
 - `neg::Bool=true`: Return negative penalized log-likelihood
@@ -273,7 +273,7 @@ The penalized objective combines the data log-likelihood with a roughness penalt
 Scalar (penalized) negative log-likelihood when `neg=true`
 
 # Notes
-- Penalty is computed on **natural scale** coefficients (exp-transformed baseline)
+- As of v0.3.0, all parameters are on natural scale. Box constraints enforce positivity.
 - This function is AD-compatible (works with ForwardDiff.Dual)
 - For likelihood-only computation (no penalty), use `loglik_exact` directly
 
@@ -666,7 +666,7 @@ actual loss at leave-one-out parameters, following Wood (2024) "On Neighbourhood
 Cross Validation" arXiv:2404.16490v4.
 
 # Arguments
-- `parameters`: Parameter vector (on estimation scale, e.g., log-transformed baseline)
+- `parameters`: Parameter vector (natural scale for baseline as of v0.3.0)
 - `data::ExactData`: Exact data container with model and paths
 - `subject_idx::Int`: Index of the subject (1-based)
 
