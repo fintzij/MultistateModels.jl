@@ -183,8 +183,9 @@ function _validate_inputs!(data::DataFrame,
                            CensoringPatterns::Matrix{Float64},
                            SubjectWeights,
                            ObservationWeights;
-                           verbose::Bool)
-    check_data!(data, tmat, CensoringPatterns; verbose = verbose)
+                           verbose::Bool,
+                           phase_to_state::Union{Nothing, Vector{Int}} = nothing)
+    check_data!(data, tmat, CensoringPatterns; verbose = verbose, phase_to_state = phase_to_state)
     
     # Validate weights
     if !isnothing(SubjectWeights)
@@ -229,10 +230,15 @@ function _assemble_model(mode::Symbol,
                          surrogate::Union{Nothing, MarkovSurrogate},
                          modelcall;
                          phasetype_expansion::Union{Nothing, PhaseTypeExpansion} = nothing)
+    # Generate parameter bounds at model construction time
+    # This ensures bounds are always available for fitting and parameter validation
+    bounds = _generate_package_bounds_from_components(components.parameters.flat, components.hazards, components.hazkeys)
+    
     # Single MultistateModel struct handles all cases
     return MultistateModel(
         components.data,
         components.parameters,
+        bounds,
         components.hazards,
         components.totalhazards,
         components.tmat,
@@ -246,4 +252,72 @@ function _assemble_model(mode::Symbol,
         modelcall,
         phasetype_expansion,
     )
+end
+
+"""
+    _generate_package_bounds_from_components(flat_params, hazards, hazkeys) -> NamedTuple{(:lb, :ub)}
+
+Generate package-level parameter bounds during model construction.
+This is called by `_assemble_model` to initialize the bounds field.
+
+Uses the same logic as `_generate_package_bounds` in bounds.jl but operates
+on the components before the model struct is created.
+"""
+function _generate_package_bounds_from_components(flat_params::Vector{Float64}, 
+                                                   hazards::Vector{<:_Hazard},
+                                                   hazkeys::Dict{Symbol, Int64})
+    n_params = length(flat_params)
+    lb = fill(-Inf, n_params)
+    ub = fill(Inf, n_params)
+    
+    # Lower bound for non-negative parameters
+    const_nonneg_lb = 0.0
+    
+    # Iterate over hazards in parameter order
+    param_offset = 0
+    for (hazname, _) in sort(collect(hazkeys), by = x -> x[2])
+        # Find hazard by name
+        haz_idx = findfirst(h -> h.hazname == hazname, hazards)
+        hazard = hazards[haz_idx]
+        family = hazard.family
+        n_baseline = hazard.npar_baseline
+        n_total = hazard.npar_total
+        
+        # Set bounds for baseline parameters based on family
+        baseline_lb = _get_baseline_lb_internal(family, n_baseline, const_nonneg_lb)
+        lb[param_offset+1:param_offset+n_baseline] .= baseline_lb
+        
+        # Covariate coefficients are unconstrained (already initialized to -Inf/Inf)
+        
+        param_offset += n_total
+    end
+    
+    return (lb = lb, ub = ub)
+end
+
+"""
+    _get_baseline_lb_internal(family, n_baseline, nonneg_lb) -> Vector{Float64}
+
+Get lower bounds for baseline parameters by hazard family.
+Internal version used during model construction.
+"""
+function _get_baseline_lb_internal(family::Symbol, n_baseline::Int, nonneg_lb::Float64)
+    if family == :exp
+        return fill(nonneg_lb, n_baseline)
+    elseif family == :wei
+        return fill(nonneg_lb, n_baseline)
+    elseif family == :gom
+        # Gompertz: shape ∈ ℝ, rate ≥ 0
+        if n_baseline == 2
+            return [-Inf, nonneg_lb]
+        else
+            return fill(nonneg_lb, n_baseline)
+        end
+    elseif family == :sp
+        return fill(nonneg_lb, n_baseline)
+    elseif family == :pt
+        return fill(nonneg_lb, n_baseline)
+    else
+        return fill(-Inf, n_baseline)
+    end
 end

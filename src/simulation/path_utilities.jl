@@ -52,6 +52,10 @@ function observe_path(
     # create a matrix for the state sequence
     obsdat = similar(subj_dat, nrows)
     
+    # Initialize statefrom to missing - will be set explicitly for some rows
+    # and propagated for others. Use missings() to ensure proper Union{Missing,Int} type.
+    obsdat.statefrom = missings(Union{Missing, Int64}, nrows)
+    
     # fill out id
     obsdat.id .= subj_dat.id[1]
 
@@ -67,33 +71,53 @@ function observe_path(
                 obstype_by_transition
             )
         else
-            # Panel/censored interval: preserve original behavior
-            right_ind = searchsortedlast(samplepath.times, subj_dat.tstop[r])
-            obsdat.tstop[rowind] = subj_dat.tstop[r]
-
-            if subj_dat.obstype[r] == 2
-                obsdat.stateto[rowind] = samplepath.states[right_ind]
+            # Panel/censored interval
+            if use_per_transition
+                # Per-transition logic: check for exact transitions within panel interval
+                rowind = _process_panel_interval_with_per_transition!(
+                    obsdat, rowind, r, samplepath, subj_dat,
+                    trans_map, obstype_by_transition
+                )
             else
-                obsdat.stateto[rowind] = missing
+                # Original behavior: preserve template obstype
+                right_ind = searchsortedlast(samplepath.times, subj_dat.tstop[r])
+                obsdat.tstop[rowind] = subj_dat.tstop[r]
+
+                if subj_dat.obstype[r] == 2
+                    obsdat.stateto[rowind] = samplepath.states[right_ind]
+                else
+                    obsdat.stateto[rowind] = missing
+                end
+
+                obsdat.obstype[rowind] = subj_dat.obstype[r]
+
+                if ncol(subj_dat) > 6
+                    obsdat[rowind, Not(1:6)] = subj_dat[r, Not(1:6)]
+                end
+
+                rowind += 1
             end
-
-            obsdat.obstype[rowind] = subj_dat.obstype[r]
-
-            if ncol(subj_dat) > 6
-                obsdat[rowind, Not(1:6)] = subj_dat[r, Not(1:6)]
-            end
-
-            rowind += 1
         end
     end
 
     # propagate tstop and state to to origin state and time
+    # Note: tstart is always propagated, but statefrom is only propagated
+    # for rows where it wasn't already explicitly set (marked as missing)
     obsdat.tstart[Not(1)] = obsdat.tstop[Not(end)]
-    obsdat.statefrom[Not(1)] = obsdat.stateto[Not(end)]
+    
+    # Only propagate statefrom for rows where it's still missing
+    # (Exact observations from panel intervals have statefrom set explicitly)
+    for i in 2:nrow(obsdat)
+        if ismissing(obsdat.statefrom[i])
+            obsdat.statefrom[i] = obsdat.stateto[i-1]
+        end
+    end
 
     # set starting time and state
     obsdat.tstart[1] = samplepath.times[1]
-    obsdat.statefrom[1] = samplepath.states[1]
+    if ismissing(obsdat.statefrom[1])
+        obsdat.statefrom[1] = samplepath.states[1]
+    end
 
     # drop rows where subject starts in an absorbing state
     transient_states = findall(isa.(model.totalhazards, _TotalHazardTransient))
@@ -118,16 +142,25 @@ function _count_observation_rows(
 )
     nrows = 0
     for r in Base.OneTo(nrow(subj_dat))
-        if subj_dat.obstype[r] != 1
-            # Non-exact interval: always 1 row
+        if subj_dat.obstype[r] != 1 && !use_per_transition
+            # Non-exact interval without per-transition: always 1 row
             nrows += 1
+        elseif subj_dat.obstype[r] != 1 && use_per_transition
+            # Non-exact interval (panel/censored) with per-transition logic
+            # May need additional rows for exact transitions within the interval
+            nrows += _count_per_transition_rows(
+                samplepath, subj_dat.tstart[r], subj_dat.tstop[r],
+                trans_map, obstype_by_transition
+            )
         elseif !use_per_transition
             # Exact interval without per-transition: original logic
-            nrows += length(
+            # Note: must guarantee at least 1 row even for zero-length intervals
+            # (e.g., phase-type expansion reset rows with tstart == tstop)
+            nrows += max(1, length(
                 unique(
                     [subj_dat.tstart[r];
                      subj_dat.tstop[r];
-                     samplepath.times[findall(subj_dat.tstart[r] .<= samplepath.times .<= subj_dat.tstop[r])]])) - 1
+                     samplepath.times[findall(subj_dat.tstart[r] .<= samplepath.times .<= subj_dat.tstop[r])]])) - 1)
         else
             # Exact interval with per-transition logic
             nrows += _count_per_transition_rows(
@@ -142,11 +175,19 @@ end
 """
     _count_per_transition_rows(samplepath, tstart, tstop, trans_map, obstype_by_transition)
 
-Count rows for an exact interval with per-transition observation types.
+Count rows for an interval with per-transition observation types.
 
-Returns the number of rows to emit:
-- One row for each exact transition (at exact transition time)
-- One final row covering interval to tstop (with obstype from non-exact transitions if any)
+Returns the number of rows to emit. The logic handles the important case where 
+panel-observed transitions occur before exact-observed transitions within the 
+same interval - in this case, a panel row must be emitted BEFORE the exact row(s)
+to properly capture the subject's state history.
+
+Row structure:
+- If there are exact transitions AND there was time before the first exact:
+  - 1 panel row from interval start to first exact transition  
+  - 1 row for each exact transition
+  - 1 final row to tstop (if there's time remaining)
+- If only non-exact transitions: 1 row for the whole interval
 """
 function _count_per_transition_rows(
     samplepath::SamplePath,
@@ -163,8 +204,9 @@ function _count_per_transition_rows(
         return 1
     end
     
-    # Count exact transitions
-    n_exact = 0
+    # Classify transitions
+    exact_jump_times = Float64[]
+    has_non_exact = false
     
     for jump_idx in jump_inds
         statefrom = samplepath.states[jump_idx - 1]
@@ -178,12 +220,47 @@ function _count_per_transition_rows(
         )
         
         if obtype == 1
-            n_exact += 1
+            push!(exact_jump_times, samplepath.times[jump_idx])
+        else
+            has_non_exact = true
         end
     end
     
-    # Rows: 1 for each exact transition + 1 final row to tstop
-    return n_exact + 1
+    n_exact = length(exact_jump_times)
+    
+    if n_exact == 0
+        # Only non-exact transitions: single row for whole interval
+        return 1
+    end
+    
+    # Has exact transitions - count rows carefully
+    # 
+    # Key insight: exact rows need tstart < tstop (non-instantaneous) to work
+    # with phase-type expansion. So we CANNOT emit a panel row ending at 
+    # first_exact_time and then an exact row starting at first_exact_time.
+    #
+    # Instead, if there were non-exact (panel) transitions before the first exact,
+    # we emit a panel row up to the LAST non-exact transition time (not first exact).
+    # The exact row then spans from that point to the exact transition time.
+    #
+    # If there were NO non-exact transitions before first exact, the exact row
+    # spans from tstart to the exact time.
+    
+    nrows = n_exact  # One row per exact transition
+    
+    # Check if there are non-exact transitions that occur BEFORE the first exact
+    if has_non_exact
+        # We'll emit a panel row for non-exact transitions
+        nrows += 1
+    end
+    
+    # If there's time after the last exact transition, need a final row
+    last_exact_time = maximum(exact_jump_times)
+    if last_exact_time < tstop
+        nrows += 1  # Final row from last_exact_time to tstop
+    end
+    
+    return nrows
 end
 
 """
@@ -307,6 +384,188 @@ function _process_exact_interval!(
         obsdat[current_row, Not(1:6)] = subj_dat[r, Not(1:6)]
     end
     current_row += 1
+    
+    return current_row
+end
+
+"""
+    _process_panel_interval_with_per_transition!(obsdat, rowind, r, samplepath, subj_dat,
+                                                  trans_map, obstype_by_transition)
+
+Process a panel/censored observation interval when per-transition obstypes are specified.
+Returns the updated row index.
+
+This function handles the case where the template has obstype != 1 (panel or censored),
+but obstype_by_transition specifies that some transitions should be recorded exactly.
+
+The key insight is that when panel-observed transitions occur BEFORE exact-observed 
+transitions within the same interval, we must emit a panel row BEFORE the exact row(s)
+to properly capture the state the subject was in at the start of the interval.
+
+Row emission logic:
+1. If there's time before the first exact transition: emit panel row [tstart, first_exact_time]
+2. For each exact transition: emit exact row ending at that transition time  
+3. If there's time after the last exact transition: emit final row [last_exact_time, tstop]
+
+# Arguments
+- `obsdat`: Output DataFrame being filled
+- `rowind`: Current row index in obsdat
+- `r`: Current row index in subj_dat (template)
+- `samplepath`: The simulated sample path
+- `subj_dat`: Template data for this subject
+- `trans_map`: Mapping from (statefrom, stateto) to transition index
+- `obstype_by_transition`: Mapping from transition index to obstype code
+
+# Returns
+Updated row index after processing this interval.
+"""
+function _process_panel_interval_with_per_transition!(
+    obsdat,
+    rowind::Int,
+    r::Int,
+    samplepath::SamplePath,
+    subj_dat,
+    trans_map::Dict{Tuple{Int,Int},Int},
+    obstype_by_transition::Dict{Int,Int}
+)
+    right_ind = searchsortedlast(samplepath.times, subj_dat.tstop[r])
+    tstart = subj_dat.tstart[r]
+    tstop = subj_dat.tstop[r]
+    template_obstype = subj_dat.obstype[r]
+    
+    # Find jumps in this interval (strictly between tstart and tstop)
+    jump_inds = findall(tstart .< samplepath.times .< tstop)
+    
+    if isempty(jump_inds)
+        # No transitions in interval: single row with template obstype
+        obsdat.tstop[rowind] = tstop
+        
+        if template_obstype == 2
+            obsdat.stateto[rowind] = samplepath.states[right_ind]
+        else
+            obsdat.stateto[rowind] = missing
+        end
+        
+        obsdat.obstype[rowind] = template_obstype
+        
+        if ncol(subj_dat) > 6
+            obsdat[rowind, Not(1:6)] = subj_dat[r, Not(1:6)]
+        end
+        
+        return rowind + 1
+    end
+    
+    # Classify each jump as exact or non-exact based on obstype_by_transition
+    # Track times for non-exact transitions as well
+    exact_jumps = Tuple{Float64, Int}[]  # (time, jump_idx)
+    non_exact_jumps = Tuple{Float64, Int, Int}[]  # (time, jump_idx, obstype)
+    
+    for jump_idx in jump_inds
+        statefrom = samplepath.states[jump_idx - 1]
+        stateto = samplepath.states[jump_idx]
+        
+        # Skip if same state (no actual transition)
+        statefrom == stateto && continue
+        
+        obtype = _get_transition_obstype(
+            statefrom, stateto, trans_map, obstype_by_transition
+        )
+        
+        if obtype == 1
+            push!(exact_jumps, (samplepath.times[jump_idx], jump_idx))
+        else
+            push!(non_exact_jumps, (samplepath.times[jump_idx], jump_idx, obtype))
+        end
+    end
+    
+    # Sort jumps by time
+    sort!(exact_jumps, by = x -> x[1])
+    sort!(non_exact_jumps, by = x -> x[1])
+    
+    current_row = rowind
+    
+    if isempty(exact_jumps)
+        # No exact transitions: single row for whole interval with template obstype
+        obsdat.tstop[current_row] = tstop
+        
+        if template_obstype == 2
+            obsdat.stateto[current_row] = samplepath.states[right_ind]
+        else
+            obsdat.stateto[current_row] = missing
+        end
+        
+        obsdat.obstype[current_row] = template_obstype
+        
+        if ncol(subj_dat) > 6
+            obsdat[current_row, Not(1:6)] = subj_dat[r, Not(1:6)]
+        end
+        
+        return current_row + 1
+    end
+    
+    # Has exact transitions - need to emit rows carefully
+    first_exact_time, first_exact_idx = exact_jumps[1]
+    last_exact_time, _ = exact_jumps[end]
+    
+    # If there are non-exact transitions, emit a panel row first
+    # This row covers all non-exact transitions and ensures proper statefrom propagation
+    if !isempty(non_exact_jumps)
+        # Find the last non-exact transition time
+        last_non_exact_time, last_non_exact_idx, _ = non_exact_jumps[end]
+        
+        # Panel row ends at the last non-exact transition time
+        obsdat.tstop[current_row] = last_non_exact_time
+        obsdat.stateto[current_row] = samplepath.states[last_non_exact_idx]  # State after last non-exact
+        obsdat.obstype[current_row] = maximum(x[3] for x in non_exact_jumps)  # Max obstype of non-exact
+        # statefrom will be propagated from initial state
+        
+        if ncol(subj_dat) > 6
+            obsdat[current_row, Not(1:6)] = subj_dat[r, Not(1:6)]
+        end
+        
+        current_row += 1
+    end
+    
+    # Emit exact rows for each exact transition
+    # Each exact row spans from the previous row's tstop to the exact transition time
+    # DO NOT explicitly set statefrom - let it propagate from previous row's stateto
+    for (i, (jump_time, jump_idx)) in enumerate(exact_jumps)
+        obsdat.tstop[current_row] = jump_time
+        obsdat.stateto[current_row] = samplepath.states[jump_idx]
+        # Note: statefrom is intentionally NOT set here
+        # It will be propagated from the previous row's stateto (or initial state for first row)
+        obsdat.obstype[current_row] = 1  # Exact observation
+        
+        if ncol(subj_dat) > 6
+            obsdat[current_row, Not(1:6)] = subj_dat[r, Not(1:6)]
+        end
+        
+        current_row += 1
+    end
+    
+    # If there's time after the last exact transition, emit a final row
+    if last_exact_time < tstop
+        obsdat.tstop[current_row] = tstop
+        
+        # Determine obstype for final row:
+        # - Use template obstype (typically panel)
+        obsdat.obstype[current_row] = template_obstype
+        
+        if template_obstype == 2
+            obsdat.stateto[current_row] = samplepath.states[right_ind]
+        elseif template_obstype >= 3
+            obsdat.stateto[current_row] = missing
+        else
+            # template_obstype == 1: exact - observe endpoint state
+            obsdat.stateto[current_row] = samplepath.states[right_ind]
+        end
+        
+        if ncol(subj_dat) > 6
+            obsdat[current_row, Not(1:6)] = subj_dat[r, Not(1:6)]
+        end
+        
+        current_row += 1
+    end
     
     return current_row
 end

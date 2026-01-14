@@ -7,7 +7,6 @@
 #
 # Features:
 # - Importance sampling from Markov or phase-type surrogates
-# - SQUAREM acceleration for faster convergence
 # - Pareto-smoothed importance sampling (PSIS) for stable weights
 # - Adaptive ESS growth based on Caffo et al. (2005)
 # - Sampling Importance Resampling (SIR/LHS) for weight degeneracy
@@ -18,7 +17,6 @@
 # - Morsomme et al. (2025) Biostatistics - multistate semi-Markov models
 # - Wei & Tanner (1990) JASA - Monte Carlo EM
 # - Caffo et al. (2005) JRSS-B - ascent-based MCEM
-# - Varadhan & Roland (2008) Scand. J. Stat. - SQUAREM acceleration
 # - Vehtari et al. (2024) JMLR - Pareto Smoothed Importance Sampling
 #
 # =============================================================================
@@ -58,8 +56,6 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
   expectation-maximization. JRSS-B, 67(2), 235-251.
 - Vehtari, A., Simpson, D., Gelman, A., Yao, Y., & Gabry, J. (2024). 
   Pareto Smoothed Importance Sampling. JMLR, 25(72), 1-58.
-- Varadhan, R., & Roland, C. (2008). Simple and globally convergent methods 
-  for accelerating the convergence of any EM algorithm. Scand. J. Stat., 35(2), 335-353.
 
 # Arguments
 
@@ -93,10 +89,6 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
   in its own cumulative hazard term (∂²L/∂θₐ∂θᵦ = 0 when θₐ, θᵦ belong to different hazards).
   For models with k hazards of sizes b₁,...,bₖ, block-diagonal inversion is O(Σbᵢ³) vs O(n³) for
   dense, where n = Σbᵢ. Set higher to prefer dense computation; set to 1.0 to always use blocks
-- `acceleration::Symbol=:none`: acceleration method for MCEM. Options:
-  - `:none` (default): standard MCEM without acceleration
-  - `:squarem`: SQUAREM acceleration (Varadhan & Roland, 2008), applies quasi-Newton 
-    extrapolation every 2 iterations to speed up convergence
 
 **Sampling Importance Resampling (SIR):**
 - `sir::Symbol=:adaptive_lhs`: SIR resampling method. Options:
@@ -170,26 +162,14 @@ records = get_convergence_records(fitted)
 using Optim
 fitted = fit(semimarkov_model; solver=Optim.BFGS())
 
-# Use SQUAREM acceleration for faster convergence
-fitted = fit(semimarkov_model; acceleration=:squarem)
 ```
 
 See also: [`fit`](@ref), [`compare_variance_estimates`](@ref)
 """
-function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = DEFAULT_MCEM_MAXITER, tol = DEFAULT_MCEM_TOL, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = DEFAULT_ESS_TARGET_INITIAL, max_ess = DEFAULT_MAX_ESS, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, acceleration::Symbol = :squarem, sir::Symbol = :adaptive_lhs, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, sir_adaptive_threshold::Float64 = 2.0, sir_adaptive_min_iters::Int = 3, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, penalty = :auto, lambda_init = 1.0, kwargs...)
+function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = DEFAULT_MCEM_MAXITER, tol = DEFAULT_MCEM_TOL, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = DEFAULT_ESS_TARGET_INITIAL, max_ess = DEFAULT_MAX_ESS, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, sir::Symbol = :adaptive_lhs, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, sir_adaptive_threshold::Float64 = 2.0, sir_adaptive_min_iters::Int = 3, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, penalty = :auto, lambda_init = 1.0, kwargs...)
 
     # Resolve penalty specification (handles :auto, :none, deprecation warning)
     resolved_penalty = _resolve_penalty(penalty, model)
-
-    # Validate acceleration parameter
-    if acceleration ∉ (:none, :squarem)
-        throw(ArgumentError("acceleration must be :none or :squarem, got :$acceleration"))
-    end
-    use_squarem = acceleration === :squarem
-    
-    if verbose && use_squarem
-        println("Using SQUAREM acceleration for MCEM.\n")
-    end
 
     # Validate SIR parameters
     if sir ∉ (:none, :sir, :lhs, :adaptive_sir, :adaptive_lhs)
@@ -559,6 +539,10 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         mll_cur = mcem_mll(loglik_target_cur, ImportanceWeights, model.SubjectWeights)
     end
 
+    # Use parameter bounds from model (generated at construction time)
+    # This ensures box constraints are enforced during M-step optimization
+    lb, ub = model.bounds.lb, model.bounds.ub
+
     # generate optimization problem
     # If using penalty, wrap objective to include penalty term
     if use_penalty
@@ -566,18 +550,18 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         penalized_loglik = (params, data) -> loglik(params, data, penalty_config)
         if isnothing(constraints)
             optf = OptimizationFunction(penalized_loglik, Optimization.AutoForwardDiff())
-            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights))
+            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights); lb=lb, ub=ub)
         else
             optf = OptimizationFunction(penalized_loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
-            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
+            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights); lb=lb, ub=ub, lcons = constraints.lcons, ucons = constraints.ucons)
         end
     else
         if isnothing(constraints)
             optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
-            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights))
+            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights); lb=lb, ub=ub)
         else
             optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
-            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights), lcons = constraints.lcons, ucons = constraints.ucons)
+            prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights); lb=lb, ub=ub, lcons = constraints.lcons, ucons = constraints.ucons)
         end
     end
 
@@ -596,9 +580,6 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     ase = 0.0
     ascent_lb = 0.0
     ascent_ub = 0.0
-
-    # Initialize SQUAREM state if using acceleration
-    squarem_state = use_squarem ? SquaremState(length(params_cur)) : nothing
 
     # start algorithm
     while keep_going
@@ -653,14 +634,6 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
                     fill!(ess_cur, Float64(ess_target))
                 end
             end
-        end
-        
-        # =====================================================================
-        # SQUAREM: Save θ₀ at start of cycle (every 2 iterations)
-        # =====================================================================
-        if use_squarem && squarem_state.step == 0
-            squarem_state.θ0 .= params_cur
-            squarem_state.step = 1
         end
         
         # solve M-step: use user-specified solver or default Ipopt
@@ -740,88 +713,10 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
             is_converged = true
         end
 
-        # =====================================================================
-        # SQUAREM: Apply acceleration every 2 iterations
-        # =====================================================================
-        if use_squarem && !is_converged
-            if squarem_state.step == 1
-                # After first EM step: save θ₁, continue to second step
-                squarem_state.θ1 .= params_prop
-                squarem_state.step = 2
-                
-                # Standard update for this iteration
-                params_cur        = deepcopy(params_prop)
-                mll_cur           = deepcopy(mll_prop)
-                loglik_target_cur = deepcopy(loglik_target_prop)
-                
-            elseif squarem_state.step == 2
-                # After second EM step: θ₂ = params_prop, now compute acceleration
-                squarem_state.θ2 .= params_prop
-                
-                # Compute step length and acceleration vectors
-                α, r, v = squarem_step_length(squarem_state.θ0, squarem_state.θ1, squarem_state.θ2)
-                squarem_state.α = α
-                
-                if α == -1.0
-                    # No acceleration possible (v too small), use standard EM update
-                    params_cur        = deepcopy(params_prop)
-                    mll_cur           = deepcopy(mll_prop)
-                    loglik_target_cur = deepcopy(loglik_target_prop)
-                    squarem_state.n_fallbacks += 1
-                    if verbose
-                        println("  [SQUAREM: no acceleration (Δ too small), using standard EM]\n")
-                    end
-                else
-                    # Compute accelerated parameters
-                    params_acc = squarem_accelerate(squarem_state.θ0, r, v, α)
-                    
-                    # Evaluate likelihood at accelerated point
-                    loglik!(params_acc, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights))
-                    if use_sir
-                        mll_acc = mcem_mll_sir(loglik_target_prop, sir_subsample_indices, model.SubjectWeights)
-                        mll_θ0 = mcem_mll_sir(loglik_target_cur, sir_subsample_indices, model.SubjectWeights)
-                    else
-                        mll_acc = mcem_mll(loglik_target_prop, ImportanceWeights, model.SubjectWeights)
-                        mll_θ0 = mcem_mll(loglik_target_cur, ImportanceWeights, model.SubjectWeights)
-                    end
-                    
-                    if squarem_should_accept(mll_acc, mll_prop, mll_θ0)
-                        # Accept accelerated step
-                        params_cur = params_acc
-                        mll_cur = mll_acc
-                        # loglik_target_cur already holds logliks at params_acc from loglik! call above
-                        loglik_target_cur = deepcopy(loglik_target_prop)
-                        squarem_state.n_accelerations += 1
-                        
-                        # Update mll_change for reporting
-                        mll_change = mll_acc - mll_θ0
-                        
-                        if verbose
-                            println("  [SQUAREM: acceleration accepted, α=$(round(α;sigdigits=3))]\n")
-                        end
-                    else
-                        # Fallback to standard EM update (θ₂)
-                        loglik!(squarem_state.θ2, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights))
-                        params_cur        = deepcopy(squarem_state.θ2)
-                        mll_cur           = deepcopy(mll_prop)
-                        loglik_target_cur = deepcopy(loglik_target_prop)
-                        squarem_state.n_fallbacks += 1
-                        if verbose
-                            println("  [SQUAREM: acceleration rejected (mll decreased), using θ₂]\n")
-                        end
-                    end
-                end
-                
-                # Reset SQUAREM cycle
-                squarem_state.step = 0
-            end
-        else
-            # Standard MCEM (no SQUAREM) or converged
-            # increment the current values of the parameter, marginal log likelihood, target loglik
-            params_cur        = deepcopy(params_prop)
-            mll_cur           = deepcopy(mll_prop)
-            loglik_target_cur = deepcopy(loglik_target_prop)
-        end
+        # Update parameters, marginal log likelihood, target loglik
+        params_cur        = deepcopy(params_prop)
+        mll_cur           = deepcopy(mll_prop)
+        loglik_target_cur = deepcopy(loglik_target_prop)
 
         # increment log importance weights, importance weights, effective sample size and pareto shape parameter
         ComputeImportanceWeightsESS!(loglik_target_cur, loglik_surrog, _logImportanceWeights, ImportanceWeights, ess_cur, ess_target, psis_pareto_k)
@@ -868,12 +763,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
             println("Gain in marginal log-likelihood, ΔQ: $(round(mll_change;sigdigits=3))")
             println("MCEM asymptotic standard error: $(round(ase;sigdigits=3))")
             println("Ascent lower and upper bound: [$(round(ascent_lb; sigdigits=3)), $(round(ascent_ub; sigdigits=3))]")
-            println("Estimate of the log marginal likelihood, l(θ): $(round(compute_loglik(model, loglik_surrog, loglik_target_cur, NormConstantProposal).loglik;digits=3))")
-            if use_squarem
-                println("SQUAREM: $(squarem_state.n_accelerations) accelerations, $(squarem_state.n_fallbacks) fallbacks\n")
-            else
-                println()
-            end
+            println("Estimate of the log marginal likelihood, l(θ): $(round(compute_loglik(model, loglik_surrog, loglik_target_cur, NormConstantProposal).loglik;digits=3))\n")
         end
 
         # save marginal log likelihood, parameters and effective sample size
@@ -1032,9 +922,11 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # hessian
     if !isnothing(constraints) || any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
 
-        # no hessian when there are constraints
+        # Model-based variance is complex with constraints in MCEM due to Louis's identity.
+        # For now, skip model-based variance but still compute IJ/JK (which work regardless).
         if compute_vcov == true
-            @warn "No covariance matrix is returned when constraints are provided or when using monotone splines."
+            @warn "Model-based variance (vcov) is not available for constrained MCEM or monotone splines. " *
+                  "IJ (sandwich) variance will be computed if compute_ij_vcov=true (default)."
         end
         vcov = nothing
     
@@ -1214,12 +1106,14 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # subject marginal likelihood
     logliks = compute_loglik(model, loglik_surrog, loglik_target_cur, NormConstantProposal)
 
-    # compute robust variance estimates if requested
+    # Compute robust variance estimates if requested
+    # IJ/JK variance can be computed with or without constraints - they use subject-level
+    # gradients which are computed at the MLE regardless of how it was found.
     ij_variance = nothing
     jk_variance = nothing
     subject_grads = nothing
     
-    if (compute_ij_vcov || compute_jk_vcov) && !isnothing(vcov) && isnothing(constraints) && is_converged
+    if (compute_ij_vcov || compute_jk_vcov) && is_converged
         if verbose
             println("Computing robust variance estimates...")
         end
@@ -1287,12 +1181,14 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     end
     
     # Rebuild parameters with proper constraints using model's hazard info
-    parameters_fitted = rebuild_parameters(fitted_params, model)
+    # Skip validation since optimizer should have respected bounds
+    parameters_fitted = rebuild_parameters(fitted_params, model; validate_bounds=false)
 
     # wrap results
     model_fitted = MultistateModelFitted(
         data_original,
         parameters_fitted,
+        model.bounds,  # Pass bounds from unfitted model
         logliks,
         vcov,
         isnothing(ij_variance) ? nothing : Matrix(ij_variance),

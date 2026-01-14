@@ -78,8 +78,8 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         println("Using penalized likelihood with $(penalty_config.n_lambda) smoothing parameter(s)")
     end
 
-    # Generate parameter bounds for box-constrained optimization
-    lb, ub = generate_parameter_bounds(model)
+    # Use parameter bounds from model (generated at construction time)
+    lb, ub = model.bounds.lb, model.bounds.ub
 
     # =========================================================================
     # SMOOTHING PARAMETER SELECTION (when penalty is active)
@@ -172,7 +172,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             # Compute subject-level gradients and Hessians to cache them for robust variance
             # This avoids redundant computation when computing robust variance estimates
             subject_grads_cache = compute_subject_gradients(sol.u, model, samplepaths)
-            subject_hessians_cache = compute_subject_hessians(sol.u, model, samplepaths)
+            subject_hessians_cache = compute_subject_hessians_fast(sol.u, model, samplepaths)
             
             # Aggregate Fisher information from subject Hessians
             nparams = length(sol.u)
@@ -229,24 +229,84 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             rectify_coefs!(sol.u, model)
         end
 
-        # no hessian when there are constraints
-        if compute_vcov == true
-            @warn "No covariance matrix is returned when constraints are provided."
+        # Check for parameters at box bounds (may affect variance estimates)
+        warn_bound_parameters(sol.u, lb, ub)
+        
+        # Compute subject gradients and Hessians for IJ/JK variance (can be done with constraints)
+        # IJ/JK variance only requires subject-level score vectors and Hessians, which are
+        # computed at the MLE regardless of whether constraints were used to find it.
+        if compute_vcov || compute_ij_vcov || compute_jk_vcov
+            if verbose && (compute_ij_vcov || compute_jk_vcov)
+                println("Computing subject gradients and Hessians for variance estimation...")
+            end
+            # Compute subject gradients and Hessians separately (matching unconstrained branch)
+            subject_grads_cache = compute_subject_gradients(sol.u, model, samplepaths)
+            subject_hessians_cache = compute_subject_hessians_fast(sol.u, model, samplepaths)
+        else
+            subject_grads_cache = nothing
+            subject_hessians_cache = nothing
         end
-        subject_grads_cache = nothing
-        subject_hessians_cache = nothing
-        vcov = nothing
+        
+        # Model-based vcov with constraints: use reduced Hessian approach
+        if compute_vcov && !isnothing(subject_hessians_cache)
+            # Build AD-compatible constraint function for Jacobian computation
+            # The function must return an array of the same type as input parameters
+            # to support ForwardDiff.jacobian
+            n_cons = length(constraints.cons)
+            cons_fn = function(x)
+                # Create result array with correct element type for AD compatibility
+                res = similar(x, n_cons)
+                consfun_multistate(res, x, nothing)
+                return res
+            end
+            constraints_for_jacobian = (cons_fn = cons_fn, lcons = constraints.lcons, ucons = constraints.ucons)
+            
+            # Identify which constraints are active at the solution
+            active = identify_active_constraints(sol.u, constraints_for_jacobian)
+            n_active = sum(active)
+            
+            if n_active > 0
+                # Compute Jacobian of active constraints
+                J_full = compute_constraint_jacobian(sol.u, constraints_for_jacobian)
+                J_active = J_full[active, :]
+                
+                if verbose
+                    println("Computing model-based variance with $(n_active) active constraint(s) using reduced Hessian...")
+                end
+                
+                # Use reduced Hessian approach
+                vcov = compute_constrained_vcov_from_components(subject_hessians_cache, J_active;
+                                                                vcov_threshold=vcov_threshold)
+            else
+                # No active constraints at solution - use standard inverse Hessian
+                if verbose
+                    println("No constraints active at solution; using standard model-based variance...")
+                end
+                nparams = length(sol.u)
+                fishinf = zeros(Float64, nparams, nparams)
+                for H_i in subject_hessians_cache
+                    fishinf .-= H_i
+                end
+                vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(length(samplepaths)) * length(sol.u))^-2 : sqrt(eps(Float64)))
+                vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)), rtol = sqrt(eps(Float64)))] .= 0.0
+                vcov = Symmetric(vcov)
+            end
+        else
+            vcov = nothing
+        end
     end
 
     # compute subject-level likelihood at the estimate (always UNPENALIZED for model comparison)
     ll_subj = loglik_exact(sol.u, ExactData(model, samplepaths); return_ll_subj = true)
 
-    # compute robust variance estimates if requested
+    # Compute robust variance estimates if requested
+    # IJ/JK variance can be computed with or without constraints - they use subject-level
+    # gradients which are computed at the MLE regardless of how it was found.
     ij_variance = nothing
     jk_variance = nothing
     subject_grads = nothing
     
-    if (compute_ij_vcov || compute_jk_vcov) && !isnothing(vcov) && isnothing(constraints)
+    if compute_ij_vcov || compute_jk_vcov
         if verbose
             println("Computing robust variance estimates...")
         end
@@ -290,6 +350,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
     model_fitted = MultistateModelFitted(
         model.data,
         parameters_fitted,
+        model.bounds,  # Pass bounds from unfitted model
         (loglik = -sol.objective, subj_lml = ll_subj),
         vcov,
         isnothing(ij_variance) ? nothing : Matrix(ij_variance),

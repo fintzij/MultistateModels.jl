@@ -63,7 +63,7 @@ struct SplineHazard <: HazardFunction
 end
 
 """
-    PhaseTypeHazard(hazard, family, statefrom, stateto, n_phases, metadata)
+    PhaseTypeHazard(hazard, family, statefrom, stateto, n_phases, structure, covariate_constraints, metadata)
 
 User-facing specification for a phase-type (Coxian) hazard.
 Created by `Hazard(:pt, ...)` and converted to internal types during model construction.
@@ -86,22 +86,41 @@ Total baseline parameters: 2n - 1
 - `statefrom`: Origin state number
 - `stateto`: Destination state number  
 - `n_phases`: Number of Coxian phases (≥ 1)
-- `structure`: Coxian structure constraint (`:unstructured` or `:sctp`)
+- `structure`: Coxian structure constraint (`:eigorder_sctp`, `:sctp`, `:ordered_sctp`, or `:unstructured`)
+- `covariate_constraints`: Covariate sharing constraint (`:unstructured` or `:homogeneous`)
 - `metadata`: HazardMetadata for time_transform and linpred_effect
 
 # Structures
-- `:unstructured` (default): All λᵢ and μᵢ are free parameters
-- `:sctp`: SCTP (Stationary Conditional Transition Probability) constraints ensuring
+- `:sctp` (default): SCTP (Stationary Conditional Transition Probability) constraints only, ensuring
   P(dest | leaving state) is constant across phases
+- `:eigorder_sctp`: SCTP plus eigenvalue ordering constraints (ν₁ ≥ ν₂ ≥ ... ≥ νₙ)
+  where νⱼ = λⱼ + Σ_d μ_{j,d} is the total rate out of phase j. May cause constraint binding.
+- `:ordered_sctp`: Alias for `:eigorder_sctp` (deprecated)
+- `:unstructured`: All λᵢ and μᵢ are free parameters (no constraints)
+
+# Covariate Constraints
+- `:homogeneous` (default): Destination-specific shared covariate effects. All phases share the same
+  covariate effect per destination (e.g., `h12_x`). Parameter count: K × p.
+  **Recommended for better identifiability and interpretability.**
+- `:unstructured`: Phase-specific covariate effects. Each phase has independent
+  covariate parameters (e.g., `h12_a_x`, `h12_b_x`). Parameter count: n × K × p.
 
 # Example
 ```julia
-# 3-phase Coxian hazard for transition 1 → 2
-h12 = Hazard(@formula(0 ~ 1 + age), :pt, 1, 2)
-model = multistatemodel(h12; data=df, n_phases=Dict(1 => 3))
+# 3-phase Coxian hazard for transition 1 → 2 with default constraints
+# (eigorder_sctp structure + homogeneous covariates)
+h12 = Hazard(@formula(0 ~ age), :pt, 1, 2; n_phases=3)
+# Parameter names: h12_age (shared across all phases)
 
-# With SCTP constraint (specified at model level)
+# With unstructured (phase-specific) covariates:
+h12 = Hazard(@formula(0 ~ age), :pt, 1, 2; n_phases=3, covariate_constraints=:unstructured)
+# Parameter names: h12_a_age, h12_b_age, h12_c_age (one per phase)
+
+# With SCTP constraint only (no eigenvalue ordering)
 model = multistatemodel(h12; data=df, n_phases=Dict(1 => 3), coxian_structure=:sctp)
+
+# Fully unconstrained (not recommended)
+model = multistatemodel(h12; data=df, n_phases=Dict(1 => 3), coxian_structure=:unstructured)
 ```
 
 See also: [`PhaseTypeCoxianHazard`](@ref), [`PhaseTypeModel`](@ref)
@@ -112,17 +131,21 @@ struct PhaseTypeHazard <: HazardFunction
     statefrom::Int64
     stateto::Int64
     n_phases::Int                      # number of Coxian phases (≥1)
-    structure::Symbol                  # :unstructured or :sctp
+    structure::Symbol                  # :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing
+    covariate_constraints::Symbol      # :unstructured (phase-specific) or :homogeneous (destination-shared)
     metadata::HazardMetadata
     
     function PhaseTypeHazard(hazard::StatsModels.FormulaTerm, family::Symbol,
                               statefrom::Int64, stateto::Int64, n_phases::Int,
-                              structure::Symbol, metadata::HazardMetadata)
+                              structure::Symbol, covariate_constraints::Symbol,
+                              metadata::HazardMetadata)
         family == :pt || throw(ArgumentError("PhaseTypeHazard family must be :pt"))
         n_phases >= 1 || throw(ArgumentError("n_phases must be ≥ 1, got $n_phases"))
-        structure in (:unstructured, :sctp) ||
-            throw(ArgumentError("structure must be :unstructured or :sctp, got :$structure"))
-        new(hazard, family, statefrom, stateto, n_phases, structure, metadata)
+        structure in (:unstructured, :sctp, :sctp_increasing, :sctp_decreasing) ||
+            throw(ArgumentError("structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :$structure"))
+        covariate_constraints in (:unstructured, :homogeneous) ||
+            throw(ArgumentError("covariate_constraints must be :unstructured or :homogeneous, got :$covariate_constraints"))
+        new(hazard, family, statefrom, stateto, n_phases, structure, covariate_constraints, metadata)
     end
 end
 

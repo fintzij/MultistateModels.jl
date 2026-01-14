@@ -184,6 +184,19 @@ Build a MarkovHazard for phase-type exit transition (μ rate).
 
 These hazards represent transitions from a specific phase to the destination state.
 Covariates from the original :pt specification are included.
+
+# Covariate Naming by Constraint
+Both C0 and C1 use phase-specific internal names (e.g., `h12_a_age`, `h12_b_age`) for
+parameter identification. The difference is:
+
+- `:unstructured`: Phase-specific covariate effects (no constraints, independent parameters)
+- `:homogeneous` (default): Destination-specific shared effects (equality constraints tie phase parameters)
+
+When `:homogeneous` is used, equality constraints are automatically generated to enforce that
+covariate parameters are equal across phases per destination. For example, with 2 phases:
+  - Parameters: `h12_a_age`, `h12_b_age` (both exist in the parameter vector)
+  - Constraint: `h12_a_age - h12_b_age = 0` (enforced during optimization)
+  - Effective degrees of freedom: 1 (not 2)
 """
 function _build_exit_hazard(pt_spec::PhaseTypeHazard, 
                              observed_from::Int, observed_to::Int,
@@ -200,8 +213,12 @@ function _build_exit_hazard(pt_spec::PhaseTypeHazard,
     hazschema = apply_schema(pt_spec.hazard, schema)
     rhs_names = _hazard_rhs_names(hazschema)
     
-    # Build parameter names
+    # Build parameter names - always use phase-specific names for unique identification
+    # C1 equality constraints are applied separately to tie shared parameters
     covar_labels = length(rhs_names) > 1 ? rhs_names[2:end] : String[]
+    
+    # Always use phase-specific names: h12_a_age, h12_b_age
+    # This ensures unique parameter identification in the constraint system
     covar_parnames = [Symbol("$(hazname)_$(c)") for c in covar_labels]
     parnames = vcat([baseline_parname], covar_parnames)
     
@@ -434,9 +451,8 @@ function expand_data_for_phasetype_fitting(data::DataFrame, mappings::PhaseTypeM
     original_row_map = expansion_result.original_row_map
     
     # Build censoring patterns for phase uncertainty FIRST (needed for obstype mapping)
-    # Each observed state maps to a set of possible phases
-    # Row s corresponds to obstype = s + 2
-    censoring_patterns = _build_phase_censoring_patterns(mappings)
+    # Returns both patterns and a mapping from state index to obstype code
+    censoring_patterns, state_to_obstype = _build_phase_censoring_patterns(mappings)
     
     # Now map state indices to phase indices in expanded space
     # For statefrom: map to first phase of the state (always unambiguous - we know 
@@ -460,8 +476,27 @@ function expand_data_for_phasetype_fitting(data::DataFrame, mappings::PhaseTypeM
         s = expanded_data.stateto[i]
         obstype_i = expanded_data.obstype[i]
         
-        if s == 0
-            # Already censored (sojourn intervals, etc.) - keep as is
+        if s == 0 && obstype_i >= 3
+            # Sojourn interval with censoring obstype (from expand_data_for_phasetype)
+            # Check if the state (obstype - 2) has multiple phases
+            sojourn_state = obstype_i - 2
+            if sojourn_state >= 1 && sojourn_state <= length(mappings.state_to_phases)
+                n_phases_in_state = length(mappings.state_to_phases[sojourn_state])
+                if n_phases_in_state == 1
+                    # Single phase: no uncertainty, convert to panel observation
+                    # Set stateto to the single phase and use obstype=2
+                    new_stateto[i] = first(mappings.state_to_phases[sojourn_state])
+                    new_obstype[i] = 2  # Panel observation
+                else
+                    # Multiple phases: use the correct obstype from mapping
+                    new_obstype[i] = state_to_obstype[sojourn_state]
+                    new_stateto[i] = 0
+                end
+            else
+                new_stateto[i] = 0
+            end
+        elseif s == 0
+            # Other censored observations - keep as is
             new_stateto[i] = 0
         elseif obstype_i == 2
             # Panel observation: destination state has phase uncertainty
@@ -472,9 +507,8 @@ function expand_data_for_phasetype_fitting(data::DataFrame, mappings::PhaseTypeM
             end
             n_phases_in_state = length(mappings.state_to_phases[s])
             if n_phases_in_state > 1
-                # Multiple phases: use censoring pattern (obstype = s + 2)
-                # This triggers build_emat to use censoring_patterns[s, :]
-                new_obstype[i] = s + 2
+                # Multiple phases: use censoring pattern from state_to_obstype mapping
+                new_obstype[i] = state_to_obstype[s]
                 new_stateto[i] = 0  # Triggers forward algorithm with emission matrix
             else
                 # Single phase: no uncertainty, map directly
@@ -514,40 +548,59 @@ end
 
 Build censoring patterns that encode phase uncertainty.
 
-For each observed state, creates a pattern where all phases of that state
-have probability 1 (possible) and all other states have probability 0 (impossible).
+Only creates rows for states with MULTIPLE phases (where there is actual uncertainty).
+Single-phase states don't need censoring patterns since there's no phase ambiguity.
 
 The patterns are indexed by observed state (rows) and expanded state (columns).
 
 Note: The format must match what `build_emat` expects:
-- Row 1 corresponds to obstype=3 (sojourn in state 1)
-- Row 2 corresponds to obstype=4 (sojourn in state 2)
-- etc.
-- Column 1 is the pattern code (not used by build_emat for indexing)
+- Row index corresponds to obstype - 2 (e.g., obstype=3 → row 1, obstype=4 → row 2)
+- Column 1 is the pattern code (for reference/debugging)
 - Columns 2:n_expanded+1 are the state indicators
+
+IMPORTANT: Only states with >1 phase get rows. Data preprocessing must ensure
+that single-phase states never use censoring obstypes (obstype ≥ 3).
 """
 function _build_phase_censoring_patterns(mappings::PhaseTypeMappings)
     n_observed = mappings.n_observed
     n_expanded = mappings.n_expanded
     
-    # Pattern matrix format for build_emat compatibility:
-    # - Row s corresponds to obstype = s + 2 (sojourn in observed state s)
-    # - Column 1 is the pattern code (s + 2.0)
-    # - Columns 2:n_expanded+1 are indicator values (1.0 = possible, 0.0 = impossible)
-    patterns = zeros(Float64, n_observed, n_expanded + 1)
+    # Count states with multiple phases (only these need censoring patterns)
+    multi_phase_states = [s for s in 1:n_observed if length(mappings.state_to_phases[s]) > 1]
+    n_patterns = length(multi_phase_states)
     
-    for s in 1:n_observed
-        patterns[s, 1] = s + 2.0  # Pattern code (for reference/debugging)
-        phases = mappings.state_to_phases[s]
-        # Use indicator values (1.0 for all possible phases)
-        # The likelihood computation sums transition probabilities for all allowed phases:
-        #   L = Σ_s P(transition to s) * indicator(s is allowed)
-        for p in phases
-            patterns[s, p + 1] = 1.0  # Phase p is allowed (column index = p + 1)
-        end
+    # Build mapping from state index to obstype (0 for single-phase states)
+    state_to_obstype = Dict{Int, Int}()
+    
+    # If no multi-phase states, return empty matrix and empty mapping
+    if n_patterns == 0
+        return zeros(Float64, 0, n_expanded + 1), state_to_obstype
     end
     
-    return patterns
+    # Pattern matrix format for build_emat compatibility:
+    # - Row index = obstype - 2 (so row 1 = obstype 3, row 2 = obstype 4, etc.)
+    # - Column 1 is the pattern code (obstype value for reference/debugging)
+    # - Columns 2:n_expanded+1 are indicator values (1.0 = possible, 0.0 = impossible)
+    patterns = zeros(Float64, n_patterns, n_expanded + 1)
+    
+    row_idx = 0
+    for s in 1:n_observed
+        phases = mappings.state_to_phases[s]
+        if length(phases) > 1
+            # Multi-phase state: create censoring pattern row
+            row_idx += 1
+            obstype_code = row_idx + 2  # Pattern code = consecutive obstype (3, 4, 5, ...)
+            patterns[row_idx, 1] = Float64(obstype_code)
+            state_to_obstype[s] = obstype_code
+            # Use indicator values (1.0 for all possible phases)
+            for p in phases
+                patterns[row_idx, p + 1] = 1.0  # Phase p is allowed (column index = p + 1)
+            end
+        end
+        # Single-phase states: skip (no row created, not added to mapping)
+    end
+    
+    return patterns, state_to_obstype
 end
 
 """

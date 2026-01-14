@@ -45,6 +45,20 @@ intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yoursel
     Must be ≥ 1. **Prefer specifying `n_phases` at model construction** via 
     `multistatemodel(...; n_phases = Dict(state => k))`. When specified in Hazard(), 
     it serves as a fallback if not provided at model level.
+- `coxian_structure::Symbol`: Coxian structure constraint for phase-type hazards
+    (only for `family == :pt`, default: `:sctp`).
+    - `:sctp` (default): SCTP (Stationary Conditional Transition Probability) constraint only.
+      Ensures P(destination | leaving) is constant across phases.
+    - `:sctp_decreasing`: SCTP + eigenvalue ordering ν₁ ≥ ν₂ ≥ ... ≥ νₙ (early exits more likely).
+    - `:sctp_increasing`: SCTP + eigenvalue ordering ν₁ ≤ ν₂ ≤ ... ≤ νₙ (late exits more likely).
+    - `:unstructured`: All progression and exit rates are free parameters.
+- `covariate_constraints::Symbol`: Controls covariate parameter sharing for phase-type
+    hazards (only for `family == :pt`, default: `:homogeneous`).
+    - `:homogeneous` (default): Destination-specific shared effects. All phases share the same
+      covariate effect per destination (e.g., `h12_age`). Parameter count: p.
+      **Recommended for better identifiability.**
+    - `:unstructured`: Phase-specific covariate effects. Each phase has independent
+      covariate parameters (e.g., `h12_a_age`, `h12_b_age`). Parameter count: n × p.
 - `time_transform::Bool`: enable time transformation shared-trajectory caching for this transition.
 - `linpred_effect::Symbol`: `:ph` (default) for proportional hazards or `:aft` for
     accelerated-failure-time behaviour.
@@ -53,8 +67,10 @@ intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yoursel
 ```julia
 julia> Hazard(:exp, 1, 2)                        # intercept only
 julia> Hazard(@formula(0 ~ age + trt), :wei, 1, 3)
-julia> Hazard(:pt, 1, 2)                         # phase-type (n_phases set at model level)
-julia> Hazard(@formula(0 ~ age), :pt, 1, 2)      # phase-type with covariates
+julia> Hazard(:pt, 1, 2)                         # phase-type with defaults (sctp + homogeneous)
+julia> Hazard(@formula(0 ~ age), :pt, 1, 2)      # phase-type with homogeneous covariates (default)
+julia> Hazard(@formula(0 ~ age), :pt, 1, 2; covariate_constraints=:unstructured)  # phase-specific
+julia> Hazard(:pt, 1, 2; coxian_structure=:unstructured)  # override to unstructured (not recommended)
 julia> @hazard begin                              # macro front-end uses the same rules
                      family = :gom
                      transition = 2 => 4
@@ -74,7 +90,8 @@ function Hazard(
     extrapolation = "constant",
     monotone = 0,
     n_phases::Int = 2,
-    coxian_structure::Symbol = :unstructured,
+    coxian_structure::Symbol = :sctp,
+    covariate_constraints::Symbol = :homogeneous,
     time_transform::Bool = false,
     linpred_effect::Symbol = :ph)
 
@@ -102,7 +119,9 @@ function Hazard(
     
     if family_key == :pt
         n_phases >= 1 || throw(ArgumentError("n_phases must be ≥ 1, got $n_phases"))
-        coxian_structure in (:unstructured, :sctp) || throw(ArgumentError("coxian_structure must be :unstructured or :sctp, got :$coxian_structure"))
+        coxian_structure in (:unstructured, :sctp, :sctp_increasing, :sctp_decreasing) || 
+            throw(ArgumentError("coxian_structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :$coxian_structure"))
+        covariate_constraints in (:unstructured, :homogeneous) || throw(ArgumentError("covariate_constraints must be :unstructured or :homogeneous, got :$covariate_constraints"))
     end
     
     linpred_effect in (:ph, :aft) || throw(ArgumentError("linpred_effect must be :ph or :aft, got :$linpred_effect"))
@@ -111,7 +130,7 @@ function Hazard(
 
     if family_key == :pt
         # Phase-type (Coxian) hazard
-        h = PhaseTypeHazard(hazard, family_key, statefrom, stateto, n_phases, coxian_structure, metadata)
+        h = PhaseTypeHazard(hazard, family_key, statefrom, stateto, n_phases, coxian_structure, covariate_constraints, metadata)
     elseif family_key != :sp
         h = ParametricHazard(hazard, family_key, statefrom, stateto, metadata)
     else 

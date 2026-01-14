@@ -273,6 +273,13 @@ function _prepare_simulation_data(model::MultistateProcess,
             sim_data = _collapse_to_single_interval(sim_data)
         end
         
+        # For phase-type models, restore original observation types
+        # The expanded data has obstype=3 for sojourn intervals, but simulation
+        # should use the original observation scheme for observe_path
+        if has_phasetype_expansion(model)
+            _restore_original_obstypes!(sim_data, model.phasetype_expansion.original_data)
+        end
+        
         sim_subjinds, _ = get_subjinds(sim_data)
         
         # Store original and swap
@@ -297,6 +304,13 @@ function _prepare_simulation_data(model::MultistateProcess,
             # No TVC: collapse to single interval per subject
             sim_data.tstop .= implicit_tmax
             sim_data = _collapse_to_single_interval(sim_data)
+        end
+        
+        # For phase-type models, restore original observation types
+        # The expanded data has obstype=3 for sojourn intervals, but simulation
+        # should use the original observation scheme for observe_path
+        if has_phasetype_expansion(model)
+            _restore_original_obstypes!(sim_data, model.phasetype_expansion.original_data)
         end
         
         sim_subjinds, _ = get_subjinds(sim_data)
@@ -394,6 +408,43 @@ function _collapse_to_single_interval(data::DataFrame)
     end
     
     return reduce(vcat, collapsed_rows)
+end
+
+"""
+    _restore_original_obstypes!(sim_data::DataFrame, original_data::DataFrame)
+
+Restore observation types from original data to simulation data.
+
+For phase-type models, the expanded data has obstype=3 for sojourn intervals,
+but simulation should use the original observation scheme for observe_path.
+This function maps each subject's obstype back to the original values.
+
+# Arguments
+- `sim_data::DataFrame`: Collapsed simulation data (modified in place)
+- `original_data::DataFrame`: Original data with correct observation types
+
+# Notes
+- Assumes sim_data has one row per subject after collapsing
+- Original data may have multiple rows per subject; takes first row's obstype
+"""
+function _restore_original_obstypes!(sim_data::DataFrame, original_data::DataFrame)
+    # Build mapping from subject id to original obstype (first row for each subject)
+    id_to_obstype = Dict{Int,Int}()
+    for row in eachrow(original_data)
+        if !haskey(id_to_obstype, row.id)
+            id_to_obstype[row.id] = row.obstype
+        end
+    end
+    
+    # Apply original obstypes to simulation data
+    for i in 1:nrow(sim_data)
+        subj_id = sim_data.id[i]
+        if haskey(id_to_obstype, subj_id)
+            sim_data.obstype[i] = id_to_obstype[subj_id]
+        end
+    end
+    
+    return nothing
 end
 
 """
@@ -1236,47 +1287,81 @@ end
     _collapse_subject_data(subj_df::AbstractDataFrame) -> DataFrame
 
 Collapse one subject's data by merging consecutive rows with same states.
+
+For phase-type models:
+- Internal phase transitions (where statefrom == stateto in observed space) are 
+  accumulated but not emitted as separate rows
+- The tstart of such intervals is preserved for the next actual transition
+- Only true transitions between different observed states are emitted
 """
 function _collapse_subject_data(subj_df::AbstractDataFrame)
     if nrow(subj_df) == 0
         return DataFrame(subj_df)
     end
     
+    # Get column names - we need to preserve all columns, not just core 6
+    all_cols = names(subj_df)
+    core_cols = [:id, :tstart, :tstop, :statefrom, :stateto, :obstype]
+    extra_cols = Symbol[Symbol(c) for c in all_cols if Symbol(c) ∉ core_cols]
+    
+    # Helper to build a row NamedTuple with all columns
+    function make_row(row, effective_tstart)
+        core = (
+            id = row.id,
+            tstart = effective_tstart,
+            tstop = row.tstop,
+            statefrom = row.statefrom,
+            stateto = row.stateto,
+            obstype = row.obstype
+        )
+        if isempty(extra_cols)
+            return core
+        else
+            extras = NamedTuple{Tuple(extra_cols)}(Tuple(row[c] for c in extra_cols))
+            return merge(core, extras)
+        end
+    end
+    
+    # Helper to update row with new tstop (keeping all other values from current_row)
+    function update_row_tstop(current_row, new_tstop, new_obstype)
+        return merge(current_row, (tstop = new_tstop, obstype = new_obstype))
+    end
+    
     # Collect rows, merging when statefrom and stateto match
     rows = NamedTuple[]
     current_row = nothing
+    accumulated_tstart = nothing  # Track tstart from accumulated internal transitions
     
     for (i, row) in enumerate(eachrow(subj_df))
+        # Check for internal transition: statefrom == stateto (and both non-missing)
+        # Note: row.statefrom == row.stateto returns `missing` if either is missing,
+        # which would cause a TypeError in boolean context. We must check explicitly.
+        is_internal = !ismissing(row.statefrom) && !ismissing(row.stateto) && 
+                      coalesce(row.statefrom == row.stateto, false)
+        
+        if is_internal
+            # Internal transition - accumulate but don't emit
+            # Track the tstart if this is the first accumulated internal transition
+            if accumulated_tstart === nothing
+                accumulated_tstart = row.tstart
+            end
+            continue
+        end
+        
+        # This is a real transition - determine the effective tstart
+        effective_tstart = accumulated_tstart !== nothing ? accumulated_tstart : row.tstart
+        accumulated_tstart = nothing  # Reset accumulator
+        
         if current_row === nothing
-            current_row = (
-                id = row.id,
-                tstart = row.tstart,
-                tstop = row.tstop,
-                statefrom = row.statefrom,
-                stateto = row.stateto,
-                obstype = row.obstype
-            )
-        elseif row.statefrom == current_row.statefrom && row.stateto == current_row.stateto
+            current_row = make_row(row, effective_tstart)
+        elseif coalesce(row.statefrom == current_row.statefrom, false) && 
+               coalesce(row.stateto == current_row.stateto, false)
             # Same transition, extend the interval
-            current_row = (
-                id = current_row.id,
-                tstart = current_row.tstart,
-                tstop = row.tstop,  # Extend to new tstop
-                statefrom = current_row.statefrom,
-                stateto = current_row.stateto,
-                obstype = row.obstype  # Use latest obstype
-            )
+            current_row = update_row_tstop(current_row, row.tstop, row.obstype)
         else
             # Different transition, save current and start new
             push!(rows, current_row)
-            current_row = (
-                id = row.id,
-                tstart = row.tstart,
-                tstop = row.tstop,
-                statefrom = row.statefrom,
-                stateto = row.stateto,
-                obstype = row.obstype
-            )
+            current_row = make_row(row, row.tstart)
         end
     end
     

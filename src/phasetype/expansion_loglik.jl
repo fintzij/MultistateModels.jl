@@ -96,12 +96,40 @@ function compute_phasetype_marginal_loglik(model::MultistateProcess,
                 
                 copyto!(α, α_new)
             else
+                # Δt = 0: Instantaneous observation (no time passes)
                 if obstype_subj[k] ∈ [1, 2] && stateto_subj[k] > 0
                     obs_state = stateto_subj[k]
-                    for j in 1:n_expanded
-                        if surrogate.phase_to_state[j] != obs_state
-                            α[j] = 0.0
+                    obs_phases = surrogate.state_to_phases[obs_state]
+                    
+                    # Check if we're already in the observed state or need to transition
+                    already_in_state = false
+                    for j in obs_phases
+                        if α[j] > 0
+                            already_in_state = true
+                            break
                         end
+                    end
+                    
+                    if already_in_state
+                        # Already in the observed state - just zero out other states
+                        for j in 1:n_expanded
+                            if surrogate.phase_to_state[j] != obs_state
+                                α[j] = 0.0
+                            end
+                        end
+                    else
+                        # Need to transition INTO the observed state
+                        # Use Q matrix to compute rate-weighted probability transfer:
+                        # α_new[j] = Σᵢ Q[i,j] * α[i] for j in destination phases
+                        fill!(α_new, 0.0)
+                        for j in obs_phases
+                            for i in 1:n_expanded
+                                if α[i] > 0 && Q[i, j] > 0
+                                    α_new[j] += Q[i, j] * α[i]
+                                end
+                            end
+                        end
+                        copyto!(α, α_new)
                     end
                 else
                     for j in 1:n_expanded

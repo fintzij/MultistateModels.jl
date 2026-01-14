@@ -203,17 +203,14 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                     data.model.data)
             end
             
-            # Invalidate eigen cache when Q changes (new parameters)
-            invalidate_eigen_cache!(data.cache, t)
-            
-            # Use batched approach when >= 2 unique Δt values (eigendecomp pays off)
+            # Use batched Schur approach when >= 2 unique Δt values (O(n²) per Δt pays off)
             n_dt = length(data.cache.dt_values[t])
             if n_dt >= 2
                 compute_tmat_batched!(
                     tpm_book[t],
                     hazmat_book[t],
                     data.cache.dt_values[t],
-                    data.cache.eigen_cache,
+                    data.cache.schur_cache,
                     t)
             else
                 # Single Δt: use standard approach
@@ -380,7 +377,15 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
             else
                 lmat = zeros(T, S, nobs_subj + 1)
             end
-            @inbounds lmat[cols.statefrom[subj_inds[1]], 1] = 1
+            
+            # Initialize forward probabilities at time 0 (before first observation)
+            # For phase-type models, the expanded data already has the correct phase index
+            # in statefrom. For exact transitions into a state, this is phase 1 (Coxian property).
+            # For panel data, the emission matrix handles phase uncertainty.
+            first_obs_idx = subj_inds[1]
+            first_statefrom = cols.statefrom[first_obs_idx]
+            
+            @inbounds lmat[first_statefrom, 1] = 1.0
 
             # initialize counter for likelihood matrix
             ind = 1
@@ -410,33 +415,33 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                     row_data = @view data.model.data[i, :]
                     
                     if dt ≈ 0
-                        # Instantaneous observation (dt=0): use hazard ratios
-                        # This occurs in phase-type expanded data where transitions
-                        # are recorded at a single point in time.
-                        # q[r,s] = h(r,s) / Σ_k h(r,k) = conditional prob of destination s
+                        # Instantaneous observation (dt=0): use raw hazard values
+                        # This occurs in phase-type expanded data where the exact transition
+                        # is recorded at a single point in time (dt=0 between sojourn and transition).
+                        #
+                        # For a density contribution, q[r,s] = h(r,s), NOT normalized.
+                        # The likelihood contribution is: Σ_r P(in phase r) × h(r,s)
+                        # which gives the density of transitioning to state s at this instant.
+                        #
+                        # Note: We do NOT normalize because we need the density (hazard),
+                        # not the conditional probability. The forward algorithm accumulates
+                        # the unnormalized likelihood which is later summed and log-transformed.
                         fill!(q, zero(eltype(q)))
                         for r in 1:S
                             if isa(data.model.totalhazards[r], _TotalHazardAbsorbing)
-                                q[r,r] = 1.0  # Absorbing state stays in itself
+                                # Absorbing states don't contribute to transitions
+                                # q[r, :] stays zero (no outgoing transitions)
                             else
                                 dest_states = transient_dests[r]
-                                # Compute hazards for each destination
-                                total_haz = zero(eltype(q))
+                                # Compute raw hazards for each destination (no normalization)
                                 for s in dest_states
                                     trans_idx = tmat_cache[r, s]
                                     hazard = hazards[trans_idx]
                                     hazard_pars = pars[hazard.hazname]
                                     haz_value = eval_hazard(hazard, dt, hazard_pars, row_data)
                                     q[r, s] = haz_value
-                                    total_haz += haz_value
                                 end
-                                # Normalize to get conditional probabilities
-                                if total_haz > 0
-                                    for s in dest_states
-                                        q[r, s] /= total_haz
-                                    end
-                                end
-                                # For instantaneous obs, diagonal is 0 (transition definitely occurred)
+                                # Diagonal is 0: transition definitely occurred at this instant
                                 q[r, r] = 0.0
                             end
                         end

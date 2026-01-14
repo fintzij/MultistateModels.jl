@@ -5,6 +5,7 @@
 # This file contains:
 # - Main fit() docstring and dispatch function
 # - Common helpers (_is_ipopt_solver, _solve_optimization)
+# - Constraint analysis helpers (identify_active_constraints, etc.)
 # - The routing logic that selects _fit_exact, _fit_markov_panel, or _fit_mcem
 #
 # Related files:
@@ -166,6 +167,43 @@ function _solve_optimization(prob, solver; ipopt_options...)
     end
 end
 
+"""
+    _clamp_to_bounds!(params::AbstractVector, lb::AbstractVector, ub::AbstractVector)
+
+Clamp parameters to bounds in-place.
+
+This function is needed when parameters may exceed bounds, e.g., after extrapolation
+steps or when working with unbounded optimization algorithms.
+
+Note: This should NOT be needed after Ipopt optimization when configured with
+`honor_original_bounds="yes"`, which guarantees the final solution satisfies bounds.
+If Ipopt returns out-of-bounds values, that indicates a configuration bug.
+
+# Arguments
+- `params`: Parameter vector to clamp (modified in-place)
+- `lb`: Lower bounds
+- `ub`: Upper bounds
+- `eps`: Small buffer to keep parameters away from exact boundaries (default: 1e-8).
+         This prevents infinite gradients when warm-starting optimization from
+         parameters exactly on the boundary.
+"""
+function _clamp_to_bounds!(params::AbstractVector, lb::AbstractVector, ub::AbstractVector; eps::Float64=1e-8)
+    for i in eachindex(params)
+        # Clamp to [lb + eps, ub - eps] to avoid exact boundary values
+        # which can cause infinite gradients in warm-started optimization
+        lb_safe = lb[i] + eps
+        ub_safe = ub[i] - eps
+        # Only apply buffer if bounds are finite and have room for it
+        if isfinite(lb[i]) && isfinite(ub[i]) && lb_safe < ub_safe
+            params[i] = clamp(params[i], lb_safe, ub_safe)
+        else
+            # Fall back to exact bounds for infinite bounds or very tight constraints
+            params[i] = clamp(params[i], lb[i], ub[i])
+        end
+    end
+    return params
+end
+
 # =============================================================================
 # Penalty Resolution
 # =============================================================================
@@ -255,6 +293,137 @@ function _resolve_adtype(adtype, solver)
         # User-specified ADType - use as-is
         return adtype
     end
+end
+
+# =============================================================================
+# Constraint Analysis Helpers
+# =============================================================================
+
+"""
+    identify_active_constraints(theta, constraints; tol=1e-6)
+
+Identify which constraints are active (binding) at the parameter vector `theta`.
+
+For inequality constraints `lcons ≤ c(θ) ≤ ucons`, a constraint is active if
+`c(θ)` is within `tol` of either bound.
+
+# Arguments
+- `theta::AbstractVector`: Parameter vector at which to evaluate constraints
+- `constraints`: Constraint specification with fields:
+  - `cons_fn`: Function that evaluates constraint values c(θ)
+  - `lcons`: Lower bounds on constraint values
+  - `ucons`: Upper bounds on constraint values
+- `tol::Float64=1e-6`: Tolerance for determining if constraint is active
+
+# Returns
+- `BitVector`: Boolean vector where `true` indicates constraint is active (binding)
+
+# Notes
+- For equality constraints (lcons[i] == ucons[i]), the constraint is always active if satisfied
+- For inequality constraints, active means c(θ) ≈ lcons or c(θ) ≈ ucons
+
+# Example
+```julia
+active = identify_active_constraints(fitted_params, constraints)
+n_active = sum(active)  # Number of binding constraints
+```
+"""
+function identify_active_constraints(theta::AbstractVector, constraints; tol::Float64=1e-6)
+    # Evaluate constraints at theta
+    c_vals = constraints.cons_fn(theta)
+    
+    # Check if each constraint is at its bound
+    at_lower = abs.(c_vals .- constraints.lcons) .< tol
+    at_upper = abs.(c_vals .- constraints.ucons) .< tol
+    
+    return at_lower .| at_upper
+end
+
+"""
+    compute_constraint_jacobian(theta, constraints)
+
+Compute the Jacobian of constraint functions at `theta` using automatic differentiation.
+
+The Jacobian J has dimensions (p_c × p) where p_c is the number of constraints
+and p is the number of parameters:
+```math
+J_{ij} = \\frac{\\partial c_i}{\\partial \\theta_j}
+```
+
+# Arguments
+- `theta::AbstractVector`: Parameter vector at which to evaluate Jacobian
+- `constraints`: Constraint specification with field `cons_fn`
+
+# Returns
+- `Matrix{Float64}`: p_c × p Jacobian matrix
+
+# Example
+```julia
+J = compute_constraint_jacobian(fitted_params, constraints)
+J_active = J[active_constraints, :]  # Jacobian of active constraints only
+```
+"""
+function compute_constraint_jacobian(theta::AbstractVector, constraints)
+    return ForwardDiff.jacobian(constraints.cons_fn, theta)
+end
+
+"""
+    identify_bound_parameters(theta, lb, ub; tol=1e-6)
+
+Identify parameters that are at (or very close to) their box bounds.
+
+Parameters at bounds indicate that the optimization found a boundary solution,
+which can affect variance estimates (the parameter cannot move in one direction).
+
+# Arguments
+- `theta::AbstractVector`: Parameter vector
+- `lb::AbstractVector`: Lower bounds
+- `ub::AbstractVector`: Upper bounds
+- `tol::Float64=1e-6`: Tolerance for determining if at bound
+
+# Returns
+- `BitVector`: Boolean vector where `true` indicates parameter is at a bound
+
+# Example
+```julia
+at_bounds = identify_bound_parameters(fitted_params, lb, ub)
+if any(at_bounds)
+    @warn "Parameters at bounds: \$(findall(at_bounds))"
+end
+```
+"""
+function identify_bound_parameters(theta::AbstractVector, lb::AbstractVector, ub::AbstractVector; tol::Float64=1e-6)
+    at_lower = abs.(theta .- lb) .< tol
+    at_upper = abs.(theta .- ub) .< tol
+    return at_lower .| at_upper
+end
+
+"""
+    warn_bound_parameters(theta, lb, ub; tol=1e-6)
+
+Check for parameters at bounds and issue a warning if any are found.
+
+# Arguments
+- `theta::AbstractVector`: Parameter vector  
+- `lb::AbstractVector`: Lower bounds
+- `ub::AbstractVector`: Upper bounds
+- `tol::Float64=1e-6`: Tolerance for bound detection
+
+# Returns
+- `BitVector`: Indicators of which parameters are at bounds
+
+# Side Effects
+- Issues `@warn` if any parameters are at their bounds
+"""
+function warn_bound_parameters(theta::AbstractVector, lb::AbstractVector, ub::AbstractVector; tol::Float64=1e-6)
+    at_bounds = identify_bound_parameters(theta, lb, ub; tol=tol)
+    if any(at_bounds)
+        bound_params = findall(at_bounds)
+        @warn "Parameters $(bound_params) are at their box bounds. " *
+              "Variance estimates for these parameters may be unreliable. " *
+              "Consider widening bounds or using IJ (sandwich) variance."
+    end
+    return at_bounds
 end
 
 # =============================================================================

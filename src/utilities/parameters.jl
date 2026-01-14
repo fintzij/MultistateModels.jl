@@ -132,6 +132,9 @@ Covariate coefficients are unconstrained.
 - `new_param_vectors`: Vector of parameter vectors (one per hazard), on natural scale
 - `model`: The model containing hazard info for npar_baseline
 
+# Keyword Arguments
+- `validate_bounds::Bool=true`: Whether to validate that parameters are within bounds
+
 # Returns
 - NamedTuple with flat, nested, and reconstructor fields
 
@@ -139,8 +142,11 @@ Covariate coefficients are unconstrained.
 For phase-type models with shared hazards, `model.hazkeys` maps hazard names to 
 *parameter* indices, not hazard indices. This function builds a reverse mapping
 to find the correct hazard for each parameter index (which has the correct parnames).
+
+Validates that new parameters are within model bounds before rebuilding.
 """
-function rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::MultistateProcess)
+function rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::MultistateProcess; 
+                            validate_bounds::Bool=true)
     # Build reverse mapping: parameter index -> hazard index
     # For phase-type models, multiple hazards may share the same parameter index,
     # but they all have the same parnames, so we just need one representative hazard.
@@ -165,12 +171,92 @@ function rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::M
     reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
     params_flat = flatten(reconstructor, params_nested)
     
+    # Validate bounds before returning (v0.3.0+)
+    if validate_bounds && hasproperty(model, :bounds) && !isnothing(model.bounds)
+        validate_parameter_bounds!(params_flat, model)
+    end
+    
     # v0.3.0+: No separate .natural field - compute on-demand via accessors
     return (
         flat = params_flat,
         nested = params_nested,
         reconstructor = reconstructor
     )
+end
+
+# Tolerance for bound checking - accounts for solver precision issues
+# Use relative tolerance for finite bounds, absolute for comparison with 0
+# ATOL should be >= typical optimizer precision (Ipopt default tolerance is ~1e-8)
+const BOUNDS_RTOL = 1e-6
+const BOUNDS_ATOL = 1e-6
+
+"""
+    validate_parameter_bounds!(flat_params::AbstractVector, model::MultistateProcess; 
+                               warn_only::Bool=false, rtol::Real=BOUNDS_RTOL, atol::Real=BOUNDS_ATOL)
+
+Validate that parameters are within model bounds, with tolerance for numerical precision.
+
+Uses a small tolerance to avoid false positives from optimizer precision issues.
+A parameter `p` violates lower bound `lb` if `p < lb - max(atol, rtol * abs(lb))`.
+
+# Arguments
+- `flat_params`: Flat parameter vector to validate
+- `model`: Model containing bounds
+- `warn_only`: If true, issue warning instead of throwing error (default: false)
+- `rtol`: Relative tolerance for bound comparison (default: 1e-6)
+- `atol`: Absolute tolerance for bound comparison (default: 1e-10)
+
+# Throws
+- `ArgumentError` if any parameter violates bounds beyond tolerance (unless `warn_only=true`)
+"""
+function validate_parameter_bounds!(flat_params::AbstractVector, model::MultistateProcess; 
+                                    warn_only::Bool=false, rtol::Real=BOUNDS_RTOL, atol::Real=BOUNDS_ATOL)
+    lb = model.bounds.lb
+    ub = model.bounds.ub
+    
+    # Check violations with tolerance
+    # For lb: violation if p < lb - tol where tol = max(atol, rtol * |lb|)
+    # For ub: violation if p > ub + tol where tol = max(atol, rtol * |ub|)
+    violations_lb = Int[]
+    violations_ub = Int[]
+    
+    for i in eachindex(flat_params)
+        lb_tol = max(atol, rtol * abs(lb[i]))
+        ub_tol = max(atol, rtol * abs(ub[i]))
+        
+        if isfinite(lb[i]) && flat_params[i] < lb[i] - lb_tol
+            push!(violations_lb, i)
+        end
+        if isfinite(ub[i]) && flat_params[i] > ub[i] + ub_tol
+            push!(violations_ub, i)
+        end
+    end
+    
+    if !isempty(violations_lb) || !isempty(violations_ub)
+        parnames = reduce(vcat, [h.parnames for h in model.hazards])
+        
+        msg = "Parameter values violate bounds (beyond tolerance rtol=$rtol, atol=$atol):\n"
+        
+        for i in violations_lb
+            pname = i <= length(parnames) ? string(parnames[i]) : "param[$i]"
+            tol = max(atol, rtol * abs(lb[i]))
+            msg *= "  $pname: value=$(flat_params[i]) < lb=$(lb[i]) (effective lb=$(lb[i] - tol))\n"
+        end
+        
+        for i in violations_ub
+            pname = i <= length(parnames) ? string(parnames[i]) : "param[$i]"
+            tol = max(atol, rtol * abs(ub[i]))
+            msg *= "  $pname: value=$(flat_params[i]) > ub=$(ub[i]) (effective ub=$(ub[i] + tol))\n"
+        end
+        
+        if warn_only
+            @warn msg
+        else
+            throw(ArgumentError(msg))
+        end
+    end
+    
+    return nothing
 end
 
 """
@@ -214,7 +300,7 @@ function set_parameters!(model::MultistateProcess, newvalues::Vector{Vector{Floa
         end
     end
     
-    # Rebuild parameters with proper constraints
+    # Rebuild parameters with bound validation
     model.parameters = rebuild_parameters(newvalues, model)
     
     return nothing
@@ -247,7 +333,7 @@ function set_parameters!(model::MultistateProcess, newvalues::Tuple)
         end
     end
     
-    # Convert tuple to vector and rebuild
+    # Convert tuple to vector and rebuild with bound validation
     new_param_vectors = [Vector{Float64}(collect(newvalues[i])) for i in 1:n_hazards]
     model.parameters = rebuild_parameters(new_param_vectors, model)
     

@@ -23,7 +23,7 @@ Configuration for MCEM path proposals.
 # Fields
 - `type::Symbol`: `:markov` (default) or `:phasetype`
 - `n_phases::Union{Symbol,Int,Dict{Int,Int}}`: `:auto` (BIC), `:heuristic`, `Int`, or `Dict`
-- `structure::Symbol`: `:unstructured` (default) or `:sctp`
+- `structure::Symbol`: `:sctp` (default), `:sctp_increasing`, `:sctp_decreasing`, or `:unstructured`
 - `max_phases::Int`: Max for BIC selection (default: 5)
 - `optimize::Bool`: Optimize surrogate params (default: true)
 - `parameters`: Manual override (default: nothing)
@@ -31,8 +31,18 @@ Configuration for MCEM path proposals.
 
 # Example
 ```julia
+# Default uses SCTP constraint
 fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=:auto))
-fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3), structure=:sctp))
+fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3)))
+
+# With increasing eigenvalue ordering (late exits more likely)
+fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3), structure=:sctp_increasing))
+
+# With decreasing eigenvalue ordering (early exits more likely)
+fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3), structure=:sctp_decreasing))
+
+# Override to unstructured (not recommended)
+fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3), structure=:unstructured))
 ```
 
 See also: [`PhaseTypeConfig`](@ref), [`PhaseTypeSurrogate`](@ref)
@@ -49,7 +59,7 @@ struct ProposalConfig
     function ProposalConfig(;
             type::Symbol = :markov,
             n_phases::Union{Symbol, Int, Dict{Int,Int}} = :auto,
-            structure::Symbol = :unstructured,
+            structure::Symbol = :sctp,
             max_phases::Int = 5,
             optimize::Bool = true,
             parameters = nothing,
@@ -73,8 +83,8 @@ struct ProposalConfig
         end
         
         # Validate structure
-        structure in (:unstructured, :sctp) ||
-            throw(ArgumentError("structure must be :unstructured or :sctp, got :$structure"))
+        structure in (:unstructured, :sctp, :sctp_increasing, :sctp_decreasing) ||
+            throw(ArgumentError("structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :$structure"))
         
         # Validate max_phases
         max_phases >= 1 || throw(ArgumentError("max_phases must be >= 1"))
@@ -232,7 +242,7 @@ Configuration for phase-type surrogate model.
 
 # Fields
 - `n_phases::Union{Symbol,Int,Dict{Int,Int}}`: `:auto`, `:heuristic`, `Int`, or `Dict{Int,Int}`
-- `structure::Symbol`: `:unstructured` (default) or `:sctp`
+- `structure::Symbol`: `:sctp` (default), `:sctp_increasing`, `:sctp_decreasing`, or `:unstructured`
 - `constraints::Bool`: Apply Titman-Sharples constraints (default: true)
 - `max_phases::Int`: Max for `:auto` BIC selection (default: 5)
 
@@ -240,7 +250,17 @@ For inference: specify `n_phases` explicitly. For MCEM surrogates: use `:auto` o
 
 # Example
 ```julia
-config = PhaseTypeConfig(n_phases=Dict(1 => 3, 2 => 2), structure=:sctp)
+# Default uses SCTP constraint
+config = PhaseTypeConfig(n_phases=Dict(1 => 3, 2 => 2))
+
+# With increasing eigenvalue ordering (late exits more likely)
+config = PhaseTypeConfig(n_phases=Dict(1 => 3, 2 => 2), structure=:sctp_increasing)
+
+# With decreasing eigenvalue ordering (early exits more likely)  
+config = PhaseTypeConfig(n_phases=Dict(1 => 3, 2 => 2), structure=:sctp_decreasing)
+
+# Override to unstructured (not recommended)
+config = PhaseTypeConfig(n_phases=Dict(1 => 3, 2 => 2), structure=:unstructured)
 ```
 """
 struct PhaseTypeConfig
@@ -251,7 +271,7 @@ struct PhaseTypeConfig
     
     function PhaseTypeConfig(; 
             n_phases::Union{Symbol, Int, Dict{Int,Int}} = 2,
-            structure::Symbol = :unstructured,
+            structure::Symbol = :sctp,
             constraints::Bool = true,
             max_phases::Int = 5)
         
@@ -266,8 +286,8 @@ struct PhaseTypeConfig
             all(k >= 1 for k in keys(n_phases)) || 
                 throw(ArgumentError("all n_phases keys (state indices) must be >= 1"))
         end
-        structure in (:unstructured, :sctp) ||
-            throw(ArgumentError("structure must be :unstructured or :sctp, got :$structure"))
+        structure in (:unstructured, :sctp, :sctp_increasing, :sctp_decreasing) ||
+            throw(ArgumentError("structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :$structure"))
         max_phases >= 1 || throw(ArgumentError("max_phases must be >= 1"))
         
         new(n_phases, structure, constraints, max_phases)

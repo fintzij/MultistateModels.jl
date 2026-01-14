@@ -1012,6 +1012,7 @@ that `set_parameters!` uses to ensure consistency.
   - Covariate coefficients: 0.0 (no effect)
 - The resulting parameter structure includes a proper `reconstructor` field
   for AD-compatible flatten/unflatten operations
+- Bounds are regenerated to match the new parameter dimensions
 """
 function _rebuild_model_parameters!(model::MultistateProcess)
     # Build new parameter vectors for each hazard
@@ -1029,6 +1030,11 @@ function _rebuild_model_parameters!(model::MultistateProcess)
         
         new_param_vectors[i] = params
     end
+    
+    # First, regenerate bounds to match new parameter dimensions
+    # This must happen BEFORE rebuild_parameters because it validates bounds
+    flat_params = reduce(vcat, new_param_vectors)
+    model.bounds = _generate_package_bounds_from_components(flat_params, model.hazards, model.hazkeys)
     
     # Use rebuild_parameters to create proper parameter structure with reconstructor
     model.parameters = rebuild_parameters(new_param_vectors, model)

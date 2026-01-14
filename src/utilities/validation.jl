@@ -11,14 +11,23 @@
 # ============================================================================
 
 """
-    check_data!(data::DataFrame, tmat::Matrix, emat::Matrix{<:Real}; verbose = true)
+    check_data!(data::DataFrame, tmat::Matrix, emat::Matrix{<:Real}; verbose = true, phase_to_state = nothing)
 
 Validate a user-supplied data frame to ensure that it conforms to MultistateModels.jl requirements.
+
+# Arguments
+- `data`: DataFrame with required columns
+- `tmat`: Transition matrix
+- `emat`: Emission matrix
+- `verbose`: Whether to print warnings (default: true)
+- `phase_to_state`: Optional mapping from phase indices to observed states (for phase-type models).
+  When provided, transition count validation is performed on observed state transitions,
+  not internal phase transitions.
 
 # Throws
 - `ArgumentError` for invalid data format or values
 """
-function check_data!(data::DataFrame, tmat::Matrix, emat::Matrix{<:Real}; verbose = true)
+function check_data!(data::DataFrame, tmat::Matrix, emat::Matrix{<:Real}; verbose = true, phase_to_state::Union{Nothing, Vector{Int}} = nothing)
 
     # validate column names and order
     if any(names(data)[1:6] .!== ["id", "tstart", "tstop", "statefrom", "stateto", "obstype"])
@@ -107,11 +116,53 @@ function check_data!(data::DataFrame, tmat::Matrix, emat::Matrix{<:Real}; verbos
     end
 
     # warning if tmat specifies an allowed transition for which no such transitions were observed in the data
-    n_rs = compute_number_transitions(data, tmat)
-    for r in 1:size(tmat)[1]
-        for s in 1:size(tmat)[2]
-            if verbose && tmat[r,s]!=0 && n_rs[r,s]==0 
-                @warn "Data does not contain any transitions from state $r to state $s"
+    # For phase-type models, check observed state transitions (not internal phase transitions)
+    if isnothing(phase_to_state)
+        # Standard case: check transitions directly
+        n_rs = compute_number_transitions(data, tmat)
+        for r in 1:size(tmat)[1]
+            for s in 1:size(tmat)[2]
+                if verbose && tmat[r,s]!=0 && n_rs[r,s]==0 
+                    @warn "Data does not contain any transitions from state $r to state $s"
+                end
+            end
+        end
+    else
+        # Phase-type case: aggregate phase transitions to observed state transitions
+        n_observed = maximum(phase_to_state)
+        n_rs_observed = zeros(Int, n_observed, n_observed)
+        
+        for rd in eachrow(data)
+            if rd.statefrom != rd.stateto && rd.statefrom > 0 && rd.stateto > 0
+                obs_from = phase_to_state[rd.statefrom]
+                obs_to = phase_to_state[rd.stateto]
+                # Only count transitions between DIFFERENT observed states
+                if obs_from != obs_to
+                    n_rs_observed[obs_from, obs_to] += 1
+                end
+            end
+        end
+        
+        # Build observed tmat from phase_to_state
+        observed_tmat = zeros(Int, n_observed, n_observed)
+        for r in 1:size(tmat, 1)
+            for s in 1:size(tmat, 2)
+                if tmat[r, s] != 0
+                    obs_r = phase_to_state[r]
+                    obs_s = phase_to_state[s]
+                    if obs_r != obs_s
+                        observed_tmat[obs_r, obs_s] = 1
+                    end
+                end
+            end
+        end
+        
+        # Warn about missing observed state transitions
+        for r in 1:n_observed
+            for s in 1:n_observed
+                if verbose && observed_tmat[r, s] != 0 && n_rs_observed[r, s] == 0
+                    @warn "Data does not contain any transitions from state $r to state $s"
+                end
             end
         end
     end

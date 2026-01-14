@@ -4,6 +4,15 @@
 
 ### Added
 
+- **Variance-Covariance with Constraints (Item #27)**: Models with constraints now always return variance-covariance matrices using the reduced Hessian approach. For constrained MLE with active constraints $c(\hat{\theta}) = 0$, the variance is computed as:
+  $$\text{Var}(\hat{\theta}) = Z(Z^\top H Z)^{-1} Z^\top$$
+  where $H$ is the observed information (negative Hessian) and $Z$ is an orthonormal basis for the null space of the active constraint Jacobian. This projects variance onto the subspace of feasible directions.
+  - New function `identify_active_constraints(theta, constraints)` identifies binding constraints
+  - New function `compute_constraint_jacobian(theta, constraints)` computes Jacobian via AD  
+  - New function `compute_null_space_basis(J)` computes orthonormal null space basis
+  - New function `compute_constrained_vcov(H, J_active)` implements the reduced Hessian formula
+  - Helper function `identify_bound_parameters(theta, lb, ub)` flags parameters at box bounds
+
 - **GPS Penalty Matrix Implementation**: Added Li & Cao (2022) General P-Spline penalty matrix construction as the default method for spline smoothing. This correctly handles non-uniform knot spacing through weighted difference matrices.
   - New function `build_general_difference_matrix(knots, d, m)` implements the GPS algorithm
   - New function `build_penalty_matrix_gps(basis, order)` applies GPS to BSplineKit bases
@@ -12,7 +21,14 @@
   - GPS matches R `gps` package exactly for both uniform and non-uniform knots
   - Supports both `BSplineBasis` and `RecombinedBSplineBasis` (natural splines)
 
+- **Schur-based TPM optimization**: `compute_tmat_batched!` now uses Schur decomposition to compute exp(Q*Δt) for multiple Δt values efficiently. The Schur decomposition Q = UTU* is computed once and reused for all Δt values.
+  - New `SchurCache` struct for pre-allocated workspace
+  - Numerically stable for defective matrices (repeated eigenvalues) common in phase-type models
+  - Previous eigendecomposition approach failed silently for such matrices
+
 ### Changed
+
+- **Constrained models now return vcov**: Previously, `fit()` with constraints would return `vcov=nothing`. Now the reduced Hessian approach computes valid variance estimates for the free parameters. Variance in constrained directions is zero (as expected).
 
 - **Default penalty method**: `build_penalty_matrix()` now defaults to `:gps` method instead of `:integral`
 - **Error types**: Hazard validation now throws `ArgumentError` instead of `AssertionError` for invalid state indices
@@ -334,11 +350,10 @@ Version 0.2.0 is a comprehensive rewrite of MultistateModels.jl with major impro
 2. [New Features](#new-features)
    - [Phase-Type Importance Sampling](#1-phase-type-importance-sampling)
    - [Robust Variance Estimation](#2-robust-variance-estimation)
-   - [SQUAREM Acceleration](#3-squarem-acceleration)
-   - [Spline Hazards](#4-spline-hazards-enhanced)
-   - [AD Backend Selection](#5-ad-backend-selection)
-   - [Simulation Infrastructure](#6-simulation-infrastructure)
-   - [Performance Optimizations](#7-performance-optimizations)
+   - [Spline Hazards](#3-spline-hazards-enhanced)
+   - [AD Backend Selection](#4-ad-backend-selection)
+   - [Simulation Infrastructure](#5-simulation-infrastructure)
+   - [Performance Optimizations](#6-performance-optimizations)
 3. [New Types](#new-types)
 4. [New Functions](#new-functions)
 5. [API Changes](#api-changes)
@@ -646,41 +661,7 @@ pijcv_criterion_derivatives(state, params, lambda) -> NamedTuple
 
 ---
 
-### 3. SQUAREM Acceleration
-
-**File:** `src/mcem.jl` (273 lines, enhanced)
-
-SQUAREM (Squared Iterative Methods) accelerates MCEM convergence via quasi-Newton updates.
-
-**Algorithm:**
-1. Compute θ₁ = M(θ₀) (first EM step)
-2. Compute θ₂ = M(θ₁) (second EM step)
-3. r = θ₁ - θ₀ (first increment)
-4. v = (θ₂ - θ₁) - r (second-order term)
-5. α = -‖r‖/‖v‖ (step length)
-6. θ_acc = θ₀ - 2αr + α²v (accelerated update)
-7. Accept if mll(θ_acc) ≥ mll(θ₀); else fall back to θ₂
-
-**Functions:**
-
-```julia
-squarem_step_length(r, v) -> Float64
-squarem_accelerate(θ₀, r, v, α) -> Vector{Float64}
-squarem_should_accept(mll_acc, mll_base) -> Bool
-```
-
-**Usage:**
-
-```julia
-fitted = fit(model; acceleration=:squarem)
-fitted = fit(model; acceleration=:none)  # Default, standard MCEM
-```
-
-**Reference:** Varadhan & Roland (2008) Scand J Stat 35(2):335-353
-
----
-
-### 4. Spline Hazards (Enhanced)
+### 3. Spline Hazards (Enhanced)
 
 **File:** `src/smooths.jl` (928 lines, up from ~200)
 
@@ -768,7 +749,7 @@ calibrate_splines!(model; nknots=3)
 
 ---
 
-### 5. AD Backend Selection
+### 4. AD Backend Selection
 
 **File:** `src/common.jl` (lines 1310-1430)
 
@@ -822,7 +803,7 @@ fitted = fit(model; adbackend=MooncakeBackend())
 
 ---
 
-### 6. Simulation Infrastructure
+### 5. Simulation Infrastructure
 
 **File:** `src/simulation.jl` (1,289 lines, up from 202)
 
@@ -893,7 +874,7 @@ paths_to_dataset(paths::Vector{SamplePath}; times=nothing) -> DataFrame
 
 ---
 
-### 7. Performance Optimizations
+### 6. Performance Optimizations
 
 **Thread-Local Workspaces:**
 
@@ -1219,7 +1200,6 @@ fit(model::MultistateSemiMarkovModel;
     max_sampling_effort = 20,
     npaths_additional = 10,
     block_hessian_speedup = 2.0,
-    acceleration::Symbol = :none,          # NEW: :none or :squarem
     verbose = true,
     return_convergence_records = true,
     return_proposed_paths = false,

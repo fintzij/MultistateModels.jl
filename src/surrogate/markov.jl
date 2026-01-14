@@ -29,9 +29,17 @@ function make_surrogate_model(model::MultistateProcess)
         markov_surrogate = model.markovsurrogate
     end
     
+    # Generate bounds for the surrogate model
+    surrogate_bounds = MultistateModels._generate_package_bounds_from_components(
+        markov_surrogate.parameters.flat, 
+        markov_surrogate.hazards, 
+        model.hazkeys
+    )
+    
     MultistateModels.MultistateModel(
         model.data,
         markov_surrogate.parameters,  # Use surrogate's parameters
+        surrogate_bounds,
         markov_surrogate.hazards,
         model.totalhazards,
         model.tmat,
@@ -183,8 +191,10 @@ function _fit_markov_surrogate(model;
         end
         
         # Fit via Markov model MLE
+        # Note: Disable all variance computation for surrogate - we only need point estimates
         surrogate_fitted = fit(surrogate_model; constraints = surrogate_constraints, 
-                               compute_vcov = false, verbose = false)
+                               compute_vcov = false, compute_ij_vcov = false, compute_jk_vcov = false,
+                               verbose = false)
         
         markov_surrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters; fitted=true)
         
@@ -569,9 +579,17 @@ where νᵢ are the importance weights for subject i.
 """
 function compute_markov_marginal_loglik(model::MultistateProcess, surrogate::MarkovSurrogate)
     # Build a temporary Markov model with the surrogate's hazards and parameters
+    # Generate bounds for the surrogate model
+    surrogate_bounds = MultistateModels._generate_package_bounds_from_components(
+        surrogate.parameters.flat,
+        surrogate.hazards,
+        model.hazkeys
+    )
+    
     surrogate_model = MultistateModel(
         model.data,
         surrogate.parameters,
+        surrogate_bounds,
         surrogate.hazards,
         model.totalhazards,
         model.tmat,

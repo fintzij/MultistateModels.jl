@@ -148,9 +148,44 @@ element type must match the parameter type for AD compatibility.
 - `pars_cache`: Mutable parameter vectors for in-place updates (avoids NamedTuple allocation)
 - `covars_cache`: Pre-extracted covariates per unique covariate pattern
 - `hazard_rates_cache`: Pre-computed hazard rates per (pattern, hazard) for Markov models
-- `eigen_cache`: Cached eigendecompositions for fast matrix exponentials with multiple Δt
+- `eigen_cache`: Cached eigendecompositions for fast matrix exponentials with multiple Δt (legacy)
+- `schur_cache`: Workspace for Schur decomposition-based matrix exponentials
 - `dt_values`: Unique Δt values per covariate pattern for batched matrix exp
 """
+
+"""
+    SchurCache
+
+Pre-allocated workspace for Schur decomposition-based matrix exponentials.
+
+Used by `compute_tmat_batched!` to efficiently compute exp(Q * Δt) for
+multiple Δt values using a single Schur decomposition. The key optimization
+is computing the Schur decomposition once and reusing it for all Δt values.
+
+# Fields
+- `Q_work`: Work matrix for in-place Schur decomposition
+- `E_work`: Work matrix for triangular matrix exponential exp(T * Δt)
+- `tmp_work`: Work matrix for intermediate multiplication U * E
+
+# Performance
+Provides speedup vs standard matrix exponential when computing multiple
+Δt values for the same Q matrix (common in Markov likelihood).
+Numerically stable for defective matrices (repeated eigenvalues).
+"""
+struct SchurCache
+    Q_work::Matrix{Float64}   # Copy of Q for in-place schur!
+    E_work::Matrix{Float64}   # exp(T * dt) where T is upper triangular
+    tmp_work::Matrix{Float64} # Intermediate result U * E
+end
+
+function SchurCache(n::Int)
+    SchurCache(
+        Matrix{Float64}(undef, n, n),
+        Matrix{Float64}(undef, n, n),
+        Matrix{Float64}(undef, n, n)
+    )
+end
+
 mutable struct TPMCache
     hazmat_book::Vector{Matrix{Float64}}
     tpm_book::Vector{Vector{Matrix{Float64}}}
@@ -161,8 +196,10 @@ mutable struct TPMCache
     pars_cache::Vector{Vector{Float64}}  # Mutable parameter vectors per hazard
     covars_cache::Vector{Vector{NamedTuple}}  # Pre-extracted covariates per pattern per hazard
     hazard_rates_cache::Vector{Vector{Float64}}  # Pre-computed rates per pattern per hazard
-    # Eigendecomposition cache for batched matrix exponentials
+    # Eigendecomposition cache for batched matrix exponentials (legacy, retained for compatibility)
     eigen_cache::Vector{Union{Nothing, Tuple{Matrix{Float64}, Vector{ComplexF64}, Matrix{ComplexF64}}}}
+    # Schur decomposition workspace for fast batched matrix exponentials
+    schur_cache::SchurCache
     dt_values::Vector{Vector{Float64}}  # Unique Δt values per pattern
 end
 
@@ -213,8 +250,11 @@ function TPMCache(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame},
     # Extract Δt values for each pattern
     dt_values = [collect(Float64, idx.tstop) for idx in tpm_index]
     
+    # Schur decomposition workspace for batched matrix exponentials
+    schur_cache = SchurCache(nstates)
+    
     TPMCache(hazmat_book, tpm_book, exp_cache, q_work, lmat_work,
-             pars_cache, covars_cache, hazard_rates_cache, eigen_cache, dt_values)
+             pars_cache, covars_cache, hazard_rates_cache, eigen_cache, schur_cache, dt_values)
 end
 
 # Helper to extract covariates or return empty NamedTuple
@@ -281,8 +321,11 @@ function TPMCache(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
     fill!(eigen_cache, nothing)
     dt_values = [collect(Float64, idx.tstop) for idx in tpm_index]
     
+    # Schur decomposition workspace
+    schur_cache = SchurCache(nstates)
+    
     TPMCache(hazmat_book, tpm_book, exp_cache, q_work, lmat_work,
-             pars_cache, covars_cache, hazard_rates_cache, eigen_cache, dt_values)
+             pars_cache, covars_cache, hazard_rates_cache, eigen_cache, schur_cache, dt_values)
 end
 
 # =============================================================================

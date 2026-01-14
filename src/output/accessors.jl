@@ -628,14 +628,18 @@ function get_parnames(surrogate::MarkovSurrogate; flatten::Bool = false)
 end
 
 """
-    get_vcov(model::MultistateModelFitted; type::Symbol=:model) 
+    get_vcov(model::MultistateModelFitted; type::Symbol=:auto) 
 
 Return the variance-covariance matrix at the maximum likelihood estimate.
 
 # Arguments 
 - `model::MultistateModelFitted`: fitted model
-- `type::Symbol=:model`: Type of variance estimator
-  - `:model` - Model-based variance (inverse Hessian, H⁻¹)
+- `type::Symbol=:auto`: Type of variance estimator
+  - `:auto` (default) - Automatically select based on whether constraints were used:
+    - Returns `:ij` if model was fit with constraints (more robust for constrained MLE)
+    - Returns `:model` otherwise
+  - `:model` - Model-based variance (inverse Hessian, H⁻¹). For constrained models,
+    this uses the reduced Hessian approach (projects variance onto feasible directions).
   - `:ij` - Infinitesimal jackknife / sandwich / robust variance (H⁻¹ K H⁻¹)
   - `:jk` - Jackknife variance ((n-1)/n times IJ variance)
 
@@ -644,11 +648,21 @@ Return the variance-covariance matrix at the maximum likelihood estimate.
 
 # Details
 - `:model` - Valid under correct model specification. Requires `compute_vcov=true` (default).
+  For constrained models, uses reduced Hessian approach which projects variance onto the
+  subspace of feasible parameter directions.
 - `:ij` - Also known as robust/Huber-White variance. Valid under model misspecification.
-  Requires `compute_ij_vcov=true` during fitting.
+  Requires `compute_ij_vcov=true` during fitting. **Recommended when constraints are present.**
 - `:jk` - Jackknife variance with finite-sample correction. 
   Related to IJ by: Var_JK = ((n-1)/n) × Var_IJ.
   Requires `compute_jk_vcov=true` during fitting.
+
+# Constrained Models
+When a model is fit with constraints (including phase-type models which always have
+eigenvalue ordering constraints), the default behavior (`:auto`) is to return IJ variance.
+This is because:
+1. IJ variance is computed from subject gradients, which are unaffected by constraints
+2. Model-based variance for constrained MLE requires the reduced Hessian approach,
+   which may be less stable or have zero variance in constrained directions
 
 # Example
 ```julia
@@ -656,7 +670,7 @@ Return the variance-covariance matrix at the maximum likelihood estimate.
 fitted = fit(model; compute_ij_vcov=true, compute_jk_vcov=true)
 
 # Compare standard errors
-model_se = sqrt.(diag(get_vcov(fitted)))                    # Model-based
+model_se = sqrt.(diag(get_vcov(fitted)))                    # Auto (IJ if constrained)
 robust_se = sqrt.(diag(get_vcov(fitted; type=:ij)))         # Robust/sandwich
 jk_se = sqrt.(diag(get_vcov(fitted; type=:jk)))             # Jackknife
 
@@ -668,8 +682,38 @@ println("SE ratio (robust/model): ", robust_se ./ model_se)
 - [`get_subject_gradients`](@ref) - Get subject-level score vectors
 - [`get_pseudovalues`](@ref) - Get jackknife or IJ pseudo-values
 """
-function get_vcov(model::MultistateModelFitted; type::Symbol=:model)
-    if type == :model
+function get_vcov(model::MultistateModelFitted; type::Symbol=:auto)
+    # Determine if model was fit with constraints
+    has_constraints = haskey(model.modelcall, :constraints) && 
+                      !isnothing(model.modelcall.constraints)
+    
+    # Resolve :auto type
+    if type == :auto
+        if has_constraints
+            # Prefer IJ variance for constrained models (more robust)
+            if !isnothing(model.ij_vcov)
+                return model.ij_vcov
+            elseif !isnothing(model.vcov)
+                @warn "IJ variance not available for constrained model; returning model-based variance. " *
+                      "Consider refitting with compute_ij_vcov=true."
+                return model.vcov
+            else
+                @warn "No variance-covariance matrix available."
+                return nothing
+            end
+        else
+            # Prefer model-based variance for unconstrained models
+            if !isnothing(model.vcov)
+                return model.vcov
+            elseif !isnothing(model.ij_vcov)
+                @warn "Model-based variance not available; returning IJ variance."
+                return model.ij_vcov
+            else
+                @warn "No variance-covariance matrix available."
+                return nothing
+            end
+        end
+    elseif type == :model
         if isnothing(model.vcov)
             @warn "Model-based variance-covariance matrix was not computed for this model."
         end
@@ -685,7 +729,7 @@ function get_vcov(model::MultistateModelFitted; type::Symbol=:model)
         end
         return model.jk_vcov
     else
-        throw(ArgumentError("type must be :model, :ij, or :jk (got :$type)"))
+        throw(ArgumentError("type must be :auto, :model, :ij, or :jk (got :$type)"))
     end
 end
 
@@ -1037,7 +1081,7 @@ function summary(model::MultistateModelFitted; compute_se::Bool=true, confidence
         ll = ll_result.loglik
         mcse = ll_result.mcse_loglik
     else
-        ll = get_loglik(model; ll="loglik")
+        ll = get_loglik(model; type=:loglik)
         mcse = nothing
     end
     
@@ -1139,7 +1183,7 @@ function aic(model::MultistateModelFitted; loglik = nothing, estimate_likelihood
     ll = if !isnothing(loglik)
         loglik
     elseif !estimate_likelihood
-        get_loglik(model; ll = "loglik")
+        get_loglik(model; type = :loglik)
     else
         estimate_loglik(model; min_ess = min_ess).loglik
     end
@@ -1177,7 +1221,7 @@ function bic(model::MultistateModelFitted; loglik = nothing, estimate_likelihood
     ll = if !isnothing(loglik)
         loglik
     elseif !estimate_likelihood
-        get_loglik(model; ll = "loglik")
+        get_loglik(model; type = :loglik)
     else
         estimate_loglik(model; min_ess = min_ess).loglik
     end

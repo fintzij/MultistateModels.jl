@@ -277,6 +277,7 @@ See also: [`is_markov`](@ref), [`is_panel_data`](@ref), [`has_phasetype_expansio
 mutable struct MultistateModel <: MultistateProcess
     data::DataFrame
     parameters::NamedTuple  # Sole parameter storage: (flat, nested, natural, reconstructor)
+    bounds::NamedTuple{(:lb, :ub), Tuple{Vector{Float64}, Vector{Float64}}}  # Parameter bounds for box-constrained optimization
     hazards::Vector{<:_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}
@@ -304,6 +305,7 @@ Parameters are stored in `parameters` as (flat, nested, reconstructor).
 mutable struct MultistateModelFitted <: MultistateProcess
     data::DataFrame
     parameters::NamedTuple  # Sole parameter storage: (flat, nested, reconstructor)
+    bounds::NamedTuple{(:lb, :ub), Tuple{Vector{Float64}, Vector{Float64}}}  # Parameter bounds for box-constrained optimization
     loglik::NamedTuple
     vcov::Union{Nothing,Matrix{Float64}}
     ij_vcov::Union{Nothing,Matrix{Float64}}  # Infinitesimal jackknife variance-covariance

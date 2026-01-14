@@ -49,11 +49,20 @@ will insert the intercept-only design automatically as described in `Hazard`'s d
   Only states with `:pt` hazards should be specified. Example: `Dict(1 => 3, 2 => 2)` means state 1 has
   3 phases and state 2 has 2 phases. If a state has `:pt` hazards but is not in the dict, an error is thrown.
   If `n_phases[s] == 1`, the phase-type is coerced to exponential internally.
-- `coxian_structure::Symbol = :unstructured`: constraint structure for phase-type hazards.
-  - `:unstructured` (default): no constraints on progression and absorption rates
-  - `:sctp`: Stationary Conditional Transition Probability - ensures P(r→s | transition out of r) is 
-    constant over time. Automatically generates constraints: `h_{r_j,s} = τ_{r_j} × h_{r_1,s}` where
-    τ parameters (`log_phase_rb`, `log_phase_rc`, ...) are shared across destinations and estimated.
+- `coxian_structure::Symbol = :sctp`: constraint structure for phase-type hazards.
+  - `:sctp` (default): SCTP (Stationary Conditional Transition Probability) constraint only.
+    Ensures P(r→s | transition out of r) is constant over time.
+  - `:sctp_decreasing`: SCTP plus eigenvalue ordering ν₁ ≥ ν₂ ≥ ... ≥ νₙ (early exits more likely).
+  - `:sctp_increasing`: SCTP plus eigenvalue ordering ν₁ ≤ ν₂ ≤ ... ≤ νₙ (late exits more likely).
+  - `:unstructured`: no constraints on progression and absorption rates
+- `ordering_at::Union{Symbol, NamedTuple} = :reference`: where to enforce eigenvalue ordering constraints.
+  - `:reference` (default): enforce νⱼ ≥ νⱼ₊₁ at reference (x=0). Produces linear constraints.
+  - `:mean`: enforce ordering at the mean covariate values (computed from data).
+  - `:median`: enforce ordering at the median covariate values (computed from data).
+  - `NamedTuple`: enforce at explicit covariate values, e.g., `(age=50.0, treatment=0.5)`.
+  
+  When `ordering_at` is not `:reference`, nonlinear constraints are generated (AD-compatible for Ipopt).
+  With `:homogeneous` covariate constraints (C1), the exp(β'x̄) factors cancel, simplifying back to linear.
 - `SubjectWeights`: optional per-subject weights (length = number of subjects). Mutually exclusive with `ObservationWeights`.
 - `ObservationWeights`: optional per-observation weights (length = number of rows in data). Mutually exclusive with `SubjectWeights`.
 - `CensoringPatterns`: optional matrix describing which states are compatible with each censoring code. Values in [0,1].
@@ -96,6 +105,14 @@ model = multistatemodel(h12, h13; data = df, n_phases = Dict(1 => 3))
 
 # Phase-type model with SCTP constraints
 model = multistatemodel(h12, h13; data = df, n_phases = Dict(1 => 3), coxian_structure = :sctp)
+
+# Phase-type model with eigenvalue ordering at mean covariate values
+model = multistatemodel(h12, h13; data = df, n_phases = Dict(1 => 3), 
+                        coxian_structure = :sctp_decreasing, ordering_at = :mean)
+
+# Phase-type model with eigenvalue ordering at explicit covariate values
+model = multistatemodel(h12, h13; data = df, n_phases = Dict(1 => 3),
+                        ordering_at = (x = 0.5,))
 ```
 """
 function multistatemodel(hazards::HazardFunction...; 
@@ -107,7 +124,8 @@ function multistatemodel(hazards::HazardFunction...;
                         surrogate_constraints = nothing,
                         surrogate_n_phases::Union{Int, Dict{Int,Int}, Symbol} = :heuristic,
                         n_phases::Union{Nothing, Dict{Int,Int}} = nothing,
-                        coxian_structure::Symbol = :unstructured,
+                        coxian_structure::Symbol = :sctp,
+                        ordering_at::Union{Symbol, NamedTuple} = :reference,
                         SubjectWeights::Union{Nothing,Vector{Float64}} = nothing, 
                         ObservationWeights::Union{Nothing,Vector{Float64}} = nothing,
                         CensoringPatterns::Union{Nothing,Matrix{<:Real}} = nothing, 
@@ -120,8 +138,13 @@ function multistatemodel(hazards::HazardFunction...;
     end
     
     # Validate coxian_structure
-    if coxian_structure ∉ (:unstructured, :sctp)
-        throw(ArgumentError("coxian_structure must be :unstructured or :sctp, got :$coxian_structure"))
+    if coxian_structure ∉ (:unstructured, :sctp, :sctp_increasing, :sctp_decreasing)
+        throw(ArgumentError("coxian_structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :$coxian_structure"))
+    end
+    
+    # Validate ordering_at
+    if ordering_at isa Symbol && ordering_at ∉ (:reference, :mean, :median)
+        throw(ArgumentError("ordering_at must be :reference, :mean, :median, or a NamedTuple, got :$ordering_at"))
     end
     
     # Validate inputs
@@ -135,6 +158,7 @@ function multistatemodel(hazards::HazardFunction...;
             initialize = initialize,
             n_phases = n_phases,
             coxian_structure = coxian_structure,
+            ordering_at = ordering_at,
             SubjectWeights = SubjectWeights,
             ObservationWeights = ObservationWeights,
             CensoringPatterns = CensoringPatterns,

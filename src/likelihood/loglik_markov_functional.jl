@@ -160,9 +160,25 @@ function _forward_algorithm_functional(subj_inds, pars, data, tpm_dict, ::Type{T
     cols = data.columns
     
     # Initialize: probability vector for initial state
-    init_state = cols.statefrom[subj_inds[1]]
+    # For phase-type models with panel data, we have phase uncertainty at the initial state:
+    # if the subject is observed "in state s" at time 0, they could be in any phase of state s.
+    first_obs_idx = subj_inds[1]
+    init_state = cols.statefrom[first_obs_idx]
     α = zeros(T, n_states)
-    α = setindex_immutable_vec(α, one(T), init_state)
+    
+    phasetype_exp = data.model.phasetype_expansion
+    if !isnothing(phasetype_exp)
+        # Phase-type model: check if starting state has multiple phases
+        mappings = phasetype_exp.mappings
+        observed_state = mappings.phase_to_state[init_state]
+        phases_in_state = mappings.state_to_phases[observed_state]
+        for phase in phases_in_state
+            α = setindex_immutable_vec(α, one(T), phase)  # Uniform over phases
+        end
+    else
+        # Standard model: known starting state
+        α = setindex_immutable_vec(α, one(T), init_state)
+    end
     
     # Forward pass: α[t+1] = α[t] * P[t] (with emission probabilities for censored states)
     for i in subj_inds

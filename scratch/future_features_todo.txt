@@ -106,10 +106,6 @@ COMPLETED FEATURES (as of 2025-12-16)
    - Variance reduction: SIR variance 0.6× of LHS
    - See src/sir.jl
 
-✅ SQUAREM Acceleration for MCEM
-   - Quasi-Newton acceleration reducing iterations to convergence
-   - Usage: fit(model; acceleration=:squarem)
-
 ✅ Spline Hazards (M-splines)
    - RuntimeSplineHazard with automatic knot placement
    - Monotonicity constraints, natural boundary conditions

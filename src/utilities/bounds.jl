@@ -15,11 +15,7 @@
 using LinearAlgebra
 
 # Default lower bound for non-negative parameters (rates, shapes, spline coefs)
-# Using small positive value rather than 0.0 to ensure numerical stability:
-# 1. Ipopt's bound_relax_factor allows solutions slightly outside bounds
-# 2. Very small rates can cause ill-conditioned Q matrices and TPM computation issues
-# 3. 1e-6 is small enough for practical models but large enough for numerical stability
-const NONNEG_LB = 1e-6
+const NONNEG_LB = 0.0
 
 """
     generate_parameter_bounds(model::MultistateProcess; user_bounds=nothing) -> (lb, ub)
@@ -61,17 +57,27 @@ lb, ub = generate_parameter_bounds(model;
 See also: [`_generate_package_bounds`](@ref)
 """
 function generate_parameter_bounds(model::MultistateProcess; user_bounds=nothing)
-    # 1. Generate package bounds on NATURAL scale
-    pkg_lb_nat, pkg_ub_nat = _generate_package_bounds(model)
+    # 1. Use model's pre-computed bounds (v0.3.0+) or generate them
+    if hasproperty(model, :bounds) && !isnothing(model.bounds)
+        pkg_lb_nat, pkg_ub_nat = model.bounds.lb, model.bounds.ub
+    else
+        # Fallback for models created before bounds were stored
+        pkg_lb_nat, pkg_ub_nat = _generate_package_bounds(model)
+    end
     
-    # 2. Convert user bounds Dict to vectors (natural scale)
+    # 2. If no user bounds, return package bounds directly
+    if isnothing(user_bounds)
+        return pkg_lb_nat, pkg_ub_nat
+    end
+    
+    # 3. Convert user bounds Dict to vectors (natural scale)
     user_lb_vec, user_ub_vec = _resolve_user_bounds(user_bounds, model)
     
-    # 3. Combine via intersection on natural scale (most restrictive)
+    # 4. Combine via intersection on natural scale (most restrictive)
     final_lb_nat = max.(pkg_lb_nat, user_lb_vec)
     final_ub_nat = min.(pkg_ub_nat, user_ub_vec)
     
-    # 4. Validate combined bounds (on natural scale)
+    # 5. Validate combined bounds (on natural scale)
     conflicts = findall(final_lb_nat .> final_ub_nat)
     if !isempty(conflicts)
         parnames = _get_flat_parnames(model)

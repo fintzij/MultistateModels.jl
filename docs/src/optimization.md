@@ -97,6 +97,56 @@ The `:direct` method approximates ``H_{-i}^{-1} \approx H^{-1}``, which is the i
 limit. The `:cholesky` method computes the exact leave-one-out Hessian by updating the 
 Cholesky factorization, which is more stable but computationally expensive.
 
+### Variance with Constraints
+
+When fitting models with constraints (e.g., phase-type SCTP or inequality constraints), 
+the MLE lies on a constraint manifold. Standard variance estimation must account for 
+the reduced degrees of freedom due to active constraints.
+
+MultistateModels.jl uses the **reduced Hessian approach** for constrained variance:
+
+```math
+\text{Var}(\hat{\theta}) = Z(Z^\top H Z)^{-1} Z^\top
+```
+
+where:
+- ``H = -\nabla^2 \ell(\hat{\theta})`` is the observed information (negative Hessian)
+- ``J = \nabla c(\hat{\theta})`` is the Jacobian of active constraints at the MLE
+- ``Z`` is an orthonormal basis for ``\text{null}(J)`` (feasible directions)
+
+**Key properties:**
+1. **Correctly reduces degrees of freedom**: If ``k`` constraints are active, variance lives in a ``(p-k)``-dimensional subspace
+2. **Zero variance in constrained directions**: Parameters fixed by constraints have zero variance
+3. **Reduces to standard ``H^{-1}`` when no constraints are active**
+
+**Active constraint identification:**
+A constraint ``l_i \le c_i(\theta) \le u_i`` is **active** at the MLE if:
+- It's an equality constraint (``l_i = u_i``), or
+- The constraint value is at its bound (``c(\hat{\theta}) \approx l_i`` or ``c(\hat{\theta}) \approx u_i``)
+
+```julia
+# Example: Phase-type model with SCTP constraints
+h12 = Hazard(@formula(0 ~ 1), "pt", 1, 2)
+h13 = Hazard(@formula(0 ~ 1), "pt", 1, 3)
+
+model = multistatemodel(h12, h13; data=df, n_phases=Dict(1 => 3), coxian_structure=:sctp)
+
+# fit() automatically computes constrained variance
+fitted = fit(model)
+
+# vcov is now available (previously was `nothing` for constrained models)
+@assert !isnothing(fitted.vcov)
+
+# Variance in constrained directions will be near-zero
+# Free directions will have positive variance
+se = sqrt.(diag(fitted.vcov))
+```
+
+**Warning messages:**
+- If parameters are at their box bounds (not constraint bounds), you'll see a warning:
+  "Parameters at bounds may have unreliable variance estimates"
+- Consider using the IJ (sandwich) variance which is more robust to boundary effects
+
 ### Variance Estimation Recommendations
 
 ```julia

@@ -7,6 +7,7 @@
 #
 # Contents:
 # - _build_phasetype_model_from_hazards: Main model building function
+# - _compute_ordering_reference: Compute reference covariate values for ordering constraints
 # - _build_expanded_parameters: Build parameters for expanded hazards
 # - _build_original_parameters: Extract initial parameters from user hazards
 # - _extract_original_natural_vector: Extract parameter vector from hazard
@@ -15,6 +16,130 @@
 # - _merge_censoring_patterns_with_shift: Merge user and phase censoring patterns
 #
 # =============================================================================
+
+using Statistics: mean, median
+
+"""
+    _compute_ordering_reference(ordering_at, data, covariate_names) -> Dict{Symbol, Float64}
+
+Compute reference covariate values for eigenvalue ordering constraints.
+
+# Arguments
+- `ordering_at::Union{Symbol, NamedTuple}`: How to compute reference values
+  - `:reference`: returns empty Dict (linear constraints at x=0)
+  - `:mean`: compute mean of each covariate from data
+  - `:median`: compute median of each covariate from data
+  - `NamedTuple`: use explicit values provided by user
+- `data::DataFrame`: Data to compute means/medians from
+- `covariate_names::Vector{Symbol}`: Names of covariates in the model
+
+# Returns
+- `Dict{Symbol, Float64}`: Reference values for each covariate. Empty dict signals
+  reference (x=0) ordering, which produces linear constraints.
+
+# Example
+```julia
+_compute_ordering_reference(:reference, data, [:age, :trt])  # Dict()
+_compute_ordering_reference(:mean, data, [:age, :trt])      # Dict(:age => 50.0, :trt => 0.4)
+_compute_ordering_reference((age=50.0,), data, [:age])      # Dict(:age => 50.0)
+```
+"""
+function _compute_ordering_reference(ordering_at::Union{Symbol, NamedTuple},
+                                      data::DataFrame,
+                                      covariate_names::Vector{Symbol})::Dict{Symbol, Float64}
+    if ordering_at === :reference
+        return Dict{Symbol, Float64}()
+    elseif ordering_at === :mean
+        result = Dict{Symbol, Float64}()
+        for cov in covariate_names
+            if hasproperty(data, cov)
+                result[cov] = mean(skipmissing(data[!, cov]))
+            else
+                @warn "Covariate $cov not found in data, using 0.0 for ordering reference"
+                result[cov] = 0.0
+            end
+        end
+        return result
+    elseif ordering_at === :median
+        result = Dict{Symbol, Float64}()
+        for cov in covariate_names
+            if hasproperty(data, cov)
+                result[cov] = median(skipmissing(data[!, cov]))
+            else
+                @warn "Covariate $cov not found in data, using 0.0 for ordering reference"
+                result[cov] = 0.0
+            end
+        end
+        return result
+    elseif ordering_at isa NamedTuple
+        result = Dict{Symbol, Float64}()
+        nt_keys = keys(ordering_at)
+        for cov in covariate_names
+            if cov in nt_keys
+                result[cov] = ordering_at[cov]
+            elseif cov in [:Intercept, Symbol("(Intercept)")]
+                # Skip intercept - it's not a covariate
+                continue
+            else
+                throw(ArgumentError("ordering_at NamedTuple missing covariate $cov. " *
+                    "Provide values for all model covariates: $covariate_names"))
+            end
+        end
+        return result
+    else
+        throw(ArgumentError("ordering_at must be :reference, :mean, :median, or NamedTuple, got $ordering_at"))
+    end
+end
+
+"""
+    _extract_covariate_names(hazards) -> Vector{Symbol}
+
+Extract unique covariate names from a collection of hazards.
+Excludes the intercept term.
+"""
+function _extract_covariate_names(hazards::Vector{<:HazardFunction})::Vector{Symbol}
+    covar_names = Set{Symbol}()
+    for h in hazards
+        if hasproperty(h, :hazard) && h.hazard isa StatsModels.FormulaTerm
+            formula = h.hazard
+            # Get the RHS - this can be various StatsModels types
+            rhs = formula.rhs
+            _extract_terms_recursive!(covar_names, rhs)
+        end
+    end
+    return collect(covar_names)
+end
+
+"""
+    _extract_terms_recursive!(names::Set{Symbol}, term)
+
+Recursively extract covariate symbol names from a StatsModels term structure.
+"""
+function _extract_terms_recursive!(names::Set{Symbol}, term)
+    if term isa StatsModels.Term
+        sym = term.sym
+        if sym ∉ (:1, Symbol("(Intercept)"))
+            push!(names, sym)
+        end
+    elseif term isa StatsModels.InteractionTerm
+        for subterm in term.terms
+            _extract_terms_recursive!(names, subterm)
+        end
+    elseif term isa Tuple
+        for subterm in term
+            _extract_terms_recursive!(names, subterm)
+        end
+    elseif term isa StatsModels.InterceptTerm || term isa StatsModels.ConstantTerm
+        # Skip intercept/constant terms
+    elseif term isa StatsModels.FunctionTerm
+        # FunctionTerm wraps a function call like s(x) or te(x,y)
+        # The args contain the actual terms
+        for arg in term.args
+            _extract_terms_recursive!(names, arg)
+        end
+    # Skip other term types (ConstantTerm, MatrixTerm, etc.)
+    end
+end
 
 """
     _build_phasetype_model_from_hazards(hazards, data; kwargs...) -> MultistateModel
@@ -29,6 +154,7 @@ expands hazards and data, and stores metadata in `phasetype_expansion` field.
 - `data::DataFrame`: Observation data
 - `n_phases::Union{Nothing,Dict{Int,Int}}`: Phases per state (default: 2)
 - `coxian_structure::Symbol`: `:unstructured` or `:sctp`
+- `ordering_at::Union{Symbol, NamedTuple}`: Where to enforce eigenvalue ordering
 - Other kwargs: `constraints`, `SubjectWeights`, `CensoringPatterns`, etc.
 
 # Returns
@@ -42,6 +168,7 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
                                               initialize::Bool = true,
                                               n_phases::Union{Nothing, Dict{Int,Int}} = nothing,
                                               coxian_structure::Symbol = :unstructured,
+                                              ordering_at::Union{Symbol, NamedTuple} = :reference,
                                               SubjectWeights::Union{Nothing,Vector{Float64}} = nothing,
                                               ObservationWeights::Union{Nothing,Vector{Float64}} = nothing,
                                               CensoringPatterns::Union{Nothing,Matrix{<:Real}} = nothing,
@@ -166,15 +293,17 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
         CensoringPatterns_expanded = phase_censoring_patterns
     else
         # Merge user patterns with phase uncertainty patterns
-        # User patterns are shifted to avoid conflict with phase patterns
+        # Pass original data to identify which obstypes are user-supplied
         CensoringPatterns_expanded, expanded_data = _merge_censoring_patterns_with_shift(
-            CensoringPatterns, phase_censoring_patterns, mappings, expanded_data
+            CensoringPatterns, phase_censoring_patterns, mappings, expanded_data, 
+            data, original_row_map
         )
     end
     
-    # Validate inputs
+    # Validate inputs (pass phase_to_state to avoid spurious warnings about missing phase transitions)
     CensoringPatterns_final = _prepare_censoring_patterns(CensoringPatterns_expanded, mappings.n_expanded)
-    _validate_inputs!(expanded_data, mappings.expanded_tmat, CensoringPatterns_final, SubjectWeights, ObservationWeights; verbose = verbose)
+    _validate_inputs!(expanded_data, mappings.expanded_tmat, CensoringPatterns_final, SubjectWeights, ObservationWeights; 
+                      verbose = verbose, phase_to_state = mappings.phase_to_state)
     
     # Step 10: Build emission matrix
     if !isnothing(EmissionMatrix)
@@ -188,16 +317,56 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
     # Step 11: Build total hazards on expanded space
     expanded_totalhazards = build_totalhazards(expanded_hazards, mappings.expanded_tmat)
     
-    # Step 11b: Generate SCTP constraints if requested
+    # Step 11b: Generate auto constraints (SCTP, ordering, C1)
     final_constraints = constraints
-    if coxian_structure === :sctp
+    
+    # SCTP constraints: ensure P(dest | leaving state) is constant across phases
+    # Applied for :sctp, :sctp_increasing, and :sctp_decreasing
+    if coxian_structure in (:sctp, :sctp_increasing, :sctp_decreasing)
         sctp_constraints = _generate_sctp_constraints(expanded_hazards, mappings, pt_states)
         if !isnothing(sctp_constraints)
             if verbose
                 println("  Generated $(length(sctp_constraints.cons)) SCTP constraints")
             end
-            final_constraints = _merge_constraints(constraints, sctp_constraints)
+            final_constraints = _merge_constraints(final_constraints, sctp_constraints)
         end
+    end
+    
+    # Ordering constraints: enforce eigenvalue ordering
+    # Applied for :sctp_decreasing and :sctp_increasing
+    if coxian_structure in (:sctp_decreasing, :sctp_increasing)
+        # Determine ordering direction
+        # :sctp_increasing → ν₁ ≤ ν₂ ≤ ... ≤ νₙ (late exits more likely)
+        # :sctp_decreasing → ν₁ ≥ ν₂ ≥ ... ≥ νₙ (early exits more likely)
+        ordering_direction = coxian_structure === :sctp_increasing ? :increasing : :decreasing
+        
+        # Compute reference covariate values for ordering constraints
+        covariate_names = _extract_covariate_names(hazards_ordered)
+        ordering_reference = _compute_ordering_reference(ordering_at, data, covariate_names)
+        
+        if verbose && !isempty(ordering_reference)
+            println("  Ordering constraints at reference: $ordering_reference")
+        end
+        
+        ordering_constraints = _generate_ordering_constraints(
+            expanded_hazards, mappings, pt_states, hazards_ordered, ordering_reference, ordering_direction
+        )
+        if !isnothing(ordering_constraints)
+            if verbose
+                direction_str = ordering_direction === :increasing ? "increasing" : "decreasing"
+                println("  Generated $(length(ordering_constraints.cons)) eigenvalue ordering constraints ($direction_str)")
+            end
+            final_constraints = _merge_constraints(final_constraints, ordering_constraints)
+        end
+    end
+    
+    # C1 constraints: equality constraints for shared covariate effects
+    c1_constraints = _generate_c1_constraints(expanded_hazards, hazards_ordered)
+    if !isnothing(c1_constraints)
+        if verbose
+            println("  Generated $(length(c1_constraints.cons)) C1 covariate equality constraints")
+        end
+        final_constraints = _merge_constraints(final_constraints, c1_constraints)
     end
     
     # Step 12: Store modelcall
@@ -224,24 +393,25 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
         original_parameters
     )
     
-    # Step 15: Assemble the MultistateModel on expanded space
-    # The model operates on expanded state space; phasetype_expansion holds original mappings
-    model = MultistateModel(
-        expanded_data,
-        expanded_parameters,
-        expanded_hazards,
-        expanded_totalhazards,
-        mappings.expanded_tmat,
-        emat,
-        expanded_hazkeys,
-        subjinds,
-        SubjectWeights,
-        ObservationWeights,
-        CensoringPatterns_final,
-        nothing,  # markovsurrogate - set during fitting if needed
-        modelcall,
-        phasetype_expansion
+    # Step 15: Assemble the MultistateModel on expanded space using _assemble_model
+    # This ensures bounds are generated correctly, matching the pattern for regular models
+    components = (
+        data = expanded_data,
+        parameters = expanded_parameters,
+        hazards = expanded_hazards,
+        totalhazards = expanded_totalhazards,
+        tmat = mappings.expanded_tmat,
+        emat = emat,
+        hazkeys = expanded_hazkeys,
+        subjinds = subjinds,
+        SubjectWeights = SubjectWeights,
+        ObservationWeights = ObservationWeights,
+        CensoringPatterns = CensoringPatterns_final,
     )
+    
+    # Phase-type models are always Markov in expanded space with panel data
+    model = _assemble_model(:panel, :markov, components, nothing, modelcall;
+                            phasetype_expansion = phasetype_expansion)
     
     # Step 16: Initialize parameters (phase-type models use :crude like other Markov models)
     if initialize
@@ -265,6 +435,13 @@ Build ParameterHandling-compatible parameter structure for expanded hazards.
 - `hazkeys`: Dict mapping hazard name to parameter index
 - `hazards`: Vector of all expanded hazards (may have more entries than params_list for shared hazards)
 - `hazard_to_params_idx`: Maps each hazard index to its parameter index (default: identity mapping)
+
+# Note on C1 Covariate Constraints
+When using `covariate_constraints=:homogeneous`, multiple hazards will have the same covariate parameter
+name (e.g., `h12_x` for both `h12_a` and `h12_b`). The current implementation stores these
+as separate entries in the nested structure. During optimization, equality constraints should
+be used to enforce that these parameters remain equal. Use `set_parameters!` to ensure
+consistent values when setting parameters manually.
 """
 function _build_expanded_parameters(params_list::Vector{Vector{Float64}}, 
                                      hazkeys::Dict{Symbol, Int64}, 
@@ -292,19 +469,9 @@ function _build_expanded_parameters(params_list::Vector{Vector{Float64}},
     reconstructor = ReConstructor(params_nested, unflattentype=UnflattenFlexible())
     params_flat = flatten(reconstructor, params_nested)
     
-    # Get natural scale parameters (family-aware transformation)
-    params_natural_pairs = [
-        let haz_idx = params_idx_to_hazard_idx[params_idx]
-            hazname => extract_natural_vector(params_nested[hazname], hazards[haz_idx].family)
-        end
-        for (hazname, params_idx) in sort(collect(hazkeys), by = x -> x[2])
-    ]
-    params_natural = NamedTuple(params_natural_pairs)
-    
     return (
         flat = params_flat,
         nested = params_nested,
-        natural = params_natural,
         reconstructor = reconstructor
     )
 end
@@ -454,101 +621,107 @@ function _count_hazard_parameters(h::HazardFunction, data::DataFrame)
 end
 
 """
-    _merge_censoring_patterns_with_shift(user_patterns, phase_patterns, mappings, data)
+    _merge_censoring_patterns_with_shift(user_patterns, phase_patterns, mappings, 
+                                          expanded_data, original_data, original_row_map)
 
-Merge user-provided censoring patterns with phase uncertainty patterns,
-shifting user codes to avoid conflicts with phase codes.
+Merge user-provided censoring patterns with phase uncertainty patterns.
 
-Phase patterns use codes 3 to 2+n_observed (for sojourn in each observed state).
-User patterns are shifted by n_observed, so user code 3 becomes 3+n_observed, etc.
+User patterns are kept at their original codes (expanded to phase space).
+Auto-generated phase patterns are shifted to start after the user's maximum code.
 
-Returns the combined censoring patterns AND the updated data with shifted obstypes.
+This ensures user's obstype values remain unchanged while auto-generated phase
+uncertainty patterns get new codes that don't conflict.
+
+# Arguments
+- `user_patterns`: User-supplied censoring patterns (n_user × n_observed+1)
+- `phase_patterns`: Auto-generated phase uncertainty patterns (n_phase × n_expanded+1)
+- `mappings`: PhaseTypeMappings
+- `expanded_data`: Data after phase-type expansion
+- `original_data`: Original data (before expansion) to identify user obstypes
+- `original_row_map`: Maps expanded row indices to original row indices
+
+Returns the combined censoring patterns AND the updated expanded_data with shifted phase obstypes.
 """
 function _merge_censoring_patterns_with_shift(user_patterns::Matrix{<:Real}, 
                                                phase_patterns::Matrix{Float64},
                                                mappings::PhaseTypeMappings,
-                                               data::DataFrame)
+                                               expanded_data::DataFrame,
+                                               original_data::DataFrame,
+                                               original_row_map::Vector{Int})
     n_observed = mappings.n_observed
     n_expanded = mappings.n_expanded
     n_user = size(user_patterns, 1)
+    n_phase = size(phase_patterns, 1)
     
-    # Phase patterns use codes 3 to 2+n_observed
-    # Shift user patterns by n_observed: user code 3 → 3+n_observed
-    shift = n_observed
+    # Identify user codes from the user_patterns matrix
+    user_codes = Set(Int.(user_patterns[:, 1]))
     
-    # Create expanded user patterns with shifted codes
+    # User patterns keep their original codes (starting at 3)
+    # Phase patterns are shifted to start after user's max code
+    user_max_code = n_user > 0 ? maximum(user_codes) : 2
+    phase_shift = user_max_code - 2  # How much to shift phase codes (originally 3, 4, ...)
+    
+    # Create expanded user patterns (keep original codes, expand to phase space)
     expanded_user = zeros(Float64, n_user, n_expanded + 1)
     
     for p in 1:n_user
         original_code = Int(user_patterns[p, 1])
-        shifted_code = original_code + shift
-        expanded_user[p, 1] = shifted_code
+        expanded_user[p, 1] = original_code  # Keep original code
         
+        # Expand state probabilities to phase probabilities
         for s_obs in 1:n_observed
             obs_prob = user_patterns[p, s_obs + 1]
             phases = mappings.state_to_phases[s_obs]
-            n_phases = length(phases)
             for phase in phases
-                expanded_user[p, phase + 1] = obs_prob / n_phases
+                # Equal probability across phases of each state
+                expanded_user[p, phase + 1] = obs_prob
             end
         end
     end
     
-    # Combine phase patterns and expanded user patterns
-    combined = vcat(phase_patterns, expanded_user)
+    # Create shifted phase patterns
+    shifted_phase = copy(phase_patterns)
+    for p in 1:n_phase
+        shifted_phase[p, 1] = phase_patterns[p, 1] + phase_shift
+    end
     
-    # Update data.obstype to use shifted codes for user patterns
-    # Original user codes are >= 3 (standard) or >= 3+n_observed already (from earlier expansion)
-    # We need to shift any code > 2+n_observed by shift amount
-    # Actually, in the expanded data, phase-generated codes are already 3 to 2+n_observed
-    # We need to shift codes that came from user's original data
+    # Combine: user patterns first, then shifted phase patterns
+    combined = vcat(expanded_user, shifted_phase)
     
-    # The user's original obstype values > 2 that aren't phase-generated should be shifted
-    # But how do we know which are user's vs phase-generated?
-    # In expand_data_for_phasetype, sojourn rows get obstype = 2 + statefrom (3 to 2+n_states)
-    # Panel observations (obstype=2) stay as 2
-    # User's custom obstypes (>=3) in panel data would also be present
+    # Sort by code to ensure consecutive ordering
+    sort_order = sortperm(combined[:, 1])
+    combined = combined[sort_order, :]
     
-    # The issue: user's original obstype=3 could mean their first custom pattern
-    # After expansion, obstype=3 means "sojourn in observed state 1" (phase-generated)
+    # Update expanded_data.obstype: 
+    # - User codes in original data stay the same
+    # - Phase-generated codes (from expand_data_for_phasetype) need to be shifted
+    updated_data = copy(expanded_data)
     
-    # We need to remap: if original data had obstype > 2, shift by n_observed in expanded data
-    # This requires tracking which rows came from original custom obstypes
+    # Build mapping from original phase codes to shifted codes
+    # Phase codes are 3, 4, ... for multi-phase states
+    multi_phase_states = [s for s in 1:n_observed if length(mappings.state_to_phases[s]) > 1]
+    phase_codes_original = Set(2 + s for s in multi_phase_states)
     
-    # For now, let's shift ALL obstypes > 2+n_observed in the expanded data
-    # This handles the case where user's codes start at 3+n_observed or higher
+    code_shift_map = Dict{Int, Int}()
+    for s in multi_phase_states
+        original_code = 2 + s
+        code_shift_map[original_code] = original_code + phase_shift
+    end
     
-    # Actually, the data expansion preserves original obstypes for panel observations
-    # Let's check what codes are actually in the data and shift appropriately
-    
-    # Find the maximum phase code (2 + n_observed)
-    max_phase_code = 2 + n_observed
-    
-    # Create a copy of data to modify
-    updated_data = copy(data)
-    
-    # For any obstype > max_phase_code, it's already shifted or doesn't need shifting
-    # For any obstype in [3, 2+n_observed], it could be either:
-    #   - Phase-generated (sojourn) - don't shift
-    #   - User's original pattern - need to shift
-    #
-    # The only way to distinguish is by checking if it's a sojourn row (stateto=0 and dt>0)
-    # or a non-sojourn row (came from panel data with user's obstype)
-    
-    # Non-sojourn rows with obstype > 2 need shifting
     for i in 1:nrow(updated_data)
         ot = updated_data.obstype[i]
-        if ot > 2 && updated_data.stateto[i] != 0
-            # This is a non-sojourn row with a custom obstype
-            # Could be from user's original panel data with obstype >= 3
-            # BUT: in expand_data_for_phasetype, exact obs (obstype=1) become sojourn + instantaneous
-            #      panel obs (obstype=2) stay as is with obstype=2
-            #      custom obstype (>=3) should stay as is...
-            # So actually, the phase expansion only creates sojourn rows with new codes
-            # User's original codes >= 3 in non-exact observations should be shifted
-            if ot >= 3 && ot <= max_phase_code
-                # Potential conflict with phase codes - shift it
-                updated_data.obstype[i] = ot + shift
+        orig_row = original_row_map[i]
+        orig_obstype = original_data.obstype[orig_row]
+        
+        if ot >= 3
+            # Is this obstype from the original data (user code) or generated (phase code)?
+            if orig_obstype in user_codes
+                # This is a user code - keep it unchanged
+                # (it may have been preserved through expansion)
+                updated_data.obstype[i] = orig_obstype
+            elseif haskey(code_shift_map, ot)
+                # This is a phase-generated code - shift it
+                updated_data.obstype[i] = code_shift_map[ot]
             end
         end
     end

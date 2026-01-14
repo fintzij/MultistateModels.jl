@@ -1,0 +1,1017 @@
+Found 38 test files
+
+******************************************************************************
+This program contains Ipopt, a library for large-scale nonlinear optimization.
+ Ipopt is released as open source code under the Eclipse Public License (EPL).
+         For more information visit https://github.com/coin-or/Ipopt
+******************************************************************************
+
+┌ Warning: Automatic knot placement with panel data uses observation intervals, not true transition times. For better knot placement, consider:
+│   1. Specify knots explicitly: Hazard(...; knots=[0.2, 0.5, 0.8])
+│   2. Call calibrate_splines!(model) after model creation to use surrogate simulation
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/construction/spline_builder.jl:34
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.688, 3.409]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.754, 3.406]
+[ Info: Using observed transition times for knot calibration
+[ Info: Calibrated 5 interior knots for h12 at: [1.158, 1.754, 2.5, 3.406, 4.231]
+No vcov returned when constraints provided: Test Failed at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_constraints.jl:459
+  Expression: isnothing(vcov)
+
+Stacktrace:
+ [1] top-level scope
+   @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_constraints.jl:408
+ [2] macro expansion
+   @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [3] macro expansion
+   @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_constraints.jl:437 [inlined]
+ [4] macro expansion
+   @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [5] macro expansion
+   @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_constraints.jl:459 [inlined]
+ [6] macro expansion
+   @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+Constraint on covariate coefficient: Error During Test at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_constraints.jl:469
+  Got exception outside of a @test
+  FieldError: type Array has no field `subject_grads`, available fields: `ref`, `size`
+  Stacktrace:
+    [1] getproperty
+      @ ./Base_compiler.jl:54 [inlined]
+    [2] _fit_exact(model::MultistateModels.MultistateModel; constraints::@NamedTuple{cons::Vector{Expr}, lcons::Vector{Float64}, ucons::Vector{Float64}}, verbose::Bool, solver::Nothing, adtype::Symbol, parallel::Bool, nthreads::Nothing, compute_vcov::Bool, vcov_threshold::Bool, compute_ij_vcov::Bool, compute_jk_vcov::Bool, loo_method::Symbol, penalty::Symbol, lambda_init::Float64, select_lambda::Symbol, kwargs::@Kwargs{})
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_exact.jl:244
+    [3] _fit_exact
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_exact.jl:41 [inlined]
+    [4] #fit#323
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_common.jl:440 [inlined]
+    [5] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_constraints.jl:511 [inlined]
+    [6] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [7] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_constraints.jl:470 [inlined]
+    [8] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [9] top-level scope
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_constraints.jl:469
+   [10] include(mapexpr::Function, mod::Module, _path::String)
+      @ Base ./Base.jl:307
+   [11] macro expansion
+      @ ./none:13 [inlined]
+   [12] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [13] macro expansion
+      @ ./none:13 [inlined]
+   [14] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [15] top-level scope
+      @ ./none:11
+   [16] eval(m::Module, e::Any)
+      @ Core ./boot.jl:489
+   [17] exec_options(opts::Base.JLOptions)
+      @ Base ./client.jl:283
+   [18] _start()
+      @ Base ./client.jl:550
+======================================================================
+Unit Tests: EFS (Extended Fellner-Schall) Criterion
+======================================================================
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.06, 2.352]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.06, 2.352]
+  ✓ EFS criterion returns finite values for all λ
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.207, 2.27]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.207, 2.27]
+  ✓ EFS criterion curve has expected properties
+    Range: [327.7715, 338.2442]
+  ⊘ EFS Update Function test skipped (compute_efs_update not implemented)
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.308, 2.456]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.308, 2.456]
+  ✓ EFS vs PERF produce valid optimal λ values:
+    EFS optimal log(λ) = 6.0
+    PERF optimal log(λ) = 2.5
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.926, 1.667]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.926, 1.667]
+  ✓ select_smoothing_parameters(:efs) works correctly
+    Optimal λ: [56.2]
+    Criterion: 150.9833
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.852, 2.016]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.852, 2.016]
+  ✓ All three methods produce valid results:
+    PIJCV optimal log(λ) = 6.0
+    PERF optimal log(λ) = 1.0
+    EFS optimal log(λ) = 6.0
+  ✓ EDF known-answer tests pass
+    2×2 case: H=[4,1;1,3], S=I, λ=1 → edf = 29/19 ≈ 1.5263
+    3×3 diagonal case: λ=2 → edf = 1.4333
+    λ→0: edf→p, λ→∞: edf→0 ✓
+
+======================================================================
+EFS Unit Tests Complete
+======================================================================
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.333, 0.667]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.333, 0.667]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.333, 0.667]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.333, 0.667]
+
+All analytical log-likelihood verification tests completed
+Fitting Markov surrogate via MLE ...
+
+Markov surrogate MLE complete.
+
+┌ Warning: The maximum number of iterations (3) has been reached.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_mcem.jl:827
+┌ Warning: MCEM did not converge.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_mcem.jl:914
+
+  Sample-level MLL estimates:
+    IS-weighted (full pool): -35.0901
+    SIR (ESS=200):    -35.0324
+    LHS (ESS=200):    -35.2505
+    Max absolute difference: 0.1604
+
+  Subject-level MLL agreement:
+    Correlation (SIR vs IS):  0.9993
+    Correlation (LHS vs IS):  0.9996
+    Correlation (SIR vs LHS): 0.999
+    Relative MAE (SIR vs IS): 2.14%
+    Relative MAE (LHS vs IS): 1.68%
+
+  Runtime benchmarks (50 reps, warmed up):
+    Pool size: 386 paths/subject avg, ESS target: 200
+
+    MLL computation only (excluding resampling):
+      IS-weighted (full pool, 386 paths): 0.0041 ms
+      SIR resampled (200 paths):             0.009 ms
+      LHS resampled (200 paths):             0.0085 ms
+      Speedup (IS/SIR): 0.46x
+      Speedup (IS/LHS): 0.49x
+
+    Resampling overhead:
+      SIR resampling: 0.9723 ms
+      LHS resampling: 0.4167 ms
+
+    Total (MLL + resampling):
+      IS-weighted:    0.0041 ms
+      SIR:            0.9813 ms
+      LHS:            0.4252 ms
+
+    Log-likelihood computation (M-step bottleneck, 10 reps):
+      Full pool (19307 paths total): 31.85 ms
+      SIR subset (10000 paths total):  10.63 ms
+      LHS subset (10000 paths total):  14.17 ms
+      Speedup (Full/SIR): 3.0x
+      Speedup (Full/LHS): 2.25x
+      Expected speedup (paths ratio): 1.93x
+
+  Variance comparison (50 replications, ESS=200):
+    Full Pool IS variance: 0.0 (deterministic)
+    SIR variance:          0.0277, SD: 0.1664
+    LHS variance:          0.0225, SD: 0.1502
+    Variance ratio (SIR/LHS): 1.23
+
+    Full Pool IS mean:     -35.0901 (exact)
+    SIR mean:              -35.0997
+    LHS mean:              -35.0954
+
+    Variance computation runtimes:
+      SIR (50 reps):  0.031 s
+      LHS (50 reps):  0.021 s
+
+  Unbiasedness check (100 bootstrap samples):
+    IS estimate:   -35.0901
+    SIR mean:      -35.0907, bias: -0.0005
+    LHS mean:      -35.137, bias: -0.0468
+    SIR SD:        0.2631
+    LHS SD:        0.2351
+
+  Edge case tests passed
+
+✓ All MLL consistency tests completed
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1175
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1175
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1175
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1175
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1210
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1210
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1175
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1210
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1210
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1175
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1175
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1210
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1175
+┌ Warning: The log-likelihood for a Markov model includes a normalizing constant that is intractable for other families. Setting estimate_likelihood=true is strongly recommended when comparing different families of models.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/accessors.jl:1175
+Reference ordering generates linear expressions: Error During Test at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:197
+  Got exception outside of a @test
+  ArgumentError: coxian_structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :eigorder_sctp
+  Stacktrace:
+    [1] multistatemodel(hazards::MultistateModels.PhaseTypeHazard; data::DataFrame, constraints::Nothing, initialize::Bool, surrogate::Symbol, fit_surrogate::Bool, surrogate_constraints::Nothing, surrogate_n_phases::Symbol, n_phases::Dict{Int64, Int64}, coxian_structure::Symbol, ordering_at::Symbol, SubjectWeights::Nothing, ObservationWeights::Nothing, CensoringPatterns::Nothing, EmissionMatrix::Nothing, verbose::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/construction/multistatemodel.jl:142
+    [2] top-level scope
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:195
+    [3] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [4] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:198 [inlined]
+    [5] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [6] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:199 [inlined]
+    [7] include(mapexpr::Function, mod::Module, _path::String)
+      @ Base ./Base.jl:307
+    [8] macro expansion
+      @ ./none:13 [inlined]
+    [9] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [10] macro expansion
+      @ ./none:13 [inlined]
+   [11] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [12] top-level scope
+      @ ./none:11
+   [13] eval(m::Module, e::Any)
+      @ Core ./boot.jl:489
+   [14] exec_options(opts::Base.JLOptions)
+      @ Base ./client.jl:283
+   [15] _start()
+      @ Base ./client.jl:550
+Non-reference ordering with heterogeneous covariates generates nonlinear expressions: Error During Test at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:211
+  Got exception outside of a @test
+  ArgumentError: coxian_structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :eigorder_sctp
+  Stacktrace:
+    [1] multistatemodel(hazards::MultistateModels.PhaseTypeHazard; data::DataFrame, constraints::Nothing, initialize::Bool, surrogate::Symbol, fit_surrogate::Bool, surrogate_constraints::Nothing, surrogate_n_phases::Symbol, n_phases::Dict{Int64, Int64}, coxian_structure::Symbol, ordering_at::Symbol, SubjectWeights::Nothing, ObservationWeights::Nothing, CensoringPatterns::Nothing, EmissionMatrix::Nothing, verbose::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/construction/multistatemodel.jl:142
+    [2] top-level scope
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:195
+    [3] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [4] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:212 [inlined]
+    [5] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [6] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:213 [inlined]
+    [7] include(mapexpr::Function, mod::Module, _path::String)
+      @ Base ./Base.jl:307
+    [8] macro expansion
+      @ ./none:13 [inlined]
+    [9] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [10] macro expansion
+      @ ./none:13 [inlined]
+   [11] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [12] top-level scope
+      @ ./none:11
+   [13] eval(m::Module, e::Any)
+      @ Core ./boot.jl:489
+   [14] exec_options(opts::Base.JLOptions)
+      @ Base ./client.jl:283
+   [15] _start()
+      @ Base ./client.jl:550
+Fit with :reference ordering: Error During Test at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:231
+  Got exception outside of a @test
+  ArgumentError: coxian_structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :eigorder_sctp
+  Stacktrace:
+    [1] multistatemodel(hazards::MultistateModels.PhaseTypeHazard; data::DataFrame, constraints::Nothing, initialize::Bool, surrogate::Symbol, fit_surrogate::Bool, surrogate_constraints::Nothing, surrogate_n_phases::Symbol, n_phases::Dict{Int64, Int64}, coxian_structure::Symbol, ordering_at::Symbol, SubjectWeights::Nothing, ObservationWeights::Nothing, CensoringPatterns::Nothing, EmissionMatrix::Nothing, verbose::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/construction/multistatemodel.jl:142
+    [2] top-level scope
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:229
+    [3] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [4] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:232 [inlined]
+    [5] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [6] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:233 [inlined]
+    [7] include(mapexpr::Function, mod::Module, _path::String)
+      @ Base ./Base.jl:307
+    [8] macro expansion
+      @ ./none:13 [inlined]
+    [9] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [10] macro expansion
+      @ ./none:13 [inlined]
+   [11] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [12] top-level scope
+      @ ./none:11
+   [13] eval(m::Module, e::Any)
+      @ Core ./boot.jl:489
+   [14] exec_options(opts::Base.JLOptions)
+      @ Base ./client.jl:283
+   [15] _start()
+      @ Base ./client.jl:550
+Fit with :mean ordering (no covariates): Error During Test at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:241
+  Got exception outside of a @test
+  ArgumentError: coxian_structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :eigorder_sctp
+  Stacktrace:
+    [1] multistatemodel(hazards::MultistateModels.PhaseTypeHazard; data::DataFrame, constraints::Nothing, initialize::Bool, surrogate::Symbol, fit_surrogate::Bool, surrogate_constraints::Nothing, surrogate_n_phases::Symbol, n_phases::Dict{Int64, Int64}, coxian_structure::Symbol, ordering_at::Symbol, SubjectWeights::Nothing, ObservationWeights::Nothing, CensoringPatterns::Nothing, EmissionMatrix::Nothing, verbose::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/construction/multistatemodel.jl:142
+    [2] top-level scope
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:229
+    [3] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [4] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:242 [inlined]
+    [5] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [6] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_ordering_at.jl:243 [inlined]
+    [7] include(mapexpr::Function, mod::Module, _path::String)
+      @ Base ./Base.jl:307
+    [8] macro expansion
+      @ ./none:13 [inlined]
+    [9] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [10] macro expansion
+      @ ./none:13 [inlined]
+   [11] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [12] top-level scope
+      @ ./none:11
+   [13] eval(m::Module, e::Any)
+      @ Core ./boot.jl:489
+   [14] exec_options(opts::Base.JLOptions)
+      @ Base ./client.jl:283
+   [15] _start()
+      @ Base ./client.jl:550
+
+✓ ordering_at Tests Complete
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.033, 1.7]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [1.067, 1.733]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.033, 1.7]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [1.067, 1.733]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.167, 1.833]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [1.067, 1.467]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.167, 1.833]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [1.067, 1.467]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.667, 2.333]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.667, 2.333]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.2, 2.0]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.2, 2.0]
+[ Info: Natural boundary conditions are not currently compatible with monotone splines. The restrictions on second derivatives at the spline boundaries will be removed.
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.2, 2.0]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.2, 2.0]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.167, 1.833]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [1.4, 2.067]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.167, 1.833]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [1.4, 2.067]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.779, 2.462]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [1.633, 2.222]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.779, 2.462]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [1.633, 2.222]
+┌ Warning: Multiple smoothing parameters detected (n_lambda=2).
+│ Current implementation uses shared λ for all smooth terms.
+│ Consider calibrating each term separately with `scope=:baseline` or `scope=:covariates`.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:1432
+┌ Warning: Multiple smoothing parameters detected (n_lambda=2).
+│ Current implementation uses shared λ for all smooth terms.
+│ Consider calibrating each term separately with `scope=:baseline` or `scope=:covariates`.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:1432
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.852, 2.445]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [1.666, 2.133]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.852, 2.445]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [1.666, 2.133]
+┌ Warning: Multiple smoothing parameters detected (n_lambda=2).
+│ Current implementation uses shared λ for all smooth terms.
+│ Consider calibrating each term separately with `scope=:baseline` or `scope=:covariates`.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:1432
+┌ Warning: Multiple smoothing parameters detected (n_lambda=2).
+│ Current implementation uses shared λ for all smooth terms.
+│ Consider calibrating each term separately with `scope=:baseline` or `scope=:covariates`.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:1432
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.499, 0.986]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.499, 0.986]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.267, 0.533]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.267, 0.533]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.695, 0.815]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.695, 0.815]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.247, 1.634]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.247, 1.634]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.197, 1.625]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.197, 1.625]
+  ✓ build_penalty_matrix produces correct K×K symmetric PSD matrix
+    K = 7 basis functions, null space dimension = 2
+  ✓ compute_penalty known-answer tests pass
+    β=[1,2,3], S=I, λ=0.5 → penalty = 3.5
+    Penalty scales linearly with λ
+    β=[1,1], S=[2,1;1,2], λ=1.0 → penalty = 3.0
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.507, 0.794]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.507, 0.794]
+======================================================================
+Unit Tests: PERF Criterion
+======================================================================
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.06, 2.352]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.06, 2.352]
+  ✓ PERF returns finite values for all λ
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.207, 2.27]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.207, 2.27]
+  ✓ PERF curve has expected properties
+    Range: [-192.1338, -174.9964]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.23, 2.23]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.23, 2.23]
+  ✓ PERF vs EFS produce valid optimal λ values:
+    PERF optimal log(λ) = -2.0
+    EFS optimal log(λ) = 6.0
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.331, 2.547]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.331, 2.547]
+  ✓ PERF vs PIJCV produce valid optimal λ values:
+    PERF optimal log(λ) = 3.5
+    PIJCV optimal log(λ) = 6.0
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.926, 1.667]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.926, 1.667]
+  ✓ select_smoothing_parameters(:perf) works correctly
+    Optimal λ: [0.115]
+    Criterion: -92.2011
+  ✓ compute_penalty known-answer tests pass (PERF context)
+    β=[1,2,3], S=I, λ=0.5 → penalty = 3.5
+    β=[1,2,3], S=I, λ=1.0 → penalty = 7.0 (linear scaling)
+    β=[1,2], S=diag(2,3), λ=1.0 → penalty = 7.0
+
+======================================================================
+PERF Unit Tests Complete
+======================================================================
+
+Phase-Type Correctness Tests Complete
+PhaseTypeConfig structure field: Test Failed at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1156
+  Expression: config_default.structure == :eigorder_sctp
+   Evaluated: sctp == eigorder_sctp
+
+Stacktrace:
+ [1] top-level scope
+   @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:797
+ [2] macro expansion
+   @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [3] macro expansion
+   @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1080 [inlined]
+ [4] macro expansion
+   @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [5] macro expansion
+   @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1148 [inlined]
+ [6] macro expansion
+   @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [7] macro expansion
+   @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1156 [inlined]
+ [8] macro expansion
+   @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+ProposalConfig structure field: Test Failed at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1169
+  Expression: config_default.structure == :eigorder_sctp
+   Evaluated: sctp == eigorder_sctp
+
+Stacktrace:
+ [1] top-level scope
+   @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:797
+ [2] macro expansion
+   @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [3] macro expansion
+   @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1080 [inlined]
+ [4] macro expansion
+   @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [5] macro expansion
+   @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1164 [inlined]
+ [6] macro expansion
+   @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+ [7] macro expansion
+   @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1169 [inlined]
+ [8] macro expansion
+   @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:680 [inlined]
+┌ Warning: Crude initialization violates constraints. Parameters initialized but may need manual adjustment before fitting.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/utilities/initialization.jl:47
+┌ Warning: Crude initialization violates constraints. Parameters initialized but may need manual adjustment before fitting.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/utilities/initialization.jl:47
+:eigorder_sctp generates SCTP + eigenvalue ordering constraints: Error During Test at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1938
+  Got exception outside of a @test
+  ArgumentError: coxian_structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :eigorder_sctp
+  Stacktrace:
+    [1] multistatemodel(::MultistateModels.PhaseTypeHazard, ::Vararg{MultistateModels.PhaseTypeHazard}; data::DataFrame, constraints::Nothing, initialize::Bool, surrogate::Symbol, fit_surrogate::Bool, surrogate_constraints::Nothing, surrogate_n_phases::Symbol, n_phases::Dict{Int64, Int64}, coxian_structure::Symbol, ordering_at::Symbol, SubjectWeights::Nothing, ObservationWeights::Nothing, CensoringPatterns::Nothing, EmissionMatrix::Nothing, verbose::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/construction/multistatemodel.jl:142
+    [2] top-level scope
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1916
+    [3] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [4] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1940 [inlined]
+    [5] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [6] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1953 [inlined]
+    [7] include(mapexpr::Function, mod::Module, _path::String)
+      @ Base ./Base.jl:307
+    [8] macro expansion
+      @ ./none:13 [inlined]
+    [9] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [10] macro expansion
+      @ ./none:13 [inlined]
+   [11] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [12] top-level scope
+      @ ./none:11
+   [13] eval(m::Module, e::Any)
+      @ Core ./boot.jl:489
+   [14] exec_options(opts::Base.JLOptions)
+      @ Base ./client.jl:283
+   [15] _start()
+      @ Base ./client.jl:550
+:ordered_sctp is alias for :eigorder_sctp: Error During Test at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1972
+  Got exception outside of a @test
+  ArgumentError: coxian_structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :eigorder_sctp
+  Stacktrace:
+    [1] multistatemodel(::MultistateModels.PhaseTypeHazard, ::Vararg{MultistateModels.PhaseTypeHazard}; data::DataFrame, constraints::Nothing, initialize::Bool, surrogate::Symbol, fit_surrogate::Bool, surrogate_constraints::Nothing, surrogate_n_phases::Symbol, n_phases::Dict{Int64, Int64}, coxian_structure::Symbol, ordering_at::Symbol, SubjectWeights::Nothing, ObservationWeights::Nothing, CensoringPatterns::Nothing, EmissionMatrix::Nothing, verbose::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/construction/multistatemodel.jl:142
+    [2] top-level scope
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1916
+    [3] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [4] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1973 [inlined]
+    [5] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [6] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1986 [inlined]
+    [7] include(mapexpr::Function, mod::Module, _path::String)
+      @ Base ./Base.jl:307
+    [8] macro expansion
+      @ ./none:13 [inlined]
+    [9] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [10] macro expansion
+      @ ./none:13 [inlined]
+   [11] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [12] top-level scope
+      @ ./none:11
+   [13] eval(m::Module, e::Any)
+      @ Core ./boot.jl:489
+   [14] exec_options(opts::Base.JLOptions)
+      @ Base ./client.jl:283
+   [15] _start()
+      @ Base ./client.jl:550
+┌ Warning: Crude initialization violates constraints. Parameters initialized but may need manual adjustment before fitting.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/utilities/initialization.jl:47
+Single destination with :eigorder_sctp generates only ordering constraints: Error During Test at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:2046
+  Got exception outside of a @test
+  ArgumentError: coxian_structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :eigorder_sctp
+  Stacktrace:
+    [1] multistatemodel(hazards::MultistateModels.PhaseTypeHazard; data::DataFrame, constraints::Nothing, initialize::Bool, surrogate::Symbol, fit_surrogate::Bool, surrogate_constraints::Nothing, surrogate_n_phases::Symbol, n_phases::Dict{Int64, Int64}, coxian_structure::Symbol, ordering_at::Symbol, SubjectWeights::Nothing, ObservationWeights::Nothing, CensoringPatterns::Nothing, EmissionMatrix::Nothing, verbose::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/construction/multistatemodel.jl:142
+    [2] top-level scope
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:1916
+    [3] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [4] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:2049 [inlined]
+    [5] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+    [6] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_phasetype.jl:2061 [inlined]
+    [7] include(mapexpr::Function, mod::Module, _path::String)
+      @ Base ./Base.jl:307
+    [8] macro expansion
+      @ ./none:13 [inlined]
+    [9] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [10] macro expansion
+      @ ./none:13 [inlined]
+   [11] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [12] top-level scope
+      @ ./none:11
+   [13] eval(m::Module, e::Any)
+      @ Core ./boot.jl:489
+   [14] exec_options(opts::Base.JLOptions)
+      @ Base ./client.jl:283
+   [15] _start()
+      @ Base ./client.jl:550
+
+Phase-Type Tests Complete
+
+Parameter recovery test:
+  True λ = 0.5
+  Grid MLE λ = 0.4
+  Log-likelihoods: [-75.41, -70.25, -68.99, -69.88, -72.01, -74.85, -78.07]
+┌ Warning: State 1 has :pt hazards but also has non-:pt hazards: [:h13]. All outgoing hazards from state 1 will be treated as phase-type.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/phasetype/expansion_model.jl:241
+┌ Warning: State 2 has :pt hazards but also has non-:pt hazards: [:h23]. All outgoing hazards from state 2 will be treated as phase-type.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/phasetype/expansion_model.jl:241
+┌ Warning: State 1 has :pt hazards but also has non-:pt hazards: [:h13]. All outgoing hazards from state 1 will be treated as phase-type.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/phasetype/expansion_model.jl:241
+┌ Warning: State 2 has :pt hazards but also has non-:pt hazards: [:h23]. All outgoing hazards from state 2 will be treated as phase-type.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/phasetype/expansion_model.jl:241
+┌ Warning: State 1 has :pt hazards but also has non-:pt hazards: [:h13]. All outgoing hazards from state 1 will be treated as phase-type.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/phasetype/expansion_model.jl:241
+┌ Warning: State 2 has :pt hazards but also has non-:pt hazards: [:h23]. All outgoing hazards from state 2 will be treated as phase-type.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/phasetype/expansion_model.jl:241
+┌ Warning: State 1 has :pt hazards but also has non-:pt hazards: [:h13]. All outgoing hazards from state 1 will be treated as phase-type.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/phasetype/expansion_model.jl:241
+┌ Warning: 30 subject Hessians contain NaN/Inf values. Check for extreme parameter values or zero hazards. Affected subjects: [1, 2, 3, 4, 5]...
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:2028
+┌ Warning: Penalized Hessian contains non-finite values (0 NaN, 23 Inf). Returning NaN EDFs.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:2043
+┌ Warning: Subject Hessian contains non-finite values (0 NaN, 9 Inf). This typically indicates:
+│   1. Zero/negative hazard values (check parameter bounds)
+│   2. Spline evaluation outside knot range
+│   3. Extreme parameter values during optimization
+│ Affected parameter indices: Int64[]
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:801
+┌ Warning: Subject Hessian contains non-finite values (0 NaN, 9 Inf). This typically indicates:
+│   1. Zero/negative hazard values (check parameter bounds)
+│   2. Spline evaluation outside knot range
+│   3. Extreme parameter values during optimization
+│ Affected parameter indices: Int64[]
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:801
+┌ Warning: 15 subject Hessians contain NaN/Inf values. Check for extreme parameter values or zero hazards. Affected subjects: [1, 2, 3, 4, 5]...
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:2028
+┌ Warning: Penalized Hessian contains non-finite values (0 NaN, 16 Inf). Returning NaN EDFs.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:2043
+┌ Info: Gaussian NCV (PIJCV)
+│   lambda = 9.521658545042921
+└   edf = 6.042549575488171
+┌ Info: Gaussian REML
+│   lambda = 2.518586296275602
+└   edf = 7.095533170556664
+┌ Info: Gaussian RMSE
+│   ncv = 0.04590384862414207
+└   reml = 0.04742033405617361
+┌ Info: PAM NCV (PIJCV)
+│   sp = 1.2725
+└   edf = 9.4941
+┌ Info: PAM REML
+│   sp = 24.4064
+└   edf = 6.4415
+┌ Info: PAM penalty matrix eigenvalue range
+│   min = -6.970535745758936e-5
+└   max = 0.9756895431044306
+┌ Info: PAM penalty matrix small eigenvalues
+└   n_small = 1
+┌ Info: PAM fit quality
+│   rmse_ncv = 0.2517
+└   rmse_reml = 0.2351
+┌ Info: Quadratic polynomial penalty
+│   computed = 3.9999999999999147
+└   expected = 4.0
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.47, 0.609]
+[ Info: Auto-placed 2 interior knots for 2→1 transition at: [0.36, 0.471]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [0.47, 0.609]
+[ Info: Auto-placed 2 interior knots for 2→1 transition at: [0.36, 0.471]
+[ Info: Natural boundary conditions are not currently compatible with monotone splines. The restrictions on second derivatives at the spline boundaries will be removed.
+[ Info: Natural boundary conditions are not currently compatible with monotone splines. The restrictions on second derivatives at the spline boundaries will be removed.
+[ Info: Natural boundary conditions are not currently compatible with monotone splines. The restrictions on second derivatives at the spline boundaries will be removed.
+rectify_coefs! round-trip consistency: Error During Test at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_splines.jl:557
+  Got exception outside of a @test
+  BoundsError: attempt to access 1-element Vector{MultistateModels._MarkovHazard} at index [0]
+  Stacktrace:
+    [1] throw_boundserror(A::Vector{MultistateModels._MarkovHazard}, I::Tuple{Int64})
+      @ Base ./essentials.jl:15
+    [2] getindex(A::Vector{MultistateModels._MarkovHazard}, i::Int64)
+      @ Base ./essentials.jl:919
+    [3] (::MultistateModels.var"#136#137")(pars::@NamedTuple{h12::@NamedTuple{baseline::@NamedTuple{h12_rate::ForwardDiff.Dual{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1}}}}, subjectdata::DataFrame, hazards::Vector{MultistateModels._MarkovHazard}, totalhazards::Vector{MultistateModels._TotalHazard}, tmat::Matrix{Int64})
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/likelihood/loglik_utils.jl:125
+    [4] (::MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath})(pars::Vector{ForwardDiff.Dual{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1}})
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:100
+    [5] vector_mode_dual_eval!
+      @ ~/.julia/packages/ForwardDiff/9ocoj/src/apiutils.jl:24 [inlined]
+    [6] vector_mode_gradient(f::MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, x::Vector{Float64}, cfg::ForwardDiff.GradientConfig{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1, Vector{ForwardDiff.Dual{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1}}})
+      @ ForwardDiff ~/.julia/packages/ForwardDiff/9ocoj/src/gradient.jl:98
+    [7] gradient
+      @ ~/.julia/packages/ForwardDiff/9ocoj/src/gradient.jl:20 [inlined]
+    [8] gradient(f::MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, x::Vector{Float64}, cfg::ForwardDiff.GradientConfig{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1, Vector{ForwardDiff.Dual{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1}}})
+      @ ForwardDiff ~/.julia/packages/ForwardDiff/9ocoj/src/gradient.jl:17
+    [9] gradient(f::MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, x::Vector{Float64})
+      @ ForwardDiff ~/.julia/packages/ForwardDiff/9ocoj/src/gradient.jl:17
+   [10] compute_subject_gradients(params::Vector{Float64}, model::MultistateModels.MultistateModel, samplepaths::Vector{SamplePath})
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:103
+   [11] compute_fisher_components(params::Vector{Float64}, model::MultistateModels.MultistateModel, samplepaths::Vector{SamplePath}; compute_subject_contributions::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:1063
+   [12] compute_fisher_components
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:1055 [inlined]
+   [13] compute_robust_vcov(params::Vector{Float64}, model::MultistateModels.MultistateModel, samplepaths::Vector{SamplePath}; compute_ij::Bool, compute_jk::Bool, loo_method::Symbol, vcov_threshold::Bool, subject_grads::Nothing, subject_hessians::Nothing)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:1468
+   [14] compute_robust_vcov
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:1441 [inlined]
+   [15] _fit_exact(model::MultistateModels.MultistateModel; constraints::Nothing, verbose::Bool, solver::Nothing, adtype::Symbol, parallel::Bool, nthreads::Nothing, compute_vcov::Bool, vcov_threshold::Bool, compute_ij_vcov::Bool, compute_jk_vcov::Bool, loo_method::Symbol, penalty::Symbol, lambda_init::Float64, select_lambda::Symbol, kwargs::@Kwargs{})
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_exact.jl:306
+   [16] _fit_exact
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_exact.jl:41 [inlined]
+   [17] #fit#323
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_common.jl:440 [inlined]
+   [18] fit
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_common.jl:431 [inlined]
+   [19] _fit_markov_surrogate(model::MultistateModels.MultistateModel; method::Symbol, surrogate_parameters::Nothing, surrogate_constraints::Nothing, verbose::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/surrogate/markov.jl:194
+   [20] _fit_markov_surrogate
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/surrogate/markov.jl:143 [inlined]
+   [21] _get_or_fit_surrogate
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/sampling.jl:506 [inlined]
+   [22] draw_paths(model::MultistateModels.MultistateModel; min_ess::Int64, npaths::Int64, paretosmooth::Bool, return_logliks::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/sampling.jl:434
+   [23] draw_paths
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/sampling.jl:412 [inlined]
+   [24] _init_from_surrogate_paths!(model::MultistateModels.MultistateModel, npaths::Int64; constraints::Nothing, surrogate_constraints::Nothing)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/utilities/initialization.jl:343
+   [25] _init_from_surrogate_paths!
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/utilities/initialization.jl:337 [inlined]
+   [26] initialize_parameters!(model::MultistateModels.MultistateModel; constraints::Nothing, surrogate_constraints::Nothing, surrogate_parameters::Nothing, method::Symbol, npaths::Int64)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/utilities/initialization.jl:499
+   [27] initialize_parameters!
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/utilities/initialization.jl:435 [inlined]
+   [28] multistatemodel(::MultistateModels.SplineHazard, ::Vararg{MultistateModels.SplineHazard}; data::DataFrame, constraints::Nothing, initialize::Bool, surrogate::Symbol, fit_surrogate::Bool, surrogate_constraints::Nothing, surrogate_n_phases::Symbol, n_phases::Nothing, coxian_structure::Symbol, ordering_at::Symbol, SubjectWeights::Nothing, ObservationWeights::Nothing, CensoringPatterns::Nothing, EmissionMatrix::Nothing, verbose::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/construction/multistatemodel.jl:249
+   [29] top-level scope
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_splines.jl:36
+   [30] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [31] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_splines.jl:559 [inlined]
+   [32] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [33] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_splines.jl:563 [inlined]
+   [34] include(mapexpr::Function, mod::Module, _path::String)
+      @ Base ./Base.jl:307
+   [35] macro expansion
+      @ ./none:13 [inlined]
+   [36] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [37] macro expansion
+      @ ./none:13 [inlined]
+   [38] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [39] top-level scope
+      @ ./none:11
+   [40] eval(m::Module, e::Any)
+      @ Core ./boot.jl:489
+   [41] exec_options(opts::Base.JLOptions)
+      @ Base ./client.jl:283
+   [42] _start()
+      @ Base ./client.jl:550
+Spline edge cases: Error During Test at /Users/fintzij/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_splines.jl:620
+  Got exception outside of a @test
+  BoundsError: attempt to access 1-element Vector{MultistateModels._MarkovHazard} at index [0]
+  Stacktrace:
+    [1] throw_boundserror(A::Vector{MultistateModels._MarkovHazard}, I::Tuple{Int64})
+      @ Base ./essentials.jl:15
+    [2] getindex(A::Vector{MultistateModels._MarkovHazard}, i::Int64)
+      @ Base ./essentials.jl:919
+    [3] (::MultistateModels.var"#136#137")(pars::@NamedTuple{h12::@NamedTuple{baseline::@NamedTuple{h12_rate::ForwardDiff.Dual{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1}}}}, subjectdata::DataFrame, hazards::Vector{MultistateModels._MarkovHazard}, totalhazards::Vector{MultistateModels._TotalHazard}, tmat::Matrix{Int64})
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/likelihood/loglik_utils.jl:125
+    [4] (::MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath})(pars::Vector{ForwardDiff.Dual{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1}})
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:100
+    [5] vector_mode_dual_eval!
+      @ ~/.julia/packages/ForwardDiff/9ocoj/src/apiutils.jl:24 [inlined]
+    [6] vector_mode_gradient(f::MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, x::Vector{Float64}, cfg::ForwardDiff.GradientConfig{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1, Vector{ForwardDiff.Dual{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1}}})
+      @ ForwardDiff ~/.julia/packages/ForwardDiff/9ocoj/src/gradient.jl:98
+    [7] gradient
+      @ ~/.julia/packages/ForwardDiff/9ocoj/src/gradient.jl:20 [inlined]
+    [8] gradient(f::MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, x::Vector{Float64}, cfg::ForwardDiff.GradientConfig{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1, Vector{ForwardDiff.Dual{ForwardDiff.Tag{MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, Float64}, Float64, 1}}})
+      @ ForwardDiff ~/.julia/packages/ForwardDiff/9ocoj/src/gradient.jl:17
+    [9] gradient(f::MultistateModels.var"#ll_subj_i#compute_subject_gradients##0"{MultistateModels.MultistateModel, Float64, SamplePath}, x::Vector{Float64})
+      @ ForwardDiff ~/.julia/packages/ForwardDiff/9ocoj/src/gradient.jl:17
+   [10] compute_subject_gradients(params::Vector{Float64}, model::MultistateModels.MultistateModel, samplepaths::Vector{SamplePath})
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:103
+   [11] compute_fisher_components(params::Vector{Float64}, model::MultistateModels.MultistateModel, samplepaths::Vector{SamplePath}; compute_subject_contributions::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:1063
+   [12] compute_fisher_components
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:1055 [inlined]
+   [13] compute_robust_vcov(params::Vector{Float64}, model::MultistateModels.MultistateModel, samplepaths::Vector{SamplePath}; compute_ij::Bool, compute_jk::Bool, loo_method::Symbol, vcov_threshold::Bool, subject_grads::Nothing, subject_hessians::Nothing)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:1468
+   [14] compute_robust_vcov
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/output/variance.jl:1441 [inlined]
+   [15] _fit_exact(model::MultistateModels.MultistateModel; constraints::Nothing, verbose::Bool, solver::Nothing, adtype::Symbol, parallel::Bool, nthreads::Nothing, compute_vcov::Bool, vcov_threshold::Bool, compute_ij_vcov::Bool, compute_jk_vcov::Bool, loo_method::Symbol, penalty::Symbol, lambda_init::Float64, select_lambda::Symbol, kwargs::@Kwargs{})
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_exact.jl:306
+   [16] _fit_exact
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_exact.jl:41 [inlined]
+   [17] #fit#323
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_common.jl:440 [inlined]
+   [18] fit
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/fit_common.jl:431 [inlined]
+   [19] _fit_markov_surrogate(model::MultistateModels.MultistateModel; method::Symbol, surrogate_parameters::Nothing, surrogate_constraints::Nothing, verbose::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/surrogate/markov.jl:194
+   [20] _fit_markov_surrogate
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/surrogate/markov.jl:143 [inlined]
+   [21] _get_or_fit_surrogate
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/sampling.jl:506 [inlined]
+   [22] draw_paths(model::MultistateModels.MultistateModel; min_ess::Int64, npaths::Int64, paretosmooth::Bool, return_logliks::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/sampling.jl:434
+   [23] draw_paths
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/sampling.jl:412 [inlined]
+   [24] _init_from_surrogate_paths!(model::MultistateModels.MultistateModel, npaths::Int64; constraints::Nothing, surrogate_constraints::Nothing)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/utilities/initialization.jl:343
+   [25] _init_from_surrogate_paths!
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/utilities/initialization.jl:337 [inlined]
+   [26] initialize_parameters!(model::MultistateModels.MultistateModel; constraints::Nothing, surrogate_constraints::Nothing, surrogate_parameters::Nothing, method::Symbol, npaths::Int64)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/utilities/initialization.jl:499
+   [27] initialize_parameters!
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/utilities/initialization.jl:435 [inlined]
+   [28] multistatemodel(::MultistateModels.SplineHazard, ::Vararg{MultistateModels.SplineHazard}; data::DataFrame, constraints::Nothing, initialize::Bool, surrogate::Symbol, fit_surrogate::Bool, surrogate_constraints::Nothing, surrogate_n_phases::Symbol, n_phases::Nothing, coxian_structure::Symbol, ordering_at::Symbol, SubjectWeights::Nothing, ObservationWeights::Nothing, CensoringPatterns::Nothing, EmissionMatrix::Nothing, verbose::Bool)
+      @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/construction/multistatemodel.jl:249
+   [29] top-level scope
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_splines.jl:36
+   [30] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [31] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_splines.jl:622 [inlined]
+   [32] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [33] macro expansion
+      @ ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/MultistateModelsTests/unit/test_splines.jl:625 [inlined]
+   [34] include(mapexpr::Function, mod::Module, _path::String)
+      @ Base ./Base.jl:307
+   [35] macro expansion
+      @ ./none:13 [inlined]
+   [36] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [37] macro expansion
+      @ ./none:13 [inlined]
+   [38] macro expansion
+      @ ~/.julia/juliaup/julia-1.12.2+0.aarch64.apple.darwin14/share/julia/stdlib/v1.12/Test/src/Test.jl:1776 [inlined]
+   [39] top-level scope
+      @ ./none:11
+   [40] eval(m::Module, e::Any)
+      @ Core ./boot.jl:489
+   [41] exec_options(opts::Base.JLOptions)
+      @ Base ./client.jl:283
+   [42] _start()
+      @ Base ./client.jl:550
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Using observed transition times for knot calibration
+[ Info: Calibrated 2 interior knots for h12 at: [1.168, 2.697]
+[ Info: Calibrated 2 interior knots for h13 at: [2.798, 3.578]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Using observed transition times for knot calibration
+[ Info: Calibrated 3 interior knots for h12 at: [0.877, 1.946, 2.929]
+[ Info: Calibrated 3 interior knots for h13 at: [2.429, 3.301, 3.787]
+[ Info: Using observed transition times for knot calibration
+[ Info: Calibrated 4 interior knots for h12 at: [0.73, 1.294, 2.178, 3.219]
+[ Info: Calibrated 2 interior knots for h13 at: [2.798, 3.578]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Using observed transition times for knot calibration
+[ Info: Calibrated 3 interior knots for h12 at: [0.877, 1.946, 2.929]
+[ Info: Calibrated 3 interior knots for h13 at: [2.429, 3.301, 3.787]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+┌ Warning: Multiple smoothing parameters detected (n_lambda=2).
+│ Current implementation uses shared λ for all smooth terms.
+│ Consider calibrating each term separately with `scope=:baseline` or `scope=:covariates`.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:1432
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Using observed transition times for knot calibration
+[ Info: Calibrated 4 interior knots for h12 at: [0.73, 1.294, 2.178, 3.219]
+[ Info: Calibrated 4 interior knots for h13 at: [1.995, 2.838, 3.451, 4.286]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+┌ Warning: Multiple smoothing parameters detected (n_lambda=2).
+│ Current implementation uses shared λ for all smooth terms.
+│ Consider calibrating each term separately with `scope=:baseline` or `scope=:covariates`.
+└ @ MultistateModels ~/Library/CloudStorage/OneDrive-BristolMyersSquibb/Documents/Julia packages/MultistateModels.jl/src/inference/smoothing_selection.jl:1432
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+[ Info: Auto-placed 2 interior knots for 1→2 transition at: [1.168, 2.697]
+[ Info: Auto-placed 2 interior knots for 1→3 transition at: [2.798, 3.578]
+Test Summary:                                                                              | Pass  Fail  Error  Broken  Total     Time
+All Unit Tests                                                                             | 3069     3     10       1   3083  6m35.5s
+  test_ad_backends.jl                                                                      |   40                          40    40.5s
+  test_bounds.jl                                                                           |   51                          51    17.6s
+  test_compute_hazard.jl                                                                   |   52                          52     9.2s
+  test_constraints.jl                                                                      |   41     1      1             43    15.9s
+    make_constraints basic functionality                                                   |   22                          22     0.0s
+    make_constraints input validation                                                      |    7                           7     0.0s
+    parse_constraints function generation                                                  |    5                           5     0.3s
+    Constraints integration with fit()                                                     |    6                           6    12.0s
+    Constraint error handling                                                              |    1     1                     2     1.0s
+      Initial values violating constraint throws error                                     |    1                           1     0.0s
+      No vcov returned when constraints provided                                           |          1                     1     1.0s
+    Constraints with covariates                                                            |                 1              1     2.4s
+      Constraint on covariate coefficient                                                  |                 1              1     2.4s
+  test_efs.jl                                                                              |   29                    1     30    11.7s
+  test_error_messages.jl                                                                   |   18                          18     0.2s
+  test_hazard_macro.jl                                                                     |   39                          39     3.2s
+  test_hazards.jl                                                                          |  163                         163    56.3s
+  test_helpers.jl                                                                          |   59                          59    12.3s
+  test_infrastructure.jl                                                                   |   64                          64     1.1s
+  test_initialization.jl                                                                   |   49                          49    19.2s
+  test_loglik_analytical.jl                                                                |   40                          40    11.3s
+  test_mcem.jl                                                                             |   22                          22     6.6s
+  test_mll_consistency.jl                                                                  |   22                          22     8.7s
+  test_model_output.jl                                                                     |   57                          57     1.1s
+  test_modelgeneration.jl                                                                  |    5                           5     0.2s
+  test_numerical_stability.jl                                                              |   79                          79     3.0s
+  test_observation_weights_emat.jl                                                         |   24                          24     0.5s
+  test_ordering_at.jl                                                                      |   30            4             34     2.2s
+    ordering_at Reference Computation                                                      |   14                          14     0.6s
+    Covariate Name Extraction                                                              |    8                           8     0.1s
+    Model Construction with ordering_at                                                    |    6                           6     1.4s
+    C1 Constraint (Homogeneous Covariates) Simplification                                  |    2                           2     0.0s
+    Constraint Expression Structure                                                        |                 2              2     0.0s
+      Reference ordering generates linear expressions                                      |                 1              1     0.0s
+      Non-reference ordering with heterogeneous covariates generates nonlinear expressions |                 1              1     0.0s
+    Fitting with ordering_at                                                               |                 2              2     0.0s
+      Fit with :reference ordering                                                         |                 1              1     0.0s
+      Fit with :mean ordering (no covariates)                                              |                 1              1     0.0s
+  test_penalty_infrastructure.jl                                                           |  108                         108    28.8s
+  test_per_transition_obstype.jl                                                           |  101                         101     1.0s
+  test_perf.jl                                                                             |   31                          31     0.9s
+  test_phasetype.jl                                                                        |  509     2      3            514     9.9s
+    Emission Matrix Correctness                                                            |   34                          34     0.2s
+    Data Expansion for Phase-Type                                                          |   41                          41     0.0s
+    Coxian Phase-Type Analytic Correctness                                                 |   45                          45     0.4s
+    Phase-Type Loglik Analytic Correctness                                                 |    5                           5     0.0s
+    Expanded Q Matrix Structure                                                            |   14                          14     0.0s
+    Phase-Type Importance Sampling                                                         |  133     2                   135     0.4s
+      IS weights = 1 when target = proposal (Markov)                                       |    3                           3     0.2s
+      collapse_phasetype_path                                                              |    6                           6     0.0s
+      loglik_expanded_path                                                                 |    2                           2     0.0s
+      draw_samplepath_phasetype validity                                                   |  100                         100     0.1s
+      IS estimate negative for semi-Markov                                                 |    2                           2     0.0s
+      Coxian structure options                                                             |   20     2                    22     0.1s
+        :unstructured structure                                                            |    7                           7     0.1s
+        :sctp structure                                                                    |    5                           5     0.0s
+        Single phase equivalence                                                           |    3                           3     0.0s
+        PhaseTypeConfig structure field                                                    |    3     1                     4     0.0s
+        ProposalConfig structure field                                                     |    2     1                     3     0.0s
+    Phase-Type Model Fitting                                                               |   72                          72     6.0s
+    Phase-Type Simulation                                                                  |  124                         124     0.6s
+    Phase-Type Model Interface                                                             |   23                          23     0.9s
+    expand_data_for_phasetype_fitting                                                      |   11                          11     0.0s
+    Eigenvalue Ordering Constraints (:eigorder_sctp)                                       |    7            3             10     0.0s
+      Default coxian_structure is :eigorder_sctp                                           |    2                           2     0.0s
+      :eigorder_sctp generates SCTP + eigenvalue ordering constraints                      |                 1              1     0.0s
+      :ordered_sctp is alias for :eigorder_sctp                                            |                 1              1     0.0s
+      :sctp generates only SCTP constraints (no eigenvalue ordering)                       |    3                           3     0.0s
+      :unstructured generates no constraints                                               |    1                           1     0.0s
+      Single destination with :eigorder_sctp generates only ordering constraints           |                 1              1     0.0s
+      Invalid coxian_structure throws error                                                |    1                           1     0.0s
+  test_phasetype_emission_expansion.jl                                                     |   26                          26     0.4s
+  test_phasetype_panel_expansion.jl                                                        |   10                          10     0.4s
+  test_phasetype_preprocessing.jl                                                          |   99                          99     2.1s
+  test_pijcv.jl                                                                            |   75                          75     7.8s
+  test_pijcv_reference.jl                                                                  |   34                          34     1.8s
+  test_pijcv_vs_loocv.jl                                                                   |   12                          12    19.5s
+  test_reconstructor.jl                                                                    |   76                          76     1.9s
+  test_regressions.jl                                                                      |    4                           4     0.3s
+  test_reversible_tvc_loglik.jl                                                            |   15                          15    13.9s
+  test_simulation.jl                                                                       |  381                         381     5.7s
+  test_sir.jl                                                                              |   38                          38     0.1s
+  test_splines.jl                                                                          |  289            2            291  1m10.2s
+    Spline Hazards                                                                         |  271            2            273  1m09.2s
+      Cumulative hazard vs QuadGK integration                                              |   25                          25     0.6s
+      B-spline antiderivative correctness (machine precision)                              |    6                           6     0.2s
+      Cumulative hazard with covariates vs QuadGK                                          |   12                          12     2.2s
+      PH covariate effect verification                                                     |    5                           5     2.6s
+      Survival probability correctness                                                     |   12                          12     0.4s
+      Cumulative hazard additivity                                                         |    4                           4     0.0s
+      Automatic Knot Placement                                                             |    9                           9    10.0s
+      default_nknots function                                                              |    7                           7     0.0s
+      default_nknots_penalized function                                                    |   20                          20     0.0s
+      Time Transform for Splines - parity verification                                     |   24                          24     1.2s
+      rectify_coefs! for Splines                                                           |    3                           3     9.8s
+      rectify_coefs! round-trip consistency                                                |                 1              1     0.3s
+      _spline_ests2coefs and _spline_coefs2ests round-trip                                 |    3                           3     0.1s
+      Spline edge cases                                                                    |                 1              1     0.0s
+      default_nknots                                                                       |    4                           4     0.0s
+      place_interior_knots                                                                 |    9                           9     0.0s
+      Spline Knot Calibration                                                              |   31                          31     3.9s
+      Smooth Covariate Terms s(x)                                                          |   46                          46     2.2s
+      Tensor Product Smooths te(x,y)                                                       |   27                          27     0.7s
+      Lambda Sharing for Smooth Covariates                                                 |   10                          10     0.2s
+      Combined s(x) + te(x,y)                                                              |   11                          11     1.4s
+      Smooth Covariates with Spline Baseline                                               |    3                           3    33.3s
+    GPS Penalty Matrix                                                                     |   18                          18     0.0s
+  test_subject_weights.jl                                                                  |   35                          35     3.6s
+  test_surrogates.jl                                                                       |   55                          55     1.1s
+  test_variance.jl                                                                         |  287                         287     5.0s
+RNG of the outermost testset: Xoshiro(0x22ab39917f810cbc, 0xc8b141ebd3f3b9bd, 0x92cb31c18422cb11, 0x2fec7460f559e049, 0xaa2e26c3457f5347)
+ERROR: Some tests did not pass: 3069 passed, 3 failed, 10 errored, 1 broken.
