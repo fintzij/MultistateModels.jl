@@ -179,7 +179,7 @@ function _get_baseline_lb(family::Symbol, n_baseline::Int)
             return fill(NONNEG_LB, n_baseline)
         end
     elseif family == :sp
-        # Spline: all coefficients ≥ 0 (non-negativity of hazard function)
+        # Spline: coefficients are on hazard scale and must be non-negative
         return fill(NONNEG_LB, n_baseline)
     elseif family == :pt
         # Phase-type: all rates ≥ 0 (λ progression rates, μ exit rates)

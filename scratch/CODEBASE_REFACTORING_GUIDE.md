@@ -1,9 +1,310 @@
 # MultistateModels.jl Codebase Refactoring Guide
 
 **Created**: 2026-01-08  
-**Last Updated**: 2026-01-12  
+**Last Updated**: 2026-01-15  
 **Branch**: penalized_splines  
 **Status**: ✅ **SQUAREM REMOVED** — Ready for penalized Markov/MCEM implementation
+
+---
+
+## 🔴 WAVE 6: PhaseType Surrogate Covariate Bug Fix & Test Hardening (2026-01-15)
+
+### Executive Summary
+
+**Critical bug discovered and fixed**: The PhaseType surrogate for MCEM was ignoring covariate effects entirely, causing Markov vs PhaseType proposal estimates to diverge by 45-94%. The bug was masked by progressively relaxed test tolerances.
+
+### Root Cause Analysis
+
+| Component | Affected? | Reason |
+|-----------|-----------|--------|
+| PhaseType Hazard (`:pt` family) | ❌ No | Direct inference uses model's hazards with proper `eval_hazard()` |
+| Markov Surrogate (MCEM) | ❌ No | `build_hazmat_book` correctly uses `compute_hazmat!()` → `eval_hazard()` |
+| **PhaseType Surrogate (MCEM)** | ✅ **YES** | `build_phasetype_tpm_book` copied baseline Q without exp(β'x) scaling |
+
+### Bug Location
+
+**File**: `src/inference/sampling.jl` function `build_phasetype_tpm_book`
+
+**Before (buggy)**:
+```julia
+hazmat_book_ph = [copy(Q_expanded) for _ in 1:n_covar_combos]  # Same Q for all!
+```
+
+**After (fixed)**:
+```julia
+# For each covariate combo, scale inter-state transitions by exp(β'x)
+for hazard in markov_surrogate.hazards
+    linpred = _linear_predictor(hazard_pars, covars, hazard)
+    scaling_factor = exp(linpred)
+    # Scale only inter-state transitions (not internal phase progression)
+    for i, j where phase_to_state[i] != phase_to_state[j]
+        hazmat_book_ph[c][i, j] = Q_baseline[i, j] * scaling_factor
+    end
+end
+```
+
+### Why Testing Didn't Catch It
+
+1. **Tolerances were progressively relaxed** to accommodate observed divergence:
+   - `PROPOSAL_COMPARISON_TOL`: 0.35 → 0.55 → 0.90
+   - Comments blamed "MCEM Monte Carlo variability"
+
+2. **Same tolerance for all parameters**: Covariate coefficients (β) are more sensitive to this bug than baseline parameters, but tests used uniform tolerance
+
+3. **PhaseType still produced valid results**: Importance sampling is robust to proposal mismatch—just less efficient and more biased
+
+### Files Modified (Bug Fix)
+
+| File | Change |
+|------|--------|
+| `src/inference/sampling.jl` | Added `markov_surrogate` parameter to `build_phasetype_tpm_book`, implemented covariate scaling |
+| `src/inference/fit_mcem.jl` | Updated call sites to pass `markov_surrogate` |
+
+### Tolerance Reverts
+
+| File | Original | Relaxed (masked bug) | Reverted To |
+|------|----------|---------------------|-------------|
+| `longtest_mcem.jl` | `PROPOSAL_COMPARISON_TOL` | `2 * PROPOSAL_COMPARISON_TOL` for Gompertz | `PROPOSAL_COMPARISON_TOL` |
+| `longtest_mcem_splines.jl` | 0.35 | 0.90 | 0.35 |
+| `longtest_mcem_tvc.jl` | 0.45 | 0.55, 0.85 | 0.45 |
+
+### Action Items: Test Infrastructure Hardening
+
+The following items should be implemented to prevent similar bugs:
+
+#### Item #25: Add Unit Test for PhaseType Covariate Scaling (HIGH PRIORITY)
+
+**File**: `MultistateModelsTests/unit/test_phasetype_surrogate.jl` (NEW)
+
+**Test specification**:
+```julia
+@testset "PhaseType surrogate covariate scaling" begin
+    # Create model with binary covariate
+    # Build PhaseType surrogate TPM book
+    # VERIFY: Q matrices differ for x=0 vs x=1
+    # VERIFY: Scaling factor matches exp(β'x) for inter-state transitions
+    # VERIFY: Internal phase progression rates are NOT scaled
+end
+```
+
+**Acceptance criteria**:
+- Test fails if Q matrices are identical for different covariate patterns
+- Test verifies correct scaling factor mathematically
+
+#### Item #26: Add Strict Covariate Coefficient Comparison (HIGH PRIORITY)
+
+**File**: Modify `longtest_mcem.jl`, `longtest_mcem_tvc.jl`, `longtest_mcem_splines.jl`
+
+**Change specification**:
+Add separate tolerance check specifically for covariate coefficients (β parameters):
+
+```julia
+@testset "Markov vs PhaseType covariate agreement" begin
+    # Extract ONLY the beta parameters
+    beta_markov = [params for covariate params]
+    beta_pt = [params for covariate params]
+    for (i, name) in enumerate(beta_names)
+        rel_diff = abs(beta_markov[i] - beta_pt[i]) / max(abs(beta_markov[i]), 0.1)
+        @test rel_diff < 0.20  # STRICT 20% tolerance for betas specifically
+    end
+end
+```
+
+**Rationale**: Covariate coefficients are most sensitive to proposal covariate handling; stricter tolerance catches bugs faster.
+
+#### Item #27: Add Diagnostic Assertion in build_phasetype_tpm_book (MEDIUM PRIORITY)
+
+**File**: `src/inference/sampling.jl`
+
+**Change specification**:
+Add runtime assertion that detects when Q matrices should differ but don't:
+
+```julia
+# At end of build_phasetype_tpm_book:
+if n_covar_combos > 1 && any(h.has_covariates for h in markov_surrogate.hazards)
+    # Q matrices should differ between covariate patterns
+    @assert !all(hazmat_book_ph[1] ≈ hazmat_book_ph[c] for c in 2:n_covar_combos) 
+        "BUG: Q matrices identical despite different covariates"
+end
+```
+
+#### Item #28: Document Tolerance Rationale (LOW PRIORITY)
+
+**File**: `MultistateModelsTests/longtests/longtest_config.jl`
+
+**Change specification**:
+Add structured documentation explaining tolerance choices:
+
+```julia
+# TOLERANCE RATIONALE (do not relax without investigation!)
+#
+# PROPOSAL_COMPARISON_TOL = 0.35
+#   - Accounts for MCEM Monte Carlo variance (~15-20% CV)
+#   - Accounts for different convergence rates
+#   - Does NOT account for systematic proposal bugs
+#   - If proposals diverge > 35%, investigate root cause before relaxing
+#
+# PARAM_TOL_REL = 0.35
+#   - Standard tolerance for parameter recovery
+#   - Relaxing beyond 35% requires documented justification
+```
+
+#### Item #29: Add "Tolerance Creep" CI Check (LOW PRIORITY)
+
+**File**: `.github/workflows/test.yml` or pre-commit hook
+
+**Specification**:
+Add grep-based check that flags tolerance increases in PRs:
+
+```bash
+# Flag any tolerance > 0.50 as requiring review
+grep -rn "TOL.*=.*0\.[5-9]" MultistateModelsTests/longtests/ && \
+  echo "WARNING: High tolerance detected - ensure this is justified"
+```
+
+### Validation Status
+
+- [x] Package compiles successfully
+- [x] No syntax errors in modified files
+- [ ] Unit tests pass (requires running)
+- [ ] Long tests pass with reverted tolerances (requires running ~2-4 hours)
+- [ ] New unit test for Item #25 implemented and passing
+
+### Next Steps
+
+1. **Immediate**: Run long tests to validate fix (`longtest_mcem.jl`, `longtest_mcem_splines.jl`, `longtest_mcem_tvc.jl`)
+2. **This week**: Implement Items #25-#26 (unit test + strict beta tolerance)
+3. **Before merge**: Implement Item #27 (runtime assertion)
+
+---
+
+## ✅ WAVE 5: Long Test Coverage Audit & Implementation (2026-01-14)
+
+### Executive Summary
+
+Comprehensive audit completed and gaps filled. The test grid `{exp, wei, gom, sp, pt} × {PH, AFT} × {nocov, fixed, tvc} × {exact, panel}` now has significantly improved coverage.
+
+**Status**: Most critical gaps have been addressed. Remaining items are lower priority or involve fundamental limitations (e.g., phase-type AFT not supported).
+
+### Implementation Session (2026-01-14)
+
+Added the following tests using 4 parallel subagents:
+
+| Subagent | Files Modified | Tests Added |
+|----------|---------------|-------------|
+| 1 | `longtest_aft_suite.jl` | 6 exp AFT scenarios (exact/panel × nocov/tfc/tvc) |
+| 2 | `longtest_aft_suite.jl` | 7 gom/wei AFT nocov scenarios |
+| 3 | `longtest_spline_exact.jl` (NEW) | 3 spline exact tests (nocov/tfc/tvc) |
+| 4 | `longtest_phasetype_panel.jl` | Verified TVC test already exists (Section 7) |
+
+### Updated Coverage Matrix (60 cells)
+
+Legend:
+- ✅ = Covered with parameter recovery tests
+- ⚠️ = Partial coverage (simulation tests only, or incomplete)
+- ❌ = NOT COVERED (known limitation or low priority)
+- 🔍 = Needs verification against similar estimates from Markov and PhaseType proposals
+
+#### Family: EXPONENTIAL (exp)
+
+| Data Type | Effect | No Covars | Fixed | TVC |
+|-----------|--------|-----------|-------|-----|
+| **Exact** | PH | ✅ longtest_parametric_suite | ✅ longtest_parametric_suite | ✅ longtest_parametric_suite |
+| **Exact** | AFT | ✅ **NEW** longtest_aft_suite (exp_aft_exact_nocov) | ✅ **NEW** longtest_aft_suite (exp_aft_exact_tfc) | ✅ **NEW** longtest_aft_suite (exp_aft_exact_tvc) |
+| **Panel** | PH | ✅ longtest_parametric_suite | ✅ longtest_parametric_suite | ✅ longtest_mcem_tvc (Test 0) |
+| **Panel** | AFT | ✅ **NEW** longtest_aft_suite (exp_aft_panel_nocov) | ✅ **NEW** longtest_aft_suite (exp_aft_panel_tfc) | ✅ **NEW** longtest_aft_suite (exp_aft_panel_tvc) |
+
+#### Family: WEIBULL (wei)
+
+| Data Type | Effect | No Covars | Fixed | TVC |
+|-----------|--------|-----------|-------|-----|
+| **Exact** | PH | ✅ longtest_parametric_suite | ✅ longtest_parametric_suite | ✅ longtest_parametric_suite |
+| **Exact** | AFT | ✅ **NEW** longtest_aft_suite (wei_aft_exact_nocov) | ✅ longtest_aft_suite (wei_aft_exact_tfc) | ✅ longtest_aft_suite (wei_aft_exact_tvc) |
+| **Panel** | PH | ✅ longtest_parametric_suite, longtest_mcem | ✅ longtest_parametric_suite | ✅ longtest_mcem_tvc (Tests 3-4) |
+| **Panel** | AFT | ✅ **NEW** longtest_aft_suite (wei_aft_panel_nocov) | ✅ longtest_aft_suite (wei_aft_panel_tfc) | ✅ longtest_aft_suite (wei_aft_panel_tvc) |
+
+#### Family: GOMPERTZ (gom)
+
+| Data Type | Effect | No Covars | Fixed | TVC |
+|-----------|--------|-----------|-------|-----|
+| **Exact** | PH | ✅ longtest_parametric_suite | ✅ longtest_parametric_suite | ✅ longtest_parametric_suite |
+| **Exact** | AFT | ✅ **NEW** longtest_aft_suite (gom_aft_exact_nocov) | ✅ longtest_aft_suite (gom_aft_exact_tfc) | ✅ **NEW** longtest_aft_suite (gom_aft_exact_tvc) |
+| **Panel** | PH | ✅ longtest_parametric_suite, longtest_mcem | ✅ longtest_parametric_suite | ✅ longtest_mcem_tvc (Tests 4-5) |
+| **Panel** | AFT | ✅ **NEW** longtest_aft_suite (gom_aft_panel_nocov) | ✅ **NEW** longtest_aft_suite (gom_aft_panel_tfc) | ✅ **NEW** longtest_aft_suite (gom_aft_panel_tvc) |
+
+#### Family: SPLINE (sp)
+
+| Data Type | Effect | No Covars | Fixed | TVC |
+|-----------|--------|-----------|-------|-----|
+| **Exact** | PH | ✅ **NEW** longtest_spline_exact (sp_exact_nocov) | ✅ **NEW** longtest_spline_exact (sp_exact_tfc) | ✅ **NEW** longtest_spline_exact (sp_exact_tvc) |
+| **Exact** | AFT | ✅ **NEW** longtest_spline_exact (sp_aft_exact_nocov) | ✅ **NEW** longtest_spline_exact (sp_aft_exact_tfc) | ✅ **NEW** longtest_spline_exact (sp_aft_exact_tvc) |
+| **Panel** | PH | ✅ longtest_mcem_splines (Tests 1-3, 5-6) | ✅ longtest_mcem_splines (Test 4) | ✅ longtest_mcem_tvc (Test 8) |
+| **Panel** | AFT | ✅ **NEW** longtest_mcem_splines (Test 7) | ✅ **NEW** longtest_mcem_splines (Test 8) | ✅ **NEW** longtest_mcem_splines (Test 9) |
+
+#### Family: PHASE-TYPE (pt)
+
+| Data Type | Effect | No Covars | Fixed | TVC |
+|-----------|--------|-----------|-------|-----|
+| **Exact** | PH | ✅ longtest_phasetype_exact | ✅ longtest_phasetype_exact | ✅ longtest_phasetype_exact |
+| **Exact** | AFT | ❌ (Not supported*) | ❌ (Not supported*) | ❌ (Not supported*) |
+| **Panel** | PH | ✅ longtest_phasetype_panel | ✅ longtest_phasetype_panel | ✅ longtest_phasetype_panel (Section 7) |
+| **Panel** | AFT | ❌ (Not supported*) | ❌ (Not supported*) | ❌ (Not supported*) |
+
+*Phase-type AFT is not supported because AFT time-scaling doesn't have a meaningful interpretation on the expanded Coxian state space where hazards are parameterized through progression (λ) and exit (μ) rates.
+
+### New Test Files
+
+| File | Lines | Tests | Purpose |
+|------|-------|-------|---------|
+| `longtest_spline_exact.jl` (NEW) | 837 | 6 testsets (~34 assertions) | Spline hazard with exact data (PH + AFT) |
+| `longtest_aft_suite.jl` | 425 | 19 scenarios | AFT effect across exp/wei/gom families |
+| `longtest_mcem_splines.jl` (MODIFIED) | 1279 | 9 tests (+3 AFT) | Spline MCEM (PH + AFT) |
+
+### Remaining Items
+
+**NONE** - All 60 cells in the test matrix are now covered (excluding phase-type AFT which is not supported because AFT time-scaling doesn't have a meaningful interpretation on the expanded Coxian state space).
+
+### Test File Summary (Updated)
+
+| File | Purpose | Coverage |
+|------|---------|----------|
+| `longtest_parametric_suite.jl` | exp/wei/gom × PH × nocov/fixed/tvc × exact/panel | 18 tests |
+| `longtest_aft_suite.jl` | AFT effect for exp/wei/gom | **19 scenarios** |
+| `longtest_mcem.jl` | MCEM algorithm validation | exp/wei/gom panel |
+| `longtest_mcem_splines.jl` | Spline MCEM | **9 tests** (6 PH + 3 AFT) |
+| `longtest_mcem_tvc.jl` | TVC with MCEM | 11 tests incl. AFT+TVC |
+| `longtest_spline_exact.jl` | **NEW** Spline exact data | **6 tests** (3 PH + 3 AFT) |
+| `longtest_phasetype_exact.jl` | Phase-type exact data | PH × nocov/tfc/tvc |
+| `longtest_phasetype_panel.jl` | Phase-type panel data | 7 tests incl. TVC |
+| `longtest_phasetype_exact.jl` | Phase-type exact data | nocov/fixed/tvc |
+| `longtest_phasetype_panel.jl` | Phase-type panel data | nocov/fixed (missing TVC) |
+| `longtest_robust_parametric.jl` | Large-n tight tolerance | exp/wei/gom PH |
+| `longtest_robust_markov_phasetype.jl` | Markov/IS validation | exp panel |
+| `longtest_exact_markov.jl` | Exact MLE validation | exp/wei/gom PH |
+| `longtest_simulation_distribution.jl` | Simulation correctness | ALL families PH/AFT |
+| `longtest_simulation_tvc.jl` | TVC simulation | exp/wei/gom PH/AFT |
+| `longtest_sir.jl` | SIR/LHS resampling | Weibull |
+| `longtest_smooth_covariate_recovery.jl` | s(x) terms | Smooth effects |
+| `longtest_tensor_product_recovery.jl` | te(x,y) terms | 2D surfaces |
+| `longtest_variance_validation.jl` | IJ/JK variance | Variance estimation |
+| `longtest_pijcv_loocv.jl` | PIJCV vs LOOCV | Smoothing selection |
+
+### Implementation Priority
+
+**Wave 5.1 (High Priority)**:
+1. Add exp AFT tests (exact + panel, all covariate types)
+2. Add gom AFT panel tests
+3. Add spline exact data tests (PH)
+4. Add pt panel TVC test
+
+**Wave 5.2 (Medium Priority)**:
+5. Add AFT nocov variants for wei/gom
+6. Add Markov vs PhaseType comparison to parametric suite
+7. Standardize output capture across all tests
+
+**Wave 5.3 (Low Priority)**:
+8. Add spline AFT tests (if AFT makes sense for flexible hazards)
+9. Document expected Markov vs PhaseType tolerance
 
 ---
 

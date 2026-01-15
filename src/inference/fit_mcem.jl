@@ -449,9 +449,9 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         if !isnothing(expanded_ph_data)
             books_ph = build_tpm_mapping(expanded_ph_data)
             expanded_ph_tpm_map = books_ph[2]  # Save tpm_map for sampling
-            tpm_book_ph, hazmat_book_ph = build_phasetype_tpm_book(phasetype_surrogate, books_ph, expanded_ph_data)
+            tpm_book_ph, hazmat_book_ph = build_phasetype_tpm_book(phasetype_surrogate, markov_surrogate, books_ph, expanded_ph_data)
         else
-            tpm_book_ph, hazmat_book_ph = build_phasetype_tpm_book(phasetype_surrogate, books, model.data)
+            tpm_book_ph, hazmat_book_ph = build_phasetype_tpm_book(phasetype_surrogate, markov_surrogate, books, model.data)
         end
         
         # Build fbmats with correct sizes (using expanded subject indices if available)

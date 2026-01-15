@@ -1416,45 +1416,113 @@ end
 # =============================================================================
 
 """
-    build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate, books, data)
+    build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate, markov_surrogate::MarkovSurrogate, books, data)
 
 Build transition probability matrix book for phase-type expanded state space.
 
+This function correctly incorporates covariate effects from the Markov surrogate
+into the phase-type expanded Q matrix. For each covariate combination, inter-state
+transition rates are scaled by exp(β'x) where β are the covariate coefficients
+from the Markov surrogate.
+
+**Key insight**: Internal phase progression rates (within-state transitions) are NOT
+scaled by covariates. Only inter-state transition rates (absorption from phases)
+are scaled, because covariate effects apply to the transition rate between observed
+states, not to the phase progression dynamics within a state.
+
 # Arguments
-- `surrogate`: PhaseTypeSurrogate with expanded Q matrix
-- `books`: Time interval book from build_tpm_mapping
-- `data`: Model data
+- `surrogate`: PhaseTypeSurrogate with expanded Q matrix (baseline rates)
+- `markov_surrogate`: MarkovSurrogate with fitted parameters including covariate coefficients
+- `books`: Time interval book from build_tpm_mapping (books[1] = tpm_index per covariate combo)
+- `data`: Model data (for extracting covariate values)
 
 # Returns
 - `tpm_book_ph`: Nested vector of TPMs [covar_combo][time_interval] in expanded space
 - `hazmat_book_ph`: Vector of intensity matrices for each covariate combination
 """
-function build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate, books, data)
+function build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate, 
+                                  markov_surrogate::MarkovSurrogate,
+                                  books, data)
     n_expanded = surrogate.n_expanded_states
-    Q_expanded = surrogate.expanded_Q
+    Q_baseline = surrogate.expanded_Q
+    phase_to_state = surrogate.phase_to_state
     
     # books[1] is a vector of DataFrames, one per covariate combination
     # Each DataFrame has columns (tstart, tstop, datind) with rows for unique time intervals
     n_covar_combos = length(books[1])
     
     # Allocate TPM book: [covar_combo][time_interval]
-    # For phase-type with homogeneous Q, we still need this structure to match
-    # how the Markov surrogate book is organized
     tpm_book_ph = [[zeros(Float64, n_expanded, n_expanded) for _ in 1:nrow(books[1][c])] for c in 1:n_covar_combos]
     
-    # Allocate hazmat book: one Q per covariate combination (all same for homogeneous PH)
-    hazmat_book_ph = [copy(Q_expanded) for _ in 1:n_covar_combos]
+    # Allocate hazmat book: one Q per covariate combination
+    hazmat_book_ph = [copy(Q_baseline) for _ in 1:n_covar_combos]
+    
+    # Pre-compute covariate scaling factors for each transition and covariate combo
+    # This is the exp(β'x) factor that scales inter-state transition rates
+    for c in 1:n_covar_combos
+        tpm_index = books[1][c]  # DataFrame with (tstart, tstop, datind)
+        
+        # Get a representative data row for this covariate combination
+        # All rows in this combo have the same covariate values
+        data_row_idx = tpm_index.datind[1]
+        data_row = data[data_row_idx, :]
+        
+        # For each Markov surrogate hazard, compute the scaling factor and apply it
+        # to the corresponding inter-state transitions in Q_expanded
+        for hazard in markov_surrogate.hazards
+            s_from = hazard.statefrom  # Observed state (from)
+            s_to = hazard.stateto      # Observed state (to)
+            
+            # Compute linear predictor β'x for this hazard and covariate combination
+            hazard_pars = markov_surrogate.parameters.nested[hazard.hazname]
+            
+            # Extract covariates for this hazard
+            covars = extract_covariates_fast(data_row, hazard.covar_names)
+            
+            # Compute scaling factor based on linpred_effect (PH vs AFT)
+            # For proportional hazards (PH): h(t|x) = h₀(t) * exp(β'x)
+            # For accelerated failure time (AFT): h(t|x) = h₀(t * exp(-β'x)) * exp(-β'x)
+            linpred = _linear_predictor(hazard_pars, covars, hazard)
+            if hazard.metadata.linpred_effect == :aft
+                scaling_factor = exp(-linpred)  # AFT: rate scales by exp(-β'x)
+            else
+                scaling_factor = exp(linpred)   # PH: rate scales by exp(β'x)
+            end
+            
+            # Apply scaling to all inter-state transitions in expanded Q
+            # Inter-state transitions go from any phase in s_from to first phase in s_to
+            # (in Coxian models, transitions always enter at phase 1 of destination)
+            # We scale Q[phase_i, first_phase_of_s_to] for all phases i in s_from
+            # Note: The baseline Q already has correct relative rates; we just scale them
+            for i in 1:n_expanded
+                for j in 1:n_expanded
+                    # Check if this is an inter-state transition from s_from to s_to
+                    if phase_to_state[i] == s_from && phase_to_state[j] == s_to
+                        # Scale the inter-state transition rate
+                        hazmat_book_ph[c][i, j] = Q_baseline[i, j] * scaling_factor
+                    end
+                end
+            end
+        end
+        
+        # Recompute diagonal elements (row sums must be zero for generator matrix)
+        for i in 1:n_expanded
+            row_sum = sum(hazmat_book_ph[c][i, j] for j in 1:n_expanded if j != i)
+            hazmat_book_ph[c][i, i] = -row_sum
+        end
+    end
     
     # Allocate cache for matrix exponential
-    cache = ExponentialUtilities.alloc_mem(Q_expanded, ExpMethodGeneric())
+    cache = ExponentialUtilities.alloc_mem(Q_baseline, ExpMethodGeneric())
     
     # Compute TPMs for each covariate combination and time interval
     for c in 1:n_covar_combos
+        Q_c = hazmat_book_ph[c]  # Covariate-specific Q matrix
         tpm_index = books[1][c]  # DataFrame with (tstart, tstop, datind)
         for t in 1:nrow(tpm_index)
             dt = tpm_index.tstop[t]  # Time interval length (tstart is always 0)
-            # TPM = exp(Q * dt)
-            tpm_book_ph[c][t] .= exponential!(copy(Q_expanded) .* dt, ExpMethodGeneric(), cache)
+            # TPM = exp(Q_c * dt)
+            tpm_book_ph[c][t] .= exponential!(copy(Q_c) .* dt, ExpMethodGeneric(), cache)
         end
     end
     
