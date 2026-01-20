@@ -55,9 +55,10 @@ will insert the intercept-only design automatically as described in `Hazard`'s d
   - `:sctp_decreasing`: SCTP plus eigenvalue ordering ν₁ ≥ ν₂ ≥ ... ≥ νₙ (early exits more likely).
   - `:sctp_increasing`: SCTP plus eigenvalue ordering ν₁ ≤ ν₂ ≤ ... ≤ νₙ (late exits more likely).
   - `:unstructured`: no constraints on progression and absorption rates
-- `ordering_at::Union{Symbol, NamedTuple} = :reference`: where to enforce eigenvalue ordering constraints.
-  - `:reference` (default): enforce νⱼ ≥ νⱼ₊₁ at reference (x=0). Produces linear constraints.
-  - `:mean`: enforce ordering at the mean covariate values (computed from data).
+- `ordering_at::Union{Symbol, NamedTuple} = :mean`: where to enforce eigenvalue ordering constraints.
+  - `:mean` (default): enforce ordering at the mean covariate values (computed from data).
+    This provides a more interpretable reference point when covariates are present.
+  - `:reference`: enforce νⱼ ≥ νⱼ₊₁ at reference (x=0). Produces linear constraints.
   - `:median`: enforce ordering at the median covariate values (computed from data).
   - `NamedTuple`: enforce at explicit covariate values, e.g., `(age=50.0, treatment=0.5)`.
   
@@ -125,7 +126,7 @@ function multistatemodel(hazards::HazardFunction...;
                         surrogate_n_phases::Union{Int, Dict{Int,Int}, Symbol} = :heuristic,
                         n_phases::Union{Nothing, Dict{Int,Int}} = nothing,
                         coxian_structure::Symbol = :sctp,
-                        ordering_at::Union{Symbol, NamedTuple} = :reference,
+                        ordering_at::Union{Symbol, NamedTuple} = :mean,
                         SubjectWeights::Union{Nothing,Vector{Float64}} = nothing, 
                         ObservationWeights::Union{Nothing,Vector{Float64}} = nothing,
                         CensoringPatterns::Union{Nothing,Matrix{<:Real}} = nothing, 
@@ -207,7 +208,7 @@ function multistatemodel(hazards::HazardFunction...;
     # Resolve :auto surrogate option based on hazard types
     # - :auto → :markov (exponential) or :phasetype (non-exponential)
     # - :markov/:phasetype both build MarkovSurrogate at construction
-    # - PhaseTypeSurrogate is built from MarkovSurrogate at MCEM time
+    # - PhaseTypeSurrogate is also built at construction when resolved_surrogate == :phasetype
     resolved_surrogate = if surrogate === :auto
         needs_phasetype_proposal(_hazards) ? :phasetype : :markov
     else
@@ -216,12 +217,26 @@ function multistatemodel(hazards::HazardFunction...;
 
     # Build surrogate if requested (initially unfitted)
     # Both :markov and :phasetype build MarkovSurrogate at construction time
-    # PhaseTypeSurrogate is built on-demand during MCEM fitting
     if resolved_surrogate in (:markov, :phasetype)
         surrogate_haz, surrogate_pars_ph, _ = build_hazards(hazards...; data = data, surrogate = true)
         markov_surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars_ph; fitted=false)
     else
         markov_surrogate = nothing
+    end
+
+    # Build PhaseTypeSurrogate at construction time when requested
+    # This is built unfitted and will be updated from the MarkovSurrogate rates at fitting time
+    phasetype_surr = nothing
+    if resolved_surrogate == :phasetype
+        # Convert surrogate_n_phases to PhaseTypeConfig
+        ph_config = PhaseTypeConfig(
+            n_phases = surrogate_n_phases,
+            structure = coxian_structure
+        )
+        phasetype_surr = build_phasetype_surrogate(tmat, ph_config; 
+            data = data, 
+            hazards = _hazards,
+            verbose = verbose)
     end
 
     components = (
@@ -241,7 +256,8 @@ function multistatemodel(hazards::HazardFunction...;
     mode = _observation_mode(data)
     process = _process_class(_hazards)
 
-    model = _assemble_model(mode, process, components, markov_surrogate, modelcall)
+    model = _assemble_model(mode, process, components, markov_surrogate, modelcall;
+                            phasetype_surrogate = phasetype_surr)
     
     # Initialize parameters (default: true)
     # Uses :auto method which selects :crude for Markov/phase-type, :surrogate for semi-Markov

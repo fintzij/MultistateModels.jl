@@ -7,6 +7,24 @@
 # - build_coxian_intensity: Construct Coxian Q matrix
 # - build_expanded_Q: Construct expanded intensity matrix
 #
+# CONSTRUCTION PATHS:
+# There are two ways to build a PhaseTypeSurrogate:
+#
+# 1. build_phasetype_surrogate (THIS FILE)
+#    - Direct construction from transition matrix and PhaseTypeConfig
+#    - Used for testing and standalone phase-type model creation
+#    - Entry point when user explicitly constructs a phase-type surrogate
+#    - Parameters initialized from heuristics or BIC selection
+#
+# 2. _build_phasetype_from_markov (src/surrogate/markov.jl)
+#    - Builds phase-type from a fitted Markov surrogate's estimated rates
+#    - Production path in MCEM: first fits Markov surrogate, then expands to phase-type
+#    - Transition rates come from Markov surrogate parameters
+#    - Called via _build_phasetype_surrogate_from_model
+#
+# Both paths ultimately construct the same PhaseTypeSurrogate struct, just with
+# different initialization for the transition rates.
+#
 # =============================================================================
 
 # =============================================================================
@@ -90,7 +108,9 @@ function build_phasetype_surrogate(tmat::Matrix{Int64}, config::PhaseTypeConfig;
         if hazards === nothing
             throw(ArgumentError("hazards is required when n_phases=:heuristic"))
         end
-        n_phases = _compute_default_n_phases(tmat, hazards)
+        n_phases_vec = _compute_default_n_phases(tmat, hazards)
+        # Convert vector to Dict{Int,Int} as required by PhaseTypeConfig
+        n_phases = Dict{Int,Int}(i => n_phases_vec[i] for i in eachindex(n_phases_vec))
         config = PhaseTypeConfig(n_phases=n_phases, constraints=config.constraints, 
                                  max_phases=config.max_phases)
         if verbose
@@ -260,11 +280,14 @@ function loglik_expanded_path(path::SamplePath, surrogate::PhaseTypeSurrogate)
         ll += Q[state_from, state_from] * sojourn_time
         
         # Transition contribution: log of off-diagonal rate
-        rate = Q[state_from, state_to]
-        if rate <= 0.0
-            return -Inf  # Impossible transition
+        # Skip if state_from == state_to (pseudo-transition at observation time, no actual jump)
+        if state_from != state_to
+            rate = Q[state_from, state_to]
+            if rate <= 0.0
+                return -Inf  # Impossible transition
+            end
+            ll += log(rate)
         end
-        ll += log(rate)
     end
     
     return ll

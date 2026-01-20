@@ -186,6 +186,98 @@ function SchurCache(n::Int)
     )
 end
 
+"""
+    CachedSchurDecomposition
+
+Pre-computed Schur decomposition for efficient matrix exponential computation.
+
+Stores Q = U * T * U' where T is upper triangular, allowing efficient
+computation of exp(Q * Δt) = U * exp(T * Δt) * U' for arbitrary Δt values.
+
+# Fields
+- `T::Matrix{Float64}`: Upper triangular Schur form
+- `U::Matrix{Float64}`: Unitary matrix from Schur decomposition
+- `E_work::Matrix{Float64}`: Pre-allocated workspace for exp(T * Δt)
+- `tmp_work::Matrix{Float64}`: Pre-allocated workspace for U * exp(T * Δt)
+
+# Performance
+The Schur decomposition is O(n³) and computed once. Each subsequent
+exp(Q * Δt) requires only exp(T * Δt) + two matrix multiplications,
+which is faster than recomputing the full decomposition.
+"""
+struct CachedSchurDecomposition
+    T::Matrix{Float64}        # Upper triangular Schur form
+    U::Matrix{Float64}        # Unitary matrix
+    E_work::Matrix{Float64}   # Workspace for exp(T * dt)
+    tmp_work::Matrix{Float64} # Workspace for U * E
+end
+
+"""
+    CachedSchurDecomposition(Q::Matrix{Float64})
+
+Pre-compute and cache the Schur decomposition of Q.
+"""
+function CachedSchurDecomposition(Q::Matrix{Float64})
+    n = size(Q, 1)
+    F = schur(Q)
+    CachedSchurDecomposition(
+        copy(F.T),
+        copy(F.Z),
+        Matrix{Float64}(undef, n, n),
+        Matrix{Float64}(undef, n, n)
+    )
+end
+
+"""
+    compute_tpm_from_schur!(P, cached::CachedSchurDecomposition, dt)
+
+Compute P = exp(Q * dt) using cached Schur decomposition (in-place).
+
+# Arguments
+- `P::Matrix{Float64}`: Output matrix (modified in-place)
+- `cached::CachedSchurDecomposition`: Pre-computed Schur decomposition
+- `dt::Float64`: Time interval
+
+# Returns
+Nothing (modifies P in-place)
+"""
+function compute_tpm_from_schur!(P::Matrix{Float64}, cached::CachedSchurDecomposition, dt::Float64)
+    n = size(cached.T, 1)
+    if dt == 0.0
+        # Identity matrix
+        fill!(P, 0.0)
+        for i in 1:n
+            P[i, i] = 1.0
+        end
+    else
+        # exp(T * dt)
+        cached.E_work .= exp(cached.T * dt)
+        # P = U * exp(T*dt) * U'
+        mul!(cached.tmp_work, cached.U, cached.E_work)
+        mul!(P, cached.tmp_work, cached.U')
+    end
+    return nothing
+end
+
+"""
+    compute_tpm_from_schur(cached::CachedSchurDecomposition, dt)
+
+Compute P = exp(Q * dt) using cached Schur decomposition.
+
+# Arguments
+- `cached::CachedSchurDecomposition`: Pre-computed Schur decomposition
+- `dt::Float64`: Time interval
+
+# Returns
+- `Matrix{Float64}`: Transition probability matrix
+"""
+function compute_tpm_from_schur(cached::CachedSchurDecomposition, dt::Float64)
+    n = size(cached.T, 1)
+    P = Matrix{Float64}(undef, n, n)
+    compute_tpm_from_schur!(P, cached, dt)
+    return P
+end
+
 mutable struct TPMCache
     hazmat_book::Vector{Matrix{Float64}}
     tpm_book::Vector{Vector{Matrix{Float64}}}

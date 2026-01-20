@@ -288,6 +288,7 @@ mutable struct MultistateModel <: MultistateProcess
     ObservationWeights::Union{Nothing, Vector{Float64}}
     CensoringPatterns::Matrix{Float64}
     markovsurrogate::Union{Nothing, MarkovSurrogate}
+    phasetype_surrogate::Union{Nothing, AbstractSurrogate}  # Phase-type FFBS surrogate (PhaseTypeSurrogate, built when surrogate=:phasetype)
     modelcall::NamedTuple
     phasetype_expansion::Union{Nothing, PhaseTypeExpansion}  # Phase-type expansion metadata
 end
@@ -321,6 +322,7 @@ mutable struct MultistateModelFitted <: MultistateProcess
     ObservationWeights::Union{Nothing, Vector{Float64}}
     CensoringPatterns::Matrix{Float64}
     markovsurrogate::Union{Nothing, MarkovSurrogate}
+    phasetype_surrogate::Union{Nothing, AbstractSurrogate}  # Phase-type FFBS surrogate (PhaseTypeSurrogate)
     ConvergenceRecords::Union{Nothing, NamedTuple, Optim.OptimizationResults, Optim.MultivariateOptimizationResults}
     ProposedPaths::Union{Nothing, NamedTuple}
     modelcall::NamedTuple

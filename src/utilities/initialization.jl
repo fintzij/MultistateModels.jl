@@ -71,6 +71,24 @@ end
 # =============================================================================
 
 """
+    _is_degenerate_data(model::MultistateProcess) -> Bool
+
+Check if model data has no observed transitions (all statefrom == stateto).
+
+This detects "template" datasets used for simulation where all rows have
+dummy states. Fitting surrogate MLEs on such data produces meaningless
+parameters (often extreme rates).
+
+Returns `true` if the data is degenerate and should not be used for 
+surrogate-based initialization.
+"""
+function _is_degenerate_data(model::MultistateProcess)
+    data = model.data
+    # Check if any row has an actual transition (statefrom != stateto)
+    return !any(data.statefrom .!= data.stateto)
+end
+
+"""
     _is_semimarkov(model::MultistateProcess) -> Bool
 
 Check if model has any non-Markov (semi-Markov) hazards.
@@ -441,6 +459,17 @@ function initialize_parameters!(model::MultistateProcess;
     
     # Validate npaths
     npaths > 0 || throw(ArgumentError("npaths must be positive, got $npaths"))
+    
+    # Check for degenerate data (no transitions observed)
+    # This detects "template" data where all statefrom == stateto, which would cause
+    # surrogate MLE fitting to produce meaningless parameters
+    if _is_degenerate_data(model)
+        @warn "No transitions observed in data (all statefrom == stateto). " *
+              "Falling back to :crude initialization. If this is template data for " *
+              "simulation, consider using `initialize=false` when creating the model."
+        set_crude_init!(model; constraints = constraints)
+        return nothing
+    end
     
     # Check if model is phase-type (has phasetype_expansion)
     is_phasetype = has_phasetype_expansion(model)

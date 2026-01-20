@@ -1,6 +1,27 @@
 # =============================================================================
 # Markov Surrogate Model Construction
 # =============================================================================
+#
+# This file handles Markov surrogate construction for MCEM importance sampling.
+#
+# MARKOV SURROGATE:
+# The MarkovSurrogate is an exponential (time-homogeneous) approximation to the
+# target model used as an importance sampling proposal. It's fitted to the data
+# or initialized from user parameters.
+#
+# PHASE-TYPE EXTENSION:
+# For improved proposal quality (especially when target hazards have non-exponential
+# sojourn time distributions), the Markov surrogate can be extended to a phase-type
+# surrogate via `_build_phasetype_from_markov`.
+#
+# The construction path is:
+#   Target Model → Markov Surrogate (fit) → Phase-Type Surrogate (expand)
+#
+# This differs from direct phase-type construction in src/phasetype/surrogate.jl,
+# which builds the phase-type directly from heuristics without a Markov fit.
+# The Markov-based approach provides better initialized transition rates.
+#
+# =============================================================================
 
 """
     make_surrogate_model(model)
@@ -50,6 +71,7 @@ function make_surrogate_model(model::MultistateProcess)
         model.ObservationWeights,
         model.CensoringPatterns,
         markov_surrogate,
+        nothing,  # phasetype_surrogate not needed for surrogate model
         model.modelcall,
         nothing)  # No phasetype_expansion for surrogate
 end
@@ -246,7 +268,24 @@ end
     _build_phasetype_from_markov(model, markov_surrogate; config, verbose)
 
 Build a phase-type surrogate from a fitted/initialized Markov surrogate.
-This is the core phase-type construction logic.
+
+This is the production path for phase-type surrogate construction in MCEM:
+transition rates are extracted from the Markov surrogate's fitted parameters,
+providing better initialization than heuristic-based construction.
+
+# Arguments
+- `model`: The target multistate model
+- `markov_surrogate::MarkovSurrogate`: Fitted Markov surrogate with estimated rates
+- `config::ProposalConfig`: Phase-type configuration (n_phases, structure, etc.)
+- `verbose::Bool`: Print construction details
+
+# Returns
+`PhaseTypeSurrogate` with expanded state space and Q matrix initialized from
+Markov surrogate transition rates.
+
+# See Also
+- `build_phasetype_surrogate` (src/phasetype/surrogate.jl): Direct construction path
+- `_build_phasetype_surrogate_from_model`: High-level entry point that calls this
 """
 function _build_phasetype_from_markov(model, markov_surrogate::MarkovSurrogate;
                                        config::ProposalConfig, verbose::Bool = true)
@@ -529,9 +568,11 @@ function _build_coxian_from_rate(n_phases::Int, total_rate::Float64;
         
     elseif structure == :unstructured
         # Unstructured: all rates are free parameters
-        # For initialization, use uniform rates: total_rate / (2n-1) for all
-        n_params = 2 * n_phases - 1
-        uniform_rate = total_rate * n_phases / n_params  # Adjust to get mean ≈ 1/total_rate
+        # For initialization, use uniform rates.
+        # For Coxian-n with progression rate λ and exit rate μ = λ for all phases:
+        #   Mean sojourn E[T] = 1/λ (by direct calculation or geometric series)
+        # So to achieve mean = 1/total_rate, we need uniform_rate = total_rate
+        uniform_rate = total_rate
         
         for i in 1:n_phases
             if i < n_phases
@@ -599,9 +640,10 @@ function compute_markov_marginal_loglik(model::MultistateProcess, surrogate::Mar
         model.SubjectWeights,
         model.ObservationWeights,
         model.CensoringPatterns,
-        surrogate,
+        surrogate,               # markovsurrogate
+        nothing,                 # phasetype_surrogate (not needed for surrogate model)
         model.modelcall,
-        nothing  # No phasetype_expansion for surrogate
+        nothing                  # phasetype_expansion (not needed for surrogate)
     )
     
     # Build the bookkeeping structure for MPanelData

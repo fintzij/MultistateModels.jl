@@ -205,7 +205,7 @@ $$
 |-------------|------------|
 | $nK$ exit baselines | $K$ baseline rates + $(n-1)$ phase effects |
 
-**New count:** $(n-1) + K + (n-1) = n + K - 1$ baseline parameters.
+**New count:** $(n-1) + K + (n-1) = 2n + K - 2$ baseline parameters.
 
 **Identifiability:** ✅ Better conditioned. Preserves exit probability stationarity.
 
@@ -229,7 +229,7 @@ $$
 1. $\nu_1^{(0)} \geq \nu_2^{(0)} \geq \cdots \geq \nu_n^{(0)}$ (total rate ordering)
 2. $\mu_{j,d}^{(0)} = \tau_j \cdot \mu_{1,d}^{(0)}$ (SCTP)
 
-**Count:** $(n-1) + K + (n-1) = n + K - 1$ baseline parameters (ordered + SCTP).
+**Count:** $(n-1) + K + (n-1) = 2n + K - 2$ baseline parameters (ordered + SCTP).
 
 **Identifiability:** ✅ Strong.
 

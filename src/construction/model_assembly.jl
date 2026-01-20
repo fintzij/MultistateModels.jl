@@ -151,12 +151,12 @@ function build_emat(data::DataFrame, CensoringPatterns::Matrix{Float64}, Emissio
     emat = zeros(Float64, n_obs, n_states)
 
     for i in 1:n_obs
-        if data.obstype[i] ∈ [1, 2] # state known (exact or panel): stateto observed
+        if data.obstype[i] ∈ [OBSTYPE_EXACT, OBSTYPE_PANEL] # state known (exact or panel): stateto observed
             emat[i,data.stateto[i]] = 1.0
         elseif data.obstype[i] == 0 # state fully censored: all states possible
             emat[i,:] .= 1.0
         else # state partially censored (obstype > 2): use censoring pattern
-            emat[i,:] .= CensoringPatterns[data.obstype[i] - 2, 2:n_states+1]
+            emat[i,:] .= CensoringPatterns[data.obstype[i] - CENSORING_OBSTYPE_OFFSET, 2:n_states+1]
         end 
     end
 
@@ -229,6 +229,7 @@ function _assemble_model(mode::Symbol,
                          components::NamedTuple,
                          surrogate::Union{Nothing, MarkovSurrogate},
                          modelcall;
+                         phasetype_surrogate::Union{Nothing, AbstractSurrogate} = nothing,
                          phasetype_expansion::Union{Nothing, PhaseTypeExpansion} = nothing)
     # Generate parameter bounds at model construction time
     # This ensures bounds are always available for fitting and parameter validation
@@ -249,6 +250,7 @@ function _assemble_model(mode::Symbol,
         components.ObservationWeights,
         components.CensoringPatterns,
         surrogate,
+        phasetype_surrogate,
         modelcall,
         phasetype_expansion,
     )

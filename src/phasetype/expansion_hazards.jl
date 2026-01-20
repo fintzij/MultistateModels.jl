@@ -478,8 +478,8 @@ function expand_data_for_phasetype_fitting(data::DataFrame, mappings::PhaseTypeM
         
         if s == 0 && obstype_i >= 3
             # Sojourn interval with censoring obstype (from expand_data_for_phasetype)
-            # Check if the state (obstype - 2) has multiple phases
-            sojourn_state = obstype_i - 2
+            # Check if the state (obstype - CENSORING_OBSTYPE_OFFSET) has multiple phases
+            sojourn_state = obstype_i - CENSORING_OBSTYPE_OFFSET
             if sojourn_state >= 1 && sojourn_state <= length(mappings.state_to_phases)
                 n_phases_in_state = length(mappings.state_to_phases[sojourn_state])
                 if n_phases_in_state == 1
@@ -554,7 +554,7 @@ Single-phase states don't need censoring patterns since there's no phase ambigui
 The patterns are indexed by observed state (rows) and expanded state (columns).
 
 Note: The format must match what `build_emat` expects:
-- Row index corresponds to obstype - 2 (e.g., obstype=3 → row 1, obstype=4 → row 2)
+- Row index corresponds to obstype - CENSORING_OBSTYPE_OFFSET (e.g., obstype=3 → row 1, obstype=4 → row 2)
 - Column 1 is the pattern code (for reference/debugging)
 - Columns 2:n_expanded+1 are the state indicators
 
@@ -578,7 +578,7 @@ function _build_phase_censoring_patterns(mappings::PhaseTypeMappings)
     end
     
     # Pattern matrix format for build_emat compatibility:
-    # - Row index = obstype - 2 (so row 1 = obstype 3, row 2 = obstype 4, etc.)
+    # - Row index = obstype - CENSORING_OBSTYPE_OFFSET (so row 1 = obstype 3, row 2 = obstype 4, etc.)
     # - Column 1 is the pattern code (obstype value for reference/debugging)
     # - Columns 2:n_expanded+1 are indicator values (1.0 = possible, 0.0 = impossible)
     patterns = zeros(Float64, n_patterns, n_expanded + 1)
@@ -608,28 +608,39 @@ end
 
 Map an observation to its compatible phases in the expanded space.
 
+# Arguments
+- `obstype::Int`: Observation type (1=exact, 2=panel, ≥3=censoring pattern)
+- `statefrom::Int`: State at start of interval
+- `stateto::Int`: Observed state at end of interval (for panel data)
+- `mappings::PhaseTypeMappings`: Phase-type expansion mappings
+
 # Returns
 - `emission_pattern_index::Int`: Index into censoring patterns (0 = exact, 1+ = uncertain)
 - `allowed_phases::Vector{Int}`: Which expanded states are compatible
 
-This is used during likelihood computation to determine the emission matrix entries.
+For obstype ≥ 3, the subject was known to be in state (obstype - CENSORING_OBSTYPE_OFFSET) 
+during the interval. This is used during likelihood computation to determine the 
+emission matrix entries.
 """
 function map_observation_to_phases(obstype::Int, statefrom::Int, stateto::Int, 
                                     mappings::PhaseTypeMappings)
-    if obstype == 1
-        # Exact observation: still uncertain about phase
+    if obstype == OBSTYPE_EXACT
+        # Exact observation: transition observed, uncertain about phase within state
         return statefrom + 1, collect(mappings.state_to_phases[statefrom])
-    elseif obstype == 2
-        # Right-censored: could be in any phase of current state
+    elseif obstype == OBSTYPE_PANEL
+        # Panel observation: state at discrete time, uncertain about phase
         return statefrom + 1, collect(mappings.state_to_phases[statefrom])
-    elseif obstype == 3
-        # Interval-censored: could be in source or dest phases
-        src_phases = collect(mappings.state_to_phases[statefrom])
-        dst_phases = collect(mappings.state_to_phases[stateto])
-        return 0, vcat(src_phases, dst_phases)  # Custom pattern needed
     else
-        # Default: all phases of statefrom
-        return statefrom + 1, collect(mappings.state_to_phases[statefrom])
+        # Censoring pattern: obstype >= 3 means subject in state (obstype - CENSORING_OBSTYPE_OFFSET)
+        # Could have been in that state the whole interval or transitioned within
+        sojourn_state = obstype - CENSORING_OBSTYPE_OFFSET
+        if sojourn_state >= 1 && sojourn_state <= length(mappings.state_to_phases)
+            # Known to be in sojourn_state during interval - allow all its phases
+            return sojourn_state + CENSORING_OBSTYPE_OFFSET, collect(mappings.state_to_phases[sojourn_state])
+        else
+            # Invalid censoring pattern, fall back to statefrom phases
+            return statefrom + 1, collect(mappings.state_to_phases[statefrom])
+        end
     end
 end
 

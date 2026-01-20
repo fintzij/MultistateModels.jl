@@ -182,9 +182,11 @@ export
     build_spline_hazard_info,
     place_interior_knots_pooled,
     validate_shared_knots,
+    center_covariates,
     compute_hazard,
     compute_cumulative_hazard,
     cumulative_incidence,
+    cumulative_incidence_at_reference,
     draw_paths,
     estimate_loglik,
     generate_parameter_bounds,
@@ -252,6 +254,9 @@ include("utilities/parameters.jl")
 
 # Data and parameter validation functions
 include("utilities/validation.jl")
+
+# Data utilities (centering, preprocessing)
+include("utilities/data_utils.jl")
 
 # Transition enumeration and per-transition obstype validation
 include("utilities/transition_helpers.jl")
@@ -343,8 +348,10 @@ include("output/accessors.jl")
 # path functions
 include("simulation/path_utilities.jl")
 
-# sampling functions
-include("inference/sampling.jl")
+# sampling functions (order matters: core → markov → phasetype)
+include("inference/sampling_core.jl")     # PathWorkspace, thread-local storage
+include("inference/sampling_markov.jl")   # Markov FFBS, ECCTMC, DrawSamplePaths!
+include("inference/sampling_phasetype.jl") # Phase-type forward likelihood, expanded FFBS
 
 # simulation
 include("simulation/simulate.jl")

@@ -366,6 +366,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         model.ObservationWeights,
         model.CensoringPatterns,
         model.markovsurrogate,
+        model.phasetype_surrogate,  # phasetype_surrogate
         (solution = sol,), # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall,

@@ -539,6 +539,11 @@ function _compute_path_loglik_fused(
                 # Add transition hazard if transition occurred
                 if statefrom != stateto
                     trans_h = tmat[statefrom, stateto]
+                    if trans_h == 0
+                        error("Invalid transition in path: state $statefrom → $stateto has no hazard (tmat[$statefrom,$stateto]=0). " *
+                              "Path times: $(path.times), Path states: $(path.states). " *
+                              "This may indicate a bug in the ECCTMC sampler or invalid input data.")
+                    end
                     hazard = hazards[trans_h]
                     hazard_pars = pars_indexed[trans_h]  # Fast indexed access
                     covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[trans_h])

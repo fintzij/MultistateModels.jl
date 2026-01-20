@@ -115,14 +115,14 @@ function expand_data_for_phasetype(data::DataFrame, n_states::Int)
             
             # Row 1: Sojourn interval [tstart, tstop)
             # Subject is in statefrom, phase unknown
-            # Use censoring code = 2 + statefrom
+            # Use censoring code = CENSORING_OBSTYPE_OFFSET + statefrom
             exp_idx += 1
             exp_id[exp_idx] = row.id
             exp_tstart[exp_idx] = row.tstart
             exp_tstop[exp_idx] = row.tstop
             exp_statefrom[exp_idx] = row.statefrom
             exp_stateto[exp_idx] = 0  # Censored (state unknown at this point)
-            exp_obstype[exp_idx] = 2 + row.statefrom  # Censoring pattern for statefrom
+            exp_obstype[exp_idx] = CENSORING_OBSTYPE_OFFSET + row.statefrom  # Censoring pattern for statefrom
             original_row_map[exp_idx] = orig_idx
             
             # Copy covariates

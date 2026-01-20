@@ -48,6 +48,46 @@ or more samples may be needed.
 const PARETO_K_THRESHOLD = 0.7
 
 # =============================================================================
+# Observation Type Conventions
+# =============================================================================
+
+"""
+    OBSTYPE_EXACT
+
+Observation type code for exact (event time fully observed) observations.
+"""
+const OBSTYPE_EXACT = 1
+
+"""
+    OBSTYPE_PANEL
+
+Observation type code for panel (state at discrete time) observations.
+"""
+const OBSTYPE_PANEL = 2
+
+"""
+    CENSORING_OBSTYPE_OFFSET
+
+Offset for converting state indices to censoring obstypes and vice versa.
+
+For censoring patterns, `obstype = CENSORING_OBSTYPE_OFFSET + statefrom` encodes
+that the subject was known to be in state `statefrom` during the interval.
+To recover the state: `statefrom = obstype - CENSORING_OBSTYPE_OFFSET`.
+
+Convention:
+- `obstype = 1`: Exact observation (transition time known)
+- `obstype = 2`: Panel observation (state at discrete times)
+- `obstype >= 3`: Censoring pattern where `statefrom = obstype - 2`
+  - `obstype = 3`: Subject in state 1 during interval
+  - `obstype = 4`: Subject in state 2 during interval
+  - etc.
+
+This convention allows the forward algorithm to constrain phase probabilities
+to only those phases consistent with the observed sojourn state.
+"""
+const CENSORING_OBSTYPE_OFFSET = 2
+
+# =============================================================================
 # Simulation Defaults
 # =============================================================================
 

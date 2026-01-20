@@ -8,7 +8,7 @@ applyTo: '**'
 
 **Read this skill file FIRST at the start of every session.** It provides the essential context needed to work effectively with this codebase.
 
-**Last Updated**: 2026-01-11  
+**Last Updated**: 2026-01-18  
 **Branch**: `penalized_splines` (active development)
 
 ---
@@ -101,7 +101,13 @@ src/
     ├── bounds.jl            # Parameter bounds for optimization
     ├── spline_utils.jl      # Knot placement, penalty matrices
     ├── penalty_config.jl    # build_penalty_config()
-    └── validation.jl        # Input validation
+    ├── validation.jl        # Input validation
+    ├── data_utils.jl        # Data manipulation, center_covariates()
+    ├── books.jl             # Book-keeping structures for likelihood
+    ├── initialization.jl    # Parameter initialization helpers
+    ├── misc.jl              # Miscellaneous utilities
+    ├── stats.jl             # Statistical helper functions
+    └── transition_helpers.jl # Transition matrix utilities
 ```
 
 ### Key Entry Points
@@ -149,7 +155,7 @@ AbstractSurrogate (abstract)
 ```julia
 struct MultistateModel <: MultistateProcess
     data::DataFrame
-    parameters::NamedTuple       # (flat, nested, natural, reconstructor)
+    parameters::NamedTuple       # (flat, nested, reconstructor)
     hazards::Vector{<:_Hazard}
     totalhazards::Vector{_TotalHazard}
     tmat::Matrix{Int64}          # Transition matrix
@@ -157,6 +163,7 @@ struct MultistateModel <: MultistateProcess
     hazkeys::Dict{Symbol,Int64}  # :h12 → index
     subjectindices::Vector{Vector{Int64}}
     markovsurrogate::Union{Nothing,MarkovSurrogate}
+    phasetype_surrogate::Union{Nothing,AbstractSurrogate}  # NEW: built at construction when surrogate=:phasetype
     phasetype_expansion::Union{Nothing,PhaseTypeExpansion}
     # ... weights, censoring patterns, modelcall
 end
@@ -169,6 +176,8 @@ end
     ij_vcov::Union{Nothing,Matrix{Float64}}
     jk_vcov::Union{Nothing,Matrix{Float64}}
     subject_gradients::Union{Nothing,Matrix{Float64}}
+    smoothing_parameters::Union{Nothing,NamedTuple}  # λ per hazard (penalized splines)
+    edf::Union{Nothing,NamedTuple}                   # Effective degrees of freedom
     ConvergenceRecords::...
     ProposedPaths::...
 ```
@@ -299,7 +308,7 @@ MultistateModelsTests/
 │   ├── test_hazards.jl
 │   ├── test_splines.jl
 │   ├── test_phasetype.jl
-│   └── ... (33 files)
+│   └── ... (41 files total)
 ├── integration/                  # End-to-end tests
 └── longtests/                    # Statistical validation (slow)
     ├── longtest_config.jl
@@ -330,12 +339,15 @@ julia --project=MultistateModelsTests -e 'include("MultistateModelsTests/longtes
 |---------|------------|------------|
 | Hazard evaluation | `test_hazards.jl`, `test_compute_hazard.jl` | - |
 | Splines | `test_splines.jl` | `longtest_splines.jl` |
-| Phase-type | `test_phasetype.jl`, `test_phasetype_*.jl`, `test_phasetype_preprocessing.jl` | `longtest_robust_markov_phasetype.jl` |
-| Penalty/PIJCV | `test_penalty_infrastructure.jl`, `test_pijcv.jl` | - |
-| Variance | `test_variance.jl`, `test_efs.jl` | - |
+| Phase-type | `test_phasetype.jl`, `test_phasetype_*.jl`, `test_phasetype_preprocessing.jl`, `test_phasetype_surrogate.jl` | `longtest_robust_markov_phasetype.jl` |
+| Penalty/PIJCV | `test_penalty_infrastructure.jl`, `test_pijcv.jl`, `test_pijcv_reference.jl`, `test_pijcv_vs_loocv.jl` | - |
+| Variance | `test_variance.jl`, `test_efs.jl`, `test_constrained_variance.jl` | - |
 | MCEM | `test_mcem.jl`, `test_mll_consistency.jl` | `longtest_mcem_*.jl` |
 | Fitting | `test_initialization.jl` | Various |
 | Likelihood | `test_loglik_analytical.jl` (40 tests: analytical verification of `loglik_exact` and `loglik_markov` against hand-calculated formulas for exponential, Weibull, and Gompertz hazards across 2-state, 3-state, and illness-death models) | - |
+| Cumulative incidence | `test_cumulative_incidence.jl` | - |
+| Covariate centering | `test_center_covariates.jl` | - |
+| Ordering constraints | `test_ordering_at.jl` | - |
 
 ---
 
@@ -362,6 +374,8 @@ julia --project=MultistateModelsTests -e 'include("MultistateModelsTests/longtes
 | Item #16 | ✅ DONE | `default_nknots_penalized()` uses n^(1/3) formula | Fixed 2026-01-08 |
 | PT Preprocessing | ✅ DONE | CensoringPatterns merging and obstype codes | Fixed 2026-01-10 |
 | BUG-2 | ✅ DONE | Phase-type TPM eigendecomposition failure | Fixed 2026-01-10 (Schur) |
+| Item #35 | ✅ DONE | PhaseType surrogate collapsed path likelihood with Schur caching | Fixed 2026-01-17 |
+| Item #36 | ✅ DONE | PhaseType surrogate dt=0 likelihood bug | Fixed 2026-01-18 |
 | Item #5 | 🟡 MED | `rectify_coefs!` review for natural scale params | TODO |
 | Item #17 | 🟡 MED | Knot placement uses raw data instead of surrogate | TODO |
 | Item #18 | 🟡 MED | PIJCV Hessian occasionally NaN/Inf | TODO |
@@ -405,6 +419,31 @@ params_idx = model.hazkeys[hazard.hazname]
 
 ### ⚠️ No Unit Tests for `_fit_markov_panel`
 The `_fit_markov_panel` function is not directly unit tested. Longtests exist in `longtest_robust_markov_phasetype.jl`.
+
+### ⚠️ PhaseType Surrogate Path Likelihood Uses Schur-Cached TPMs
+
+When computing importance weights for MCEM with PhaseType proposal, the collapsed path density requires TPMs computed at **sampled transition times** (not pre-computed observation times). This is handled efficiently via cached Schur decomposition.
+
+**Implementation** (Item #35 — COMPLETE 2026-01-17):
+
+1. **`CachedSchurDecomposition`** struct in `data_containers.jl` stores Q = UTU' decomposition
+2. **`compute_tpm_from_schur(cache, dt)`** computes exp(Q*dt) = U*exp(T*dt)*U' efficiently
+3. **`schur_cache_ph`** (one cache per covariate combo) passed through `DrawSamplePaths!` to path likelihood
+4. **Forward algorithm** uses cached TPMs at sampled transition times
+
+**Key insight**: The Schur decomposition only depends on Q (fixed per covariate combo), not on Δt. Pre-computing it once and reusing for arbitrary Δt values provides 2-5x speedup.
+
+**Data flow**:
+```
+fit_mcem()
+  → hazmat_book_ph = [Q₁, Q₂, ...]  (covariate-adjusted Q matrices)
+  → schur_cache_ph = [Schur(Q₁), Schur(Q₂), ...]  (one decomposition per combo)
+  → DrawSamplePaths!(... schur_cache_ph=schur_cache_ph)
+      → convert_expanded_path_to_censored_data(... schur_cache=cache[covar_idx])
+          → compute_tpm_from_schur(cache, dt) for each interval
+```
+
+See: `src/types/data_containers.jl`, `src/inference/sampling.jl`, `src/inference/fit_mcem.jl`
 
 ---
 
@@ -487,6 +526,12 @@ Before ending any session where code was modified:
 
 | Date | Author | Changes |
 |------|--------|---------|
+| 2026-01-18 | julia-statistician | **Item #36 COMPLETE**: Fixed PhaseType surrogate likelihood dt=0 bug. Primary fix: `compute_forward_loglik` now uses raw hazards Q[i,j] instead of normalized probabilities P[i,j]=Q[i,j]/(-Q[i,i]) for instantaneous transitions (dt=0). The distinction: probabilities are for sampling (choosing destination), hazards are for likelihood (density contribution). Secondary fix: Added retry mechanism (up to 10 attempts) for paths with -Inf surrogate likelihood, with fallback to Markov proposal likelihood. Also fixed: TestFixtures.jl missing phasetype_surrogate arg, test_splines.jl shared knots expectation, fit_mcem.jl NaN/negative ASE guard. All 2129 unit tests pass. MCEM longtests: PhaseType proposal no longer produces -Inf/NaN issues. |
+| 2026-01-17 | julia-statistician | **Item #35 COMPLETE**: PhaseType surrogate likelihood for MCEM now uses Schur caching for efficient TPM computation at sampled transition times. Added `CachedSchurDecomposition` struct to `data_containers.jl`, `schur_cache` parameter to `convert_expanded_path_to_censored_data`, `schur_cache_ph` parameter to `DrawSamplePaths!`, and creation/passing in `fit_mcem.jl`. Verified via unit test (machine precision match with direct exp(Q*dt)). Performance benefit: O(n³) decomposition once per covariate combo, then faster TPM computation for each interval. Updated gotcha section with implementation details. |
+| 2026-01-17 | julia-statistician | **Item #35 ANALYSIS COMPLETE, IMPLEMENTATION NEEDED**: Analyzed PhaseType surrogate likelihood for MCEM. Key insight: collapsed paths create implicit censoring (phase uncertainty) that must be handled via Markov infrastructure, NOT custom formulas. Partial fix was computing wrong quantity (marginal likelihood vs path density). Detailed implementation plan added to CODEBASE_REFACTORING_GUIDE.md. Updated gotcha section. Status changed from DONE to IN PROGRESS. |
+| 2026-01-17 | julia-statistician | **SKILL FILES AUDIT**: Updated multiple skill files for consistency: (1) multistate-domain/SKILL.md: Fixed parameter scale documentation—all parameters now documented as natural scale with box constraints (v0.3.0+), not log-transformed. Added `:ordered_sctp` option. Fixed incomplete HSMM code block. (2) codebase-knowledge/SKILL.md: Added missing utility files (data_utils.jl, books.jl, initialization.jl, misc.jl, stats.jl, transition_helpers.jl). Updated test file count from 33 to 41. Added new test files to feature table (test_cumulative_incidence.jl, test_center_covariates.jl, test_ordering_at.jl, etc.). (3) numerical-optimization/SKILL.md: Added note that SQUAREM acceleration was removed from MCEM. (4) julia-testing/SKILL.md: Added newer test files to feature table. (5) survival-analysis/SKILL.md: Added MultistateModels.jl storage format notes for parametric families. |
+| 2026-01-17 | julia-statistician | **PhaseType survival path likelihood fix**: Fixed bug in `loglik_phasetype_collapsed_path` (sampling.jl L2207-2331) where paths with s_obs == d_obs (subject stays in same state) returned -Inf. Previously computed "transition density" for 1→1 which gave negative internal phase rates. Now correctly distinguishes survival events (compute log(π' exp(Sτ) 𝟙)) from transitions. Fix verified: PT and Markov path likelihoods match for both survival and transition paths. **PARTIAL FIX**: MCEM still shows divergence between proposals (~50% relative error) - indicates additional bug in `draw_samplepath_phasetype` or FFBS infrastructure. Investigation ongoing. |
+| 2026-01-16 | julia-statistician | **Item #29 COMPLETED**: Spline Knot Calibration Improvements. (1) Added `cumulative_incidence(t, model, newdata; statefrom)` methods for NamedTuple/DataFrameRow, plus `cumulative_incidence_at_reference()` in `src/hazard/api.jl`. (2) Added `center_covariates(model; centering=:mean/:median/:reference)` in `src/utilities/data_utils.jl`. (3) `calibrate_splines` now uses CDF inversion via `_compute_exit_quantiles_at_reference()`. (4) Changed `ordering_at` default from `:reference` to `:mean`. (5) Added `phasetype_surrogate::Union{Nothing, AbstractSurrogate}` field to MultistateModel/Fitted structs; built at construction when `surrogate=:phasetype`. (6) Created 27 unit tests in `test_cumulative_incidence.jl` (15) and `test_center_covariates.jl` (12). |
 | 2026-01-15 | julia-statistician | **AFT BUG IN PHASETYPE PROPOSAL FIXED**: `build_phasetype_tpm_book()` was always using `exp(β'x)` for covariate scaling, which is correct for PH models but WRONG for AFT models. For AFT, the correct scaling is `exp(-β'x)`. Fixed in `src/inference/sampling.jl` lines 1480-1488 to check `hazard.metadata.linpred_effect` and apply the correct sign. Added unit tests in `test_phasetype_surrogate.jl` (new testset "AFT vs PH Covariate Scaling Direction" with 10 tests). This bug caused `wei_aft_panel_tvc` longtest failure (Markov vs PhaseType proposal comparison: 109.9% relative difference, wrong-signed estimate). After fix: all 19 AFT scenarios pass, all 2106 unit tests pass. |
 | 2026-01-14 | julia-statistician | **LONGTEST COVERAGE 100% COMPLETE (Wave 5)**: All 60 cells covered (excl. pt AFT which is unsupported). Final additions: (1) Added 3 spline AFT exact tests to `longtest_spline_exact.jl` (sp_aft_exact_nocov/tfc/tvc), total now 6 tests (837 lines). (2) Added 3 spline AFT panel tests to `longtest_mcem_splines.jl` (Tests 7-9: sp_aft_panel_nocov/tfc/tvc), total now 9 tests (1279 lines). All tests validated and passing. |
 | 2026-01-14 | julia-statistician | **LONGTEST COVERAGE COMPLETE (Wave 5)**: (1) Added 13 new AFT scenarios to `longtest_aft_suite.jl` covering exp_aft_exact/panel × nocov/tfc/tvc, wei_aft_nocov, gom_aft_nocov/tvc, gom_aft_panel × nocov/tfc/tvc. Total AFT scenarios: 19 (was 6). (2) Created NEW file `longtest_spline_exact.jl` (489 lines, 3 tests, ~17 assertions) for spline hazards with exact data (sp_exact_nocov/tfc/tvc). Validates by comparing fitted h(t) to true Weibull DGP. (3) Verified pt_panel_tvc already exists in `longtest_phasetype_panel.jl` Section 7. (4) Updated CODEBASE_REFACTORING_GUIDE.md with complete coverage matrix. Coverage gaps filled: exp AFT all, gom AFT all, wei AFT nocov, sp exact PH all. |

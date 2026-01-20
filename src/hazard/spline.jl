@@ -176,7 +176,8 @@ function place_interior_knots_pooled(model::MultistateProcess, origin::Int, nkno
         data = model.data
         for row in eachrow(data)
             obstype = row.obstype
-            if !(obstype == 1 || obstype == 3)
+            # Only exact observations have known transition times
+            if obstype != OBSTYPE_EXACT
                 continue
             end
             
@@ -223,7 +224,8 @@ function _has_exact_transitions_from_origin(model::MultistateProcess, origin::In
     data = model.data
     for row in eachrow(data)
         obstype = row.obstype
-        if (obstype == 1 || obstype == 3) && 
+        # Only exact observations (obstype=1) have known transition times
+        if obstype == OBSTYPE_EXACT && 
            row.statefrom == origin && 
            row.statefrom != row.stateto
             return true
@@ -536,13 +538,18 @@ end
                       nknots=nothing,
                       n_paths::Int=1000,
                       min_ess::Int=100,
+                      n_grid::Int=1000,
+                      use_cdf_inversion::Bool=true,
                       verbose::Bool=true) -> NamedTuple
 
-Compute recommended knot locations for spline hazards based on transition times.
+Compute recommended knot locations for spline hazards based on exit time quantiles.
 
-For exact data (obstype 1 or 3), uses observed sojourn times directly.
-For panel data (obstype 2), fits a Markov surrogate, simulates sample paths,
-and uses the simulated transition times to determine knot locations.
+For exact data (obstype 1 or 3), uses observed sojourn times pooled across all
+destinations from each origin state (shared knots for competing hazards).
+
+For panel data (obstype 2), computes cumulative incidence at reference covariate
+level (x=0) and numerically inverts the exit CDF to get quantiles. This approach
+is deterministic and avoids Monte Carlo noise from path simulation.
 
 # Arguments
 - `model::MultistateProcess`: An unfitted model with one or more spline hazards.
@@ -554,13 +561,18 @@ and uses the simulated transition times to determine knot locations.
   - `Int`: Number of interior knots for all hazards
   - `NamedTuple`: Per-hazard counts, e.g., `(h12 = 3, h23 = 2)`
   - `nothing` (default): Use `floor(n^(1/5))`
-- `n_paths::Int=1000`: Number of paths to sample per subject (panel data only)
-- `min_ess::Int=100`: Minimum effective sample size for importance sampling (panel data only)
+- `n_paths::Int=1000`: Number of paths to sample per subject (simulation fallback only)
+- `min_ess::Int=100`: Minimum effective sample size (simulation fallback only)
+- `n_grid::Int=1000`: Number of points in time grid for CDF evaluation (panel data)
+- `use_cdf_inversion::Bool=true`: Use deterministic CDF inversion instead of simulation
+  for panel data. When `true` (default), knots are placed at quantiles of the exit time
+  distribution computed at reference covariate level. When `false`, uses legacy
+  simulation-based approach.
 - `verbose::Bool=true`: Print info about knot placement
 
 # Returns
 A `NamedTuple` with one entry per spline hazard, each containing:
-- `boundary_knots::Vector{Float64}`: `[0.0, max_sojourn]` for the transition
+- `boundary_knots::Vector{Float64}`: `[0.0, max_time]` for the transition
 - `interior_knots::Vector{Float64}`: Recommended interior knot locations
 
 # Errors
@@ -569,11 +581,13 @@ A `NamedTuple` with one entry per spline hazard, each containing:
 - `ArgumentError` if both `quantiles` and `nknots` are specified
 
 # Notes
-- For exact data: uses observed sojourn times directly (no surrogate fitting)
-- For panel data: fits Markov surrogate, simulates paths, extracts transition times
+- All hazards from the same origin state share the same knots (exit time distribution is shared)
+- For exact data: uses observed sojourn times directly (pooled across destinations)
+- For panel data with `use_cdf_inversion=true`: computes cumulative incidence at reference
+  level and inverts CDF (deterministic, no Monte Carlo noise)
+- For panel data with `use_cdf_inversion=false`: fits surrogate, simulates paths (legacy)
 - Lower boundary is always 0.0 (sojourns are non-negative)
-- Upper boundary is the maximum observed/simulated sojourn time
-- For ties, knots are spread evenly using [`place_interior_knots`](@ref)
+- The surrogate must be fitted before calling for panel data with CDF inversion
 
 # Example
 ```julia
@@ -581,26 +595,32 @@ h12 = Hazard(@formula(0 ~ 1), "sp", 1, 2; degree=3)
 h23 = Hazard(@formula(0 ~ 1), "sp", 2, 3; degree=3)
 model = multistatemodel(h12, h23; data=data)
 
-# Auto-select nknots based on sample size
+# Auto-select nknots based on sample size (uses CDF inversion for panel data)
 knots = calibrate_splines(model)
 
 # Specify number of knots
 knots = calibrate_splines(model; nknots=3)
 
-# Different knots per hazard
+# Different knots per hazard (Note: hazards from same origin will still share knots)
 knots = calibrate_splines(model; nknots=(h12=4, h23=2))
 
 # Specify explicit quantiles
 knots = calibrate_splines(model; quantiles=[0.2, 0.4, 0.6, 0.8])
+
+# Use legacy simulation approach instead of CDF inversion
+knots = calibrate_splines(model; use_cdf_inversion=false)
 ```
 
-See also: [`calibrate_splines!`](@ref), [`place_interior_knots`](@ref)
+See also: [`calibrate_splines!`](@ref), [`place_interior_knots`](@ref), 
+          [`cumulative_incidence_at_reference`](@ref)
 """
 function calibrate_splines(model::MultistateProcess;
                            quantiles::Union{Vector{Float64}, NamedTuple, Nothing}=nothing,
                            nknots::Union{Int, NamedTuple, Nothing}=nothing,
                            n_paths::Int=1000,
                            min_ess::Int=100,
+                           n_grid::Int=1000,
+                           use_cdf_inversion::Bool=true,
                            verbose::Bool=true)
     
     # Validation
@@ -621,65 +641,189 @@ function calibrate_splines(model::MultistateProcess;
     # Determine if data is exact or panel
     has_exact_data = _has_exact_transitions(model)
     
-    # Get sojourns by transition
+    # Group spline hazards by origin state for shared knot placement
+    # Key insight: all hazards from same origin share same sojourn time distribution
+    origin_to_hazards = Dict{Int, Vector{Int}}()
+    for idx in spline_indices
+        haz = model.hazards[idx]
+        origin = haz.statefrom
+        if !haskey(origin_to_hazards, origin)
+            origin_to_hazards[origin] = Int[]
+        end
+        push!(origin_to_hazards[origin], idx)
+    end
+    
+    # Compute knots per origin state
+    results = Dict{Symbol, NamedTuple}()
+    
     if has_exact_data
         # Use observed data directly
         verbose && @info "Using observed transition times for knot calibration"
         sojourns_by_transition = _extract_sojourns_from_data(model)
+        
+        # Pool sojourns by origin (for shared knots across competing hazards)
+        for (origin, haz_indices) in origin_to_hazards
+            # Pool all sojourns from this origin state
+            pooled_sojourns = Float64[]
+            for idx in haz_indices
+                haz = model.hazards[idx]
+                key = (haz.statefrom, haz.stateto)
+                sojourns = get(sojourns_by_transition, key, Float64[])
+                append!(pooled_sojourns, sojourns)
+            end
+            
+            # Compute shared knots for all hazards from this origin
+            _compute_shared_knots_for_origin!(
+                results, model, origin, haz_indices, pooled_sojourns,
+                nknots, quantiles, verbose
+            )
+        end
     else
-        # Fit surrogate and simulate paths
-        verbose && @info "Fitting Markov surrogate and simulating paths for knot calibration"
-        sojourns_by_transition = _extract_sojourns_from_surrogate(model, n_paths, min_ess)
-    end
-    
-    # Compute knots for each spline hazard
-    results = Dict{Symbol, NamedTuple}()
-    
-    for idx in spline_indices
-        haz = model.hazards[idx]
-        hazname = haz.hazname
-        key = (haz.statefrom, haz.stateto)
-        
-        # Get sojourns for this transition
-        sojourns = get(sojourns_by_transition, key, Float64[])
-        
-        if isempty(sojourns)
-            @warn "No transitions $(key[1])→$(key[2]) for hazard $hazname; using model boundaries"
-            bknots = [haz.knots[1], haz.knots[end]]
-            results[hazname] = (boundary_knots=bknots, interior_knots=Float64[])
-            continue
-        end
-        
-        # Determine number of knots
-        nk = _get_nknots_for_hazard(hazname, nknots, length(sojourns))
-        
-        # Determine quantile levels or compute from nknots
-        qlevels = _get_quantiles_for_hazard(hazname, quantiles, nk)
-        
-        # Compute boundary knots
-        lb = 0.0  # Lower boundary is always 0 for sojourns
-        ub = maximum(sojourns)
-        
-        # Compute interior knots
-        if qlevels !== nothing
-            # User-specified quantiles
-            interior = quantile(sojourns, qlevels)
-            interior = unique(interior)
+        # Panel data: use CDF inversion (deterministic) or fallback to simulation
+        if use_cdf_inversion
+            verbose && @info "Using CDF inversion at reference level for knot calibration"
+            
+            # Ensure surrogate is fitted for cumulative incidence calculation
+            if model.markovsurrogate === nothing || !is_fitted(model.markovsurrogate)
+                verbose && @info "  Fitting surrogate for cumulative incidence computation..."
+                set_surrogate!(model; type=:auto, verbose=false)
+            end
+            
+            # Compute exit quantiles by origin via CDF inversion
+            for (origin, haz_indices) in origin_to_hazards
+                # Determine nknots for this origin (use first hazard's settings as representative)
+                first_haz = model.hazards[haz_indices[1]]
+                nk = _get_nknots_for_hazard(first_haz.hazname, nknots, nrow(model.data))
+                
+                # Get quantile levels (if user specified) or generate from nknots
+                qlevels = _get_quantiles_for_hazard(first_haz.hazname, quantiles, nk)
+                if qlevels === nothing
+                    # Generate evenly spaced quantiles from nknots
+                    qlevels = collect(range(1/(nk+1), 1 - 1/(nk+1), length=nk))
+                end
+                
+                # Compute exit time quantiles via CDF inversion
+                exit_quantiles = try
+                    _compute_exit_quantiles_at_reference(
+                        model, origin;
+                        quantiles=qlevels,
+                        n_grid=n_grid
+                    )
+                catch e
+                    @warn "CDF inversion failed for origin $origin: $e. Falling back to simulation."
+                    # Fallback: use old simulation-based approach
+                    sojourns_by_transition = _extract_sojourns_from_surrogate(model, n_paths, min_ess)
+                    pooled = Float64[]
+                    for idx in haz_indices
+                        haz = model.hazards[idx]
+                        key = (haz.statefrom, haz.stateto)
+                        append!(pooled, get(sojourns_by_transition, key, Float64[]))
+                    end
+                    isempty(pooled) ? qlevels .* 10.0 : quantile(pooled, qlevels)
+                end
+                
+                # Compute boundary knots
+                lb = 0.0
+                ub = maximum(exit_quantiles) * 1.5  # Extend beyond last quantile
+                ub = max(ub, maximum(model.data.tstop))  # At least cover observed data
+                
+                # Assign shared knots to all hazards from this origin
+                for idx in haz_indices
+                    haz = model.hazards[idx]
+                    hazname = haz.hazname
+                    verbose && @info "Calibrated $(length(exit_quantiles)) interior knots for $hazname from CDF: $(round.(exit_quantiles, digits=3))"
+                    results[hazname] = (boundary_knots=[lb, ub], interior_knots=exit_quantiles)
+                end
+            end
         else
-            # Use place_interior_knots for automatic placement with tie handling
-            interior = place_interior_knots(sojourns, nk; lower_bound=lb, upper_bound=ub)
+            # Legacy: simulation-based approach
+            verbose && @info "Fitting Markov surrogate and simulating paths for knot calibration"
+            sojourns_by_transition = _extract_sojourns_from_surrogate(model, n_paths, min_ess)
+            
+            for (origin, haz_indices) in origin_to_hazards
+                # Pool all sojourns from this origin state
+                pooled_sojourns = Float64[]
+                for idx in haz_indices
+                    haz = model.hazards[idx]
+                    key = (haz.statefrom, haz.stateto)
+                    sojourns = get(sojourns_by_transition, key, Float64[])
+                    append!(pooled_sojourns, sojourns)
+                end
+                
+                # Compute shared knots for all hazards from this origin
+                _compute_shared_knots_for_origin!(
+                    results, model, origin, haz_indices, pooled_sojourns,
+                    nknots, quantiles, verbose
+                )
+            end
         end
-        
-        verbose && @info "Calibrated $(length(interior)) interior knots for $hazname at: $(round.(interior, digits=3))"
-        results[hazname] = (boundary_knots=[lb, ub], interior_knots=interior)
     end
     
     return NamedTuple(results)
 end
 
 """
+    _compute_shared_knots_for_origin!(results, model, origin, haz_indices, pooled_sojourns, 
+                                       nknots, quantiles, verbose)
+
+Helper to compute shared knots for all hazards from a given origin state.
+Mutates `results` dict in-place.
+"""
+function _compute_shared_knots_for_origin!(results::Dict{Symbol, NamedTuple},
+                                            model::MultistateProcess,
+                                            origin::Int,
+                                            haz_indices::Vector{Int},
+                                            pooled_sojourns::Vector{Float64},
+                                            nknots::Union{Int, NamedTuple, Nothing},
+                                            quantiles::Union{Vector{Float64}, NamedTuple, Nothing},
+                                            verbose::Bool)
+    # Use first hazard as representative for settings
+    first_haz = model.hazards[haz_indices[1]]
+    first_hazname = first_haz.hazname
+    
+    if isempty(pooled_sojourns)
+        @warn "No transitions from state $origin; using model boundaries"
+        bknots = [first_haz.knots[1], first_haz.knots[end]]
+        for idx in haz_indices
+            haz = model.hazards[idx]
+            results[haz.hazname] = (boundary_knots=bknots, interior_knots=Float64[])
+        end
+        return
+    end
+    
+    # Determine number of knots
+    nk = _get_nknots_for_hazard(first_hazname, nknots, length(pooled_sojourns))
+    
+    # Determine quantile levels or compute from nknots
+    qlevels = _get_quantiles_for_hazard(first_hazname, quantiles, nk)
+    
+    # Compute boundary knots
+    lb = 0.0  # Lower boundary is always 0 for sojourns
+    ub = maximum(pooled_sojourns)
+    
+    # Compute shared interior knots
+    if qlevels !== nothing
+        # User-specified quantiles
+        interior = quantile(pooled_sojourns, qlevels)
+        interior = unique(interior)
+    else
+        # Use place_interior_knots for automatic placement with tie handling
+        interior = place_interior_knots(pooled_sojourns, nk; lower_bound=lb, upper_bound=ub)
+    end
+    
+    # Assign same knots to all hazards from this origin
+    for idx in haz_indices
+        haz = model.hazards[idx]
+        hazname = haz.hazname
+        verbose && @info "Calibrated $(length(interior)) shared interior knots for $hazname at: $(round.(interior, digits=3))"
+        results[hazname] = (boundary_knots=[lb, ub], interior_knots=interior)
+    end
+end
+
+"""
     calibrate_splines!(model::MultistateProcess; quantiles=nothing, nknots=nothing, 
-                       n_paths=1000, min_ess=100, verbose=true)
+                       n_paths=1000, min_ess=100, n_grid=1000, use_cdf_inversion=true,
+                       verbose=true)
 
 Compute and apply knot locations for spline hazards in-place.
 
@@ -687,7 +831,9 @@ Modifies the spline hazards in `model` to use the computed knot locations.
 See [`calibrate_splines`](@ref) for argument details.
 
 # Arguments
-Same as [`calibrate_splines`](@ref).
+Same as [`calibrate_splines`](@ref), plus:
+- `n_grid::Int=1000`: Grid resolution for CDF inversion (panel data only)
+- `use_cdf_inversion::Bool=true`: Use deterministic CDF inversion instead of simulation (panel data only)
 
 # Returns
 `NamedTuple` with computed knot locations (same as [`calibrate_splines`](@ref)).
@@ -696,6 +842,7 @@ Same as [`calibrate_splines`](@ref).
 - Modifies `model.hazards` in place for all `RuntimeSplineHazard` hazards
 - Also rebuilds the parameter structure to match the new number of basis functions
 - After calling this, the model's spline hazards will have updated knots
+- For panel data, CDF inversion provides deterministic knot placement without Monte Carlo noise
 
 # Example
 ```julia
@@ -711,11 +858,14 @@ function calibrate_splines!(model::MultistateProcess;
                             nknots::Union{Int, NamedTuple, Nothing}=nothing,
                             n_paths::Int=1000,
                             min_ess::Int=100,
+                            n_grid::Int=1000,
+                            use_cdf_inversion::Bool=true,
                             verbose::Bool=true)
     
     # Get recommended knots (this also does validation)
     knots = calibrate_splines(model; quantiles=quantiles, nknots=nknots, 
-                              n_paths=n_paths, min_ess=min_ess, verbose=verbose)
+                              n_paths=n_paths, min_ess=min_ess, n_grid=n_grid,
+                              use_cdf_inversion=use_cdf_inversion, verbose=verbose)
     
     # Build knot_locations dict for _rebuild_model_with_knots!
     knot_locations = Dict{Tuple{Int,Int}, Vector{Float64}}()
@@ -776,11 +926,12 @@ function _rebuild_model_with_knots!(model::MultistateProcess,
         B = BSplineBasis(BSplineOrder(haz.degree + 1), copy(allknots))
         
         # Apply boundary conditions via basis recombination (same as original)
+        # Only enforce conditions at RIGHT boundary - no constraint at left (t=0)
         use_constant = haz.extrapolation == "constant"
         if use_constant && (haz.degree >= 2)
-            B = RecombinedBSplineBasis(B, Derivative(1))
+            B = RecombinedBSplineBasis(B, (), Derivative(1))  # free left, Neumann right
         elseif (haz.degree > 1) && haz.natural_spline
-            B = RecombinedBSplineBasis(B, Natural())
+            B = RecombinedBSplineBasis(B, (), Derivative(2))  # free left, natural right
         end
         
         # Determine extrapolation method
@@ -858,16 +1009,16 @@ end
 Extract observed sojourn times for each transition from the model's data.
 
 Returns dictionary mapping (statefrom, stateto) to vector of sojourn times.
-Only includes exact transitions (obstype 1 or 3) where the transition actually occurred.
+Only includes exact transitions (obstype=1) where the transition time is known.
 """
 function _extract_sojourns_from_data(model::MultistateProcess)
     data = model.data
     result = Dict{Tuple{Int,Int}, Vector{Float64}}()
     
     for row in eachrow(data)
-        # Only exact transitions
+        # Only exact transitions have known sojourn times
         obstype = row.obstype
-        if !(obstype == 1 || obstype == 3)
+        if obstype != OBSTYPE_EXACT
             continue
         end
         
@@ -895,13 +1046,14 @@ end
 """
     _has_exact_transitions(model::MultistateProcess) -> Bool
 
-Check if the model data contains any exact transition observations (obstype 1 or 3).
+Check if the model data contains any exact transition observations (obstype=1).
 """
 function _has_exact_transitions(model::MultistateProcess)
     data = model.data
     for row in eachrow(data)
         obstype = row.obstype
-        if (obstype == 1 || obstype == 3) && row.statefrom != row.stateto
+        # Only obstype=1 means exact observation with known transition time
+        if obstype == OBSTYPE_EXACT && row.statefrom != row.stateto
             return true
         end
     end
@@ -912,15 +1064,28 @@ end
     _extract_sojourns_from_surrogate(model::MultistateProcess, n_paths::Int, min_ess::Int) 
         -> Dict{Tuple{Int,Int}, Vector{Float64}}
 
-Fit a Markov surrogate to the model, simulate sample paths, and extract sojourn times.
+Fit a surrogate to the model, simulate sample paths, and extract sojourn times.
+
+Uses the appropriate surrogate type based on the model's hazards:
+- Markov surrogate for exponential hazards
+- Phase-type surrogate for non-exponential hazards (Weibull, Gompertz, spline, etc.)
 
 Used for panel data where exact transition times are not observed.
+
+!!! warning "Deprecated"
+    This function uses Monte Carlo simulation which introduces noise into knot placement.
+    Prefer `_compute_exit_quantiles_at_reference` for deterministic knot placement via
+    CDF inversion.
 """
 function _extract_sojourns_from_surrogate(model::MultistateProcess, n_paths::Int, min_ess::Int)
-    # Fit and store surrogate in model (set_surrogate! fits and stores in model.markovsurrogate)
-    set_surrogate!(model; verbose=false)
+    # Determine appropriate surrogate type based on hazards
+    # Non-exponential hazards benefit from phase-type proposals
+    surrogate_type = needs_phasetype_proposal(model.hazards) ? :phasetype : :markov
     
-    # Draw sample paths from the model (uses stored markovsurrogate)
+    # Fit and store surrogate in model
+    set_surrogate!(model; type=surrogate_type, verbose=false)
+    
+    # Draw sample paths from the model (uses stored surrogate)
     path_result = draw_paths(model; min_ess=min_ess)
     
     # Extract paths - handle different return types from draw_paths
@@ -954,6 +1119,180 @@ function _extract_sojourns_from_surrogate(model::MultistateProcess, n_paths::Int
                     result[(i, j)] = sojourns
                 end
             end
+        end
+    end
+    
+    return result
+end
+
+"""
+    _compute_exit_quantiles_at_reference(model::MultistateProcess, statefrom::Int;
+                                         quantiles::Vector{Float64}=[0.25, 0.5, 0.75],
+                                         t_max::Union{Nothing, Float64}=nothing,
+                                         n_grid::Int=1000) -> Vector{Float64}
+
+Compute exit time quantiles from a given state at reference covariate level (x=0).
+
+This function uses numerical CDF inversion rather than Monte Carlo simulation,
+providing deterministic and noise-free knot placement. The exit time distribution
+is computed from the cumulative incidence at reference covariate values.
+
+# Arguments
+- `model::MultistateProcess`: The multistate model (with fitted surrogate if panel data)
+- `statefrom::Int`: Origin state for which to compute exit time quantiles
+- `quantiles::Vector{Float64}=[0.25, 0.5, 0.75]`: Quantile levels to compute
+- `t_max::Union{Nothing, Float64}=nothing`: Maximum time for grid. If `nothing`,
+  uses `2 * max(tstop)` from data (with fallback to 100.0)
+- `n_grid::Int=1000`: Number of points in time grid for CDF evaluation
+
+# Returns
+Vector of exit times corresponding to each requested quantile.
+
+# Notes
+- Exit time = time until leaving `statefrom` via any transition (competing risks)
+- Quantiles are computed from the total exit CDF: `F(t) = 1 - S(t)` where
+  `S(t) = exp(-∫₀ᵗ Λ(u) du)` is survival and `Λ(u)` is total hazard from state
+- For panel data, the surrogate's fitted parameters are used (via `cumulative_incidence_at_reference`)
+- Uses linear interpolation to invert the CDF
+
+# Algorithm
+1. Evaluate cumulative incidence of exit on fine time grid at reference (x=0)
+2. Total exit CDF = sum of cause-specific cumulative incidences across destinations
+3. For each quantile level q, find t such that F(t) = q via linear interpolation
+
+# Example
+```julia
+# Get median and quartiles of exit time from state 1
+q = _compute_exit_quantiles_at_reference(model, 1; quantiles=[0.25, 0.5, 0.75])
+# q[1] = 25th percentile, q[2] = median, q[3] = 75th percentile
+```
+
+See also: [`cumulative_incidence_at_reference`](@ref), [`calibrate_splines`](@ref)
+"""
+function _compute_exit_quantiles_at_reference(model::MultistateProcess, statefrom::Int;
+                                               quantiles::Vector{Float64}=[0.25, 0.5, 0.75],
+                                               t_max::Union{Nothing, Float64}=nothing,
+                                               n_grid::Int=1000)
+    # Validate quantiles
+    all(0 < q < 1 for q in quantiles) || 
+        throw(ArgumentError("All quantiles must be in (0, 1), got $quantiles"))
+    
+    # Determine t_max if not specified
+    if t_max === nothing
+        max_tstop = maximum(model.data.tstop)
+        t_max = 2.0 * max_tstop  # Extend beyond observed data
+        t_max = max(t_max, 10.0)  # Ensure minimum range
+    end
+    
+    # Create time grid (start slightly above 0 to avoid issues at boundary)
+    t_grid = collect(range(1e-6, t_max, length=n_grid))
+    
+    # Compute cumulative incidence at reference level
+    # This returns matrix: (n_times × n_destinations)
+    ci_matrix = cumulative_incidence_at_reference(t_grid, model; statefrom=statefrom)
+    
+    # Total exit probability = sum across all destinations (competing risks)
+    # ci_matrix is cumulative incidence for each cause, sum gives total exit CDF
+    total_exit_cdf = vec(sum(ci_matrix, dims=2))
+    
+    # Invert CDF to get quantiles via linear interpolation
+    result = Float64[]
+    sorted_quantiles = sort(quantiles)
+    
+    for q in sorted_quantiles
+        # Find interval where CDF crosses q
+        idx = searchsortedfirst(total_exit_cdf, q)
+        
+        if idx == 1
+            # Quantile is below first grid point - use first point
+            push!(result, t_grid[1])
+        elseif idx > length(t_grid)
+            # Quantile is above maximum CDF value - cap at t_max
+            # This can happen if exit probability doesn't reach q by t_max
+            @warn "Exit probability at t_max=$(t_max) is $(total_exit_cdf[end]) < $q; extending grid may help"
+            push!(result, t_grid[end])
+        else
+            # Linear interpolation between idx-1 and idx
+            t_lo, t_hi = t_grid[idx-1], t_grid[idx]
+            cdf_lo, cdf_hi = total_exit_cdf[idx-1], total_exit_cdf[idx]
+            
+            # Handle edge case of flat CDF
+            if abs(cdf_hi - cdf_lo) < 1e-12
+                push!(result, t_lo)
+            else
+                t_q = t_lo + (t_hi - t_lo) * (q - cdf_lo) / (cdf_hi - cdf_lo)
+                push!(result, t_q)
+            end
+        end
+    end
+    
+    # Return in original quantile order
+    return result[sortperm(sortperm(quantiles))]
+end
+
+"""
+    _get_exit_quantiles_by_origin(model::MultistateProcess;
+                                   quantiles::Vector{Float64}=[0.25, 0.5, 0.75],
+                                   t_max::Union{Nothing, Float64}=nothing,
+                                   n_grid::Int=1000,
+                                   verbose::Bool=false) -> Dict{Int, Vector{Float64}}
+
+Compute exit time quantiles for all transient states at reference covariate level.
+
+Returns a dictionary mapping origin state → exit time quantiles.
+This is the main entry point for knot calibration using CDF inversion.
+
+# Arguments
+- `model::MultistateProcess`: The multistate model
+- `quantiles::Vector{Float64}`: Quantile levels to compute (default: quartiles)
+- `t_max`: Maximum time for CDF evaluation grid (default: 2× max observed time)
+- `n_grid::Int=1000`: Grid resolution for CDF evaluation
+- `verbose::Bool=false`: Print progress information
+
+# Returns
+`Dict{Int, Vector{Float64}}` mapping each transient origin state to its exit quantiles.
+
+# Notes
+- Skips absorbing states (no outgoing transitions)
+- For panel data, the surrogate should be fitted before calling this function
+- All competing hazards from the same origin share the same exit time distribution,
+  so knots are naturally shared across them
+
+See also: [`_compute_exit_quantiles_at_reference`](@ref), [`calibrate_splines`](@ref)
+"""
+function _get_exit_quantiles_by_origin(model::MultistateProcess;
+                                        quantiles::Vector{Float64}=[0.25, 0.5, 0.75],
+                                        t_max::Union{Nothing, Float64}=nothing,
+                                        n_grid::Int=1000,
+                                        verbose::Bool=false)
+    result = Dict{Int, Vector{Float64}}()
+    
+    # Find transient states (states with outgoing transitions)
+    tmat = model.tmat
+    n_states = size(tmat, 1)
+    
+    for s in 1:n_states
+        # Check if state has any outgoing transitions
+        has_outgoing = any(tmat[s, :] .!= 0)
+        if !has_outgoing
+            continue  # Absorbing state, skip
+        end
+        
+        verbose && @info "Computing exit quantiles from state $s..."
+        
+        try
+            q_values = _compute_exit_quantiles_at_reference(
+                model, s;
+                quantiles=quantiles,
+                t_max=t_max,
+                n_grid=n_grid
+            )
+            result[s] = q_values
+            verbose && @info "  State $s: quantiles at $(round.(q_values, digits=4))"
+        catch e
+            @warn "Failed to compute exit quantiles from state $s: $e"
+            # Fall back to uniform placement
+            result[s] = collect(range(0.1, t_max === nothing ? 10.0 : t_max*0.9, length=length(quantiles)))
         end
     end
     
@@ -1137,19 +1476,21 @@ end
 Rebuild the BSpline basis from a RuntimeSplineHazard for coefficient transformations.
 
 Handles natural splines and constant extrapolation boundary conditions:
-- constant: enforces D¹=0 (Neumann BC) at boundaries for smooth constant extrapolation
-- natural_spline: enforces D²=0 (natural spline) at boundaries
+- constant: enforces D¹=0 (Neumann BC) at RIGHT boundary for smooth constant extrapolation
+- natural_spline: enforces D²=0 (natural spline) at RIGHT boundary
+No boundary condition at left (t=0) for full flexibility near the origin.
 """
 function _rebuild_spline_basis(hazard::RuntimeSplineHazard)
     B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(hazard.knots))
     
-    # Apply boundary conditions based on extrapolation method
+    # Apply boundary conditions at RIGHT boundary only
+    # No constraint at left (t=0) for full flexibility near the origin
     if hazard.extrapolation == "constant" && hazard.degree >= 2
-        # constant: D¹=0 at both boundaries for C¹ continuity
-        B = RecombinedBSplineBasis(B, Derivative(1))
+        # constant: D¹=0 at right boundary for C¹ continuity
+        B = RecombinedBSplineBasis(B, (), Derivative(1))  # free left, Neumann right
     elseif (hazard.degree > 1) && hazard.natural_spline
-        # Natural spline: D²=0 at boundaries
-        B = RecombinedBSplineBasis(B, Natural())
+        # Natural spline: D²=0 at right boundary
+        B = RecombinedBSplineBasis(B, (), Derivative(2))  # free left, natural right
     end
     return B
 end

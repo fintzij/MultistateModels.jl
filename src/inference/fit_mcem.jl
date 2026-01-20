@@ -387,6 +387,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     hazmat_book_ph = nothing
     fbmats_ph = nothing
     emat_ph = nothing
+    schur_cache_ph = nothing  # Cached Schur decompositions for efficient TPM computation
     
     if use_phasetype
         phasetype_surrogate = _build_phasetype_from_markov(model, markov_surrogate; 
@@ -454,6 +455,10 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
             tpm_book_ph, hazmat_book_ph = build_phasetype_tpm_book(phasetype_surrogate, markov_surrogate, books, model.data)
         end
         
+        # Pre-compute Schur decompositions for each covariate-specific Q matrix
+        # This provides significant speedup when computing TPMs for sampled paths
+        schur_cache_ph = [CachedSchurDecomposition(Q) for Q in hazmat_book_ph]
+        
         # Build fbmats with correct sizes (using expanded subject indices if available)
         subj_inds_for_ph = isnothing(ph_subjectindices) ? model.subjectindices : ph_subjectindices
         fbmats_ph = build_fbmats_phasetype_with_indices(subj_inds_for_ph, phasetype_surrogate)
@@ -513,7 +518,9 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         expanded_ph_data = expanded_ph_data,
         expanded_ph_subjectindices = ph_subjectindices,
         expanded_ph_tpm_map = expanded_ph_tpm_map,
-        ph_original_row_map = ph_original_row_map)
+        ph_original_row_map = ph_original_row_map,
+        # Cached Schur decompositions for efficient TPM computation
+        schur_cache_ph = schur_cache_ph)
     
     # Apply SIR: resample indices from pool and compute uniform weights
     if use_sir
@@ -698,6 +705,11 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
                 ase = mcem_ase_sir(loglik_target_prop, loglik_target_cur, sir_subsample_indices, model.SubjectWeights)
             else
                 ase = mcem_ase(loglik_target_prop, loglik_target_cur, ImportanceWeights, model.SubjectWeights)
+            end
+    
+            # Guard against NaN or negative ASE (can occur with degenerate importance weights)
+            if !isfinite(ase) || ase < 0
+                ase = 0.0
             end
     
             # calculate the lower bound for ΔQ
@@ -894,7 +906,9 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
             expanded_ph_data = expanded_ph_data,
             expanded_ph_subjectindices = ph_subjectindices,
             expanded_ph_tpm_map = expanded_ph_tpm_map,
-            ph_original_row_map = ph_original_row_map)
+            ph_original_row_map = ph_original_row_map,
+            # Cached Schur decompositions for efficient TPM computation
+            schur_cache_ph = schur_cache_ph)
         
         # SIR: Resample after pool expansion
         if use_sir
@@ -1204,6 +1218,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         model.ObservationWeights,
         model.CensoringPatterns,
         surrogate,
+        model.phasetype_surrogate,  # phasetype_surrogate
         ConvergenceRecords,
         ProposedPaths,
         model.modelcall,

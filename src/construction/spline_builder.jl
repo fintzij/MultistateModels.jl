@@ -110,23 +110,24 @@ function _build_spline_hazard(ctx::HazardBuildContext)
     # Combine and sort knots
     allknots = unique(sort([bknots[1]; intknots; bknots[2]]))
     
-    # Build B-spline basis
-    B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(allknots))
-    
     # Determine if we need smooth constant extrapolation
-    # "constant" enforces h'=0 at boundaries for C¹ continuity with flat extrapolation
+    # "constant" enforces h'=0 at RIGHT boundary for C¹ continuity with flat extrapolation
     use_constant = hazard.extrapolation == "constant"
     
-    # Apply boundary conditions via basis recombination
+    # Build B-spline basis with knots
+    B = BSplineBasis(BSplineOrder(hazard.degree + 1), copy(allknots))
+    
+    # Apply boundary conditions via basis recombination at RIGHT boundary only
+    # No constraint at left (t=0) for full flexibility near the origin
     if use_constant && (hazard.degree >= 2)
-        # constant: enforce D¹=0 (Neumann BC) at both boundaries
-        # This gives C¹ continuity when extending as constant beyond boundaries
-        # The hazard approaches the boundary tangentially (zero slope), ensuring
+        # constant extrapolation: enforce D¹=0 (Neumann BC) at RIGHT boundary only
+        # This gives C¹ continuity when extending as constant beyond the right boundary.
+        # The hazard approaches the right boundary tangentially (zero slope), ensuring
         # a smooth transition to the constant extrapolation region.
-        B = RecombinedBSplineBasis(B, Derivative(1))
+        B = RecombinedBSplineBasis(B, (), Derivative(1))  # free left, Neumann right
     elseif (hazard.degree > 1) && hazard.natural_spline
-        # Natural spline: D²=0 at boundaries only
-        B = RecombinedBSplineBasis(B, Natural())
+        # Natural spline: D²=0 at RIGHT boundary only
+        B = RecombinedBSplineBasis(B, (), Derivative(2))  # free left, natural right
     end
     
     # Determine extrapolation method

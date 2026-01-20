@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **MCEM with PhaseType proposal (Item #35)**: Fixed severe parameter bias (~35-100% shape error, ~25-72% scale underestimation) when using PhaseType proposal in MCEM for semi-Markov target models (Weibull, Gompertz). The surrogate likelihood now correctly uses the forward algorithm on censored data instead of computing the unconditional path density.
+  - **Root cause**: `loglik_phasetype_collapsed_path()` computed the unconditional path density p(Z|θ') instead of the marginal likelihood p(Z|Y,θ'). This treated panel observations as if exactly observed, causing biased importance weights.
+  - **New functions**: `convert_collapsed_path_to_censored_data(path, subj_data, model)` converts collapsed paths back to censored data format preserving original observation times; `loglik_phasetype_forward(censored_data, surrogate)` computes marginal likelihood via forward algorithm on expanded phase state space.
+  - **Deprecated**: `loglik_phasetype_collapsed_path()` now emits a deprecation warning and should not be used for importance sampling.
+
 ### Added
 
 - **Variance-Covariance with Constraints (Item #27)**: Models with constraints now always return variance-covariance matrices using the reduced Hessian approach. For constrained MLE with active constraints $c(\hat{\theta}) = 0$, the variance is computed as:

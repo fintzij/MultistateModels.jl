@@ -146,8 +146,7 @@ end
 """
     _loglik_markov_mutating(parameters, data::MPanelData; neg=true, return_ll_subj=false)
 
-Mutating implementation of Markov panel likelihood. Uses in-place operations
-for efficiency. Compatible with ForwardDiff (forward-mode AD).
+Mutating implementation of Markov panel likelihood. Uses in-place operations for efficiency. Compatible with ForwardDiff (forward-mode AD).
 
 This is an internal function. Use `loglik_markov` for the public API.
 """
