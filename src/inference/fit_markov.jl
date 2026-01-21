@@ -229,8 +229,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         model.SubjectWeights,
         model.ObservationWeights,
         model.CensoringPatterns,
-        model.markovsurrogate,
-        model.phasetype_surrogate,  # phasetype_surrogate
+        model.surrogate,  # Unified surrogate field
         (solution = sol,), # ConvergenceRecords::Union{Nothing, NamedTuple}
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall,

@@ -95,7 +95,8 @@ export
     # Parameter manipulation
     # --------------------------------------------------------------------------
     set_parameters!,
-    set_surrogate!,
+    initialize_surrogate!,
+    set_surrogate!,  # DEPRECATED: use initialize_surrogate! instead
     is_surrogate_fitted,
     is_fitted,
     initialize_parameters,
@@ -348,10 +349,16 @@ include("output/accessors.jl")
 # path functions
 include("simulation/path_utilities.jl")
 
-# sampling functions (order matters: core → markov → phasetype)
+# sampling functions (order matters for dependencies)
 include("inference/sampling_core.jl")     # PathWorkspace, thread-local storage
+include("inference/sampling_phasetype.jl") # Phase-type forward likelihood, expanded FFBS (no MCEM deps)
+
+# MCEM infrastructure (uses build_phasetype_tpm_book from sampling_phasetype.jl)
+include("mcem/infrastructure.jl")         # MCEMInfrastructure struct and builders
+include("mcem/path_likelihood.jl")        # Dispatch methods for path likelihoods
+
+# Markov sampling (uses MCEMInfrastructure for new dispatch-based API)
 include("inference/sampling_markov.jl")   # Markov FFBS, ECCTMC, DrawSamplePaths!
-include("inference/sampling_phasetype.jl") # Phase-type forward likelihood, expanded FFBS
 
 # simulation
 include("simulation/simulate.jl")

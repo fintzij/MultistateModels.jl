@@ -21,8 +21,285 @@
 # ============================================================================
 
 # ============================================================================
-# Main DrawSamplePaths! functions
+# Main DrawSamplePaths! functions - Infrastructure-based API (Phase 3 refactor)
 # ============================================================================
+
+"""
+    DrawSamplePaths!(model, infra::MCEMInfrastructure, containers; kwargs...)
+
+Draw sample paths using infrastructure-based dispatch. This is the new unified API
+that replaces the legacy kwargs-based signature with 12+ phase-type arguments.
+
+# Arguments
+- `model::MultistateProcess`: The target model
+- `infra::MCEMInfrastructure`: Pre-built infrastructure (Markov or PhaseType)
+- `containers`: NamedTuple with sampling containers:
+  - `samplepaths`, `loglik_surrog`, `loglik_target_prop`, `loglik_target_cur`
+  - `_logImportanceWeights`, `ImportanceWeights`, `ess_cur`, `psis_pareto_k`
+
+# Keyword Arguments  
+- `ess_target::Int`: Target effective sample size
+- `max_sampling_effort::Int`: Maximum multiplier for paths vs ESS
+- `npaths_additional::Int`: Paths to add per sampling round
+- `params_cur::Vector{Float64}`: Current parameter values for target likelihood
+
+See also: [`MCEMInfrastructure`](@ref), [`build_mcem_infrastructure`](@ref)
+"""
+function DrawSamplePaths!(model::MultistateProcess, infra::MCEMInfrastructure, containers;
+    ess_target, max_sampling_effort, npaths_additional, params_cur)
+    
+    # Unflatten parameters for target likelihood evaluation
+    pars = unflatten_parameters(params_cur, model)
+
+    for i in 1:infra.nsubj
+        DrawSamplePaths!(i, model, infra, containers;
+            ess_target = ess_target,
+            max_sampling_effort = max_sampling_effort,
+            npaths_additional = npaths_additional,
+            params_cur = params_cur)
+    end
+end
+
+"""
+    DrawSamplePaths!(i::Int, model, infra::MCEMInfrastructure, containers; kwargs...)
+
+Draw sample paths for subject i using infrastructure-based dispatch.
+Dispatches to surrogate-specific sampling based on infra type parameter.
+"""
+function DrawSamplePaths!(i::Int, model::MultistateProcess, infra::MCEMInfrastructure, containers;
+    ess_target, max_sampling_effort, npaths_additional, params_cur)
+    
+    # Extract containers
+    samplepaths = containers.samplepaths
+    loglik_surrog = containers.loglik_surrog
+    loglik_target_prop = containers.loglik_target_prop
+    loglik_target_cur = containers.loglik_target_cur
+    _logImportanceWeights = containers._logImportanceWeights
+    ImportanceWeights = containers.ImportanceWeights
+    ess_cur = containers.ess_cur
+    psis_pareto_k = containers.psis_pareto_k
+    
+    n_path_max = max_sampling_effort * ess_target
+    keep_sampling = ess_cur[i] < ess_target
+    
+    # Subject data view (from original model, not infra - needed for target loglik)
+    subj_inds = model.subjectindices[i]
+    subj_dat = view(model.data, subj_inds, :)
+    
+    # For Markov surrogate: compute FFBS matrices if needed for censored observations
+    if infra isa MCEMInfrastructure{MarkovSurrogate}
+        _prepare_ffbs_markov!(i, model, infra, subj_dat)
+    end
+    
+    while keep_sampling
+        npaths = length(samplepaths[i])
+        n_add = npaths == 0 ? maximum([50, Int(ceil(ess_target))]) : npaths_additional
+        
+        # Augment containers
+        append!(samplepaths[i], Vector{SamplePath}(undef, n_add))
+        append!(loglik_surrog[i], zeros(n_add))
+        append!(loglik_target_prop[i], zeros(n_add))
+        append!(loglik_target_cur[i], zeros(n_add))
+        append!(_logImportanceWeights[i], zeros(n_add))
+        append!(ImportanceWeights[i], zeros(n_add))
+        
+        # Sample new paths
+        for j in npaths .+ (1:n_add)
+            _sample_path_with_infra!(j, i, model, infra, containers, params_cur, subj_dat)
+        end
+        
+        # Update ESS and importance weights
+        _update_ess_and_weights!(i, samplepaths, loglik_surrog, loglik_target_cur,
+                                  loglik_target_prop, _logImportanceWeights, ImportanceWeights, 
+                                  ess_cur, psis_pareto_k, ess_target)
+        
+        # Check stopping criteria
+        keep_sampling = (ess_cur[i] < ess_target) && (length(samplepaths[i]) <= n_path_max)
+        
+        if length(samplepaths[i]) > n_path_max
+            @warn "More than $n_path_max sample paths required for individual $i."
+        end
+    end
+end
+
+"""
+    _prepare_ffbs_markov!(i, model, infra::MCEMInfrastructure{MarkovSurrogate}, subj_dat)
+
+Prepare forward-backward matrices for Markov surrogate if subject has censored observations.
+"""
+function _prepare_ffbs_markov!(i::Int, model::MultistateProcess, 
+                                infra::MCEMInfrastructure{MarkovSurrogate}, subj_dat)
+    if !isnothing(infra.fbmats) && any(subj_dat.obstype .∉ Ref([1,2]))
+        subj_inds = model.subjectindices[i]
+        subj_tpm_map = view(infra.books[2], subj_inds, :)
+        subj_emat = view(model.emat, subj_inds, :)
+        ForwardFiltering!(infra.fbmats[i], subj_dat, infra.tpm_book, subj_tpm_map, subj_emat;
+                         hazmat_book=infra.hazmat_book)
+    end
+end
+
+"""
+    _sample_path_with_infra!(j, i, model, infra::MCEMInfrastructure{MarkovSurrogate}, ...)
+
+Sample a single path using Markov surrogate infrastructure.
+"""
+function _sample_path_with_infra!(j::Int, i::Int, model::MultistateProcess,
+    infra::MCEMInfrastructure{MarkovSurrogate}, containers, params_cur, subj_dat)
+    
+    samplepaths = containers.samplepaths
+    loglik_surrog = containers.loglik_surrog
+    loglik_target_cur = containers.loglik_target_cur
+    _logImportanceWeights = containers._logImportanceWeights
+    
+    # Draw path from Markov surrogate
+    samplepaths[i][j] = draw_samplepath(i, model, infra.tpm_book, infra.hazmat_book,
+                                         infra.books[2], infra.fbmats, infra.absorbingstates)
+    
+    # Surrogate log-likelihood (using dispatch)
+    loglik_surrog[i][j] = compute_surrogate_path_loglik(samplepaths[i][j], i, model, infra)
+    
+    # Target log-likelihood
+    target_pars = unflatten_parameters(params_cur, model)
+    loglik_target_cur[i][j] = loglik(target_pars, samplepaths[i][j], model.hazards, model)
+    
+    # Unnormalized log importance weight
+    _logImportanceWeights[i][j] = loglik_target_cur[i][j] - loglik_surrog[i][j]
+end
+
+"""
+    _sample_path_with_infra!(j, i, model, infra::MCEMInfrastructure{PhaseTypeSurrogate}, ...)
+
+Sample a single path using PhaseType surrogate infrastructure.
+Samples in expanded space, collapses to original states, computes marginal likelihood.
+"""
+function _sample_path_with_infra!(j::Int, i::Int, model::MultistateProcess,
+    infra::MCEMInfrastructure{PhaseTypeSurrogate}, containers, params_cur, subj_dat)
+    
+    samplepaths = containers.samplepaths
+    loglik_surrog = containers.loglik_surrog
+    loglik_target_cur = containers.loglik_target_cur
+    _logImportanceWeights = containers._logImportanceWeights
+    
+    # Get tpm_map for this subject (expanded if data was expanded)
+    ph_tpm_map = isnothing(infra.expanded_tpm_map) ? infra.books[2] : infra.expanded_tpm_map
+    
+    # Get subject's tpm_map on original data (for covariate lookup during TVC)
+    subj_inds = model.subjectindices[i]
+    subj_tpm_map = view(infra.books[2], subj_inds, :)
+    
+    # Sample with retry for -Inf likelihoods
+    max_retries = 10
+    retry_count = 0
+    valid_path = false
+    
+    while !valid_path && retry_count < max_retries
+        # Sample in expanded phase space
+        path_result = draw_samplepath_phasetype(i, model, infra.tpm_book, infra.hazmat_book,
+                                                 ph_tpm_map, infra.fbmats, infra.emat,
+                                                 infra.surrogate, infra.absorbingstates;
+                                                 expanded_data = infra.original_row_map === nothing ? nothing : infra.data,
+                                                 expanded_subjectindices = infra.original_row_map === nothing ? nothing : infra.subjectindices,
+                                                 original_row_map = infra.original_row_map)
+        
+        # Store collapsed path for target likelihood evaluation
+        samplepaths[i][j] = path_result.collapsed
+        
+        # Compute surrogate log-likelihood using dispatch (marginal over phases)
+        loglik_surrog[i][j] = compute_surrogate_path_loglik(
+            samplepaths[i][j], i, model, infra;
+            expanded_path = path_result.expanded,
+            subj_data = subj_dat,
+            subj_tpm_map = subj_tpm_map
+        )
+        
+        if isfinite(loglik_surrog[i][j])
+            valid_path = true
+        else
+            retry_count += 1
+            if retry_count == max_retries
+                @warn "PhaseType proposal: -Inf surrogate likelihood for subject $i path $j after $max_retries retries; using path anyway" maxlog=5
+                # Fall back to Markov proposal likelihood (approximate)
+                markov_pars = get_hazard_params(infra.surrogate.parameters, infra.surrogate.hazards)
+                loglik_surrog[i][j] = loglik(markov_pars, samplepaths[i][j], infra.surrogate.hazards, model)
+                valid_path = true
+            end
+        end
+    end
+    
+    # Target log-likelihood (on collapsed path)
+    target_pars = unflatten_parameters(params_cur, model)
+    loglik_target_cur[i][j] = loglik(target_pars, samplepaths[i][j], model.hazards, model)
+    
+    # Unnormalized log importance weight
+    _logImportanceWeights[i][j] = loglik_target_cur[i][j] - loglik_surrog[i][j]
+end
+
+"""
+    _update_ess_and_weights!(i, ...)
+
+Update ESS and importance weights for subject i after sampling.
+Handles degenerate cases and applies PSIS smoothing.
+"""
+function _update_ess_and_weights!(i::Int, samplepaths, loglik_surrog, loglik_target_cur,
+                                   loglik_target_prop, _logImportanceWeights, ImportanceWeights, 
+                                   ess_cur, psis_pareto_k, ess_target)
+    
+    # Handle degenerate case: all paths have same surrogate likelihood
+    if allequal(loglik_surrog[i])
+        samplepaths[i] = [first(samplepaths[i])]
+        loglik_target_cur[i] = [first(loglik_target_cur[i])]
+        loglik_target_prop[i] = [first(loglik_target_prop[i])]  # Also truncate proposed likelihoods
+        loglik_surrog[i] = [first(loglik_surrog[i])]
+        _logImportanceWeights[i] = [first(_logImportanceWeights[i])]
+        ImportanceWeights[i] = [1.0]
+        ess_cur[i] = ess_target
+        return
+    end
+    
+    # Check for degenerate weights
+    weights_range = maximum(_logImportanceWeights[i]) - minimum(_logImportanceWeights[i])
+    weights_degenerate = allequal(_logImportanceWeights[i]) || weights_range < 1e-10
+    
+    if weights_degenerate
+        fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))
+        ess_cur[i] = length(ImportanceWeights[i])
+        psis_pareto_k[i] = 0.0
+    else
+        # Apply PSIS
+        psiw = try
+            ParetoSmooth.psis(reshape(copy(_logImportanceWeights[i]), 1, length(_logImportanceWeights[i]), 1); source = "other")
+        catch e
+            if e isa ArgumentError && occursin("all tail values are the same", string(e))
+                @warn "PSIS failed for subject $i (degenerate tail); using uniform weights" maxlog=5
+                nothing
+            else
+                rethrow(e)
+            end
+        end
+        
+        if isnothing(psiw)
+            fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))
+            ess_cur[i] = length(ImportanceWeights[i])
+            psis_pareto_k[i] = Inf
+        else
+            copyto!(ImportanceWeights[i], psiw.weights)
+            ess_cur[i] = psiw.ess[1]
+            psis_pareto_k[i] = psiw.pareto_k[1]
+        end
+        
+        # Handle NaN/Inf ESS from PSIS
+        if isnan(ess_cur[i]) || isinf(ess_cur[i])
+            copyto!(ImportanceWeights[i], normalize(exp.(_logImportanceWeights[i] .- maximum(_logImportanceWeights[i])), 1))
+            ess_cur[i] = 1 / sum(ImportanceWeights[i] .^ 2)
+        end
+    end
+end
+
+# ============================================================================
+# Legacy DrawSamplePaths! functions (kwargs-based API)
+# ============================================================================
+# These remain for backward compatibility during Phase 4 transition.
+# Will be removed once fit_mcem.jl is fully updated to use infrastructure.
 
 """
     DrawSamplePaths(model; ...)

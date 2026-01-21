@@ -35,6 +35,18 @@
 
 ### Changed
 
+- **MCEM Surrogate-Agnostic Refactoring (Internal)**: Refactored MCEM implementation to use dispatch-based architecture instead of `if use_phasetype` branching. This is an internal code quality improvement with **no user-facing API changes**.
+  - **New struct**: `MCEMInfrastructure{S<:AbstractSurrogate}` encapsulates all precomputed objects for importance sampling (TPM books, forward-backward matrices, data views, Schur caches)
+  - **New dispatch methods**:
+    - `build_mcem_infrastructure(model, surrogate::MarkovSurrogate)` and `build_mcem_infrastructure(model, surrogate::PhaseTypeSurrogate)` - Build infrastructure once at MCEM start
+    - `compute_normalizing_constant(model, infra)` - Marginal likelihood under surrogate (matrix exponential for Markov, forward algorithm for PhaseType)
+    - `compute_surrogate_path_loglik(path, subj_idx, model, infra)` - Path density under surrogate for importance weights
+    - `collapse_expanded_path(path, infra)` - Map phase-level paths to macro-state paths (PhaseType only)
+  - **Simplified signature**: `DrawSamplePaths!(model, infra, containers; kwargs...)` replaces 12+ phase-type-specific keyword arguments with infrastructure lookup
+  - **New files**: `src/mcem/infrastructure.jl`, `src/mcem/path_likelihood.jl`
+  - **Code reduction**: `fit_mcem.jl` reduced from ~1250 to ~1100 lines with unified control flow
+  - **RNG reproducibility**: Same RNG seed produces identical MLEs for both Markov and PhaseType surrogates
+
 - **Constrained models now return vcov**: Previously, `fit()` with constraints would return `vcov=nothing`. Now the reduced Hessian approach computes valid variance estimates for the free parameters. Variance in constrained directions is zero (as expected).
 
 - **Default penalty method**: `build_penalty_matrix()` now defaults to `:gps` method instead of `:integral`

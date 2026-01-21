@@ -351,10 +351,12 @@ function convert_expanded_path_to_censored_data(
         if k == 1
             t_start = times[1]
             entry_phase = phases[1]
+            is_first_sojourn = true
         else
             prev_trans_idx = transition_indices[k - 1]
             t_start = times[prev_trans_idx + 1]
             entry_phase = phases[prev_trans_idx + 1]
+            is_first_sojourn = false
         end
         
         # Transition time and destination
@@ -374,7 +376,12 @@ function convert_expanded_path_to_censored_data(
             # Row: Survival in source macro-state
             push!(tstart_out, t_start)
             push!(tstop_out, t_trans)
-            push!(statefrom_out, entry_phase)
+            #
+            # CRITICAL FOR MARGINALIZATION:
+            # - First sojourn: initialize α to the actual starting phase
+            # - Subsequent sojourns: do NOT re-initialize α; use distribution from 
+            #   previous transition row (which marginalizes over entry phases)
+            push!(statefrom_out, is_first_sojourn ? entry_phase : 0)
             push!(stateto_out, 0)
             push!(obstype_out, s_macro + 2)  # Censoring pattern
             
@@ -396,16 +403,28 @@ function convert_expanded_path_to_censored_data(
         end
         
         # Row: Exact transition (Δt = 0)
-        # This row captures the instantaneous transition to the destination phase
+        # This row captures the instantaneous transition to the destination macro-state.
+        #
+        # CRITICAL FOR IMPORTANCE SAMPLING:
+        # The collapsed path only observes macro-state transitions, not specific phases.
+        # For proper marginalization, the emission matrix must allow ANY phase of the
+        # destination macro-state, not just the specific phase that was sampled.
+        # This ensures q(Z_collapsed) = P(macro-state sequence), marginalizing over phases.
         push!(tstart_out, t_trans)
         push!(tstop_out, t_trans)
         # When we skip survival row, we need statefrom to be entry_phase for initialization
         push!(statefrom_out, Δt > 0 ? 0 : entry_phase)
-        push!(stateto_out, d_phase)
+        push!(stateto_out, d_phase)  # Store actual destination phase for tracking
         push!(obstype_out, 1)
         
+        # Get destination macro-state from the destination phase
+        d_macro = surrogate.phase_to_state[d_phase]
+        
+        # Emission allows ANY phase of the destination macro-state
         erow = zeros(Float64, n_expanded)
-        erow[d_phase] = 1.0
+        for p in surrogate.state_to_phases[d_macro]
+            erow[p] = 1.0
+        end
         push!(emat_rows, erow)
         
         # For Δt=0, we use instantaneous Q matrix
@@ -451,7 +470,9 @@ function convert_expanded_path_to_censored_data(
             
             push!(tstart_out, final_entry_time)
             push!(tstop_out, final_time)
-            push!(statefrom_out, final_entry_phase)
+            # Do NOT re-initialize α; use distribution from the last transition row
+            # This ensures proper marginalization over entry phases
+            push!(statefrom_out, 0)
             push!(stateto_out, 0)  # Censored/survival, not transitioning
             push!(obstype_out, final_macro + 2)  # Censoring pattern for final_macro
             
@@ -829,14 +850,13 @@ end
 # =============================================================================
 
 """
-    build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate, markov_surrogate::MarkovSurrogate, books, data)
+    build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate, books, data)
 
 Build transition probability matrix book for phase-type expanded state space.
 
-This function correctly incorporates covariate effects from the Markov surrogate
-into the phase-type expanded Q matrix. For each covariate combination, inter-state
-transition rates are scaled by exp(β'x) where β are the covariate coefficients
-from the Markov surrogate.
+This function correctly incorporates covariate effects into the phase-type expanded 
+Q matrix. For each covariate combination, inter-state transition rates are scaled 
+by exp(β'x) where β are the covariate coefficients stored in the surrogate.
 
 **Key insight**: Internal phase progression rates (within-state transitions) are NOT
 scaled by covariates. Only inter-state transition rates (absorption from phases)
@@ -844,8 +864,7 @@ are scaled, because covariate effects apply to the transition rate between obser
 states, not to the phase progression dynamics within a state.
 
 # Arguments
-- `surrogate`: PhaseTypeSurrogate with expanded Q matrix (baseline rates)
-- `markov_surrogate`: MarkovSurrogate with fitted parameters including covariate coefficients
+- `surrogate`: PhaseTypeSurrogate with expanded Q matrix, hazards, and fitted parameters
 - `books`: Time interval book from build_tpm_mapping (books[1] = tpm_index per covariate combo)
 - `data`: Model data (for extracting covariate values)
 
@@ -853,9 +872,7 @@ states, not to the phase progression dynamics within a state.
 - `tpm_book_ph`: Nested vector of TPMs [covar_combo][time_interval] in expanded space
 - `hazmat_book_ph`: Vector of intensity matrices for each covariate combination
 """
-function build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate, 
-                                  markov_surrogate::MarkovSurrogate,
-                                  books, data)
+function build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate, books, data)
     n_expanded = surrogate.n_expanded_states
     Q_baseline = surrogate.expanded_Q
     phase_to_state = surrogate.phase_to_state
@@ -880,14 +897,14 @@ function build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate,
         data_row_idx = tpm_index.datind[1]
         data_row = data[data_row_idx, :]
         
-        # For each Markov surrogate hazard, compute the scaling factor and apply it
+        # For each hazard in the surrogate, compute the scaling factor and apply it
         # to the corresponding inter-state transitions in Q_expanded
-        for hazard in markov_surrogate.hazards
+        for hazard in surrogate.hazards
             s_from = hazard.statefrom  # Observed state (from)
             s_to = hazard.stateto      # Observed state (to)
             
             # Compute linear predictor β'x for this hazard and covariate combination
-            hazard_pars = markov_surrogate.parameters.nested[hazard.hazname]
+            hazard_pars = surrogate.parameters.nested[hazard.hazname]
             
             # Extract covariates for this hazard
             covars = extract_covariates_fast(data_row, hazard.covar_names)
@@ -940,6 +957,15 @@ function build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate,
     end
     
     return tpm_book_ph, hazmat_book_ph
+end
+
+# Backward compatible overload (DEPRECATED - remove after tests updated)
+function build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate, 
+                                  markov_surrogate::MarkovSurrogate,
+                                  books, data)
+    @warn "build_phasetype_tpm_book with markov_surrogate argument is deprecated. " *
+          "Use build_phasetype_tpm_book(surrogate, books, data) instead." maxlog=1
+    return build_phasetype_tpm_book(surrogate, books, data)
 end
 
 

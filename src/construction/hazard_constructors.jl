@@ -47,11 +47,11 @@ intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yoursel
     it serves as a fallback if not provided at model level.
 - `coxian_structure::Symbol`: Coxian structure constraint for phase-type hazards
     (only for `family == :pt`, default: `:sctp`).
-    - `:sctp` (default): SCTP (Stationary Conditional Transition Probability) constraint only.
-      Ensures P(destination | leaving) is constant across phases.
-    - `:sctp_decreasing`: SCTP + eigenvalue ordering ν₁ ≥ ν₂ ≥ ... ≥ νₙ (early exits more likely).
-    - `:sctp_increasing`: SCTP + eigenvalue ordering ν₁ ≤ ν₂ ≤ ... ≤ νₙ (late exits more likely).
-    - `:unstructured`: All progression and exit rates are free parameters.
+    - `:sctp` (default): SCTP (Stationary Conditional Transition Probability) constraint with
+      eigenvalue ordering ν₁ ≤ ν₂ ≤ ... ≤ νₙ. Ensures P(destination | leaving) is constant
+      across phases and provides identifiability through eigenvalue ordering.
+    - `:unstructured`: All progression and exit rates are free parameters (not recommended,
+      may have identifiability issues).
 - `covariate_constraints::Symbol`: Controls covariate parameter sharing for phase-type
     hazards (only for `family == :pt`, default: `:homogeneous`).
     - `:homogeneous` (default): Destination-specific shared effects. All phases share the same
@@ -119,8 +119,8 @@ function Hazard(
     
     if family_key == :pt
         n_phases >= 1 || throw(ArgumentError("n_phases must be ≥ 1, got $n_phases"))
-        coxian_structure in (:unstructured, :sctp, :sctp_increasing, :sctp_decreasing) || 
-            throw(ArgumentError("coxian_structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :$coxian_structure"))
+        coxian_structure in (:unstructured, :sctp) || 
+            throw(ArgumentError("coxian_structure must be :unstructured or :sctp, got :$coxian_structure"))
         covariate_constraints in (:unstructured, :homogeneous) || throw(ArgumentError("covariate_constraints must be :unstructured or :homogeneous, got :$covariate_constraints"))
     end
     

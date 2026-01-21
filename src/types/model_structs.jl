@@ -287,10 +287,34 @@ mutable struct MultistateModel <: MultistateProcess
     SubjectWeights::Vector{Float64}
     ObservationWeights::Union{Nothing, Vector{Float64}}
     CensoringPatterns::Matrix{Float64}
-    markovsurrogate::Union{Nothing, MarkovSurrogate}
-    phasetype_surrogate::Union{Nothing, AbstractSurrogate}  # Phase-type FFBS surrogate (PhaseTypeSurrogate, built when surrogate=:phasetype)
+    surrogate::Union{Nothing, AbstractSurrogate}  # MCEM importance sampling surrogate (MarkovSurrogate or PhaseTypeSurrogate)
     modelcall::NamedTuple
     phasetype_expansion::Union{Nothing, PhaseTypeExpansion}  # Phase-type expansion metadata
+end
+
+# Backward compatibility accessors for old surrogate fields (DEPRECATED - use .surrogate instead)
+function Base.getproperty(m::MultistateModel, s::Symbol)
+    if s === :markovsurrogate
+        surr = getfield(m, :surrogate)
+        return surr isa MarkovSurrogate ? surr : nothing
+    elseif s === :phasetype_surrogate
+        surr = getfield(m, :surrogate)
+        return surr isa PhaseTypeSurrogate ? surr : nothing
+    else
+        return getfield(m, s)
+    end
+end
+
+function Base.setproperty!(m::MultistateModel, s::Symbol, v)
+    if s === :markovsurrogate
+        # Setting markovsurrogate sets the unified surrogate field
+        setfield!(m, :surrogate, v)
+    elseif s === :phasetype_surrogate
+        # Setting phasetype_surrogate sets the unified surrogate field
+        setfield!(m, :surrogate, v)
+    else
+        setfield!(m, s, v)
+    end
 end
 
 """
@@ -321,12 +345,34 @@ mutable struct MultistateModelFitted <: MultistateProcess
     SubjectWeights::Vector{Float64}
     ObservationWeights::Union{Nothing, Vector{Float64}}
     CensoringPatterns::Matrix{Float64}
-    markovsurrogate::Union{Nothing, MarkovSurrogate}
-    phasetype_surrogate::Union{Nothing, AbstractSurrogate}  # Phase-type FFBS surrogate (PhaseTypeSurrogate)
+    surrogate::Union{Nothing, AbstractSurrogate}  # MCEM importance sampling surrogate (MarkovSurrogate or PhaseTypeSurrogate)
     ConvergenceRecords::Union{Nothing, NamedTuple, Optim.OptimizationResults, Optim.MultivariateOptimizationResults}
     ProposedPaths::Union{Nothing, NamedTuple}
     modelcall::NamedTuple
     phasetype_expansion::Union{Nothing, PhaseTypeExpansion}  # Phase-type expansion metadata
     smoothing_parameters::Union{Nothing, Vector{Float64}}    # Selected λ from penalized fitting
     edf::Union{Nothing, NamedTuple}                          # Effective degrees of freedom
+end
+
+# Backward compatibility accessors for old surrogate fields (DEPRECATED - use .surrogate instead)
+function Base.getproperty(m::MultistateModelFitted, s::Symbol)
+    if s === :markovsurrogate
+        surr = getfield(m, :surrogate)
+        return surr isa MarkovSurrogate ? surr : nothing
+    elseif s === :phasetype_surrogate
+        surr = getfield(m, :surrogate)
+        return surr isa PhaseTypeSurrogate ? surr : nothing
+    else
+        return getfield(m, s)
+    end
+end
+
+function Base.setproperty!(m::MultistateModelFitted, s::Symbol, v)
+    if s === :markovsurrogate
+        setfield!(m, :surrogate, v)
+    elseif s === :phasetype_surrogate
+        setfield!(m, :surrogate, v)
+    else
+        setfield!(m, s, v)
+    end
 end

@@ -83,8 +83,8 @@ struct ProposalConfig
         end
         
         # Validate structure
-        structure in (:unstructured, :sctp, :sctp_increasing, :sctp_decreasing) ||
-            throw(ArgumentError("structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :$structure"))
+        structure in (:unstructured, :erlang, :sctp, :sctp_increasing, :sctp_decreasing) ||
+            throw(ArgumentError("structure must be :unstructured, :erlang, :sctp, :sctp_increasing, or :sctp_decreasing, got :$structure"))
         
         # Validate max_phases
         max_phases >= 1 || throw(ArgumentError("max_phases must be >= 1"))
@@ -242,7 +242,7 @@ Configuration for phase-type surrogate model.
 
 # Fields
 - `n_phases::Union{Symbol,Int,Dict{Int,Int}}`: `:auto`, `:heuristic`, `Int`, or `Dict{Int,Int}`
-- `structure::Symbol`: `:sctp` (default), `:sctp_increasing`, `:sctp_decreasing`, or `:unstructured`
+- `structure::Symbol`: `:sctp` (default), `:sctp_increasing`, `:sctp_decreasing`, `:erlang`, or `:unstructured`
 - `constraints::Bool`: Apply Titman-Sharples constraints (default: true)
 - `max_phases::Int`: Max for `:auto` BIC selection (default: 5)
 
@@ -286,8 +286,8 @@ struct PhaseTypeConfig
             all(k >= 1 for k in keys(n_phases)) || 
                 throw(ArgumentError("all n_phases keys (state indices) must be >= 1"))
         end
-        structure in (:unstructured, :sctp, :sctp_increasing, :sctp_decreasing) ||
-            throw(ArgumentError("structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :$structure"))
+        structure in (:unstructured, :erlang, :sctp, :sctp_increasing, :sctp_decreasing) ||
+            throw(ArgumentError("structure must be :unstructured, :erlang, :sctp, :sctp_increasing, or :sctp_decreasing, got :$structure"))
         max_phases >= 1 || throw(ArgumentError("max_phases must be >= 1"))
         
         new(n_phases, structure, constraints, max_phases)
@@ -363,15 +363,19 @@ end
 """
     PhaseTypeSurrogate
 
-Phase-type augmented surrogate for importance sampling.
+Phase-type augmented surrogate for importance sampling. Self-contained with all
+information needed for MCEM importance sampling.
 
 # Fields
 - `phasetype_dists::Dict{Int,PhaseTypeDistribution}`: PH per observed state
 - `n_observed_states::Int`, `n_expanded_states::Int`: State counts
 - `state_to_phases::Vector{UnitRange{Int}}`, `phase_to_state::Vector{Int}`: Mappings
-- `expanded_Q::Matrix{Float64}`: Expanded intensity matrix
+- `expanded_Q::Matrix{Float64}`: Expanded intensity matrix (baseline rates)
 - `config::PhaseTypeConfig`: Configuration
 - `fitted::Bool`: Whether the surrogate has been fitted (required by AbstractSurrogate)
+- `fitted_rates::Union{Nothing, Dict{Symbol, Any}}`: MLE-fitted rates from `_fit_phasetype_mle`.
+- `hazards::Vector{<:_Hazard}`: Exponential hazards with covariate definitions
+- `parameters::NamedTuple`: Fitted parameters including covariate coefficients (β)
 
 See also: [`PhaseTypeConfig`](@ref), [`build_phasetype_surrogate`](@ref), [`AbstractSurrogate`](@ref)
 """
@@ -384,12 +388,29 @@ struct PhaseTypeSurrogate <: AbstractSurrogate
     expanded_Q::Matrix{Float64}
     config::PhaseTypeConfig
     fitted::Bool
+    fitted_rates::Union{Nothing, Dict{Symbol, Any}}
+    hazards::Vector{<:_Hazard}  # Exponential hazards with covariate info
+    parameters::NamedTuple      # Fitted parameters (baseline rates + covariate β)
     
-    # Default constructor with fitted=true (phase-type surrogates are built from fitted Markov)
+    # Production constructor with hazards and parameters (from _build_phasetype_from_markov)
+    function PhaseTypeSurrogate(phasetype_dists, n_observed, n_expanded, 
+                                 state_to_phases, phase_to_state, expanded_Q, config,
+                                 hazards::Vector{<:_Hazard}, parameters::NamedTuple;
+                                 fitted::Bool=true,
+                                 fitted_rates::Union{Nothing, Dict{Symbol, Any}}=nothing)
+        new(phasetype_dists, n_observed, n_expanded, state_to_phases, 
+            phase_to_state, expanded_Q, config, fitted, fitted_rates, hazards, parameters)
+    end
+    
+    # Testing constructor without hazards/parameters (CANNOT be used for MCEM with covariates)
     function PhaseTypeSurrogate(phasetype_dists, n_observed, n_expanded, 
                                  state_to_phases, phase_to_state, expanded_Q, config;
-                                 fitted::Bool=true)
+                                 fitted::Bool=true,
+                                 fitted_rates::Union{Nothing, Dict{Symbol, Any}}=nothing)
+        # Create empty hazards/parameters for testing
+        empty_hazards = _MarkovHazard[]
+        empty_params = (;)
         new(phasetype_dists, n_observed, n_expanded, state_to_phases, 
-            phase_to_state, expanded_Q, config, fitted)
+            phase_to_state, expanded_Q, config, fitted, fitted_rates, empty_hazards, empty_params)
     end
 end

@@ -227,15 +227,15 @@ end
 function _assemble_model(mode::Symbol,
                          process::Symbol,
                          components::NamedTuple,
-                         surrogate::Union{Nothing, MarkovSurrogate},
+                         surrogate::Union{Nothing, AbstractSurrogate},
                          modelcall;
-                         phasetype_surrogate::Union{Nothing, AbstractSurrogate} = nothing,
                          phasetype_expansion::Union{Nothing, PhaseTypeExpansion} = nothing)
     # Generate parameter bounds at model construction time
     # This ensures bounds are always available for fitting and parameter validation
     bounds = _generate_package_bounds_from_components(components.parameters.flat, components.hazards, components.hazkeys)
     
     # Single MultistateModel struct handles all cases
+    # The surrogate field holds either MarkovSurrogate or PhaseTypeSurrogate
     return MultistateModel(
         components.data,
         components.parameters,
@@ -249,8 +249,7 @@ function _assemble_model(mode::Symbol,
         components.SubjectWeights,
         components.ObservationWeights,
         components.CensoringPatterns,
-        surrogate,
-        phasetype_surrogate,
+        surrogate,  # Single unified surrogate field
         modelcall,
         phasetype_expansion,
     )

@@ -208,14 +208,6 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         println("Using adaptive SIR (will switch to $sir_target_method when cost-effective).\n")
     end
 
-    # Resolve proposal configuration
-    proposal_config = resolve_proposal_config(proposal, model)
-    use_phasetype = proposal_config.type === :phasetype
-    
-    if verbose && use_phasetype
-        println("Using phase-type proposal for MCEM importance sampling.\n")
-    end
-
     # copy of data
     data_original = deepcopy(model.data)
 
@@ -275,9 +267,6 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
 
     # number of subjects
     nsubj = length(model.subjectindices)
-
-    # identify absorbing states
-    absorbingstates = findall(map(x -> all(x .== 0), eachrow(model.tmat)))
 
     # extract and initialize model parameters
     # Phase 3: Use ParameterHandling.jl flat parameters (natural scale since v0.3.0)
@@ -345,13 +334,6 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     adaptive_sir_switch_iter = 0            # Iteration when switch occurred
     adaptive_sir_cumul_path_ratio = 0.0     # Cumulative path ratio (weighted by optim iters)
     adaptive_sir_cumul_optim_iters = 0      # Cumulative optimizer iterations
-    
-    # make fbmats if necessary
-    if any(model.data.obstype .> 2)
-        fbmats = build_fbmats(model)
-    else
-        fbmats = nothing
-    end
 
     # containers for traces
     mll_trace = Vector{Float64}() # marginal loglikelihood
@@ -360,127 +342,67 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # Phase 3: Use ParameterHandling.jl flat parameter length
     parameters_trace = ElasticArray{Float64, 2}(undef, length(get_parameters_flat(model)), 0) # parameter estimates
 
-    # Require a pre-built Markov surrogate for MCEM
-    # Users should call set_surrogate!(model) or use surrogate=:markov in multistatemodel() beforehand
-    if isnothing(model.markovsurrogate)
-        throw(ArgumentError("MCEM requires a Markov surrogate. Call `set_surrogate!(model)` or use `surrogate=:markov` in `multistatemodel()` before fitting."))
+    # ==========================================================================
+    # Surrogate Validation
+    # ==========================================================================
+    # MCEM requires a fitted surrogate. The surrogate should be created and fitted
+    # either at model construction time (surrogate=:markov/:phasetype in multistatemodel())
+    # or explicitly via initialize_surrogate!(model) before calling fit().
+    #
+    # fit() does NOT create or fit surrogates - this is by design to ensure clear
+    # ownership and avoid unexpected computation during fitting.
+    # ==========================================================================
+    
+    if isnothing(model.surrogate)
+        throw(ArgumentError(
+            "MCEM requires a surrogate for importance sampling.\n\n" *
+            "Solutions:\n" *
+            "  1. Create model with surrogate: multistatemodel(...; surrogate=:markov)\n" *
+            "  2. Initialize surrogate explicitly: initialize_surrogate!(model)\n\n" *
+            "See ?initialize_surrogate! for options (type=:markov/:phasetype, method=:mle/:heuristic)."))
     end
     
-    # Check if surrogate needs to be fitted (not yet fitted)
-    # This happens when surrogate=:markov is used with fit_surrogate=false
-    if !model.markovsurrogate.fitted
-        if verbose
-            println("Markov surrogate not yet fitted. Fitting via MLE...")
-        end
-        # Fit the surrogate via set_surrogate! with MLE method
-        set_surrogate!(model; type=:markov, method=:mle, verbose=verbose)
+    if !model.surrogate.fitted
+        throw(ArgumentError(
+            "Model has a surrogate but it is not fitted.\n\n" *
+            "Solution: Call initialize_surrogate!(model; method=:mle) to fit the surrogate.\n\n" *
+            "Note: If you used fit_surrogate=false in multistatemodel(), you must fit " *
+            "the surrogate explicitly before calling fit()."))
     end
     
-    markov_surrogate = model.markovsurrogate
+    # Get surrogate from model - it's already fitted at this point
+    # Surrogates are self-contained: MarkovSurrogate or PhaseTypeSurrogate
+    surrogate = model.surrogate
+    
     if verbose
-        println("Using model's Markov surrogate for MCEM.\n")
+        surrogate_name = surrogate isa PhaseTypeSurrogate ? "phase-type" : "Markov"
+        println("Using $surrogate_name surrogate for MCEM importance sampling.\n")
     end
 
-    # Build phase-type surrogate if requested
-    phasetype_surrogate = nothing
-    tpm_book_ph = nothing
-    hazmat_book_ph = nothing
-    fbmats_ph = nothing
-    emat_ph = nothing
-    schur_cache_ph = nothing  # Cached Schur decompositions for efficient TPM computation
+    # ==========================================================================
+    # Build MCEM Infrastructure (Phase 4 refactor)
+    # ==========================================================================
+    # All surrogate-specific infrastructure is now built via dispatch on surrogate type.
+    # This eliminates ~100 lines of conditional branching and duplicate variables.
+    # See infrastructure.jl for MCEMInfrastructure struct and builders.
+    infra = build_mcem_infrastructure(model, surrogate; verbose=verbose)
     
-    if use_phasetype
-        phasetype_surrogate = _build_phasetype_from_markov(model, markov_surrogate; 
-                                                       config=proposal_config, verbose=verbose)
-    end
-    
-    # Use Markov surrogate for compatibility (phase-type uses it for sampling infrastructure)
-    surrogate = markov_surrogate
+    # Create containers NamedTuple for DrawSamplePaths!
+    containers = (
+        samplepaths = samplepaths,
+        loglik_surrog = loglik_surrog,
+        loglik_target_prop = loglik_target_prop,
+        loglik_target_cur = loglik_target_cur,
+        _logImportanceWeights = _logImportanceWeights,
+        ImportanceWeights = ImportanceWeights,
+        ess_cur = ess_cur,
+        psis_pareto_k = psis_pareto_k
+    )
 
-     # containers for bookkeeping TPMs
-     books = build_tpm_mapping(model.data)    
-
-     # transition probability objects for Markov surrogate
-     hazmat_book_surrogate = build_hazmat_book(Float64, model.tmat, books[1])
-     tpm_book_surrogate = build_tpm_book(Float64, model.tmat, books[1])
- 
-     # allocate memory for matrix exponential
-     cache = ExponentialUtilities.alloc_mem(similar(hazmat_book_surrogate[1]), ExpMethodGeneric())
-
-    # Solve Kolmogorov equations for TPMs
-    # Get natural-scale surrogate parameters for hazard evaluation (family-aware)
-    surrogate_pars = get_hazard_params(surrogate.parameters, surrogate.hazards)
-    for t in eachindex(books[1])
-        # compute the transition intensity matrix
-        compute_hazmat!(hazmat_book_surrogate[t], surrogate_pars, surrogate.hazards, books[1][t], model.data)
-        # compute transition probability matrices
-        compute_tmat!(tpm_book_surrogate[t], hazmat_book_surrogate[t], books[1][t], cache)
-    end
-
-    # Build phase-type infrastructure if using phase-type proposals
-    # For exact observations, we need to expand the data to properly express
-    # phase uncertainty during sojourn times
-    expanded_ph_data = nothing
-    ph_censoring_patterns = nothing
-    ph_original_row_map = nothing
-    ph_subjectindices = nothing
-    expanded_ph_tpm_map = nothing  # tpm_map for expanded data
-    
-    if use_phasetype
-        # Check if data needs expansion (has exact observations)
-        if needs_data_expansion_for_phasetype(model.data)
-            n_states = size(model.tmat, 1)
-            expansion_result = expand_data_for_phasetype(model.data, n_states)
-            expanded_ph_data = expansion_result.expanded_data
-            ph_censoring_patterns = expansion_result.censoring_patterns
-            ph_original_row_map = expansion_result.original_row_map
-            ph_subjectindices = compute_expanded_subject_indices(expanded_ph_data)
-            
-            if verbose
-                n_orig = nrow(model.data)
-                n_exp = nrow(expanded_ph_data)
-                println("  Expanded data for phase-type: $n_orig → $n_exp rows")
-            end
-        end
-        
-        # Build TPM book using original or expanded data
-        data_for_ph = isnothing(expanded_ph_data) ? model.data : expanded_ph_data
-        
-        # Rebuild books for expanded data if needed
-        if !isnothing(expanded_ph_data)
-            books_ph = build_tpm_mapping(expanded_ph_data)
-            expanded_ph_tpm_map = books_ph[2]  # Save tpm_map for sampling
-            tpm_book_ph, hazmat_book_ph = build_phasetype_tpm_book(phasetype_surrogate, markov_surrogate, books_ph, expanded_ph_data)
-        else
-            tpm_book_ph, hazmat_book_ph = build_phasetype_tpm_book(phasetype_surrogate, markov_surrogate, books, model.data)
-        end
-        
-        # Pre-compute Schur decompositions for each covariate-specific Q matrix
-        # This provides significant speedup when computing TPMs for sampled paths
-        schur_cache_ph = [CachedSchurDecomposition(Q) for Q in hazmat_book_ph]
-        
-        # Build fbmats with correct sizes (using expanded subject indices if available)
-        subj_inds_for_ph = isnothing(ph_subjectindices) ? model.subjectindices : ph_subjectindices
-        fbmats_ph = build_fbmats_phasetype_with_indices(subj_inds_for_ph, phasetype_surrogate)
-        
-        emat_ph = build_phasetype_emat_expanded(model, phasetype_surrogate;
-                                                 expanded_data = expanded_ph_data,
-                                                 censoring_patterns = ph_censoring_patterns)
-    end
-
-    # compute normalizing constant of proposal distribution
-    # For Markov proposal: this is the log-likelihood under the Markov surrogate
-    # For phase-type proposal: compute marginal likelihood via forward algorithm
-    #   This is r(Y|θ') in the importance sampling formula:
-    #   log f̂(Y|θ) = log r(Y|θ') + Σᵢ log(mean(νᵢ))
-    if use_phasetype
-        NormConstantProposal = compute_phasetype_marginal_loglik(
-            model, phasetype_surrogate, emat_ph;
-            expanded_data = expanded_ph_data,
-            expanded_subjectindices = ph_subjectindices)
-    else
-        NormConstantProposal = compute_markov_marginal_loglik(model, markov_surrogate)
-    end
+    # Compute normalizing constant of proposal distribution via dispatch
+    # For Markov: log-likelihood under Markov surrogate
+    # For PhaseType: marginal likelihood via forward algorithm on expanded space
+    NormConstantProposal = compute_normalizing_constant(model, infra)
 
     # draw sample paths until the target ess is reached 
     if verbose  println("Initializing sample paths ...\n") end
@@ -489,38 +411,12 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # After sampling, we'll resample ess_target indices from the pool
     sampling_target = use_sir ? sir_pool_target : ess_target
     
-    DrawSamplePaths!(model; 
-        ess_target = sampling_target, 
-        ess_cur = ess_cur, 
+    # Draw sample paths using infrastructure-based dispatch (Phase 4 refactor)
+    DrawSamplePaths!(model, infra, containers;
+        ess_target = sampling_target,
         max_sampling_effort = max_sampling_effort,
-        samplepaths = samplepaths, 
-        loglik_surrog = loglik_surrog, 
-        loglik_target_prop = loglik_target_prop, 
-        loglik_target_cur = loglik_target_cur, 
-        _logImportanceWeights = _logImportanceWeights, 
-        ImportanceWeights = ImportanceWeights, 
-        tpm_book_surrogate = tpm_book_surrogate, 
-        hazmat_book_surrogate = hazmat_book_surrogate, 
-        books = books, 
-        npaths_additional = npaths_additional, 
-        params_cur = params_cur, 
-        surrogate = surrogate, 
-        psis_pareto_k = psis_pareto_k,
-        fbmats = fbmats,
-        absorbingstates = absorbingstates,
-        # Phase-type infrastructure (nothing if not using)
-        phasetype_surrogate = phasetype_surrogate,
-        tpm_book_ph = tpm_book_ph,
-        hazmat_book_ph = hazmat_book_ph,
-        fbmats_ph = fbmats_ph,
-        emat_ph = emat_ph,
-        # Expanded data infrastructure (nothing if not using/not needed)
-        expanded_ph_data = expanded_ph_data,
-        expanded_ph_subjectindices = ph_subjectindices,
-        expanded_ph_tpm_map = expanded_ph_tpm_map,
-        ph_original_row_map = ph_original_row_map,
-        # Cached Schur decompositions for efficient TPM computation
-        schur_cache_ph = schur_cache_ph)
+        npaths_additional = npaths_additional,
+        params_cur = params_cur)
     
     # Apply SIR: resample indices from pool and compute uniform weights
     if use_sir
@@ -728,7 +624,11 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         # Update parameters, marginal log likelihood, target loglik
         params_cur        = deepcopy(params_prop)
         mll_cur           = deepcopy(mll_prop)
-        loglik_target_cur = deepcopy(loglik_target_prop)
+        # Copy proposed log-likelihoods into current (preserves container reference)
+        # Note: Array sizes should match since both were updated by DrawSamplePaths!
+        for i in eachindex(loglik_target_cur)
+            copyto!(loglik_target_cur[i], loglik_target_prop[i])
+        end
 
         # increment log importance weights, importance weights, effective sample size and pareto shape parameter
         ComputeImportanceWeightsESS!(loglik_target_cur, loglik_surrog, _logImportanceWeights, ImportanceWeights, ess_cur, ess_target, psis_pareto_k)
@@ -877,38 +777,12 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         # For SIR: sample to pool_target instead of ess_target
         sampling_target = use_sir ? sir_pool_target : ess_target
         
-        DrawSamplePaths!(model; 
-            ess_target = sampling_target, 
-            ess_cur = ess_cur, 
+        # Draw sample paths using infrastructure-based dispatch (Phase 4 refactor)
+        DrawSamplePaths!(model, infra, containers;
+            ess_target = sampling_target,
             max_sampling_effort = max_sampling_effort,
-            samplepaths = samplepaths, 
-            loglik_surrog = loglik_surrog, 
-            loglik_target_prop = loglik_target_prop, 
-            loglik_target_cur = loglik_target_cur, 
-            _logImportanceWeights = _logImportanceWeights, 
-            ImportanceWeights = ImportanceWeights,   
-            tpm_book_surrogate = tpm_book_surrogate,   
-            hazmat_book_surrogate = hazmat_book_surrogate, 
-            books = books, 
-            npaths_additional = npaths_additional, 
-            params_cur = params_cur, 
-            surrogate = surrogate,
-            psis_pareto_k = psis_pareto_k,
-            fbmats = fbmats,
-            absorbingstates = absorbingstates,
-            # Phase-type infrastructure (nothing if not using)
-            phasetype_surrogate = phasetype_surrogate,
-            tpm_book_ph = tpm_book_ph,
-            hazmat_book_ph = hazmat_book_ph,
-            fbmats_ph = fbmats_ph,
-            emat_ph = emat_ph,
-            # Expanded data infrastructure (nothing if not using/not needed)
-            expanded_ph_data = expanded_ph_data,
-            expanded_ph_subjectindices = ph_subjectindices,
-            expanded_ph_tpm_map = expanded_ph_tpm_map,
-            ph_original_row_map = ph_original_row_map,
-            # Cached Schur decompositions for efficient TPM computation
-            schur_cache_ph = schur_cache_ph)
+            npaths_additional = npaths_additional,
+            params_cur = params_cur)
         
         # SIR: Resample after pool expansion
         if use_sir
@@ -1198,6 +1072,9 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # Skip validation since optimizer should have respected bounds
     parameters_fitted = rebuild_parameters(fitted_params, model; validate_bounds=false)
 
+    # The surrogate is already set from model.surrogate at MCEM start
+    # (can be MarkovSurrogate or PhaseTypeSurrogate)
+
     # wrap results
     model_fitted = MultistateModelFitted(
         data_original,
@@ -1217,8 +1094,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         model.SubjectWeights,
         model.ObservationWeights,
         model.CensoringPatterns,
-        surrogate,
-        model.phasetype_surrogate,  # phasetype_surrogate
+        surrogate,  # Single unified surrogate field (from model.surrogate)
         ConvergenceRecords,
         ProposedPaths,
         model.modelcall,

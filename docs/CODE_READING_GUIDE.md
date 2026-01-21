@@ -128,11 +128,62 @@ The optimization parameters `ests` are non-negative increments; the spline coeff
 | `src/inference/fit_common.jl` | Main interface, dispatch |
 | `src/inference/fit_exact.jl` | Exact observation fitting |
 | `src/inference/fit_markov.jl` | Markov panel fitting |
-| `src/inference/fit_mcem.jl` | Semi-Markov MCEM fitting |
+| `src/inference/fit_mcem.jl` | Semi-Markov MCEM fitting (single-flow, surrogate-agnostic) |
 | `src/inference/mcem.jl` | MCEM algorithm core |
 | `src/inference/sampling.jl` | Path sampling for MCEM |
 | `src/inference/smoothing_selection.jl` | PIJCV smoothing parameter selection |
 | `src/inference/sir.jl` | Sampling importance resampling |
+
+### MCEM Infrastructure (NEW)
+| File | Purpose |
+|------|---------|
+| `src/mcem/infrastructure.jl` | `MCEMInfrastructure{S}` struct and `build_mcem_infrastructure()` dispatch |
+| `src/mcem/path_likelihood.jl` | `compute_normalizing_constant()`, `compute_surrogate_loglik()`, `collapse_path()` |
+
+### MCEM Architecture
+
+The MCEM algorithm uses a **surrogate-agnostic** design where all differences between `MarkovSurrogate` and `PhaseTypeSurrogate` are handled via method dispatch on specialized subroutines.
+
+#### Key Principle
+The sampling algorithm is the SAME (FFBS → ECCTMC) regardless of surrogate type — phase-type models are still Markovian internally.
+
+#### MCEMInfrastructure Struct
+```julia
+MCEMInfrastructure{S<:AbstractSurrogate}
+```
+Contains all precomputed objects needed for MCEM:
+- `tpm_book`, `hazmat_book` — Transition probability/hazard matrices
+- `fbmats` — Forward-backward matrices for FFBS
+- `emat` — Emission matrix
+- `books` — TPM bookkeeping (times, map)
+- `data` — DataFrame (may be expanded for PhaseType)
+- `subjectindices` — Per-subject row indices
+- `surrogate` — The surrogate model instance
+- `schur_cache` — For efficient matrix exponentials (PhaseType)
+- `original_row_map` — Maps expanded → original rows (PhaseType)
+- `absorbingstates` — Absorbing state indices
+
+#### Dispatch Pattern
+```julia
+# Build infrastructure (dispatches on surrogate type):
+infra = build_mcem_infrastructure(model, surrogate)
+
+# Compute normalizing constant (dispatches on infra type):
+logZ = compute_normalizing_constant(model, infra)
+
+# Compute surrogate path log-likelihood:
+logq = compute_surrogate_loglik(path, model, infra)
+
+# Collapse expanded path to observed states (PhaseType only):
+collapsed = collapse_path(expanded_path, infra)
+```
+
+| Operation | MarkovSurrogate | PhaseTypeSurrogate |
+|-----------|-----------------|---------------------|
+| `build_mcem_infrastructure` | Original state space | Expanded state space |
+| `compute_normalizing_constant` | Markov marginal loglik | PhaseType forward algorithm |
+| `compute_surrogate_loglik` | CTMC path density | Marginal via forward algorithm |
+| `collapse_path` | Identity (no-op) | Expanded → observed states |
 
 ### Likelihood Files
 | File | Purpose |
@@ -256,6 +307,16 @@ register_hazard_family!(:wei, _build_weibull_hazard)
 - `obstype=2`: State observed at discrete times (panel)
 - `obstype≥3`: Censoring patterns
 
+### MCEM Surrogate-Agnostic Design
+All `MarkovSurrogate` vs `PhaseTypeSurrogate` differences are handled via dispatch:
+```julia
+# Main loop is ONE flow regardless of surrogate type:
+infra = build_mcem_infrastructure(model, surrogate)  # Dispatches
+logZ = compute_normalizing_constant(model, infra)    # Dispatches
+# ... sampling uses same FFBS → ECCTMC algorithm
+logq = compute_surrogate_loglik(path, model, infra)  # Dispatches
+```
+
 ---
 
 ## 9. Actual File Inventory
@@ -294,6 +355,10 @@ register_hazard_family!(:wei, _build_weibull_hazard)
 ### src/inference/
 - `fit_common.jl`, `fit_exact.jl`, `fit_markov.jl`, `fit_mcem.jl`, `mcem.jl`, `sampling.jl`, `smoothing_selection.jl`, `sir.jl`
 
+### src/mcem/
+- `infrastructure.jl` — `MCEMInfrastructure` struct and `build_mcem_infrastructure()` dispatch
+- `path_likelihood.jl` — `compute_normalizing_constant()`, `compute_surrogate_loglik()`, `collapse_path()` dispatch
+
 ### src/phasetype/
 - `types.jl`, `surrogate.jl`, `expansion_mappings.jl`, `expansion_hazards.jl`, `expansion_constraints.jl`, `expansion_model.jl`, `expansion_loglik.jl`, `expansion_ffbs_data.jl`
 
@@ -321,4 +386,5 @@ Tests are in `test/` (main suite) and `MultistateModelsTests/` (extended):
 
 ---
 
-*Updated: January 7, 2026*
+*Updated: January 21, 2026*  
+*Note: MCEM refactored to surrogate-agnostic design with dispatch-based architecture.*

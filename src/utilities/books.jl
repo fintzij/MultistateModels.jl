@@ -165,35 +165,8 @@ function collapse_data(data::DataFrame; SubjectWeights::Vector{Float64} = ones(F
     return DataCollapsed, SubjectWeightsCollapsed
 end
 
-"""
-    initialize_surrogate!(model::MultistateProcess; method=:mle, surrogate_parameters=nothing, surrogate_constraints=nothing, verbose=true)
-
-Populate the field for the Markov surrogate in semi-Markov models.
-Fits a new surrogate and stores it in `model.markovsurrogate`.
-
-# Arguments
-- `model`: Multistate model to initialize
-- `method::Symbol = :mle`: Fitting method (`:mle` or `:heuristic`)
-- `surrogate_parameters = nothing`: Optional fixed parameters (skips fitting)
-- `surrogate_constraints = nothing`: Optional constraints for MLE fitting
-- `verbose = true`: Print progress information
-"""
-function initialize_surrogate!(model::MultistateProcess; 
-    method::Symbol = :mle,
-    surrogate_parameters = nothing, 
-    surrogate_constraints = nothing, 
-    verbose = true)
-
-    # fit_surrogate now always returns MarkovSurrogate
-    surrogate = fit_surrogate(model; 
-        method = method,
-        surrogate_parameters = surrogate_parameters, 
-        surrogate_constraints = surrogate_constraints, 
-        verbose = verbose)
-
-    # Store the surrogate directly (already a MarkovSurrogate)
-    model.markovsurrogate = surrogate
-end
+# NOTE: initialize_surrogate! is now defined in surrogate/markov.jl
+# See that file for the unified entry point for surrogate creation.
 
 """
     make_subjdat(path::SamplePath, subjectdata::SubDataFrame)

@@ -50,11 +50,10 @@ will insert the intercept-only design automatically as described in `Hazard`'s d
   3 phases and state 2 has 2 phases. If a state has `:pt` hazards but is not in the dict, an error is thrown.
   If `n_phases[s] == 1`, the phase-type is coerced to exponential internally.
 - `coxian_structure::Symbol = :sctp`: constraint structure for phase-type hazards.
-  - `:sctp` (default): SCTP (Stationary Conditional Transition Probability) constraint only.
-    Ensures P(r→s | transition out of r) is constant over time.
-  - `:sctp_decreasing`: SCTP plus eigenvalue ordering ν₁ ≥ ν₂ ≥ ... ≥ νₙ (early exits more likely).
-  - `:sctp_increasing`: SCTP plus eigenvalue ordering ν₁ ≤ ν₂ ≤ ... ≤ νₙ (late exits more likely).
-  - `:unstructured`: no constraints on progression and absorption rates
+  - `:sctp` (default): SCTP (Stationary Conditional Transition Probability) constraint with
+    eigenvalue ordering ν₁ ≤ ν₂ ≤ ... ≤ νₙ. Provides identifiability for phase-type models.
+  - `:unstructured`: no constraints on progression and absorption rates (not recommended,
+    may have identifiability issues).
 - `ordering_at::Union{Symbol, NamedTuple} = :mean`: where to enforce eigenvalue ordering constraints.
   - `:mean` (default): enforce ordering at the mean covariate values (computed from data).
     This provides a more interpretable reference point when covariates are present.
@@ -109,7 +108,7 @@ model = multistatemodel(h12, h13; data = df, n_phases = Dict(1 => 3), coxian_str
 
 # Phase-type model with eigenvalue ordering at mean covariate values
 model = multistatemodel(h12, h13; data = df, n_phases = Dict(1 => 3), 
-                        coxian_structure = :sctp_decreasing, ordering_at = :mean)
+                        coxian_structure = :sctp, ordering_at = :mean)
 
 # Phase-type model with eigenvalue ordering at explicit covariate values
 model = multistatemodel(h12, h13; data = df, n_phases = Dict(1 => 3),
@@ -139,8 +138,8 @@ function multistatemodel(hazards::HazardFunction...;
     end
     
     # Validate coxian_structure
-    if coxian_structure ∉ (:unstructured, :sctp, :sctp_increasing, :sctp_decreasing)
-        throw(ArgumentError("coxian_structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :$coxian_structure"))
+    if coxian_structure ∉ (:unstructured, :sctp)
+        throw(ArgumentError("coxian_structure must be :unstructured or :sctp, got :$coxian_structure"))
     end
     
     # Validate ordering_at
@@ -207,8 +206,6 @@ function multistatemodel(hazards::HazardFunction...;
 
     # Resolve :auto surrogate option based on hazard types
     # - :auto → :markov (exponential) or :phasetype (non-exponential)
-    # - :markov/:phasetype both build MarkovSurrogate at construction
-    # - PhaseTypeSurrogate is also built at construction when resolved_surrogate == :phasetype
     resolved_surrogate = if surrogate === :auto
         needs_phasetype_proposal(_hazards) ? :phasetype : :markov
     else
@@ -216,27 +213,18 @@ function multistatemodel(hazards::HazardFunction...;
     end
 
     # Build surrogate if requested (initially unfitted)
-    # Both :markov and :phasetype build MarkovSurrogate at construction time
+    # The surrogate field can hold either MarkovSurrogate or PhaseTypeSurrogate
+    model_surrogate::Union{Nothing, AbstractSurrogate} = nothing
     if resolved_surrogate in (:markov, :phasetype)
+        # Always build the Markov surrogate first (needed for both types)
+        # The MarkovSurrogate stores the exponential hazards and covariate coefficients
         surrogate_haz, surrogate_pars_ph, _ = build_hazards(hazards...; data = data, surrogate = true)
         markov_surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars_ph; fitted=false)
-    else
-        markov_surrogate = nothing
-    end
-
-    # Build PhaseTypeSurrogate at construction time when requested
-    # This is built unfitted and will be updated from the MarkovSurrogate rates at fitting time
-    phasetype_surr = nothing
-    if resolved_surrogate == :phasetype
-        # Convert surrogate_n_phases to PhaseTypeConfig
-        ph_config = PhaseTypeConfig(
-            n_phases = surrogate_n_phases,
-            structure = coxian_structure
-        )
-        phasetype_surr = build_phasetype_surrogate(tmat, ph_config; 
-            data = data, 
-            hazards = _hazards,
-            verbose = verbose)
+        model_surrogate = markov_surrogate  # Default to Markov
+        
+        # For :phasetype, we need to fit the Markov surrogate first, then build PhaseType from it
+        # This is deferred to the fit_surrogate step below since we need fitted rates
+        # For now, just store the Markov surrogate - initialize_surrogate! will handle conversion
     end
 
     components = (
@@ -256,8 +244,7 @@ function multistatemodel(hazards::HazardFunction...;
     mode = _observation_mode(data)
     process = _process_class(_hazards)
 
-    model = _assemble_model(mode, process, components, markov_surrogate, modelcall;
-                            phasetype_surrogate = phasetype_surr)
+    model = _assemble_model(mode, process, components, model_surrogate, modelcall)
     
     # Initialize parameters (default: true)
     # Uses :auto method which selects :crude for Markov/phase-type, :surrogate for semi-Markov
@@ -266,15 +253,18 @@ function multistatemodel(hazards::HazardFunction...;
     end
     
     # Fit surrogate at model creation time (default: true)
-    # Both :markov and :phasetype resolved options trigger surrogate fitting
     if fit_surrogate && resolved_surrogate in (:markov, :phasetype)
         if verbose
-            println("Fitting Markov surrogate at model creation time...")
+            println("Fitting surrogate at model creation time...")
         end
-        fitted_surrogate = _fit_markov_surrogate(model; 
-            surrogate_constraints = surrogate_constraints, 
+        # Use initialize_surrogate! to fit the appropriate surrogate type
+        # This replaces direct _fit_markov_surrogate call
+        initialize_surrogate!(model; 
+            type = resolved_surrogate,
+            method = :mle,
+            n_phases = surrogate_n_phases,
+            surrogate_constraints = surrogate_constraints,
             verbose = verbose)
-        model.markovsurrogate = fitted_surrogate
     end
     
     return model

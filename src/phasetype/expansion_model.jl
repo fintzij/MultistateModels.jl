@@ -321,8 +321,8 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
     final_constraints = constraints
     
     # SCTP constraints: ensure P(dest | leaving state) is constant across phases
-    # Applied for :sctp, :sctp_increasing, and :sctp_decreasing
-    if coxian_structure in (:sctp, :sctp_increasing, :sctp_decreasing)
+    # Applied for :sctp (which now also includes ordering for identifiability)
+    if coxian_structure === :sctp
         sctp_constraints = _generate_sctp_constraints(expanded_hazards, mappings, pt_states)
         if !isnothing(sctp_constraints)
             if verbose
@@ -332,14 +332,9 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
         end
     end
     
-    # Ordering constraints: enforce eigenvalue ordering
-    # Applied for :sctp_decreasing and :sctp_increasing
-    if coxian_structure in (:sctp_decreasing, :sctp_increasing)
-        # Determine ordering direction
-        # :sctp_increasing → ν₁ ≤ ν₂ ≤ ... ≤ νₙ (late exits more likely)
-        # :sctp_decreasing → ν₁ ≥ ν₂ ≥ ... ≥ νₙ (early exits more likely)
-        ordering_direction = coxian_structure === :sctp_increasing ? :increasing : :decreasing
-        
+    # Ordering constraints: enforce eigenvalue ordering ν₁ ≤ ν₂ ≤ ... ≤ νₙ
+    # Applied for :sctp (always uses increasing order for identifiability)
+    if coxian_structure === :sctp
         # Compute reference covariate values for ordering constraints
         covariate_names = _extract_covariate_names(hazards_ordered)
         ordering_reference = _compute_ordering_reference(ordering_at, data, covariate_names)
@@ -349,12 +344,11 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
         end
         
         ordering_constraints = _generate_ordering_constraints(
-            expanded_hazards, mappings, pt_states, hazards_ordered, ordering_reference, ordering_direction
+            expanded_hazards, mappings, pt_states, hazards_ordered, ordering_reference
         )
         if !isnothing(ordering_constraints)
             if verbose
-                direction_str = ordering_direction === :increasing ? "increasing" : "decreasing"
-                println("  Generated $(length(ordering_constraints.cons)) eigenvalue ordering constraints ($direction_str)")
+                println("  Generated $(length(ordering_constraints.cons)) eigenvalue ordering constraints (ν₁ ≤ ν₂ ≤ ... ≤ νₙ)")
             end
             final_constraints = _merge_constraints(final_constraints, ordering_constraints)
         end

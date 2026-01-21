@@ -6,7 +6,8 @@
 #
 # 1. SCTP (Stationary Conditional Transition Probabilities) - B2
 #    Ensures P(dest | leaving state) is constant across phases.
-#    Implements: (μ_{j,d1} - μ_{1,d1}) - (μ_{j,d2} - μ_{1,d2}) = 0
+#    On NATURAL scale: μ_{j,d1}/μ_{1,d1} = μ_{j,d2}/μ_{1,d2}
+#    Implemented as: μ_{j,d1} * μ_{1,d2} - μ_{j,d2} * μ_{1,d1} = 0
 #
 # 2. Eigenvalue Ordering - B3 (ordered_sctp)
 #    Enforces total rate ordering: ν₁ ≥ ν₂ ≥ ... ≥ νₙ
@@ -31,7 +32,10 @@
 
 Generate SCTP constraints ensuring P(dest | leaving state) is constant across phases.
 
-Implements: (h_{r_j,d1} - h_{r_1,d1}) - (h_{r_j,d2} - h_{r_1,d2}) = 0
+On the NATURAL scale, the constraint is:
+    μ_{j,d1}/μ_{1,d1} = μ_{j,d2}/μ_{1,d2}
+    
+Rearranged as: μ_{j,d1} * μ_{1,d2} - μ_{j,d2} * μ_{1,d1} = 0
 
 # Arguments
 - `expanded_hazards`: Expanded hazards from phase-type model
@@ -103,15 +107,17 @@ function _generate_sctp_constraints(expanded_hazards::Vector{<:_Hazard},
             length(other_hazards) == length(ref_hazards) || continue
             
             for p in 2:n_phases
-                # Get baseline parameter names (first parameter = log rate)
+                # Get baseline parameter names (first parameter = rate on NATURAL scale)
                 ref_phase1_par = ref_hazards[1].parnames[1]
                 ref_phaseP_par = ref_hazards[p].parnames[1]
                 other_phase1_par = other_hazards[1].parnames[1]
                 other_phaseP_par = other_hazards[p].parnames[1]
                 
-                # Constraint: (other_p - other_1) - (ref_p - ref_1) = 0
-                # Which is: other_p - other_1 - ref_p + ref_1 = 0
-                constraint_expr = :( $other_phaseP_par - $other_phase1_par - $ref_phaseP_par + $ref_phase1_par )
+                # SCTP constraint on NATURAL scale:
+                # τ_j must be the same for all destinations, where τ_j = μ_{j,d}/μ_{1,d}
+                # So: μ_{j,d1}/μ_{1,d1} = μ_{j,d2}/μ_{1,d2}
+                # Rearranged: μ_{j,d1} * μ_{1,d2} - μ_{j,d2} * μ_{1,d1} = 0
+                constraint_expr = :( $other_phaseP_par * $ref_phase1_par - $ref_phaseP_par * $other_phase1_par )
                 
                 push!(cons, constraint_expr)
                 push!(lcons, 0.0)
@@ -126,13 +132,12 @@ function _generate_sctp_constraints(expanded_hazards::Vector{<:_Hazard},
 end
 
 """
-    _generate_ordering_constraints(expanded_hazards, mappings, pt_states, user_hazards, ordering_reference, direction) -> NamedTuple
+    _generate_ordering_constraints(expanded_hazards, mappings, pt_states, user_hazards, ordering_reference) -> NamedTuple
 
 Generate eigenvalue (total rate) ordering constraints for phase-type models.
 
-Enforces the canonical representation constraint based on direction:
-- `:decreasing` (default): ν₁ ≥ ν₂ ≥ ... ≥ νₙ (early exits more likely)
-- `:increasing`: ν₁ ≤ ν₂ ≤ ... ≤ νₙ (late exits more likely, initial latent period)
+Enforces the SCTP canonical representation constraint:
+    ν₁ ≤ ν₂ ≤ ... ≤ νₙ (increasing eigenvalues)
 
 where νⱼ = λⱼ + Σ_d μ_{j,d}·exp(β_{j,d}'x̄) is the total rate out of phase j
 at reference covariate values x̄.
@@ -140,8 +145,7 @@ at reference covariate values x̄.
 For the final phase (j = n), there is no progression rate (λₙ = 0), so νₙ = Σ_d μ_{n,d}·exp(β_{n,d}'x̄).
 
 The constraints are implemented as inequality constraints:
-- Decreasing: νⱼ(x̄) - ν_{j-1}(x̄) ≤ 0  for j = 2, ..., n
-- Increasing: ν_{j-1}(x̄) - νⱼ(x̄) ≤ 0  for j = 2, ..., n
+    ν_{j-1}(x̄) - νⱼ(x̄) ≤ 0  for j = 2, ..., n
 
 # Arguments
 - `expanded_hazards`: Expanded hazards from phase-type model
@@ -150,12 +154,12 @@ The constraints are implemented as inequality constraints:
 - `user_hazards`: Original user hazard specifications (to detect C1 constraints)
 - `ordering_reference::Dict{Symbol, Float64}`: Reference covariate values.
   Empty dict signals baseline (x=0) → linear constraints.
-- `direction::Symbol`: `:decreasing` (ν₁ ≥ ν₂ ≥ ...) or `:increasing` (ν₁ ≤ ν₂ ≤ ...)
 
 # Returns
 NamedTuple with `cons`, `lcons`, `ucons` fields, or `nothing` if no constraints needed.
 
 # Notes
+- SCTP identifiability requires increasing eigenvalue ordering (ν₁ ≤ ν₂ ≤ ... ≤ νₙ).
 - At baseline (empty `ordering_reference`) or with C1 constraints (homogeneous covariates),
   the constraint simplifies to linear: λⱼ + Σ_d μ_{j,d} - λ_{j-1} - Σ_d μ_{j-1,d} ≤ 0
 - With heterogeneous covariate effects at non-baseline reference, the constraint is nonlinear
@@ -168,8 +172,7 @@ function _generate_ordering_constraints(expanded_hazards::Vector{<:_Hazard},
                                         mappings::PhaseTypeMappings,
                                         pt_states::Set{Int},
                                         user_hazards::Vector{<:HazardFunction},
-                                        ordering_reference::Dict{Symbol, Float64},
-                                        direction::Symbol = :decreasing)
+                                        ordering_reference::Dict{Symbol, Float64})
     cons = Expr[]
     lcons = Float64[]
     ucons = Float64[]
@@ -229,14 +232,12 @@ function _generate_ordering_constraints(expanded_hazards::Vector{<:_Hazard},
         end
         
         # Build total rate expression for each phase: νⱼ = λⱼ + Σ_d μ_{j,d}·exp(β_{j,d}'x̄)
-        # Constraint depends on direction:
-        # - :decreasing → νⱼ - ν_{j-1} ≤ 0 (i.e., ν_{j-1} ≥ νⱼ)
-        # - :increasing → ν_{j-1} - νⱼ ≤ 0 (i.e., νⱼ ≥ ν_{j-1})
+        # SCTP constraint: ν_{j-1} - νⱼ ≤ 0 (i.e., νⱼ ≥ ν_{j-1}, increasing eigenvalues)
         for j in 2:n_phases
             constraint_expr = if use_linear_constraints
-                _build_linear_ordering_constraint(j, progression_hazards, exit_hazards_by_phase, direction)
+                _build_linear_ordering_constraint(j, progression_hazards, exit_hazards_by_phase)
             else
-                _build_nonlinear_ordering_constraint(j, progression_hazards, exit_hazards_by_phase, ordering_reference, direction)
+                _build_nonlinear_ordering_constraint(j, progression_hazards, exit_hazards_by_phase, ordering_reference)
             end
             
             if !isnothing(constraint_expr)
@@ -264,11 +265,9 @@ function _generate_ordering_constraints(expanded_hazards::Vector{<:_Hazard},
 end
 
 """
-    _build_linear_ordering_constraint(j, progression_hazards, exit_hazards_by_phase, direction) -> Expr
+    _build_linear_ordering_constraint(j, progression_hazards, exit_hazards_by_phase) -> Expr
 
-Build linear ordering constraint based on direction:
-- `:decreasing`: νⱼ - ν_{j-1} ≤ 0 (i.e., ν_{j-1} ≥ νⱼ)
-- `:increasing`: ν_{j-1} - νⱼ ≤ 0 (i.e., νⱼ ≥ ν_{j-1})
+Build linear SCTP ordering constraint: ν_{j-1} - νⱼ ≤ 0 (i.e., νⱼ ≥ ν_{j-1})
 
 where νⱼ = λⱼ + Σ_d μ_{j,d} (baseline rates only).
 
@@ -276,15 +275,13 @@ Used when ordering_at=:baseline or when C1 constraints make covariate factors ca
 """
 function _build_linear_ordering_constraint(j::Int, 
                                             progression_hazards::Dict,
-                                            exit_hazards_by_phase::Dict,
-                                            direction::Symbol = :decreasing)
+                                            exit_hazards_by_phase::Dict)
     terms = Expr[]
     
-    # Determine signs based on direction
-    # :decreasing → νⱼ - ν_{j-1} ≤ 0, so +νⱼ and -ν_{j-1}
-    # :increasing → ν_{j-1} - νⱼ ≤ 0, so -νⱼ and +ν_{j-1}
-    sign_j = direction === :increasing ? :- : :+
-    sign_jm1 = direction === :increasing ? :+ : :-
+    # SCTP constraint: ν_{j-1} - νⱼ ≤ 0 (increasing eigenvalues)
+    # So: -νⱼ and +ν_{j-1}
+    sign_j = :-
+    sign_jm1 = :+
     
     # Add ±λⱼ if phase j has progression (phases 1 to n-1 have progression)
     if haskey(progression_hazards, j)
@@ -319,11 +316,9 @@ function _build_linear_ordering_constraint(j::Int,
 end
 
 """
-    _build_nonlinear_ordering_constraint(j, progression_hazards, exit_hazards_by_phase, ordering_reference, direction) -> Expr
+    _build_nonlinear_ordering_constraint(j, progression_hazards, exit_hazards_by_phase, ordering_reference) -> Expr
 
-Build nonlinear ordering constraint based on direction:
-- `:decreasing`: νⱼ(x̄) - ν_{j-1}(x̄) ≤ 0 (i.e., ν_{j-1} ≥ νⱼ)
-- `:increasing`: ν_{j-1}(x̄) - νⱼ(x̄) ≤ 0 (i.e., νⱼ ≥ ν_{j-1})
+Build nonlinear SCTP ordering constraint: ν_{j-1}(x̄) - νⱼ(x̄) ≤ 0 (i.e., νⱼ ≥ ν_{j-1})
 
 where νⱼ(x̄) = λⱼ + Σ_d μ_{j,d}·exp(β_{j,d}'x̄).
 
@@ -335,15 +330,13 @@ Used when ordering_at is not :baseline and covariates are not homogeneous.
 function _build_nonlinear_ordering_constraint(j::Int, 
                                                progression_hazards::Dict,
                                                exit_hazards_by_phase::Dict,
-                                               ordering_reference::Dict{Symbol, Float64},
-                                               direction::Symbol = :decreasing)
+                                               ordering_reference::Dict{Symbol, Float64})
     terms = Expr[]
     
-    # Determine signs based on direction
-    # :decreasing → +νⱼ - ν_{j-1}
-    # :increasing → -νⱼ + ν_{j-1}
-    sign_j = direction === :increasing ? :negative : :positive
-    sign_jm1 = direction === :increasing ? :positive : :negative
+    # SCTP constraint: ν_{j-1} - νⱼ ≤ 0 (increasing eigenvalues)
+    # So: -νⱼ and +ν_{j-1}
+    sign_j = :negative
+    sign_jm1 = :positive
     
     # Progression hazards don't have covariates in phase-type models (they're internal transitions)
     # So λⱼ and λ_{j-1} are simple baseline parameters
