@@ -117,7 +117,7 @@ function DrawSamplePaths!(i::Int, model::MultistateProcess, infra::MCEMInfrastru
         keep_sampling = (ess_cur[i] < ess_target) && (length(samplepaths[i]) <= n_path_max)
         
         if length(samplepaths[i]) > n_path_max
-            @warn "More than $n_path_max sample paths required for individual $i."
+            @warn "More than $n_path_max sample paths required for individual $i." maxlog=5
         end
     end
 end
@@ -589,7 +589,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
         
         if length(samplepaths[i]) > n_path_max
             keep_sampling = false
-            @warn "More than $n_path_max sample paths are required to obtain ess>$ess_target for individual $i."
+            @warn "More than $n_path_max sample paths are required to obtain ess>$ess_target for individual $i." maxlog=5
         end
     end
 end

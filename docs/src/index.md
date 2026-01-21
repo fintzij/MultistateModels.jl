@@ -208,31 +208,91 @@ path = simulate_path(model, subject_id; strategy=DirectTransformStrategy())
 
 Both strategies produce identical results given the same random seed - the choice affects only computational performance.
 
-## Parameter Scale Conventions
+## Parameter Scale Convention
 
-MultistateModels.jl stores parameters on **estimation scale** internally but provides convenience functions for working with **natural scale** parameters:
-
-| Family | Parameter | Estimation Scale | Natural Scale |
-|--------|-----------|-----------------|---------------|
-| Exponential | rate | log(rate) | rate |
-| Weibull | shape | log(shape) | shape |
-| Weibull | scale | log(scale) | scale |
-| Gompertz | shape | shape | shape (unconstrained) |
-| Gompertz | rate | log(rate) | rate |
-| All | covariate β | β | β |
-
-**Note**: Gompertz `shape` is unconstrained (can be negative), so it is stored as-is without log transformation.
+**All parameters are stored on natural scale** (v0.3.0+). Positivity constraints (e.g., for rate parameters) are enforced via box constraints during optimization, not log-transformation.
 
 ```julia
-# Get parameters on natural scale
-natural_params = get_parameters(fitted; scale=:natural)
+# Get parameters (always natural scale)
+params = get_parameters(fitted)
 
-# Get parameters on estimation (log) scale  
-est_params = get_parameters(fitted; scale=:estimation)
+# Set parameters (expects natural scale)
+set_parameters!(model, (h12 = [shape, scale, beta],))
 
-# Set parameters (expects estimation scale)
-set_parameters!(model, (h12 = [log(shape), log(scale), beta],))
+# For hazard families with positivity constraints:
+# - Exponential: rate > 0 (box constraint)
+# - Weibull: shape > 0, scale > 0 (box constraints)
+# - Gompertz: shape ∈ ℝ (unconstrained), rate > 0 (box constraint)
+# - Spline: coefficients ≥ 0 for monotone hazards (box constraints)
+```
 
-# For Gompertz specifically:
-set_parameters!(model, (h12 = [shape, log(rate), beta],))  # shape NOT logged
+## Penalized Splines
+
+Spline hazards support automatic smoothing parameter selection via penalized maximum likelihood:
+
+```julia
+# Default: automatic penalty with PIJCV smoothing selection
+fitted = fit(model)
+
+# Explicit penalty specification
+fitted = fit(model; 
+             penalty=SplinePenalty(order=2),  # Curvature penalty
+             lambda_init=1.0,                  # Initial smoothing parameter
+             select_lambda=:pijcv)             # Selection method
+
+# Check effective degrees of freedom
+println(fitted.edf)          # Per-hazard EDF
+println(fitted.smoothing_parameters)  # Optimal λ values
+```
+
+**Smoothing selection methods:**
+- `:pijcv` (default): Predictive infinitesimal jackknife CV (fast, accurate)
+- `:efs`: Expected Fisher scoring criterion  
+- `:perf`: Performance iteration (GCV-like)
+- `:loocv`: Exact leave-one-out CV (slow but exact)
+
+See the [Optimization](optimization.md) documentation for details on penalty configuration and smoothing parameter selection.
+
+## Warning Messages
+
+MultistateModels.jl provides informative warnings for common issues. Most warnings are rate-limited (via `maxlog`) to avoid flooding output during long-running fits.
+
+### Suppressing Warnings
+
+To suppress specific warnings:
+
+```julia
+using Logging
+
+# Suppress all warnings from MultistateModels during a fit
+with_logger(SimpleLogger(stderr, Logging.Error)) do
+    fitted = fit(model; verbose=false)
+end
+
+# Or filter specific warning messages
+filtered_logger = ConsoleLogger(stderr, Logging.Warn; meta_formatter=(level, _module, group, id, file, line) -> "")
+with_logger(filtered_logger) do
+    fitted = fit(model)
+end
+```
+
+### Common Warnings and Their Meaning
+
+| Warning | Meaning | Action |
+|---------|---------|--------|
+| "Parameters at bounds" | MLE is at box constraint boundary | Check if bounds are appropriate; may need wider bounds |
+| "No transitions from state X" | Data has no observed transitions for a hazard | Check data or simplify model |
+| "Model has no absorbing states" | Potential infinite sojourn times | Verify this is intentional |
+| "Variance not available" | VCOV couldn't be computed | May need more data or simpler model |
+| "PSIS failed" | Importance sampling diagnostics warn | Increase ESS or simplify model |
+
+### Debug-Level Messages
+
+For detailed diagnostic output, enable debug logging:
+
+```julia
+using Logging
+global_logger(ConsoleLogger(stderr, Logging.Debug))
+
+fitted = fit(model)
 ``` 

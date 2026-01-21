@@ -710,7 +710,7 @@ function calibrate_splines(model::MultistateProcess;
                         n_grid=n_grid
                     )
                 catch e
-                    @warn "CDF inversion failed for origin $origin: $e. Falling back to simulation."
+                    @warn "CDF inversion failed for origin $origin: $e. Falling back to simulation." maxlog=1
                     # Fallback: use old simulation-based approach
                     sojourns_by_transition = _extract_sojourns_from_surrogate(model, n_paths, min_ess)
                     pooled = Float64[]

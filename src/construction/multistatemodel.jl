@@ -205,7 +205,7 @@ function multistatemodel(hazards::HazardFunction...;
     if !has_absorbing
         @warn "Model has no absorbing states. All states have at least one outgoing transition. " *
               "This may cause simulation to run indefinitely or likelihood computation issues. " *
-              "Consider adding at least one absorbing state (a state with no outgoing transitions)."
+              "Consider adding at least one absorbing state (a state with no outgoing transitions)." maxlog=1
     end
 
     # Handle weight exclusivity and defaults

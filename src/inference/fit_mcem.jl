@@ -679,7 +679,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
                     new_pool_target = sir_pool_size(ess_target, sir_pool_constant, sir_max_pool)
                     if new_pool_target == sir_max_pool && !sir_pool_cap_exceeded
                         sir_pool_cap_exceeded = true
-                        @warn "SIR pool size capped at $sir_max_pool; further ESS increases will reduce SIR effectiveness."
+                        @warn "SIR pool size capped at $sir_max_pool; further ESS increases will reduce SIR effectiveness." maxlog=1
                     end
                     sir_pool_target = new_pool_target
                     
@@ -914,7 +914,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
                 new_pool_target = sir_pool_size(ess_target, sir_pool_constant, sir_max_pool)
                 if new_pool_target == sir_max_pool && !sir_pool_cap_exceeded
                     sir_pool_cap_exceeded = true
-                    @warn "SIR pool size capped at $sir_max_pool; further ESS increases will reduce SIR effectiveness."
+                    @warn "SIR pool size capped at $sir_max_pool; further ESS increases will reduce SIR effectiveness." maxlog=1
                 end
                 sir_pool_target = new_pool_target
                 

@@ -147,6 +147,125 @@ se = sqrt.(diag(fitted.vcov))
   "Parameters at bounds may have unreliable variance estimates"
 - Consider using the IJ (sandwich) variance which is more robust to boundary effects
 
+## Penalized Spline Smoothing
+
+When fitting spline hazards (`:sp`), MultistateModels.jl supports **penalized maximum likelihood** estimation with automatic smoothing parameter selection. This prevents overfitting while preserving flexibility.
+
+### Penalty Specification
+
+The `penalty` argument to `fit()` controls spline penalization:
+
+```julia
+# Default: automatic penalty for spline hazards
+fitted = fit(model)  # penalty=:auto
+
+# Explicit penalty (same as default for splines)
+fitted = fit(model; penalty=SplinePenalty())
+
+# Disable penalization
+fitted = fit(model; penalty=:none)
+```
+
+#### SplinePenalty Options
+
+```julia
+SplinePenalty(selector=:all;
+              order=2,              # Derivative order (2 = curvature penalty)
+              total_hazard=false,   # Penalize total hazard from each state
+              share_lambda=false,   # Share λ across hazards
+              share_covariate_lambda=false)  # Share λ for smooth covariates
+```
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `selector` | `:all`, origin state `Int`, or transition `(from, to)` | `:all` |
+| `order` | Derivative order to penalize (1=roughness, 2=curvature) | `2` |
+| `total_hazard` | Also penalize sum of competing hazards | `false` |
+| `share_lambda` | Use single λ across all selected hazards | `false` |
+| `share_covariate_lambda` | `false`, `:hazard`, or `:global` | `false` |
+
+### Smoothing Parameter Selection Methods
+
+The `select_lambda` argument controls how the smoothing parameter λ is chosen:
+
+```julia
+# Default: PIJCV (fast, accurate)
+fitted = fit(model; select_lambda=:pijcv)
+
+# Alternative methods
+fitted = fit(model; select_lambda=:efs)    # Expected Fisher scoring
+fitted = fit(model; select_lambda=:perf)   # Performance iteration
+fitted = fit(model; select_lambda=:loocv)  # Exact leave-one-out CV (slow)
+fitted = fit(model; select_lambda=:cv5)    # 5-fold cross-validation
+```
+
+| Method | Description | Complexity | Recommended For |
+|--------|-------------|------------|-----------------|
+| `:pijcv` | Predictive infinitesimal jackknife CV (Wood 2024) | O(np²) | Default choice |
+| `:pijcv5`, `:pijcv10`, `:pijcv20` | K-fold PIJCV variants | O(np²) | Large n |
+| `:efs` | Expected Fisher scoring criterion | O(np²) | Fast alternative |
+| `:perf` | Performance iteration (Wood & Fasiolo 2017) | O(np²) | GCV-like behavior |
+| `:loocv` | Exact leave-one-out cross-validation | O(n²p²) | Gold standard (slow) |
+| `:cv5`, `:cv10`, `:cv20` | K-fold CV with refitting | O(knp²) | Model checking |
+
+**Reference**: Wood, S.N. (2024). "On Neighbourhood Cross Validation." arXiv:2404.16490
+
+### Initial Lambda Value
+
+The `lambda_init` parameter sets the starting value for λ optimization:
+
+```julia
+# Default
+fitted = fit(model; lambda_init=1.0)
+
+# Start with less smoothing
+fitted = fit(model; lambda_init=0.1)
+
+# Start with more smoothing
+fitted = fit(model; lambda_init=10.0)
+```
+
+### Effective Degrees of Freedom
+
+After fitting, the effective degrees of freedom (EDF) can be retrieved:
+
+```julia
+fitted = fit(model)
+
+# EDF per hazard (named tuple)
+edf = fitted.edf  # e.g., (h12 = 4.2, h21 = 3.8)
+
+# Total EDF
+total_edf = sum(values(fitted.edf))
+```
+
+Lower EDF indicates more smoothing (simpler model). When EDF ≈ number of spline coefficients, the penalty has little effect.
+
+### Example: Illness-Death Model with Spline Hazards
+
+```julia
+using MultistateModels, DataFrames
+
+# Define spline hazards with automatic knot placement
+h12 = Hazard(@formula(0 ~ 1 + age), :sp, 1, 2; degree=3, knots=nothing)
+h13 = Hazard(@formula(0 ~ 1 + age), :sp, 1, 3; degree=3, knots=nothing)
+h23 = Hazard(@formula(0 ~ 1), :sp, 2, 3; degree=3, knots=nothing, monotone=1)
+
+# Create model
+model = multistatemodel(h12, h13, h23; data=df)
+
+# Fit with automatic smoothing selection
+fitted = fit(model)  # Uses penalty=:auto, select_lambda=:pijcv
+
+# Check smoothing parameters and EDF
+println("Smoothing parameters: ", fitted.smoothing_parameters)
+println("Effective degrees of freedom: ", fitted.edf)
+
+# Get parameter estimates with robust standard errors
+params = get_parameters(fitted)
+se_robust = sqrt.(diag(get_ij_vcov(fitted)))
+```
+
 ### Variance Estimation Recommendations
 
 ```julia

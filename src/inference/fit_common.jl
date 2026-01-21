@@ -302,7 +302,7 @@ function _resolve_penalty(penalty, model::MultistateProcess)
     elseif isnothing(penalty)
         # Deprecated - warn and treat as :none
         @warn "penalty=nothing is deprecated. Use penalty=:none for explicit unpenalized fitting, " *
-              "or penalty=:auto (default) for automatic penalization of spline hazards."
+              "or penalty=:auto (default) for automatic penalization of spline hazards." maxlog=1
         return nothing
     else
         # User-specified penalty (SplinePenalty or Vector{SplinePenalty})

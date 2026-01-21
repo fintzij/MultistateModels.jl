@@ -356,8 +356,9 @@ Compatible with reverse-mode AD.
 - `P`: Transition probability matrix
 """
 function compute_tmat(Q::AbstractMatrix{T}, dt::Real) where T
-    # Use ExponentialUtilities.exp_generic for AD-compatible matrix exponential
-    # exp_generic handles arbitrary element types (including Dual numbers for ForwardDiff)
+    # Use ExponentialUtilities.exponential! with ExpMethodGeneric for AD-compatible matrix exponential
+    # ExpMethodGeneric handles arbitrary element types (including Dual numbers for ForwardDiff)
+    # Note: exponential! mutates its argument, so we pass a copy to avoid modifying Qt
     Qt = Q * dt
-    return ExponentialUtilities.exp_generic(Qt)
+    return exponential!(copy(Qt), ExpMethodGeneric())
 end

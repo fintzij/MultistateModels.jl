@@ -95,7 +95,7 @@ function build_general_difference_matrix(knots::Vector{Float64}, d::Int, m::Int)
         
         # Check for zero weights (would indicate coincident knots in interior)
         if any(abs.(W_diag) .< 1e-14)
-            @warn "Near-zero weight in general difference matrix at iteration j=$j (coincident knots?)"
+            @warn "Near-zero weight in general difference matrix at iteration j=$j (coincident knots?)" maxlog=1
             # Replace near-zero with small value to avoid division by zero
             W_diag[abs.(W_diag) .< 1e-14] .= 1e-14
         end
@@ -621,7 +621,7 @@ function build_ispline_transform_matrix(basis; direction::Int=1, warn_on_ill_con
             @warn "I-spline transformation matrix is ill-conditioned (cond(L) = $(round(cond_L, sigdigits=3))). " *
                   "This can cause numerical precision loss in coefficient rectification. " *
                   "Consider: (1) reducing the number of knots, (2) ensuring knots are not too closely spaced, " *
-                  "or (3) using wider knot spacing. Current basis has $K functions."
+                  "or (3) using wider knot spacing. Current basis has $K functions." maxlog=1
         end
     end
     

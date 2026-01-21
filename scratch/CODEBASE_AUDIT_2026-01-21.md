@@ -270,7 +270,7 @@ Additionally, the "near-zero zeroing" step uses different tolerances:
 |-------|-------|
 | **File** | `src/construction/model_assembly.jl` L191-197 |
 | **Status** | ✅ Complete |
-| **Owner** | TBD |
+| **Owner** | Sprint 11 Agent |
 | **Impact** | Silent incorrect results with invalid weights |
 
 **Description**: `check_SubjectWeights` and `check_ObservationWeights` are called but:
@@ -278,12 +278,17 @@ Additionally, the "near-zero zeroing" step uses different tolerances:
 2. No validation that weights are finite (not NaN/Inf)
 3. Zero weights could cause division issues
 
+**Resolution**: Validation already exists in `src/utilities/validation.jl`. Both functions check:
+- Weights are finite (not NaN/Inf)
+- Weights are positive (> 0, not just non-negative)
+- Throws `ArgumentError` with helpful message on failure
+
 **Action Items**:
-- [ ] Add validation: all weights must be non-negative
-- [ ] Add validation: all weights must be finite
-- [ ] Consider warning if any weights are exactly zero
-- [ ] Document weight semantics in docstrings
-- [ ] Add unit tests with edge-case weights
+- [x] Add validation: all weights must be non-negative (implemented as > 0)
+- [x] Add validation: all weights must be finite
+- [x] Consider warning if any weights are exactly zero (throws error instead)
+- [x] Document weight semantics in docstrings
+- [x] Add unit tests with edge-case weights (test_weight_validation.jl)
 
 ---
 
@@ -961,7 +966,7 @@ end
 | L10_P2 | Absorbing state model not validated | `multistatemodel.jl` | Add check for at least one absorbing state | ✅ Complete (Sprint 10) |
 | L11_P2 | Boundary epsilon constants duplicated | Multiple | Unify into `constants.jl` | ✅ Complete (Sprint 10) |
 | L12_P2 | Debug assertions disabled by default | `constants.jl` | Added `MSM_DEBUG_ASSERTIONS` env var | ✅ Complete (Sprint 3) |
-| L13_P2 | No structured logging for errors | Multiple | Consider Logging.jl integration | ⬜ Backlog |
+| L13_P2 | No structured logging for errors | Multiple | Consider Logging.jl integration | ✅ Complete (Sprint 13 - assessed: current coverage sufficient) |
 
 ### L10_P2 Resolution (Sprint 10)
 Added absorbing state validation to `multistatemodel()`:
@@ -1146,14 +1151,14 @@ unit/
 |-------|------|-------|
 | C11_P2 | Add workspace cleanup function | ✅ Sprint 1 Agent |
 | C9_P2 | Document thread-safety constraints | ✅ Sprint 8 Agent |
-| M18_P2 | Make global config thread-safe | ⚠️ Deferred (low priority) |
+| M18_P2 | Make global config thread-safe | ✅ Sprint 13 Agent (already implemented) |
 
 ## Week 7-8: Test Infrastructure & Documentation
 | Task | Owner |
 |------|-------|
-| Add invariant assertion framework | ⚠️ Deferred (nice-to-have) |
-| Add concurrency stress tests | 🔲 Sprint 12 |
-| Update user documentation | 🔲 Sprint 12 |
+| Add invariant assertion framework | ✅ Sprint 13 Agent (assessed: already implemented via MSM_DEBUG_ASSERTIONS) |
+| Add concurrency stress tests | ✅ Sprint 12 Agent |
+| Update user documentation | ✅ Sprint 12 Agent |
 | Create migration guide for old serialized models | ✅ Sprint 8 Agent (in error msg) |
 
 ## Week 9-10: Warning Cleanup & Deprecation Removal
@@ -1163,8 +1168,8 @@ unit/
 | H6_P1 | Remove deprecated `build_phasetype_tpm_book` shim in `sampling_phasetype.jl` | ✅ Sprint 11 Agent |
 | H6_P1 | Remove deprecated `set_surrogate!` in `markov.jl` | ✅ Sprint 11 Agent |
 | NEW | Suppress or fix "No transitions observed" warning for template/simulation data | ✅ Sprint 11 Agent (maxlog=1) |
-| NEW | Replace `exp_generic` with `exponential!` in `markov.jl:1046` (ExponentialUtilities update) | ⏳ Blocked (upstream dep) |
-| NEW | Review all `@warn` statements - add log levels or make suppressible | 🔲 Sprint 12 |
+| NEW | Replace `exp_generic` with `exponential!` in `markov.jl:1046` (ExponentialUtilities update) | ✅ Sprint 13 Agent |
+| NEW | Review all `@warn` statements - add log levels or make suppressible | ✅ Sprint 12 Agent |
 
 ---
 
@@ -1195,7 +1200,7 @@ The following 5 workstreams were executed:
 |-------|------|--------|
 | H6_P1 | Remove deprecated `build_phasetype_tpm_book` shim | ✅ Removed |
 | H6_P1 | Remove deprecated `set_surrogate!` function | ✅ Removed |
-| NEW | Replace `exp_generic` with `exponential!` | ⏳ Upstream dependency |
+| NEW | Replace `exp_generic` with `exponential!` | ✅ Sprint 13 |
 
 ### Workstream C: Warning Cleanup (NEW items) ✅ COMPLETE
 **Target**: Improve warning quality and make suppressible
@@ -1205,7 +1210,7 @@ The following 5 workstreams were executed:
 | Issue | Task | Status |
 |-------|------|--------|
 | NEW | Fix "No transitions observed" warning for template data | ✅ Added maxlog=1 |
-| NEW | Review @warn statements - consider Logging.jl levels | ⏳ Future work |
+| NEW | Review @warn statements - consider Logging.jl levels | ✅ Sprint 12-13 (comprehensive coverage) |
 
 ### Workstream D: Test Infrastructure (H12_P2 + NEW) ✅ COMPLETE
 **Target**: Add missing test coverage for round-trips and edge cases
@@ -1433,4 +1438,10 @@ src/
 | 2026-01-21 | Sprint 9 Agent | L1_P1 (MCEMConfig struct), M5_P1 (Hazard validation), M7_P1 (error message suggestions), M8_P1 (OptionalTimeTransformContext), M17_P2 (TPMCache version counter), L4_P1 (Int64→Int in hazard_constructors.jl), L3_P1 (reviewed @inline - all appropriate for hot paths) |
 | 2026-01-21 | Sprint 10 Agent | H1_P1 (constants consolidation in 5 files), M2_P1 (isnothing in fit_common.jl), M3_P1 (assessed - no action), L4_P1 (Int64→Int in api.jl, transforms.jl, books.jl), L10_P2 (absorbing state validation), L11_P2 (boundary constants unified), L6_P1 (assessed), L2_P1/L5_P1/L8_P1 (assessed - consistent), H12_P2 (deferred to test infra) |
 | 2026-01-21 | Sprint 11 Agent | H6_P1 (removed deprecated `build_phasetype_tpm_book` shim, removed deprecated `set_surrogate!` function), C4_P1 (AD-safety documentation in smoothing_selection.jl), H2_P1 (vcov tolerance formula documentation), H3_P1/H11_P2 (verified existing), Warning cleanup (maxlog=1), Test infrastructure (3 new test files: test_phasetype_roundtrip.jl, test_weight_validation.jl, test_error_paths.jl). Updated test files to use new APIs. All 2,162 tests pass. |
-| 2026-01-21 | Sprint 11 Agent | Roadmap table sync: Updated 14 TBD entries to reflect actual completion status from detailed issue sections. Marked 3 items for Sprint 12, 2 as deferred, 1 as blocked upstream. |
+| 2026-01-21 | Sprint 11 Agent | Roadmap table sync: Updated 14 TBD entries to reflect actual completion status from detailed issue sections. Marked 3 items for Sprint 12, 2 as deferred, 1 as blocked upstream. || 2026-01-21 | Sprint 12 Agent | **Workstream B (User Documentation)**: Updated docs/src/index.md with correct natural-scale parameter convention (v0.3.0+), added Penalized Splines section with smoothing selection methods, added Warning Messages section with suppression patterns. Updated docs/src/optimization.md with new Penalized Spline Smoothing section covering SplinePenalty options, smoothing parameter selection methods (PIJCV, EFS, PERF, LOOCV), effective degrees of freedom, and example code. |
+| 2026-01-21 | Sprint 12 Agent | **Workstream C (Concurrency)**: Created MultistateModelsTests/unit/test_concurrency.jl with stress tests for parallel simulate() on same model (SAFE), parallel fit() on deepcopy'd models (SAFE), concurrent read operations (SAFE), and documentation of UNSAFE patterns. Added thread safety documentation in test file header. |
+| 2026-01-21 | Sprint 12 Agent | **Workstream D (@warn Review)**: Audited all 71 @warn statements in src/. Added maxlog=1 or maxlog=5 to 8 warnings that could repeat: sampling_markov.jl (2x path limit warnings), spline.jl (CDF inversion fallback), spline_utils.jl (coincident knots, I-spline condition), fit_common.jl (deprecated penalty), fit_mcem.jl (2x SIR pool cap), multistatemodel.jl (no absorbing states). 8 warnings already had maxlog. Remaining warnings are one-time model construction/validation warnings that don't need limiting. |
+| 2026-01-21 | Sprint 13 Agent | **Workstream A (M18_P2 Thread-Safe Global Config)**: ASSESSED - No action needed. `_GLOBAL_THREADING_CONFIG` already protected by `ReentrantLock`. `TVC_INTERVAL_WORKSPACES` uses lock for thread-safe get-or-create (C7_P2 fix). All mutable globals are properly synchronized. |
+| 2026-01-21 | Sprint 13 Agent | **Workstream B (L13_P2 Structured Logging)**: ASSESSED - Current coverage sufficient. 101 logging statements in src/ (91 @warn/@debug, remaining @info/@error). Sprint 12 added maxlog limits to 8 high-frequency warnings. Comprehensive coverage of optimization failures, numerical issues, and user warnings. No Logging.jl integration needed. |
+| 2026-01-21 | Sprint 13 Agent | **Workstream C (ExponentialUtilities API)**: IMPLEMENTED. Replaced deprecated `exp_generic` with `exponential!(copy(Qt), ExpMethodGeneric())` in [tpm.jl](src/hazard/tpm.jl#L362) and [markov.jl](src/surrogate/markov.jl#L1030). Both produce identical results and gradients via ForwardDiff. All 2,162 tests pass. ExponentialUtilities v1.29.0 confirmed. |
+| 2026-01-21 | Sprint 13 Agent | **Workstream D (Invariant Assertions)**: ASSESSED - Already implemented. `MSM_DEBUG_ASSERTIONS` environment flag in [constants.jl](src/utilities/constants.jl#L259). 5 invariant checks already active: 4x hazard non-negativity in [evaluation.jl](src/hazard/evaluation.jl#L108), 1x TPM row sum in [data_containers.jl](src/types/data_containers.jl#L264). Debug mode documentation in constants.jl. |

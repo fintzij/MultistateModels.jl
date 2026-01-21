@@ -1024,10 +1024,11 @@ function _compute_phasetype_panel_loglik_ad(model::MultistateProcess,
             dt = model.data.tstop[i] - model.data.tstart[i]
             
             # Compute TPM: P(dt) = exp(Q * dt)
-            # Use ExponentialUtilities.exp_generic for AD compatibility
+            # Use exponential! with ExpMethodGeneric for AD compatibility
+            # Note: exponential! mutates its argument, so we pass a copy
             if dt > 0
                 Qt = expanded_Q * dt
-                tpm = ExponentialUtilities.exp_generic(Qt)
+                tpm = exponential!(copy(Qt), ExpMethodGeneric())
             else
                 # dt = 0: identity matrix
                 tpm = Matrix{T}(I, n_expanded, n_expanded)
