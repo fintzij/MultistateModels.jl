@@ -1126,35 +1126,35 @@ unit/
 ## Week 1-2: Critical Safety (P0)
 | Issue | Task | Owner |
 |-------|------|-------|
-| C1_P1 | Validate spline knots in constructor | TBD |
-| C6_P2 | Transactional construction pattern | TBD |
+| C1_P1 | Validate spline knots in constructor | ✅ Sprint 3 Agent |
+| C6_P2 | Transactional construction pattern | ✅ Sprint 7 Agent (documented) |
 | C7_P2 | Fix TOCTOU in workspace creation | ✅ Sprint 1 Agent |
 | C8_P2 | Add iteration limit to simulation | ✅ Sprint 2 Agent |
 
 ## Week 3-4: Data Integrity (P1)
 | Issue | Task | Owner |
 |-------|------|-------|
-| H1_P1 | Add spline monotonicity validation | TBD |
-| H8_P2 | Add condition number check | TBD |
+| H1_P1 | Add spline monotonicity validation | ✅ Sprint 10 Agent (constants) |
+| H8_P2 | Add condition number check | ✅ Sprint 7 Agent |
 | H9_P2 | Add Weibull t=0 guard | ✅ Sprint 2 Agent |
 | H10_P2 | Add Gompertz overflow guard | ✅ Sprint 2 Agent |
-| H11_P2 | Validate dt >= 0 | TBD |
-| H12_P2 | Round-trip test for phase-type | TBD |
+| H11_P2 | Validate dt >= 0 | ✅ Sprint 11 Agent (verified existing) |
+| H12_P2 | Round-trip test for phase-type | ✅ Sprint 11 Agent (test file) |
 
 ## Week 5-6: Memory & Concurrency
 | Issue | Task | Owner |
 |-------|------|-------|
-| C11_P2 | Add workspace cleanup function | TBD |
-| C9_P2 | Document thread-safety constraints | TBD |
-| M18_P2 | Make global config thread-safe | TBD |
+| C11_P2 | Add workspace cleanup function | ✅ Sprint 1 Agent |
+| C9_P2 | Document thread-safety constraints | ✅ Sprint 8 Agent |
+| M18_P2 | Make global config thread-safe | ⚠️ Deferred (low priority) |
 
 ## Week 7-8: Test Infrastructure & Documentation
 | Task | Owner |
 |------|-------|
-| Add invariant assertion framework | TBD |
-| Add concurrency stress tests | TBD |
-| Update user documentation | TBD |
-| Create migration guide for old serialized models | TBD |
+| Add invariant assertion framework | ⚠️ Deferred (nice-to-have) |
+| Add concurrency stress tests | 🔲 Sprint 12 |
+| Update user documentation | 🔲 Sprint 12 |
+| Create migration guide for old serialized models | ✅ Sprint 8 Agent (in error msg) |
 
 ## Week 9-10: Warning Cleanup & Deprecation Removal
 | Issue | Task | Owner |
@@ -1163,8 +1163,8 @@ unit/
 | H6_P1 | Remove deprecated `build_phasetype_tpm_book` shim in `sampling_phasetype.jl` | ✅ Sprint 11 Agent |
 | H6_P1 | Remove deprecated `set_surrogate!` in `markov.jl` | ✅ Sprint 11 Agent |
 | NEW | Suppress or fix "No transitions observed" warning for template/simulation data | ✅ Sprint 11 Agent (maxlog=1) |
-| NEW | Replace `exp_generic` with `exponential!` in `markov.jl:1046` (ExponentialUtilities update) | TBD (upstream dep) |
-| NEW | Review all `@warn` statements - add log levels or make suppressible | TBD |
+| NEW | Replace `exp_generic` with `exponential!` in `markov.jl:1046` (ExponentialUtilities update) | ⏳ Blocked (upstream dep) |
+| NEW | Review all `@warn` statements - add log levels or make suppressible | 🔲 Sprint 12 |
 
 ---
 
@@ -1433,3 +1433,4 @@ src/
 | 2026-01-21 | Sprint 9 Agent | L1_P1 (MCEMConfig struct), M5_P1 (Hazard validation), M7_P1 (error message suggestions), M8_P1 (OptionalTimeTransformContext), M17_P2 (TPMCache version counter), L4_P1 (Int64→Int in hazard_constructors.jl), L3_P1 (reviewed @inline - all appropriate for hot paths) |
 | 2026-01-21 | Sprint 10 Agent | H1_P1 (constants consolidation in 5 files), M2_P1 (isnothing in fit_common.jl), M3_P1 (assessed - no action), L4_P1 (Int64→Int in api.jl, transforms.jl, books.jl), L10_P2 (absorbing state validation), L11_P2 (boundary constants unified), L6_P1 (assessed), L2_P1/L5_P1/L8_P1 (assessed - consistent), H12_P2 (deferred to test infra) |
 | 2026-01-21 | Sprint 11 Agent | H6_P1 (removed deprecated `build_phasetype_tpm_book` shim, removed deprecated `set_surrogate!` function), C4_P1 (AD-safety documentation in smoothing_selection.jl), H2_P1 (vcov tolerance formula documentation), H3_P1/H11_P2 (verified existing), Warning cleanup (maxlog=1), Test infrastructure (3 new test files: test_phasetype_roundtrip.jl, test_weight_validation.jl, test_error_paths.jl). Updated test files to use new APIs. All 2,162 tests pass. |
+| 2026-01-21 | Sprint 11 Agent | Roadmap table sync: Updated 14 TBD entries to reflect actual completion status from detailed issue sections. Marked 3 items for Sprint 12, 2 as deferred, 1 as blocked upstream. |
