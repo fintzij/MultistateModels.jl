@@ -131,7 +131,7 @@ struct PhaseTypeHazard <: HazardFunction
     statefrom::Int64
     stateto::Int64
     n_phases::Int                      # number of Coxian phases (≥1)
-    structure::Symbol                  # :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing
+    structure::Symbol                  # :unstructured or :sctp (eigenvalue ordering, increasing by default)
     covariate_constraints::Symbol      # :unstructured (phase-specific) or :homogeneous (destination-shared)
     metadata::HazardMetadata
     
@@ -141,8 +141,9 @@ struct PhaseTypeHazard <: HazardFunction
                               metadata::HazardMetadata)
         family == :pt || throw(ArgumentError("PhaseTypeHazard family must be :pt"))
         n_phases >= 1 || throw(ArgumentError("n_phases must be ≥ 1, got $n_phases"))
-        structure in (:unstructured, :sctp, :sctp_increasing, :sctp_decreasing) ||
-            throw(ArgumentError("structure must be :unstructured, :sctp, :sctp_increasing, or :sctp_decreasing, got :$structure"))
+        # Note: :sctp_increasing and :sctp_decreasing were removed - :sctp now implies increasing eigenvalues
+        structure in (:unstructured, :sctp) ||
+            throw(ArgumentError("structure must be :unstructured or :sctp, got :$structure"))
         covariate_constraints in (:unstructured, :homogeneous) ||
             throw(ArgumentError("covariate_constraints must be :unstructured or :homogeneous, got :$covariate_constraints"))
         new(hazard, family, statefrom, stateto, n_phases, structure, covariate_constraints, metadata)
@@ -188,14 +189,14 @@ shared_baseline_key(::HazardFunction, ::Symbol) = nothing
 function shared_baseline_key(h::ParametricHazard, runtime_family::Symbol)
     h.metadata.time_transform || return nothing
     sig = baseline_signature(h, runtime_family)
-    sig === nothing && return nothing
+    isnothing(sig) && return nothing
     return SharedBaselineKey(h.statefrom, sig)
 end
 
 function shared_baseline_key(h::SplineHazard, runtime_family::Symbol)
     h.metadata.time_transform || return nothing
     sig = baseline_signature(h, runtime_family)
-    sig === nothing && return nothing
+    isnothing(sig) && return nothing
     return SharedBaselineKey(h.statefrom, sig)
 end
 
@@ -207,6 +208,6 @@ end
 function shared_baseline_key(h::PhaseTypeHazard, runtime_family::Symbol)
     h.metadata.time_transform || return nothing
     sig = baseline_signature(h, runtime_family)
-    sig === nothing && return nothing
+    isnothing(sig) && return nothing
     return SharedBaselineKey(h.statefrom, sig)
 end

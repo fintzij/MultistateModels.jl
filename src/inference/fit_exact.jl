@@ -36,6 +36,15 @@ This is called by `fit()` when `is_panel_data(model) == false`.
   - `:perf`: Performance iteration criterion
   - `:none`: Use fixed λ from `lambda_init` (no automatic selection)
 
+# Variance Computation Dependencies
+
+The variance-covariance matrices have the following dependencies:
+- `vcov=nothing` implies `subject_gradients=nothing` (gradients only computed when vcov is computed)
+- `compute_ij_vcov=true` requires `compute_vcov=true` (IJ variance uses the same Hessian)
+- `compute_jk_vcov=true` requires subject gradients from vcov computation
+
+If you need subject-level gradients for custom analysis, ensure `compute_vcov=true`.
+
 See also: [`SplinePenalty`](@ref), [`build_penalty_config`](@ref), [`select_smoothing_parameters`](@ref)
 """
 function _fit_exact(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing,
@@ -158,7 +167,8 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             sol = _solve_optimization(prob, solver)
         end
 
-        # rectify spline coefs - CHECK THIS!!!!
+        # Rectify spline coefficients to clean up numerical errors from I-spline transformation.
+        # See rectify_coefs! docstring in hazard/spline.jl for mathematical justification.
         if any(isa.(model.hazards, _SplineHazard))
             rectify_coefs!(sol.u, model)
         end
@@ -181,8 +191,10 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
                 fishinf .-= H_i
             end
             
-            vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(length(samplepaths)) * length(sol.u))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
-            vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)), rtol = sqrt(eps(Float64)))] .= 0.0
+            # Compute vcov using shared tolerance computation (H2_P1 fix)
+            pinv_tol = _compute_vcov_tolerance(length(samplepaths), nparams, vcov_threshold)
+            vcov = pinv(Symmetric(fishinf), atol = pinv_tol)
+            _clean_vcov_matrix!(vcov)
             vcov = Symmetric(vcov)
         else
             subject_grads_cache = nothing
@@ -287,8 +299,10 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
                 for H_i in subject_hessians_cache
                     fishinf .-= H_i
                 end
-                vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(length(samplepaths)) * length(sol.u))^-2 : sqrt(eps(Float64)))
-                vcov[isapprox.(vcov, 0.0; atol = sqrt(eps(Float64)), rtol = sqrt(eps(Float64)))] .= 0.0
+                # Compute vcov using shared tolerance computation (H2_P1 fix)
+                pinv_tol = _compute_vcov_tolerance(length(samplepaths), nparams, vcov_threshold)
+                vcov = pinv(Symmetric(fishinf), atol = pinv_tol)
+                _clean_vcov_matrix!(vcov)
                 vcov = Symmetric(vcov)
             end
         else

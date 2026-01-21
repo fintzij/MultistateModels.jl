@@ -110,7 +110,7 @@ surrogate = MarkovSurrogate(hazards, params)  # fitted=false by default
 surrogate = MarkovSurrogate(hazards, params; fitted=true)
 ```
 
-See also: [`set_surrogate!`](@ref), [`AbstractSurrogate`](@ref), [`is_fitted`](@ref)
+See also: [`initialize_surrogate!`](@ref), [`AbstractSurrogate`](@ref), [`is_fitted`](@ref)
 """
 struct MarkovSurrogate <: AbstractSurrogate
     hazards::Vector{_MarkovHazard}
@@ -295,9 +295,19 @@ end
 # Backward compatibility accessors for old surrogate fields (DEPRECATED - use .surrogate instead)
 function Base.getproperty(m::MultistateModel, s::Symbol)
     if s === :markovsurrogate
+        Base.depwarn(
+            "`model.markovsurrogate` is deprecated, use `model.surrogate` instead. " *
+            "This accessor will be removed in a future version.",
+            :markovsurrogate
+        )
         surr = getfield(m, :surrogate)
         return surr isa MarkovSurrogate ? surr : nothing
     elseif s === :phasetype_surrogate
+        Base.depwarn(
+            "`model.phasetype_surrogate` is deprecated, use `model.surrogate` instead. " *
+            "This accessor will be removed in a future version.",
+            :phasetype_surrogate
+        )
         surr = getfield(m, :surrogate)
         return surr isa PhaseTypeSurrogate ? surr : nothing
     else
@@ -307,9 +317,19 @@ end
 
 function Base.setproperty!(m::MultistateModel, s::Symbol, v)
     if s === :markovsurrogate
+        Base.depwarn(
+            "`model.markovsurrogate = x` is deprecated, use `model.surrogate = x` instead. " *
+            "This accessor will be removed in a future version.",
+            :markovsurrogate
+        )
         # Setting markovsurrogate sets the unified surrogate field
         setfield!(m, :surrogate, v)
     elseif s === :phasetype_surrogate
+        Base.depwarn(
+            "`model.phasetype_surrogate = x` is deprecated, use `model.surrogate = x` instead. " *
+            "This accessor will be removed in a future version.",
+            :phasetype_surrogate
+        )
         # Setting phasetype_surrogate sets the unified surrogate field
         setfield!(m, :surrogate, v)
     else

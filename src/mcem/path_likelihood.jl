@@ -37,8 +37,8 @@ end
 function compute_normalizing_constant(model::MultistateModel, infra::MCEMInfrastructure{PhaseTypeSurrogate})
     # Phase-type marginal likelihood via forward algorithm on expanded space
     # Uses expanded data and emission matrix if data was expanded
-    expanded_data = infra.original_row_map === nothing ? nothing : infra.data
-    expanded_subjectindices = infra.original_row_map === nothing ? nothing : infra.subjectindices
+    expanded_data = isnothing(infra.original_row_map) ? nothing : infra.data
+    expanded_subjectindices = isnothing(infra.original_row_map) ? nothing : infra.subjectindices
     
     compute_phasetype_marginal_loglik(
         model, infra.surrogate, infra.emat;

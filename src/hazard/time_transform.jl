@@ -39,7 +39,7 @@ Get shared cache if hazard shares baseline with others, otherwise local cache.
 """
 @inline function _shared_or_local_cache(context::TimeTransformContext{LinType,TimeType}, hazard_slot::Int, hazard::_Hazard) where {LinType,TimeType}
     shared_key = hazard.shared_baseline_key
-    if shared_key === nothing
+    if isnothing(shared_key)
         return _time_transform_cache(context, hazard_slot)
     end
     return get!(context.shared_baselines.caches, shared_key) do
@@ -149,7 +149,7 @@ Baseline Gompertz cumulative hazard: H₀(t) = (rate/shape) * (exp(shape*t) - 1)
 Special case for shape ≈ 0: H₀(t) = rate * t (exponential)
 """
 @inline function _gompertz_baseline_cumhaz(shape::Real, rate::Real, lb::Real, ub::Real)
-    if abs(shape) < 1e-6
+    if abs(shape) < SHAPE_ZERO_TOL
         # Taylor expansion around shape = 0
         # (exp(shape*t) - 1)/shape = t + shape*t^2/2 + shape^2*t^3/6 + ...
         # H(lb, ub) = rate * [ (ub - lb) + shape/2 * (ub^2 - lb^2) + shape^2/6 * (ub^3 - lb^3) ]

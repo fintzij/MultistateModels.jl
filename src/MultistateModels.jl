@@ -96,7 +96,6 @@ export
     # --------------------------------------------------------------------------
     set_parameters!,
     initialize_surrogate!,
-    set_surrogate!,  # DEPRECATED: use initialize_surrogate! instead
     is_surrogate_fitted,
     is_fitted,
     initialize_parameters,
@@ -173,6 +172,13 @@ export
     # --------------------------------------------------------------------------
     get_physical_cores,
     recommended_nthreads,
+    
+    # --------------------------------------------------------------------------
+    # Memory management (C11_P2 fix)
+    # --------------------------------------------------------------------------
+    clear_all_workspaces!,
+    clear_tvc_workspaces!,
+    clear_path_workspaces!,
     
     # --------------------------------------------------------------------------
     # User utilities

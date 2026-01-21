@@ -29,7 +29,7 @@ function _build_spline_hazard(ctx::HazardBuildContext)
     # Panel data (obstype=2) has observation times, not exact transition times.
     # Using observation intervals for knot placement may be misleading.
     has_panel_data = any(data.obstype .== 2)
-    using_auto_knots = hazard.knots === nothing
+    using_auto_knots = isnothing(hazard.knots)
     if has_panel_data && using_auto_knots
         @warn "Automatic knot placement with panel data uses observation intervals, not true " *
               "transition times. For better knot placement, consider:\n" *
@@ -50,7 +50,7 @@ function _build_spline_hazard(ctx::HazardBuildContext)
     all_sojourns = vcat(sojourns_transition, sojourns_stay)
     
     # Determine boundary knots
-    if hazard.boundaryknots === nothing
+    if isnothing(hazard.boundaryknots)
         if isempty(all_sojourns)
             # No observations for this transition - use timespan as fallback
             bknots = [0.0, maximum(data.tstop)]
@@ -62,7 +62,7 @@ function _build_spline_hazard(ctx::HazardBuildContext)
     end
     
     # Determine interior knots - automatic placement if not specified
-    if hazard.knots === nothing
+    if isnothing(hazard.knots)
         # Automatic knot placement using quantiles
         if isempty(sojourns_transition)
             # No observed transitions - use evenly spaced knots
@@ -111,7 +111,24 @@ function _build_spline_hazard(ctx::HazardBuildContext)
     allknots = unique(sort([bknots[1]; intknots; bknots[2]]))
     
     # Determine if we need smooth constant extrapolation
-    # "constant" enforces h'=0 at RIGHT boundary for C¹ continuity with flat extrapolation
+    # 
+    # EXTRAPOLATION METHODS:
+    # - "constant" (default): The hazard approaches the boundary with zero slope (h'=0 at right
+    #   boundary via Neumann BC), then extends as a flat constant beyond. This provides C¹
+    #   continuity at the boundary - the hazard value AND its first derivative match at the
+    #   boundary. Best for most applications where you want smooth behavior at time horizon.
+    #
+    # - "flat": The hazard extends as a constant beyond boundaries (same value as at boundary),
+    #   but WITHOUT the zero-slope constraint at the boundary. This provides only C⁰ continuity
+    #   (hazard values match but slopes may not). The hazard can have non-zero slope at the
+    #   boundary, creating a potential "kink" when extrapolating. Use when you want the spline
+    #   to have full flexibility at boundaries.
+    #
+    # - "linear": The hazard extends linearly beyond boundaries using the slope at the boundary.
+    #   Useful when you expect the hazard to continue its trend beyond observed data.
+    #
+    # Note: For degree < 2 splines, "constant" automatically falls back to "flat" because
+    # the Neumann boundary condition requires at least quadratic basis functions.
     use_constant = hazard.extrapolation == "constant"
     
     # Build B-spline basis with knots

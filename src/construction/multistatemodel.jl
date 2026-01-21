@@ -191,6 +191,22 @@ function multistatemodel(hazards::HazardFunction...;
 
     # compile matrix enumerating instantaneous state transitions
     tmat = create_tmat(hazinfo)
+    
+    # Validate that at least one absorbing state exists (L10_P2)
+    # An absorbing state has no outgoing transitions (all zeros in its row)
+    n_states = size(tmat, 1)
+    has_absorbing = false
+    for s in 1:n_states
+        if all(tmat[s, :] .== 0)
+            has_absorbing = true
+            break
+        end
+    end
+    if !has_absorbing
+        @warn "Model has no absorbing states. All states have at least one outgoing transition. " *
+              "This may cause simulation to run indefinitely or likelihood computation issues. " *
+              "Consider adding at least one absorbing state (a state with no outgoing transitions)."
+    end
 
     # Handle weight exclusivity and defaults
     SubjectWeights, ObservationWeights = check_weight_exclusivity(SubjectWeights, ObservationWeights, nsubj)
@@ -246,10 +262,24 @@ function multistatemodel(hazards::HazardFunction...;
 
     model = _assemble_model(mode, process, components, model_surrogate, modelcall)
     
+    # NOTE ON CONSTRUCTION ATOMICITY (C6_P2):
+    # The following initialization steps are NOT transactional. If initialize_parameters!
+    # succeeds but initialize_surrogate! fails, the model will be returned with initialized
+    # parameters but no surrogate. This is by design - a partially initialized model is still
+    # usable for some operations (e.g., simulation with manual parameter setting).
+    # 
+    # If strict atomicity is required, wrap the multistatemodel() call in try-catch and
+    # discard the model on any failure.
+    
     # Initialize parameters (default: true)
     # Uses :auto method which selects :crude for Markov/phase-type, :surrogate for semi-Markov
     if initialize
-        initialize_parameters!(model; constraints = constraints)
+        try
+            initialize_parameters!(model; constraints = constraints)
+        catch e
+            @warn "Parameter initialization failed. Model returned with default parameters." exception=(e, catch_backtrace())
+            rethrow()  # Still throw, but user gets warning first
+        end
     end
     
     # Fit surrogate at model creation time (default: true)
@@ -259,12 +289,18 @@ function multistatemodel(hazards::HazardFunction...;
         end
         # Use initialize_surrogate! to fit the appropriate surrogate type
         # This replaces direct _fit_markov_surrogate call
-        initialize_surrogate!(model; 
-            type = resolved_surrogate,
-            method = :mle,
-            n_phases = surrogate_n_phases,
-            surrogate_constraints = surrogate_constraints,
-            verbose = verbose)
+        try
+            initialize_surrogate!(model; 
+                type = resolved_surrogate,
+                method = :mle,
+                n_phases = surrogate_n_phases,
+                surrogate_constraints = surrogate_constraints,
+                verbose = verbose)
+        catch e
+            @warn "Surrogate initialization failed. Model returned with parameters initialized but no fitted surrogate. " *
+                  "You may need to call initialize_surrogate!() manually before fitting." exception=(e, catch_backtrace())
+            rethrow()  # Still throw, but user gets warning first
+        end
     end
     
     return model

@@ -15,6 +15,26 @@
 # minimizes UNPENALIZED prediction error via leave-one-out approximation.
 #
 # =============================================================================
+# AD-SAFETY NOTES
+# =============================================================================
+#
+# The functions in this module are designed for AD-compatibility where needed:
+#
+# AD-SAFE (can be differentiated through):
+# - compute_penalty_from_lambda: Uses eltype(beta) for penalty accumulation
+# - fit_penalized_beta: Uses ForwardDiff for optimization
+# - pijcv_criterion: Core criterion is AD-safe (uses T = eltype)
+#
+# AD-UNSAFE (contain control flow/exceptions that break AD):
+# - select_smoothing_parameters: Outer loop with convergence checks
+# - _golden_section_search: Contains conditional logic
+# - Catch blocks throughout: Return fallback values that preserve type T
+#
+# For catch blocks: When optimization fails during λ search, fallbacks use
+# T(1e10) where T = eltype(parameters). This preserves AD type information
+# even though gradients will be zero through the fallback path.
+#
+# =============================================================================
 
 using LinearAlgebra
 
@@ -185,7 +205,7 @@ function fit_penalized_beta(model::MultistateProcess, data::ExactData,
     # Merge default options with user overrides
     # Convert kwargs to NamedTuple to enable merging
     ipopt_options_nt = (;ipopt_options...)
-    merged_options = merge(DEFAULT_IPOPT_OPTIONS, (maxiters=maxiters, tol=1e-6), ipopt_options_nt)
+    merged_options = merge(DEFAULT_IPOPT_OPTIONS, (maxiters=maxiters, tol=LAMBDA_SELECTION_INNER_TOL), ipopt_options_nt)
     
     if use_polyalgorithm
         # Phase 1: LBFGS warm-start with loose tolerance
@@ -320,14 +340,16 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
         try
             cholesky(H_lambda_sym)
         catch e
+            @debug "Cholesky factorization failed in _ncv_criterion (LOO): " exception=(e, catch_backtrace()) lambda=lambda
             nothing
         end
     else
         nothing  # Skip factorization for AD mode
     end
     
-    # If Cholesky failed and not in AD mode, return large value
-    if chol_fact === nothing && use_cholesky_downdate
+    # If Cholesky failed and not in AD mode, return large value indicating poor λ
+    if isnothing(chol_fact) && use_cholesky_downdate
+        @debug "Returning large criterion value due to Cholesky failure"
         return T(1e10)
     end
     
@@ -353,7 +375,7 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
             nothing  # Will use direct solve below
         end
         
-        if delta_i === nothing
+        if isnothing(delta_i)
             # Either Cholesky downdate failed or we're in AD mode
             # Use direct solve: (H_λ - H_i)⁻¹ g_i
             H_lambda_loo = H_lambda - H_i
@@ -363,6 +385,7 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
                 H_loo_sym \ collect(g_i)
             catch e
                 # If solve fails (e.g., indefinite Hessian), return large value
+                @debug "Linear solve failed for LOO Hessian in _ncv_criterion: " exception=(e, catch_backtrace()) subject=i
                 return T(1e10)
             end
         end
@@ -466,6 +489,7 @@ function compute_pijkfold_criterion(log_lambda::AbstractVector{T}, state::Smooth
         cholesky(H_lambda_sym)
     catch e
         # If Cholesky fails, H_λ is not positive definite
+        @debug "Cholesky factorization failed in _ncv_criterion (k-fold): " exception=(e, catch_backtrace()) lambda=lambda nfolds=nfolds
         return T(1e10)
     end
     
@@ -504,6 +528,7 @@ function compute_pijkfold_criterion(log_lambda::AbstractVector{T}, state::Smooth
             H_fold_sym \ g_k
         catch e
             # If solve fails (e.g., indefinite Hessian), return large value
+            @debug "Linear solve failed for fold-out Hessian in _ncv_criterion (k-fold): " exception=(e, catch_backtrace()) fold=k
             return T(1e10)
         end
         
@@ -834,13 +859,14 @@ function _solve_loo_newton_step(chol_H::Cholesky, H_i::Matrix{Float64}, g_i::Abs
         L_chol = Cholesky(L, 'L', 0)
         return L_chol \ collect(g_i)
     catch e
-        # Cholesky solve failed
+        # Cholesky solve failed - expected for ill-conditioned problems
+        @debug "Cholesky solve failed in _cholesky_downdate_solve: " exception=(e, catch_backtrace())
         return nothing
     end
 end
 
 """
-    _cholesky_downdate!(L::Matrix, v::Vector; tol=1e-10) -> Bool
+    _cholesky_downdate!(L::Matrix, v::Vector; tol=CHOLESKY_DOWNDATE_TOL) -> Bool
 
 Perform in-place rank-1 downdate of Cholesky factor: LLᵀ → L̃L̃ᵀ where L̃L̃ᵀ = LLᵀ - vvᵀ.
 
@@ -866,7 +892,7 @@ For j = 1, ..., n:
 # Reference
 Seeger, M. (2004). Low Rank Updates for the Cholesky Decomposition.
 """
-function _cholesky_downdate!(L::Matrix{Float64}, v::Vector{Float64}; tol::Float64=1e-10)
+function _cholesky_downdate!(L::Matrix{Float64}, v::Vector{Float64}; tol::Float64=CHOLESKY_DOWNDATE_TOL)
     n = size(L, 1)
     w = copy(v)
     
@@ -1724,20 +1750,21 @@ function compute_perf_criterion(log_lambda::AbstractVector{T}, state::SmoothingS
     eig = try
         eigen(H_sym)
     catch e
+        @debug "Eigendecomposition failed in _perf_criterion: " exception=(e, catch_backtrace()) lambda=lambda
         return T(1e10)  # Return large value if eigen fails
     end
     
     # Check for positive definiteness
-    if any(eig.values .< 1e-10)
+    if any(eig.values .< EIGENVALUE_ZERO_TOL)
         # H is not positive definite - regularize
         min_eval = minimum(eig.values)
-        regularization = abs(min_eval) + 1e-6
+        regularization = abs(min_eval) + MATRIX_REGULARIZATION_EPS
         H_reg = H + regularization * I(p)
         eig = eigen(Symmetric(H_reg))
     end
     
     # H^{1/2} = V * D^{1/2} * V'
-    sqrt_evals = sqrt.(max.(eig.values, 1e-10))
+    sqrt_evals = sqrt.(max.(eig.values, EIGENVALUE_ZERO_TOL))
     H_sqrt = eig.vectors * Diagonal(sqrt_evals) * eig.vectors'
     
     # H^{-1/2} = V * D^{-1/2} * V'
@@ -1764,6 +1791,7 @@ function compute_perf_criterion(log_lambda::AbstractVector{T}, state::SmoothingS
     H_lambda_inv = try
         inv(H_lambda_sym)
     catch e
+        @debug "Matrix inversion failed in _perf_criterion: " exception=(e, catch_backtrace()) lambda=lambda
         return T(1e10)
     end
     
@@ -1847,7 +1875,7 @@ function compute_efs_criterion(log_lambda::AbstractVector{T}, state::SmoothingSe
     # Log pseudo-determinant of S_λ: ½ log|S_λ|₊
     # Use eigenvalues, keeping only positive ones (for rank-deficient S)
     eig_S = eigen(Symmetric(S_lambda))
-    pos_eigs_S = filter(e -> e > 1e-10, eig_S.values)
+    pos_eigs_S = filter(e -> e > EIGENVALUE_ZERO_TOL, eig_S.values)
     log_det_S = if isempty(pos_eigs_S)
         T(0.0)  # S_λ is zero (no penalty)
     else
@@ -1859,11 +1887,12 @@ function compute_efs_criterion(log_lambda::AbstractVector{T}, state::SmoothingSe
     eig_H = try
         eigen(H_lambda_sym)
     catch e
+        @debug "Eigendecomposition of H_lambda failed in _reml_criterion: " exception=(e, catch_backtrace()) lambda=lambda
         return T(1e10)
     end
     
     # Check for positive definiteness
-    if any(eig_H.values .< 1e-10)
+    if any(eig_H.values .< EIGENVALUE_ZERO_TOL)
         # Not positive definite - return large value
         return T(1e10)
     end

@@ -88,6 +88,11 @@ function generate_weibull_hazard(parnames::Vector{Symbol}, linpred_effect::Symbo
                 # h(t) = shape * scale * t^(shape-1) * exp(linear_pred)
                 haz = shape * scale * exp(linear_pred)
                 if shape != 1.0
+                    # H9_P2 guard: For shape < 1 and t = 0, t^(shape-1) = Inf
+                    # Clamp to large finite value to prevent NaN propagation
+                    if t == 0.0 && shape < 1.0
+                        return $WEIBULL_MAX_HAZARD
+                    end
                     haz *= t^(shape - 1)
                 end
                 
@@ -114,6 +119,11 @@ function generate_weibull_hazard(parnames::Vector{Symbol}, linpred_effect::Symbo
                 # = shape * scale * t^(shape-1) * exp(-shape * linear_pred)
                 haz = shape * scale * exp(-shape * linear_pred)
                 if shape != 1.0
+                    # H9_P2 guard: For shape < 1 and t = 0, t^(shape-1) = Inf
+                    # Clamp to large finite value to prevent NaN propagation
+                    if t == 0.0 && shape < 1.0
+                        return $WEIBULL_MAX_HAZARD
+                    end
                     haz *= t^(shape - 1)
                 end
                 
@@ -195,7 +205,13 @@ function generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symb
                 shape = pars.baseline.$(shape_parname)
                 rate = pars.baseline.$(rate_parname)
                 linear_pred = $linear_pred_expr
-                return rate * exp(shape * t + linear_pred)
+                
+                # H10_P2 guard: prevent overflow for large shape * t
+                exponent = shape * t + linear_pred
+                if exponent > $GOMPERTZ_MAX_EXPONENT
+                    return rate * exp($GOMPERTZ_MAX_EXPONENT)  # Clamped large value
+                end
+                return rate * exp(exponent)
             end
         ))
 
@@ -208,7 +224,10 @@ function generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symb
                     # Reduces to exponential: H = rate * (ub - lb)
                     baseline_cumhaz = rate * (ub - lb)
                 else
-                    baseline_cumhaz = (rate / shape) * (exp(shape * ub) - exp(shape * lb))
+                    # H10_P2 guard: use log-space computation to prevent overflow
+                    exp_upper = shape * ub > $GOMPERTZ_MAX_EXPONENT ? exp($GOMPERTZ_MAX_EXPONENT) : exp(shape * ub)
+                    exp_lower = shape * lb > $GOMPERTZ_MAX_EXPONENT ? exp($GOMPERTZ_MAX_EXPONENT) : exp(shape * lb)
+                    baseline_cumhaz = (rate / shape) * (exp_upper - exp_lower)
                 end
                 linear_pred = $linear_pred_expr
                 return baseline_cumhaz * exp(linear_pred)
@@ -222,8 +241,14 @@ function generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symb
                 rate = pars.baseline.$(rate_parname)
                 linear_pred = $linear_pred_expr
                 time_scale = exp(-linear_pred)
+                
+                # H10_P2 guard: prevent overflow for large shape * t * time_scale
+                exponent = shape * t * time_scale
+                if exponent > $GOMPERTZ_MAX_EXPONENT
+                    return rate * exp($GOMPERTZ_MAX_EXPONENT) * time_scale
+                end
                 # AFT: h(t|x) = h_0(t * exp(-linear_pred)) * exp(-linear_pred)
-                return rate * exp(shape * t * time_scale) * time_scale
+                return rate * exp(exponent) * time_scale
             end
         ))
 
@@ -239,7 +264,10 @@ function generate_gompertz_hazard(parnames::Vector{Symbol}, linpred_effect::Symb
                 if abs(scaled_shape) < $SHAPE_ZERO_TOL
                     baseline_cumhaz = scaled_rate * (ub - lb)
                 else
-                    baseline_cumhaz = (scaled_rate / scaled_shape) * (exp(scaled_shape * ub) - exp(scaled_shape * lb))
+                    # H10_P2 guard: use clamped exp to prevent overflow
+                    exp_upper = scaled_shape * ub > $GOMPERTZ_MAX_EXPONENT ? exp($GOMPERTZ_MAX_EXPONENT) : exp(scaled_shape * ub)
+                    exp_lower = scaled_shape * lb > $GOMPERTZ_MAX_EXPONENT ? exp($GOMPERTZ_MAX_EXPONENT) : exp(scaled_shape * lb)
+                    baseline_cumhaz = (scaled_rate / scaled_shape) * (exp_upper - exp_lower)
                 end
                 return baseline_cumhaz
             end

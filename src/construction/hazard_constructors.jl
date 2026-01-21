@@ -16,6 +16,86 @@ const _DEFAULT_HAZARD_FORMULA = StatsModels.@formula(0 ~ 1)
     return false
 end
 
+# =============================================================================
+# Error Message Helpers (M7_P1)
+# =============================================================================
+
+# Common typos and their corrections for hazard families
+const _FAMILY_TYPO_MAP = Dict(
+    :exponential => :exp,
+    :expon => :exp,
+    :weibull => :wei,
+    :weib => :wei,
+    :weibu => :wei,
+    :gompertz => :gom,
+    :gomp => :gom,
+    :spline => :sp,
+    :splines => :sp,
+    :bspline => :sp,
+    :phasetype => :pt,
+    :phase_type => :pt,
+    :coxian => :pt,
+)
+
+"""
+    _suggest_family(family::Symbol) -> Vector{Symbol}
+
+Suggest corrections for common typos in hazard family names.
+Returns empty vector if no suggestion available.
+"""
+function _suggest_family(family::Symbol)
+    # Check exact typo map
+    haskey(_FAMILY_TYPO_MAP, family) && return [_FAMILY_TYPO_MAP[family]]
+    
+    # Check if it's a case variation
+    family_lower = Symbol(lowercase(String(family)))
+    haskey(_FAMILY_TYPO_MAP, family_lower) && return [_FAMILY_TYPO_MAP[family_lower]]
+    
+    # Check Levenshtein-like similarity (simple heuristic)
+    valid = (:exp, :wei, :gom, :sp, :pt)
+    family_str = String(family)
+    for v in valid
+        v_str = String(v)
+        # If the family starts with the same letter and is short, suggest it
+        if !isempty(family_str) && first(family_str) == first(v_str) && length(family_str) <= 6
+            return [v]
+        end
+    end
+    
+    return Symbol[]
+end
+
+"""
+    _suggest_extrapolation(extrap::AbstractString) -> Vector{String}
+
+Suggest corrections for common typos in extrapolation method names.
+"""
+function _suggest_extrapolation(extrap::AbstractString)
+    extrap_lower = lowercase(extrap)
+    
+    # Common typos
+    typo_map = Dict(
+        "const" => "constant",
+        "c" => "constant", 
+        "lin" => "linear",
+        "l" => "linear",
+        "f" => "flat",
+        "zero" => "flat",
+        "none" => "flat",
+    )
+    
+    haskey(typo_map, extrap_lower) && return [typo_map[extrap_lower]]
+    
+    # Check prefixes
+    for valid in ("constant", "linear", "flat")
+        if startswith(valid, extrap_lower) && length(extrap_lower) >= 2
+            return [valid]
+        end
+    end
+    
+    return String[]
+end
+
 """
         Hazard(family::Union{AbstractString,Symbol}, statefrom::Integer, stateto::Integer; kwargs...)
         Hazard(hazard::StatsModels.FormulaTerm, family::Union{AbstractString,Symbol}, statefrom::Integer, stateto::Integer; kwargs...)
@@ -39,6 +119,14 @@ intercept-only design `@formula(0 ~ 1)` so you never have to write `+ 1` yoursel
 # Keyword arguments
 - `degree`, `knots`, `boundaryknots`, `natural_spline`, `extrapolation`, `monotone`:
     spline controls used only when `family == :sp`. See the BSplineKit docs for details.
+- `extrapolation`: How the spline hazard behaves beyond boundary knots (default: `"constant"`).
+    - `"constant"`: Hazard approaches boundary with zero slope (C¹ continuous) then extends flat.
+      The Neumann boundary condition (h'=0) ensures smooth transition to constant extrapolation.
+      Recommended for most applications.
+    - `"flat"`: Hazard extends as constant beyond boundaries (C⁰ continuous only). The spline
+      can have non-zero slope at boundaries, creating a potential kink. Use when full boundary
+      flexibility is needed.
+    - `"linear"`: Hazard extends linearly using the slope at the boundary.
 - `monotone`: `0` (default) leaves the spline unconstrained, `1` enforces an increasing
     hazard, and `-1` enforces a decreasing hazard.
 - `n_phases::Int`: Number of Coxian phases (only for `family == :pt`, default: 2).
@@ -81,9 +169,9 @@ julia> @hazard begin                              # macro front-end uses the sam
 function Hazard(
     hazard::StatsModels.FormulaTerm,
     family::Union{AbstractString,Symbol},
-    statefrom::Int64,
-    stateto::Int64;
-    degree::Int64 = 3,
+    statefrom::Int,
+    stateto::Int;
+    degree::Int = 3,
     knots::Union{Vector{Float64}, Float64, Nothing} = nothing,
     boundaryknots::Union{Vector{Float64}, Nothing} = nothing,
     natural_spline = true,
@@ -103,13 +191,57 @@ function Hazard(
     # Normalize family to Symbol (accept both String and Symbol for backward compatibility)
     family_key = family isa Symbol ? family : Symbol(lowercase(String(family)))
     
+    # Validate family with helpful error message (M7_P1)
     valid_families = (:exp, :wei, :gom, :sp, :pt)
-    family_key in valid_families || throw(ArgumentError("family must be one of $valid_families, got :$family_key"))
+    if family_key ∉ valid_families
+        # Check for common typos and provide suggestions
+        suggestions = _suggest_family(family_key)
+        if !isempty(suggestions)
+            throw(ArgumentError("Unknown hazard family :$family_key. Did you mean :$(suggestions[1])? Valid options: $valid_families"))
+        else
+            throw(ArgumentError("Unknown hazard family :$family_key. Valid options: $valid_families"))
+        end
+    end
     
+    # Spline-specific validation (M5_P1)
     if family_key == :sp
-        degree >= 0 || throw(ArgumentError("spline degree must be non-negative, got $degree"))
-        extrapolation in ("linear", "constant", "flat") || throw(ArgumentError("extrapolation must be \"linear\", \"constant\", or \"flat\", got \"$extrapolation\""))
-        monotone in (-1, 0, 1) || throw(ArgumentError("monotone must be -1, 0, or 1, got $monotone"))
+        degree >= 0 || throw(ArgumentError("spline degree must be non-negative, got $degree. Use degree=3 for cubic splines (default)."))
+        
+        # Validate extrapolation
+        if extrapolation ∉ ("linear", "constant", "flat")
+            suggestions = _suggest_extrapolation(extrapolation)
+            if !isempty(suggestions)
+                throw(ArgumentError("Invalid extrapolation \"$extrapolation\". Did you mean \"$(suggestions[1])\"? Valid options: \"linear\", \"constant\", \"flat\""))
+            else
+                throw(ArgumentError("extrapolation must be \"linear\", \"constant\", or \"flat\", got \"$extrapolation\""))
+            end
+        end
+        
+        monotone in (-1, 0, 1) || throw(ArgumentError("monotone must be -1 (decreasing), 0 (unconstrained), or 1 (increasing), got $monotone"))
+        
+        # Validate knots if provided
+        if !isnothing(knots) && knots isa Vector{Float64}
+            length(knots) >= 1 || throw(ArgumentError("knots vector must contain at least 1 knot, got empty vector"))
+            issorted(knots) || throw(ArgumentError("knots must be in strictly increasing order. Got: $knots"))
+            allunique(knots) || throw(ArgumentError("knots must be distinct (no duplicates). Got: $knots"))
+        end
+        
+        # Validate boundary knots if provided
+        if !isnothing(boundaryknots)
+            length(boundaryknots) == 2 || throw(ArgumentError("boundaryknots must have exactly 2 elements [lower, upper], got $(length(boundaryknots)) elements"))
+            boundaryknots[1] < boundaryknots[2] || throw(ArgumentError("boundaryknots must be ordered [lower, upper] with lower < upper, got $(boundaryknots)"))
+            
+            # If both knots and boundaryknots provided, validate relationship
+            if !isnothing(knots) && knots isa Vector{Float64} && !isempty(knots)
+                if minimum(knots) < boundaryknots[1]
+                    throw(ArgumentError("Interior knots must be within boundary knots. Knot $(minimum(knots)) < lower boundary $(boundaryknots[1])"))
+                end
+                if maximum(knots) > boundaryknots[2]
+                    throw(ArgumentError("Interior knots must be within boundary knots. Knot $(maximum(knots)) > upper boundary $(boundaryknots[2])"))
+                end
+            end
+        end
+        
         # For degree < 2, constant extrapolation (C1 boundary) is impossible.
         # Default to flat extrapolation (C0 boundary) which is usually desired.
         if extrapolation == "constant" && degree < 2
@@ -117,14 +249,27 @@ function Hazard(
         end
     end
     
+    # Phase-type specific validation
     if family_key == :pt
-        n_phases >= 1 || throw(ArgumentError("n_phases must be ≥ 1, got $n_phases"))
-        coxian_structure in (:unstructured, :sctp) || 
-            throw(ArgumentError("coxian_structure must be :unstructured or :sctp, got :$coxian_structure"))
-        covariate_constraints in (:unstructured, :homogeneous) || throw(ArgumentError("covariate_constraints must be :unstructured or :homogeneous, got :$covariate_constraints"))
+        n_phases >= 1 || throw(ArgumentError("n_phases must be ≥ 1, got $n_phases. For single-phase, use :exp hazard instead."))
+        # Valid structures: :unstructured (no constraints) or :sctp (eigenvalue ordering, increasing by default)
+        # Note: :sctp_increasing and :sctp_decreasing were removed - :sctp now implies increasing eigenvalues
+        if coxian_structure ∉ (:unstructured, :sctp)
+            if coxian_structure in (:sctp_increasing, :sctp_decreasing)
+                throw(ArgumentError("coxian_structure :$coxian_structure is deprecated. Use :sctp instead (implies eigenvalue ordering)."))
+            else
+                throw(ArgumentError("coxian_structure must be :unstructured or :sctp, got :$coxian_structure"))
+            end
+        end
+        if covariate_constraints ∉ (:unstructured, :homogeneous)
+            throw(ArgumentError("covariate_constraints must be :unstructured or :homogeneous, got :$covariate_constraints"))
+        end
     end
     
-    linpred_effect in (:ph, :aft) || throw(ArgumentError("linpred_effect must be :ph or :aft, got :$linpred_effect"))
+    # Validate linpred_effect with helpful message
+    if linpred_effect ∉ (:ph, :aft)
+        throw(ArgumentError("linpred_effect must be :ph (proportional hazards) or :aft (accelerated failure time), got :$linpred_effect"))
+    end
     
     metadata = HazardMetadata(time_transform = time_transform, linpred_effect = linpred_effect)
 
@@ -176,9 +321,9 @@ function enumerate_hazards(hazards::HazardFunction...)
     # initialize state space information
     hazinfo = 
         DataFrames.DataFrame(
-            statefrom = zeros(Int64, n_haz),
-            stateto = zeros(Int64, n_haz),
-            trans = zeros(Int64, n_haz),
+            statefrom = zeros(Int, n_haz),
+            stateto = zeros(Int, n_haz),
+            trans = zeros(Int, n_haz),
             order = collect(1:n_haz))
 
     # grab the origin and destination states for each hazard
@@ -216,7 +361,7 @@ function create_tmat(hazinfo::DataFrame)
     n_states = length(statespace)
 
     # initialize transition matrix
-    tmat = zeros(Int64, n_states, n_states)
+    tmat = zeros(Int, n_states, n_states)
 
     for i in axes(hazinfo, 1)
         tmat[hazinfo.statefrom[i], hazinfo.stateto[i]] = 

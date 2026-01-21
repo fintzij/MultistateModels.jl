@@ -99,7 +99,7 @@ struct SplineHazardInfo{B<:Union{BSplineBasis, RecombinedBSplineBasis}}
         
         # Validate S is symmetric (handle zero matrix case where norm(S) == 0)
         norm_S = norm(S)
-        tol = norm_S > 0 ? 1e-10 * norm_S : 1e-15
+        tol = norm_S > 0 ? SPLINE_SYMMETRY_RTOL * norm_S : SPLINE_SYMMETRY_ATOL
         norm(S - S') < tol || 
             throw(ArgumentError("Penalty matrix S must be symmetric"))
         
@@ -684,9 +684,9 @@ function calibrate_splines(model::MultistateProcess;
             verbose && @info "Using CDF inversion at reference level for knot calibration"
             
             # Ensure surrogate is fitted for cumulative incidence calculation
-            if model.markovsurrogate === nothing || !is_fitted(model.markovsurrogate)
+            if isnothing(model.markovsurrogate) || !is_fitted(model.markovsurrogate)
                 verbose && @info "  Fitting surrogate for cumulative incidence computation..."
-                set_surrogate!(model; type=:auto, verbose=false)
+                initialize_surrogate!(model; type=:auto, verbose=false)
             end
             
             # Compute exit quantiles by origin via CDF inversion
@@ -697,7 +697,7 @@ function calibrate_splines(model::MultistateProcess;
                 
                 # Get quantile levels (if user specified) or generate from nknots
                 qlevels = _get_quantiles_for_hazard(first_haz.hazname, quantiles, nk)
-                if qlevels === nothing
+                if isnothing(qlevels)
                     # Generate evenly spaced quantiles from nknots
                     qlevels = collect(range(1/(nk+1), 1 - 1/(nk+1), length=nk))
                 end
@@ -1083,7 +1083,7 @@ function _extract_sojourns_from_surrogate(model::MultistateProcess, n_paths::Int
     surrogate_type = needs_phasetype_proposal(model.hazards) ? :phasetype : :markov
     
     # Fit and store surrogate in model
-    set_surrogate!(model; type=surrogate_type, verbose=false)
+    initialize_surrogate!(model; type=surrogate_type, verbose=false)
     
     # Draw sample paths from the model (uses stored surrogate)
     path_result = draw_paths(model; min_ess=min_ess)
@@ -1178,14 +1178,14 @@ function _compute_exit_quantiles_at_reference(model::MultistateProcess, statefro
         throw(ArgumentError("All quantiles must be in (0, 1), got $quantiles"))
     
     # Determine t_max if not specified
-    if t_max === nothing
+    if isnothing(t_max)
         max_tstop = maximum(model.data.tstop)
         t_max = 2.0 * max_tstop  # Extend beyond observed data
         t_max = max(t_max, 10.0)  # Ensure minimum range
     end
     
     # Create time grid (start slightly above 0 to avoid issues at boundary)
-    t_grid = collect(range(1e-6, t_max, length=n_grid))
+    t_grid = collect(range(CDF_GRID_START, t_max, length=n_grid))
     
     # Compute cumulative incidence at reference level
     # This returns matrix: (n_times × n_destinations)
@@ -1217,7 +1217,7 @@ function _compute_exit_quantiles_at_reference(model::MultistateProcess, statefro
             cdf_lo, cdf_hi = total_exit_cdf[idx-1], total_exit_cdf[idx]
             
             # Handle edge case of flat CDF
-            if abs(cdf_hi - cdf_lo) < 1e-12
+            if abs(cdf_hi - cdf_lo) < CDF_INTERPOLATION_TOL
                 push!(result, t_lo)
             else
                 t_q = t_lo + (t_hi - t_lo) * (q - cdf_lo) / (cdf_hi - cdf_lo)
@@ -1292,7 +1292,7 @@ function _get_exit_quantiles_by_origin(model::MultistateProcess;
         catch e
             @warn "Failed to compute exit quantiles from state $s: $e"
             # Fall back to uniform placement
-            result[s] = collect(range(0.1, t_max === nothing ? 10.0 : t_max*0.9, length=length(quantiles)))
+            result[s] = collect(range(0.1, isnothing(t_max) ? 10.0 : t_max*0.9, length=length(quantiles)))
         end
     end
     
@@ -1307,7 +1307,7 @@ Determine number of interior knots for a specific hazard.
 function _get_nknots_for_hazard(hazname::Symbol, 
                                  nknots::Union{Int, NamedTuple, Nothing},
                                  n_obs::Int)
-    if nknots === nothing
+    if isnothing(nknots)
         return default_nknots(n_obs)
     elseif nknots isa Int
         return nknots
@@ -1325,7 +1325,7 @@ Determine quantile levels for a specific hazard, or nothing if using automatic p
 function _get_quantiles_for_hazard(hazname::Symbol,
                                     quantiles::Union{Vector{Float64}, NamedTuple, Nothing},
                                     nknots::Int)
-    if quantiles === nothing
+    if isnothing(quantiles)
         return nothing  # Use place_interior_knots for automatic placement
     elseif quantiles isa Vector{Float64}
         return quantiles

@@ -45,7 +45,7 @@ function build_tpm_mapping(data::DataFrame)
 
     # maps each row in dataset to TPM
     # first col is covar combn, second is tpm index
-    tpm_map = zeros(Int64, nrow(data), 2)
+    tpm_map = zeros(Int, nrow(data), 2)
 
     # check if the data contains covariates
     if ncol(data) == 6 # no covariates

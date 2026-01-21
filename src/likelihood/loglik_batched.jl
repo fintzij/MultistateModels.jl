@@ -196,7 +196,7 @@ function stack_intervals_for_hazard(hazard_idx::Int, cached_paths::Vector{Cached
     covar_names = hasfield(typeof(hazard), :covar_names) ? 
                   hazard.covar_names : 
                   extract_covar_names(hazard.parnames)
-    hazard_pars = pars === nothing ? nothing : pars[hazard_idx]
+    hazard_pars = isnothing(pars) ? nothing : pars[hazard_idx]
     
     for (path_i, cpd) in enumerate(cached_paths)
         subjdat_df = cpd.df

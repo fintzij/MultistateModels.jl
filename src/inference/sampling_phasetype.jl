@@ -959,15 +959,6 @@ function build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate, books, data)
     return tpm_book_ph, hazmat_book_ph
 end
 
-# Backward compatible overload (DEPRECATED - remove after tests updated)
-function build_phasetype_tpm_book(surrogate::PhaseTypeSurrogate, 
-                                  markov_surrogate::MarkovSurrogate,
-                                  books, data)
-    @warn "build_phasetype_tpm_book with markov_surrogate argument is deprecated. " *
-          "Use build_phasetype_tpm_book(surrogate, books, data) instead." maxlog=1
-    return build_phasetype_tpm_book(surrogate, books, data)
-end
-
 
 """
     build_phasetype_emat_expanded(model, surrogate::PhaseTypeSurrogate;

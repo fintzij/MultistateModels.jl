@@ -165,17 +165,14 @@ const WORKSPACE_LOCK = ReentrantLock()
     get_path_workspace() -> PathWorkspace
 
 Get the thread-local PathWorkspace, creating if necessary.
-Thread-safe initialization with lazy allocation.
+
+Thread-safe: The entire get-or-create operation is inside the lock to prevent
+TOCTOU race conditions when multiple threads initialize simultaneously (C7_P2 fix).
 """
 function get_path_workspace()
     tid = Threads.threadid()
     
-    # Fast path: workspace already exists
-    if tid <= length(THREAD_WORKSPACES) && isassigned(THREAD_WORKSPACES, tid)
-        return THREAD_WORKSPACES[tid]
-    end
-    
-    # Slow path: need to initialize
+    # Entire get-or-create must be inside lock to avoid TOCTOU race
     lock(WORKSPACE_LOCK) do
         # Resize if needed
         if tid > length(THREAD_WORKSPACES)
@@ -186,7 +183,24 @@ function get_path_workspace()
         if !isassigned(THREAD_WORKSPACES, tid)
             THREAD_WORKSPACES[tid] = PathWorkspace()
         end
+        
+        return THREAD_WORKSPACES[tid]
     end
-    
-    return THREAD_WORKSPACES[tid]
+end
+
+"""
+    clear_path_workspaces!()
+
+Clear all thread-local PathWorkspaces, freeing memory.
+
+This function should be called to reclaim memory in long-running processes
+after MCEM fitting is complete. Thread-safe.
+
+See also: [`clear_all_workspaces!`](@ref) for clearing all workspace types.
+"""
+function clear_path_workspaces!()
+    lock(WORKSPACE_LOCK) do
+        empty!(THREAD_WORKSPACES)
+    end
+    return nothing
 end

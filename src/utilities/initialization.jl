@@ -280,7 +280,7 @@ Initialize parameters using rates from fitted Markov surrogate.
 This is the implementation for `method = :markov`.
 
 If the model already has a fitted Markov surrogate (created during model generation
-or via `set_surrogate!`), it will be used directly. Otherwise, a new surrogate
+or via `initialize_surrogate!`), it will be used directly. Otherwise, a new surrogate
 will be fitted.
 
 # Arguments
@@ -466,7 +466,7 @@ function initialize_parameters!(model::MultistateProcess;
     if _is_degenerate_data(model)
         @warn "No transitions observed in data (all statefrom == stateto). " *
               "Falling back to :crude initialization. If this is template data for " *
-              "simulation, consider using `initialize=false` when creating the model."
+              "simulation, consider using `initialize=false` when creating the model." maxlog=1
         set_crude_init!(model; constraints = constraints)
         return nothing
     end

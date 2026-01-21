@@ -289,7 +289,7 @@ function _build_phasetype_model_from_hazards(hazards::Tuple{Vararg{HazardFunctio
     SubjectWeights, ObservationWeights = check_weight_exclusivity(SubjectWeights, ObservationWeights, nsubj)
     
     # Step 9: Prepare censoring patterns for expanded space
-    if CensoringPatterns === nothing
+    if isnothing(CensoringPatterns)
         CensoringPatterns_expanded = phase_censoring_patterns
     else
         # Merge user patterns with phase uncertainty patterns

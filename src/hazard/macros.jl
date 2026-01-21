@@ -12,7 +12,7 @@ const _ANALYTIC_HAZARD_FAMILY_ALIASES = Dict(
 )
 
 @inline function _hazard_macro_transition(value)
-    value === nothing && return nothing, nothing
+    isnothing(value) && return nothing, nothing
     if value isa Pair
         return value.first, value.second
     elseif value isa NTuple{2}
@@ -24,7 +24,7 @@ end
 
 function _hazard_macro_coalesce(key::Symbol, values...)
     for value in values
-        value === nothing && continue
+        isnothing(value) && continue
         return value
     end
     throw(ArgumentError("@hazard requires `$key = ...`"))
@@ -42,7 +42,7 @@ function _hazard_macro_entry(; formula = nothing,
                                kwargs...)
     hazard_formula = something(formula, hazard, _DEFAULT_HAZARD_FORMULA)
 
-    family === nothing && throw(ArgumentError("@hazard requires `family = ...`"))
+    isnothing(family) && throw(ArgumentError("@hazard requires `family = ...`"))
     family_symbol = family isa Symbol ? family : Symbol(lowercase(String(family)))
 
     transition_from, transition_to = _hazard_macro_transition(transition)
@@ -62,7 +62,7 @@ function _hazard_macro_entry(; formula = nothing,
 end
 
 function _hazard_macro_kwexprs(body)
-    args = body isa Expr && body.head == :block ? body.args : (body === nothing ? Expr[] : [body])
+    args = body isa Expr && body.head == :block ? body.args : (isnothing(body) ? Expr[] : [body])
     kwexprs = Expr[]
     for arg in args
         arg isa LineNumberNode && continue
@@ -70,7 +70,7 @@ function _hazard_macro_kwexprs(body)
             key = arg.args[1]
             key isa Symbol || throw(ArgumentError("@hazard assignments must use simple symbols (e.g., `family = :exp`)."))
             push!(kwexprs, Expr(:kw, key, arg.args[2]))
-        elseif arg === nothing
+        elseif isnothing(arg)
             continue
         else
             throw(ArgumentError("@hazard expects a block of assignments like `key = value`."))

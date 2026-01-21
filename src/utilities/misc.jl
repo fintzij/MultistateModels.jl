@@ -44,3 +44,40 @@ function parse_constraints(cons::Vector{Expr}, hazards; consfun_name = :consfun_
     # evaluate to compile the function
     @RuntimeGeneratedFunction(consfun_name)
 end
+
+# =============================================================================
+# Memory Management
+# =============================================================================
+
+"""
+    clear_all_workspaces!()
+
+Clear all thread-local workspaces to free memory.
+
+This function clears:
+- TVC interval workspaces (used for time-varying covariate evaluation)
+- Path sampling workspaces (used for MCEM inference)
+
+Call this function in long-running processes after model fitting is complete
+to reclaim memory. All workspaces will be lazily re-created on next use.
+
+# Example
+```julia
+# Fit multiple models in a loop
+for i in 1:100
+    model = multistatemodel(...)
+    fitted = fit(model)
+    process_results(fitted)
+end
+
+# Free accumulated workspace memory
+clear_all_workspaces!()
+```
+
+See also: [`clear_tvc_workspaces!`](@ref), [`clear_path_workspaces!`](@ref)
+"""
+function clear_all_workspaces!()
+    clear_tvc_workspaces!()
+    clear_path_workspaces!()
+    return nothing
+end

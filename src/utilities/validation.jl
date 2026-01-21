@@ -222,7 +222,7 @@ end
 Check that subject-level weights are properly specified.
 
 # Throws
-- `ArgumentError` for invalid weights
+- `ArgumentError` for invalid weights (wrong length, non-positive, or non-finite)
 """
 function check_SubjectWeights(SubjectWeights::Vector{Float64}, data::DataFrame)
     
@@ -232,7 +232,13 @@ function check_SubjectWeights(SubjectWeights::Vector{Float64}, data::DataFrame)
         throw(ArgumentError("SubjectWeights has length $(length(SubjectWeights)) but there are $nsubj subjects."))
     end
 
-    # check that the subject weights are non-negative
+    # check that all weights are finite (not NaN or Inf)
+    if any(!isfinite, SubjectWeights)
+        bad_indices = findall(!isfinite, SubjectWeights)
+        throw(ArgumentError("SubjectWeights must be finite (no NaN or Inf). Found non-finite values at indices: $(bad_indices[1:min(5, length(bad_indices))])"))
+    end
+
+    # check that the subject weights are positive (non-negative and non-zero)
     if any(SubjectWeights .<= 0)
         bad_indices = findall(SubjectWeights .<= 0)
         throw(ArgumentError("SubjectWeights must be positive. Found non-positive values at indices: $(bad_indices[1:min(5, length(bad_indices))])"))
@@ -245,7 +251,7 @@ end
 Check that observation-level weights are properly specified.
 
 # Throws
-- `ArgumentError` for invalid weights
+- `ArgumentError` for invalid weights (wrong length, non-positive, or non-finite)
 """
 function check_ObservationWeights(ObservationWeights::Vector{Float64}, data::DataFrame)
     
@@ -254,7 +260,13 @@ function check_ObservationWeights(ObservationWeights::Vector{Float64}, data::Dat
         throw(ArgumentError("ObservationWeights has length $(length(ObservationWeights)) but there are $(nrow(data)) observations."))
     end
 
-    # check that the observation weights are non-negative
+    # check that all weights are finite (not NaN or Inf)
+    if any(!isfinite, ObservationWeights)
+        bad_indices = findall(!isfinite, ObservationWeights)
+        throw(ArgumentError("ObservationWeights must be finite (no NaN or Inf). Found non-finite values at indices: $(bad_indices[1:min(5, length(bad_indices))])"))
+    end
+
+    # check that the observation weights are positive (non-negative and non-zero)
     if any(ObservationWeights .<= 0)
         bad_indices = findall(ObservationWeights .<= 0)
         throw(ArgumentError("ObservationWeights must be positive. Found non-positive values at indices: $(bad_indices[1:min(5, length(bad_indices))])"))

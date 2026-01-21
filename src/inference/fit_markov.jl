@@ -83,8 +83,10 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
                 fishinf .-= H_i
             end
             
-            vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(nsubj) * length(sol.u))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
-            vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
+            # Compute vcov using shared tolerance computation (H2_P1 fix)
+            pinv_tol = _compute_vcov_tolerance(nsubj, nparams, vcov_threshold)
+            vcov = pinv(Symmetric(fishinf), atol = pinv_tol)
+            _clean_vcov_matrix!(vcov)
             vcov = Symmetric(vcov)
         else
             subject_grads_cache = nothing
@@ -157,8 +159,10 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
                 for H_i in subject_hessians_cache
                     fishinf .-= H_i
                 end
-                vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(nsubj) * length(sol.u))^-2 : sqrt(eps(Float64)))
-                vcov[isapprox.(vcov, 0.0; atol = eps(Float64))] .= 0.0
+                # Compute vcov using shared tolerance computation (H2_P1 fix)
+                pinv_tol = _compute_vcov_tolerance(nsubj, nparams, vcov_threshold)
+                vcov = pinv(Symmetric(fishinf), atol = pinv_tol)
+                _clean_vcov_matrix!(vcov)
                 vcov = Symmetric(vcov)
             end
         else

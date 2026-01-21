@@ -21,6 +21,164 @@
 #
 # =============================================================================
 
+# =============================================================================
+# MCEM Configuration Struct (L1_P1)
+# =============================================================================
+
+"""
+    MCEMConfig
+
+Configuration struct for MCEM algorithm parameters.
+
+This struct consolidates the many keyword arguments of `_fit_mcem` into a
+single configuration object, improving readability and maintainability.
+
+# Fields
+
+## Algorithm Control
+- `maxiter::Int`: Maximum MCEM iterations (default: 100)
+- `tol::Float64`: Tolerance for MLL change in stopping rule (default: 1e-2)
+- `ascent_threshold::Float64`: Standard normal quantile for ascent lower bound (default: 0.1)
+- `stopping_threshold::Float64`: Standard normal quantile for stopping criterion (default: 0.1)
+
+## ESS Control
+- `ess_target_initial::Int`: Initial effective sample size target per subject (default: 50)
+- `max_ess::Int`: Maximum ESS before stopping for non-convergence (default: 10000)
+- `ess_growth_factor::Float64`: Multiplicative factor for ESS increase (default: √2)
+- `ess_increase_method::Symbol`: Method for increasing ESS, `:fixed` or `:adaptive` (default: :fixed)
+- `ascent_alpha::Float64`: Type I error rate for adaptive power calculation (default: 0.25)
+- `ascent_beta::Float64`: Type II error rate for adaptive power calculation (default: 0.25)
+
+## Sampling Control
+- `max_sampling_effort::Int`: Maximum factor of ESS for additional path sampling (default: 20)
+- `npaths_additional::Int`: Increment for additional paths when augmenting (default: 10)
+- `block_hessian_speedup::Float64`: Minimum speedup to use block-diagonal Hessian (default: 2.0)
+
+## SIR Configuration
+- `sir::Symbol`: SIR resampling method (default: :adaptive_lhs)
+- `sir_pool_constant::Float64`: Pool size multiplier (default: 2.0)
+- `sir_max_pool::Int`: Maximum pool size cap (default: 8192)
+- `sir_resample::Symbol`: When to resample, `:always` or `:degeneracy` (default: :always)
+- `sir_degeneracy_threshold::Float64`: Pareto-k threshold for `:degeneracy` mode (default: 0.7)
+- `sir_adaptive_threshold::Float64`: Ratio threshold for adaptive switching (default: 2.0)
+- `sir_adaptive_min_iters::Int`: Minimum iterations before adaptive switch (default: 3)
+
+## Output Control
+- `verbose::Bool`: Print progress messages (default: true)
+- `return_convergence_records::Bool`: Save iteration history (default: true)
+- `return_proposed_paths::Bool`: Save latent paths and importance weights (default: false)
+
+## Variance Estimation
+- `compute_vcov::Bool`: Compute model-based variance (default: true)
+- `vcov_threshold::Bool`: Use adaptive threshold for pseudo-inverse (default: true)
+- `compute_ij_vcov::Bool`: Compute IJ/sandwich variance (default: true)
+- `compute_jk_vcov::Bool`: Compute jackknife variance (default: false)
+- `loo_method::Symbol`: Method for LOO perturbations (default: :direct)
+
+## Penalty Configuration
+- `penalty`: Penalty specification (default: :auto)
+- `lambda_init::Float64`: Initial smoothing parameter (default: 1.0)
+
+# Example
+```julia
+config = MCEMConfig(
+    maxiter = 200,
+    ess_target_initial = 100,
+    sir = :lhs,
+    verbose = true
+)
+fitted = fit(model; mcem_config = config)  # (future API)
+```
+"""
+Base.@kwdef struct MCEMConfig
+    # Algorithm control
+    maxiter::Int = DEFAULT_MCEM_MAXITER
+    tol::Float64 = DEFAULT_MCEM_TOL
+    ascent_threshold::Float64 = 0.1
+    stopping_threshold::Float64 = 0.1
+    
+    # ESS control
+    ess_target_initial::Int = DEFAULT_ESS_TARGET_INITIAL
+    max_ess::Int = DEFAULT_MAX_ESS
+    ess_growth_factor::Float64 = sqrt(2.0)
+    ess_increase_method::Symbol = :fixed
+    ascent_alpha::Float64 = 0.25
+    ascent_beta::Float64 = 0.25
+    
+    # Sampling control
+    max_sampling_effort::Int = 20
+    npaths_additional::Int = 10
+    block_hessian_speedup::Float64 = 2.0
+    
+    # SIR configuration
+    sir::Symbol = :adaptive_lhs
+    sir_pool_constant::Float64 = 2.0
+    sir_max_pool::Int = 8192
+    sir_resample::Symbol = :always
+    sir_degeneracy_threshold::Float64 = 0.7
+    sir_adaptive_threshold::Float64 = 2.0
+    sir_adaptive_min_iters::Int = 3
+    
+    # Output control
+    verbose::Bool = true
+    return_convergence_records::Bool = true
+    return_proposed_paths::Bool = false
+    
+    # Variance estimation
+    compute_vcov::Bool = true
+    vcov_threshold::Bool = true
+    compute_ij_vcov::Bool = true
+    compute_jk_vcov::Bool = false
+    loo_method::Symbol = :direct
+    
+    # Penalty configuration
+    penalty::Any = :auto
+    lambda_init::Float64 = 1.0
+end
+
+"""
+    validate(config::MCEMConfig)
+
+Validate MCEM configuration parameters.
+
+# Returns
+- `true` if all parameters are valid
+
+# Throws
+- `ArgumentError` if any parameter is invalid
+"""
+function validate(config::MCEMConfig)
+    # SIR validation
+    config.sir ∈ (:none, :sir, :lhs, :adaptive_sir, :adaptive_lhs) ||
+        throw(ArgumentError("sir must be :none, :sir, :lhs, :adaptive_sir, or :adaptive_lhs, got :$(config.sir)"))
+    config.sir_resample ∈ (:always, :degeneracy) ||
+        throw(ArgumentError("sir_resample must be :always or :degeneracy, got :$(config.sir_resample)"))
+    config.sir_pool_constant > 0 ||
+        throw(ArgumentError("sir_pool_constant must be positive, got $(config.sir_pool_constant)"))
+    config.sir_max_pool > 0 ||
+        throw(ArgumentError("sir_max_pool must be positive, got $(config.sir_max_pool)"))
+    0 < config.sir_degeneracy_threshold < 1 ||
+        throw(ArgumentError("sir_degeneracy_threshold must be in (0,1), got $(config.sir_degeneracy_threshold)"))
+    config.sir_adaptive_threshold > 0 ||
+        throw(ArgumentError("sir_adaptive_threshold must be positive, got $(config.sir_adaptive_threshold)"))
+    config.sir_adaptive_min_iters >= 1 ||
+        throw(ArgumentError("sir_adaptive_min_iters must be at least 1, got $(config.sir_adaptive_min_iters)"))
+    
+    # Algorithm parameters
+    config.max_sampling_effort > 1 ||
+        throw(ArgumentError("max_sampling_effort must be greater than 1, got $(config.max_sampling_effort)"))
+    config.ess_growth_factor > 1 ||
+        throw(ArgumentError("ess_growth_factor must be greater than 1, got $(config.ess_growth_factor)"))
+    config.ess_increase_method ∈ (:fixed, :adaptive) ||
+        throw(ArgumentError("ess_increase_method must be :fixed or :adaptive, got :$(config.ess_increase_method)"))
+    0 < config.ascent_alpha < 1 ||
+        throw(ArgumentError("ascent_alpha must be in (0,1), got $(config.ascent_alpha)"))
+    0 < config.ascent_beta < 1 ||
+        throw(ArgumentError("ascent_beta must be in (0,1), got $(config.ascent_beta)"))
+    
+    return true
+end
+
 """
     _fit_mcem(model::MultistateModel; kwargs...)
 
@@ -32,7 +190,7 @@ Uses Ipopt optimization for both constrained and unconstrained M-steps by defaul
 
 !!! note "Surrogate Required"
     MCEM requires a Markov surrogate for importance sampling proposals. 
-    You must call `set_surrogate!(model)` or use `surrogate=:markov` in 
+    You must call `initialize_surrogate!(model)` or use `surrogate=:markov` in 
     `multistatemodel()` before fitting.
 
 # Algorithm
@@ -983,9 +1141,11 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
             end
         end
 
-        # get the variance-covariance matrix
-        vcov = pinv(Symmetric(fishinf), atol = vcov_threshold ? (log(nsubj) * length(params_cur))^-2 : sqrt(eps(real(float(oneunit(eltype(fishinf)))))))
-        vcov[findall(isapprox.(vcov, 0.0; atol = sqrt(eps(Float64))))] .= 0.0
+        # Compute vcov using shared tolerance computation (H2_P1 fix)
+        nparams = length(params_cur)
+        pinv_tol = _compute_vcov_tolerance(nsubj, nparams, vcov_threshold)
+        vcov = pinv(Symmetric(fishinf), atol = pinv_tol)
+        _clean_vcov_matrix!(vcov)
         vcov = Symmetric(vcov)
     else
         vcov = nothing

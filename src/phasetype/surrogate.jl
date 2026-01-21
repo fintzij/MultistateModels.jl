@@ -97,7 +97,7 @@ function build_phasetype_surrogate(tmat::Matrix{Int64}, config::PhaseTypeConfig;
     
     # Handle :auto - select via BIC
     if config.n_phases === :auto
-        if data === nothing
+        if isnothing(data)
             throw(ArgumentError("data is required when n_phases=:auto for BIC-based selection"))
         end
         n_phases = _select_n_phases_bic(tmat, data; max_phases=config.max_phases, verbose=verbose)
@@ -105,7 +105,7 @@ function build_phasetype_surrogate(tmat::Matrix{Int64}, config::PhaseTypeConfig;
                                  max_phases=config.max_phases)
     # Handle :heuristic - use smart defaults based on hazard types
     elseif config.n_phases === :heuristic
-        if hazards === nothing
+        if isnothing(hazards)
             throw(ArgumentError("hazards is required when n_phases=:heuristic"))
         end
         n_phases_vec = _compute_default_n_phases(tmat, hazards)

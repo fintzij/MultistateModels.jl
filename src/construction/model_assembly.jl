@@ -35,7 +35,7 @@ function build_hazards(hazards::HazardFunction...; data::DataFrame, surrogate = 
     for (idx, ctx) in enumerate(contexts)
         hazkeys[ctx.hazname] = idx
         builder = get(_HAZARD_BUILDERS, ctx.family, nothing)
-        builder === nothing && throw(ArgumentError("Unknown hazard family: $(ctx.family). Supported families: $(keys(_HAZARD_BUILDERS))"))
+        isnothing(builder) && throw(ArgumentError("Unknown hazard family: $(ctx.family). Supported families: $(keys(_HAZARD_BUILDERS))"))
         hazard_struct, hazpars = builder(ctx)
         _hazards[idx] = hazard_struct
         push!(parameters_list, hazpars)
@@ -144,6 +144,16 @@ function build_emat(data::DataFrame, CensoringPatterns::Matrix{Float64}, Emissio
                 throw(ArgumentError("EmissionMatrix row $i has no allowed states (all zeros)."))
             end
         end
+        # Validate row sums (M6_P1): rows representing probabilities should sum to <= 1.0
+        # This is a soft constraint with a warning, as emission matrices can represent
+        # unnormalized likelihoods in some use cases
+        row_sums = sum(EmissionMatrix, dims=2)
+        if any(row_sums .> 1.0 + 1e-10)
+            bad_rows = findall(vec(row_sums) .> 1.0 + 1e-10)
+            @warn "EmissionMatrix rows should sum to ≤ 1.0 for proper probability interpretation. " *
+                  "Rows with sum > 1.0: $(bad_rows[1:min(5, length(bad_rows))]). " *
+                  "This may indicate incorrect soft evidence specification."
+        end
         return EmissionMatrix
     end
     
@@ -187,12 +197,19 @@ function _validate_inputs!(data::DataFrame,
                            phase_to_state::Union{Nothing, Vector{Int}} = nothing)
     check_data!(data, tmat, CensoringPatterns; verbose = verbose, phase_to_state = phase_to_state)
     
-    # Validate weights
+    # Validate weights (H3_P1, M15_P2)
+    # check_SubjectWeights and check_ObservationWeights ensure:
+    # - All weights are finite (not NaN/Inf)
+    # - All weights are positive (> 0), which guarantees sum > 0
     if !isnothing(SubjectWeights)
         check_SubjectWeights(SubjectWeights, data)
+        # Defense-in-depth: explicit sum check (M15_P2)
+        @assert sum(SubjectWeights) > 0 "Sum of SubjectWeights must be positive"
     end
     if !isnothing(ObservationWeights)
         check_ObservationWeights(ObservationWeights, data)
+        # Defense-in-depth: explicit sum check (M15_P2)
+        @assert sum(ObservationWeights) > 0 "Sum of ObservationWeights must be positive"
     end
     
     if any(data.obstype .∉ Ref([1, 2]))

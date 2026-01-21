@@ -519,7 +519,7 @@ end
 # =============================================================================
 
 """
-    build_ispline_transform_matrix(basis; direction::Int=1) -> Matrix{Float64}
+    build_ispline_transform_matrix(basis; direction::Int=1, warn_on_ill_conditioned::Bool=true) -> Matrix{Float64}
 
 Build the transformation matrix L for I-spline (monotone) parameterization.
 
@@ -532,6 +532,7 @@ where L encodes the cumulative sum transformation with knot-spacing weights.
 # Arguments
 - `basis`: BSplineKit basis object
 - `direction::Int=1`: Direction of monotonicity (+1 for increasing, -1 for decreasing)
+- `warn_on_ill_conditioned::Bool=true`: If true, warn when cond(L) > ISPLINE_CONDITION_WARNING_THRESHOLD
 
 # Returns
 - `L`: Transformation matrix (K × K) where K is the number of basis functions
@@ -553,6 +554,13 @@ So L has the structure:
 
 For decreasing monotonicity (direction=-1), the output is reversed.
 
+# Numerical Stability
+The condition number of L determines precision loss when inverting (e.g., in rectify_coefs!).
+If cond(L) > 1e10 (ISPLINE_CONDITION_WARNING_THRESHOLD), a warning is issued. Common causes:
+- Very closely spaced knots
+- Too many basis functions
+- Poorly chosen knot placement
+
 # Mathematical Background
 The I-spline transformation ensures that when the parameters (ests) are constrained
 to be non-negative (via box constraints), the resulting B-spline has non-negative
@@ -568,9 +576,9 @@ Use `transform_penalty_for_monotone` to apply this transformation.
 - Ramsay, J.O. (1988). "Monotone Regression Splines in Action."
   Statistical Science 3(4), 425-441.
 
-See also: [`transform_penalty_for_monotone`](@ref), [`_spline_ests2coefs`](@ref)
+See also: [`transform_penalty_for_monotone`](@ref), [`_spline_ests2coefs`](@ref), `ISPLINE_CONDITION_WARNING_THRESHOLD`
 """
-function build_ispline_transform_matrix(basis; direction::Int=1)
+function build_ispline_transform_matrix(basis; direction::Int=1, warn_on_ill_conditioned::Bool=true)
     direction ∈ [-1, 1] || throw(ArgumentError("direction must be ±1, got $direction"))
     
     k = BSplineKit.order(basis)
@@ -602,6 +610,19 @@ function build_ispline_transform_matrix(basis; direction::Int=1)
     if direction == -1
         # Reverse rows only (output reversal)
         L = L[K:-1:1, :]
+    end
+    
+    # H8_P2: Check condition number and warn if ill-conditioned
+    # An ill-conditioned L means the inverse (used in rectify_coefs! and coefficient recovery)
+    # will lose significant precision, potentially causing numerical issues
+    if warn_on_ill_conditioned
+        cond_L = cond(L)
+        if cond_L > ISPLINE_CONDITION_WARNING_THRESHOLD
+            @warn "I-spline transformation matrix is ill-conditioned (cond(L) = $(round(cond_L, sigdigits=3))). " *
+                  "This can cause numerical precision loss in coefficient rectification. " *
+                  "Consider: (1) reducing the number of knots, (2) ensuring knots are not too closely spaced, " *
+                  "or (3) using wider knot spacing. Current basis has $K functions."
+        end
     end
     
     return L

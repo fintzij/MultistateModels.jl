@@ -197,8 +197,8 @@ function _sample_path_with_infra!(j::Int, i::Int, model::MultistateProcess,
         path_result = draw_samplepath_phasetype(i, model, infra.tpm_book, infra.hazmat_book,
                                                  ph_tpm_map, infra.fbmats, infra.emat,
                                                  infra.surrogate, infra.absorbingstates;
-                                                 expanded_data = infra.original_row_map === nothing ? nothing : infra.data,
-                                                 expanded_subjectindices = infra.original_row_map === nothing ? nothing : infra.subjectindices,
+                                                 expanded_data = isnothing(infra.original_row_map) ? nothing : infra.data,
+                                                 expanded_subjectindices = isnothing(infra.original_row_map) ? nothing : infra.subjectindices,
                                                  original_row_map = infra.original_row_map)
         
         # Store collapsed path for target likelihood evaluation
@@ -258,7 +258,7 @@ function _update_ess_and_weights!(i::Int, samplepaths, loglik_surrog, loglik_tar
     
     # Check for degenerate weights
     weights_range = maximum(_logImportanceWeights[i]) - minimum(_logImportanceWeights[i])
-    weights_degenerate = allequal(_logImportanceWeights[i]) || weights_range < 1e-10
+    weights_degenerate = allequal(_logImportanceWeights[i]) || weights_range < IMPORTANCE_WEIGHT_RANGE_TOL
     
     if weights_degenerate
         fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))
@@ -539,7 +539,7 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
             
             # Check for degenerate weights - either exactly equal or nearly so
             weights_range = maximum(_logImportanceWeights[i]) - minimum(_logImportanceWeights[i])
-            weights_degenerate = allequal(_logImportanceWeights[i]) || weights_range < 1e-10
+            weights_degenerate = allequal(_logImportanceWeights[i]) || weights_range < IMPORTANCE_WEIGHT_RANGE_TOL
             
             if weights_degenerate
                 fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))
@@ -1595,7 +1595,7 @@ function ComputeImportanceWeightsESS!(loglik_target, loglik_surrog, _logImportan
             # Check for degenerate weights - either all near zero or very small range
             weights_range = maximum(_logImportanceWeights[i]) - minimum(_logImportanceWeights[i])
             weights_degenerate = all(isapprox.(_logImportanceWeights[i], 0.0; atol = sqrt(eps()))) || 
-                                 weights_range < 1e-10
+                                 weights_range < IMPORTANCE_WEIGHT_RANGE_TOL
             
             if weights_degenerate
                 fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))

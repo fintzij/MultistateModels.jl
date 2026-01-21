@@ -258,12 +258,16 @@ function should_parallelize(config::ThreadingConfig, task_count::Int)
 end
 
 # Global threading configuration (can be overridden per-call)
+# Protected by lock for thread-safe access (M18_P2 fix)
 const _GLOBAL_THREADING_CONFIG = Ref(ThreadingConfig(parallel=false))
+const _GLOBAL_THREADING_CONFIG_LOCK = ReentrantLock()
 
 """
     set_threading_config!(; parallel=false, nthreads=nothing, min_batch_size=10)
 
 Set global threading configuration for likelihood evaluation.
+
+Thread-safe: Uses a lock to prevent race conditions when called from multiple threads.
 
 # Example
 ```julia
@@ -279,17 +283,25 @@ set_threading_config!(parallel=false)
 """
 function set_threading_config!(; parallel::Bool=false, nthreads::Union{Nothing,Int}=nothing,
                                  min_batch_size::Int=10)
-    _GLOBAL_THREADING_CONFIG[] = ThreadingConfig(parallel=parallel, nthreads=nthreads,
-                                                  min_batch_size=min_batch_size)
-    return _GLOBAL_THREADING_CONFIG[]
+    config = ThreadingConfig(parallel=parallel, nthreads=nthreads, min_batch_size=min_batch_size)
+    lock(_GLOBAL_THREADING_CONFIG_LOCK) do
+        _GLOBAL_THREADING_CONFIG[] = config
+    end
+    return config
 end
 
 """
     get_threading_config() -> ThreadingConfig
 
 Get current global threading configuration.
+
+Thread-safe: Uses a lock to prevent race conditions when called from multiple threads.
 """
-get_threading_config() = _GLOBAL_THREADING_CONFIG[]
+function get_threading_config()
+    lock(_GLOBAL_THREADING_CONFIG_LOCK) do
+        return _GLOBAL_THREADING_CONFIG[]
+    end
+end
 # =============================================================================
 # Spline Penalty Configuration Types
 # =============================================================================

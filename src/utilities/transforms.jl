@@ -103,13 +103,13 @@ function get_unflatten_fn(model::MultistateProcess)
 end
 
 """
-    get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natural)
+    get_parameters(model::MultistateProcess, h::Int; scale::Symbol=:natural)
 
 Get parameters for a specific hazard by index.
 
 # Arguments
 - `model::MultistateProcess`: The model
-- `h::Int64`: Hazard index (1-based)
+- `h::Int`: Hazard index (1-based)
 - `scale::Symbol`: One of `:natural`, `:nested`, or `:log` (default: `:natural`)
 
 # Returns
@@ -137,7 +137,7 @@ params_nested = get_parameters(model, 1, scale=:nested)
 - [`get_parameters_natural`](@ref) - Get all parameters on natural scale
 - [`set_parameters!`](@ref) - Set parameters for a hazard
 """
-function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natural)
+function get_parameters(model::MultistateProcess, h::Int; scale::Symbol=:natural)
     # Validate hazard index
     n_hazards = length(model.hazards)
     if h < 1 || h > n_hazards
@@ -159,7 +159,7 @@ function get_parameters(model::MultistateProcess, h::Int64; scale::Symbol=:natur
                 break
             end
         end
-        if hazname === nothing
+        if isnothing(hazname)
             throw(ArgumentError("Could not find hazard name for index $h. Available hazards: $(keys(model.hazkeys))"))
         end
         

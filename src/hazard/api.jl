@@ -24,11 +24,11 @@ function _make_covar_namedtuple(covar_names::Vector{Symbol}, covar_dict::Dict{Sy
 end
 
 """
-    cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
+    cumulative_incidence(t, model::MultistateProcess, subj::Int=1)
 
 Compute the cumulative incidence for each possible transition as a function of time since state entry. Assumes the subject starts their observation period at risk and saves cumulative incidence at the supplied vector of times, t.
 """
-function cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
+function cumulative_incidence(t, model::MultistateProcess, subj::Int=1)
 
     # grab parameters, hazards and total hazards
     parameters   = model.parameters
@@ -46,7 +46,7 @@ function cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
     transients = findall(isa.(totalhazards, _TotalHazardTransient))
 
     # identify which transient state to grab for each hazard (as transients[trans_inds[h]])
-    trans_inds  = reduce(vcat, [i * ones(Int64, length(totalhazards[transients[i]].components)) for i in eachindex(transients)])
+    trans_inds  = reduce(vcat, [i * ones(Int, length(totalhazards[transients[i]].components)) for i in eachindex(transients)])
 
     # initialize cumulative incidence
     n_intervals = length(subj_times) - 1
@@ -95,11 +95,11 @@ function cumulative_incidence(t, model::MultistateProcess, subj::Int64=1)
 end
 
 """
-    cumulative_incidence(t, model::MultistateProcess, parameters, statefrom, subj::Int64=1)
+    cumulative_incidence(t, model::MultistateProcess, parameters, statefrom, subj::Int=1)
 
 Compute the cumulative incidence for each possible transition originating in `statefrom` as a function of time since state entry. Assumes the subject starts their observation period at risk and saves cumulative incidence at the supplied vector of times since state entry. This function is used internally.
 """
-function cumulative_incidence(t, model::MultistateProcess, parameters, statefrom, subj::Int64=1)
+function cumulative_incidence(t, model::MultistateProcess, parameters, statefrom, subj::Int=1)
 
     # get hazards
     hazards = model.hazards
@@ -161,7 +161,7 @@ function cumulative_incidence(t, model::MultistateProcess, parameters, statefrom
 end
 
 """
-    compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int64=1)
+    compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int=1)
 
 Compute the hazard at times t. 
 
@@ -171,7 +171,7 @@ Compute the hazard at times t.
 - hazard: Symbol specifying the hazard, e.g., :h12 for the hazard for transitioning from state 1 to state 2. 
 - subj: subject id. 
 """
-function compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int64 = 1)
+function compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int = 1)
 
     # get hazard index
     hazind = model.hazkeys[hazard]
@@ -197,7 +197,7 @@ function compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int64
 end
 
 """
-    compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, hazard::Symbol, subj::Int64=1)
+    compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, hazard::Symbol, subj::Int=1)
 
 Compute the cumulative hazard over [tstart,tstop]. 
 
@@ -208,7 +208,7 @@ Compute the cumulative hazard over [tstart,tstop].
 - hazard: Symbol specifying the hazard, e.g., :h12 for the hazard for transitioning from state 1 to state 2. 
 - subj: subject id. 
 """
-function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, hazard::Symbol, subj::Int64 = 1)
+function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, hazard::Symbol, subj::Int = 1)
 
     # check bounds
     if (length(tstart) == length(tstop))

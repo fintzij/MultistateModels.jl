@@ -1385,6 +1385,15 @@ See also: [`ij_vcov`](@ref), [`get_vcov`](@ref)
 """
 function jk_vcov(loo_deltas::AbstractMatrix)
     n = size(loo_deltas, 2)
+    
+    # Warn if n < 2 - jackknife variance is undefined or numerically unstable
+    if n < 2
+        @warn "Jackknife variance requested with n=$(n) subjects. " *
+              "Jackknife requires at least 2 subjects for valid variance estimation. " *
+              "Results may be NaN or numerically unstable. " *
+              "Consider using model-based variance (type=:model) instead."
+    end
+    
     return Symmetric(((n - 1) / n) * (loo_deltas * loo_deltas'))
 end
 

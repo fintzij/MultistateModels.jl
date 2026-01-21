@@ -979,8 +979,19 @@ function simulate_path(model::MultistateProcess, subj::Int64;
     # effective_times[h] tracks the accumulated effective time for hazard h
     effective_times = zeros(Float64, length(model.hazards))
 
+    # iteration counter to prevent infinite loops (C8_P2 guard)
+    iteration_count = 0
+
     # simulate path
     while keep_going
+        # C8_P2 guard: check iteration limit to prevent infinite loops
+        iteration_count += 1
+        if iteration_count > MAX_SIMULATION_ITERATIONS
+            error("Simulation exceeded maximum iterations ($MAX_SIMULATION_ITERATIONS) for subject $subj " *
+                  "in state $scur at time $tcur. This may indicate zero hazard rates or numerical issues. " *
+                  "Check that all hazard rates from non-absorbing states are positive.")
+        end
+
         use_transform = time_transform && _time_transform_enabled(model.totalhazards[scur], model.hazards)
         
         # Helper to compute cumulative hazard increment over a clock time interval dt
@@ -1024,6 +1035,14 @@ function simulate_path(model::MultistateProcess, subj::Int64;
         
         interval_len = tstop - tcur
         cumhaz_incr = compute_cumhaz_increment(interval_len)
+        
+        # C8_P2 guard: validate that total hazard is positive
+        # If cumulative hazard over a non-trivial interval is near-zero, we have zero hazard rates
+        if interval_len > 0.0 && cumhaz_incr < MIN_TOTAL_HAZARD_RATE * interval_len
+            error("Total hazard rate from state $scur is effectively zero (cumhaz=$cumhaz_incr over interval=$interval_len). " *
+                  "Simulation cannot progress. Check that all hazard parameters are positive and well-specified.")
+        end
+        
         interval_incid = (1 - cuminc) * (1 - exp(-cumhaz_incr))
 
         # check if event happened in the interval
@@ -1342,17 +1361,17 @@ function _collapse_subject_data(subj_df::AbstractDataFrame)
         if is_internal
             # Internal transition - accumulate but don't emit
             # Track the tstart if this is the first accumulated internal transition
-            if accumulated_tstart === nothing
+            if isnothing(accumulated_tstart)
                 accumulated_tstart = row.tstart
             end
             continue
         end
         
         # This is a real transition - determine the effective tstart
-        effective_tstart = accumulated_tstart !== nothing ? accumulated_tstart : row.tstart
+        effective_tstart = !isnothing(accumulated_tstart) ? accumulated_tstart : row.tstart
         accumulated_tstart = nothing  # Reset accumulator
         
-        if current_row === nothing
+        if isnothing(current_row)
             current_row = make_row(row, effective_tstart)
         elseif coalesce(row.statefrom == current_row.statefrom, false) && 
                coalesce(row.stateto == current_row.stateto, false)

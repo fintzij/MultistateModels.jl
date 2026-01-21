@@ -106,7 +106,7 @@ surrogate = fit_surrogate(model; method=:heuristic)
 surrogate = fit_surrogate(model; type=:phasetype, n_phases=3)
 ```
 
-See also: [`set_surrogate!`](@ref), [`MarkovSurrogate`](@ref), [`PhaseTypeSurrogate`](@ref)
+See also: [`initialize_surrogate!`](@ref), [`MarkovSurrogate`](@ref), [`PhaseTypeSurrogate`](@ref)
 """
 function fit_surrogate(model::MultistateProcess; 
     surrogate_parameters = nothing, 
@@ -603,22 +603,6 @@ end
 
 
 """
-    set_surrogate!(model; type=:markov, method=:mle, ...)
-
-!!! warning "Deprecated"
-    `set_surrogate!` is deprecated. Use `initialize_surrogate!` instead.
-
-Build and fit a surrogate for a multistate model (alias for `initialize_surrogate!`).
-
-See [`initialize_surrogate!`](@ref) for full documentation.
-"""
-function set_surrogate!(model::MultistateProcess; kwargs...)
-    @warn "set_surrogate! is deprecated. Use initialize_surrogate! instead." maxlog=1
-    return initialize_surrogate!(model; kwargs...)
-end
-
-
-"""
     _build_coxian_from_rate(n_phases::Int, total_rate::Float64; 
                             structure::Symbol=:unstructured) -> PhaseTypeDistribution
 
@@ -701,7 +685,7 @@ function _build_coxian_from_rate(n_phases::Int, total_rate::Float64;
     end
     
     # Handle tau parameter
-    if tau === nothing
+    if isnothing(tau)
         # Default: uniform τⱼ = 1 for all j
         tau_vec = ones(Float64, n_phases)
     else
@@ -1191,7 +1175,7 @@ function _fit_phasetype_mle(model::MultistateProcess,
     
     # Initialize parameters from Markov rates
     theta0 = zeros(Float64, n_params)
-    lb = fill(1e-6, n_params)  # Lower bound: small positive
+    lb = fill(SURROGATE_PARAM_MIN, n_params)  # Lower bound: small positive
     ub = fill(100.0, n_params)  # Upper bound: prevent extreme rates
     
     for s in transient_states

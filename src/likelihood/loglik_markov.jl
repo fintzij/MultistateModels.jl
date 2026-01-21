@@ -469,8 +469,8 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
                                 end
                             end
 
-                            # pedantic b/c of numerical error
-                            q[r,r] = maximum([1 - exp(logsumexp(q[r, Not(r)])), eps()])
+                            # Ensure diagonal is a valid probability (H5_P1 fix: use eps(eltype(q)) for AD compatibility)
+                            q[r,r] = maximum([1 - exp(logsumexp(q[r, Not(r)])), eps(eltype(q))])
                             q[r,Not(r)] = exp.(q[r, Not(r)])               
                         end
                     end

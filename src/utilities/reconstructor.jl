@@ -34,13 +34,12 @@ flat_dual = flattenAD(rc, params_dual)
 reconstructed_dual = unflattenAD(rc, flat_dual)
 ```
 """
-struct ReConstructor{F,S,T,U,V}
+struct ReConstructor{F,S,T,U}
     default::FlattenDefault
     flatten_strict::F
     flatten_flexible::S
     unflatten_strict::T
     unflatten_flexible::U
-    _buffer::V  # Pre-allocated buffer for intermediate operations
 end
 
 """
@@ -83,17 +82,12 @@ function ReConstructor(
     # Build flexible constructors (for AD usage)
     flatten_flexible_fn, unflatten_flexible_fn = construct_flatten(Float64, flattentype, UnflattenFlexible(), x)
     
-    # Pre-allocate buffer for intermediate operations
-    flat_example = flatten_strict_fn(x)
-    buffer = similar(flat_example)
-    
     return ReConstructor(
         default,
         flatten_strict_fn,
         flatten_flexible_fn,
         unflatten_strict_fn,
-        unflatten_flexible_fn,
-        buffer
+        unflatten_flexible_fn
     )
 end
 

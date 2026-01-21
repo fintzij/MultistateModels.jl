@@ -128,17 +128,17 @@ const DEFAULT_IPOPT_OPTIONS = (
     
     # Boundary handling (critical for constrained parameters like β ≥ 0)
     honor_original_bounds = "yes",
-    bound_relax_factor = 1e-10,
-    bound_push = 1e-4,
-    bound_frac = 0.001,
+    bound_relax_factor = IPOPT_BOUND_RELAX_FACTOR,
+    bound_push = IPOPT_BOUND_PUSH,
+    bound_frac = IPOPT_BOUND_FRAC,
     
     # Adaptive barrier (more robust for difficult problems)
     mu_strategy = "adaptive",
     
     # Convergence tolerances
-    tol = 1e-7,
-    acceptable_tol = 1e-5,
-    acceptable_iter = 10,
+    tol = IPOPT_DEFAULT_TOL,
+    acceptable_tol = IPOPT_ACCEPTABLE_TOL,
+    acceptable_iter = IPOPT_ACCEPTABLE_ITER,
 )
 
 """
@@ -167,41 +167,96 @@ function _solve_optimization(prob, solver; ipopt_options...)
     end
 end
 
+# =============================================================================
+# Variance-Covariance Computation Helpers
+# =============================================================================
+
 """
-    _clamp_to_bounds!(params::AbstractVector, lb::AbstractVector, ub::AbstractVector)
+Tolerance for zeroing near-zero vcov entries.
 
-Clamp parameters to bounds in-place.
+After computing the pseudo-inverse of the Fisher information,
+entries smaller than this tolerance (in absolute value) are set to zero.
+This prevents numerical noise from appearing as spurious correlations.
+"""
+const VCOV_NEAR_ZERO_ATOL = sqrt(eps(Float64))
 
-This function is needed when parameters may exceed bounds, e.g., after extrapolation
-steps or when working with unbounded optimization algorithms.
+"""
+Relative tolerance for zeroing near-zero vcov entries.
 
-Note: This should NOT be needed after Ipopt optimization when configured with
-`honor_original_bounds="yes"`, which guarantees the final solution satisfies bounds.
-If Ipopt returns out-of-bounds values, that indicates a configuration bug.
+Used together with VCOV_NEAR_ZERO_ATOL for adaptive thresholding.
+"""
+const VCOV_NEAR_ZERO_RTOL = sqrt(eps(Float64))
+
+"""
+    _compute_vcov_tolerance(n_obs::Int, n_params::Int, use_adaptive::Bool)
+
+Compute appropriate tolerance for pseudo-inverse of Fisher information matrix.
 
 # Arguments
-- `params`: Parameter vector to clamp (modified in-place)
-- `lb`: Lower bounds
-- `ub`: Upper bounds
-- `eps`: Small buffer to keep parameters away from exact boundaries (default: 1e-8).
-         This prevents infinite gradients when warm-starting optimization from
-         parameters exactly on the boundary.
+- `n_obs::Int`: Number of observations (subjects or sample paths)
+- `n_params::Int`: Number of parameters
+- `use_adaptive::Bool`: If true, use data-dependent adaptive tolerance;
+                       if false, use conservative default
+
+# Returns
+- `Float64`: Tolerance value for `pinv(...; atol=...)`
+
+# Mathematical Justification
+
+The adaptive formula `(log(n) × p)^(-2)` is motivated by the following considerations:
+
+1. **Fisher Information Scaling**: The Fisher information matrix I(θ) scales with 
+   sample size as O(n). For well-specified models, eigenvalues of I(θ) are O(n).
+
+2. **Inverse Scaling**: The variance-covariance matrix Var(θ̂) = I(θ)⁻¹ scales as O(1/n).
+   Its eigenvalues are O(1/n).
+
+3. **Numerical Stability**: Eigenvalues much smaller than O(1/n) typically indicate
+   either numerical error or near-singularity (e.g., parameters at boundary, 
+   collinearity). These should be truncated via pseudo-inverse.
+
+4. **Tolerance Choice**: Setting tolerance ≈ (log(n) × p)⁻² ensures:
+   - For n=100, p=10: tol ≈ 0.0005 (truncates eigenvalues < 0.05% of expected scale)
+   - For n=1000, p=20: tol ≈ 0.00003 (more stringent for larger samples)
+   - The log(n) factor provides conservative downward adjustment as n grows
+   - The p factor accounts for higher-dimensional parameter spaces being more
+     prone to numerical issues
+
+5. **Connection to Condition Number**: For a well-conditioned Fisher information
+   with condition number κ = O(1), eigenvalues span a range where the smallest
+   is still O(n). The formula truncates only when eigenvalues fall orders of
+   magnitude below this expected scale.
+
+When `use_adaptive=false`, returns `sqrt(eps(Float64))` ≈ 1.5×10⁻⁸ which is a 
+conservative machine-precision-based default. This works well for most cases but 
+may fail to truncate problematic small eigenvalues in certain ill-conditioned scenarios.
 """
-function _clamp_to_bounds!(params::AbstractVector, lb::AbstractVector, ub::AbstractVector; eps::Float64=1e-8)
-    for i in eachindex(params)
-        # Clamp to [lb + eps, ub - eps] to avoid exact boundary values
-        # which can cause infinite gradients in warm-started optimization
-        lb_safe = lb[i] + eps
-        ub_safe = ub[i] - eps
-        # Only apply buffer if bounds are finite and have room for it
-        if isfinite(lb[i]) && isfinite(ub[i]) && lb_safe < ub_safe
-            params[i] = clamp(params[i], lb_safe, ub_safe)
-        else
-            # Fall back to exact bounds for infinite bounds or very tight constraints
-            params[i] = clamp(params[i], lb[i], ub[i])
-        end
+function _compute_vcov_tolerance(n_obs::Int, n_params::Int, use_adaptive::Bool)
+    if use_adaptive
+        return (log(n_obs) * n_params)^-2
+    else
+        return sqrt(eps(Float64))
     end
-    return params
+end
+
+"""
+    _clean_vcov_matrix!(vcov::AbstractMatrix)
+
+Zero out near-zero entries in variance-covariance matrix.
+
+Modifies `vcov` in-place to set entries that are approximately zero
+(within `VCOV_NEAR_ZERO_ATOL` and `VCOV_NEAR_ZERO_RTOL`) to exactly zero.
+This removes numerical noise from appearing as spurious correlations.
+
+# Arguments
+- `vcov::AbstractMatrix`: Variance-covariance matrix to clean
+
+# Returns
+- The modified matrix
+"""
+function _clean_vcov_matrix!(vcov::AbstractMatrix)
+    vcov[isapprox.(vcov, 0.0; atol=VCOV_NEAR_ZERO_ATOL, rtol=VCOV_NEAR_ZERO_RTOL)] .= 0.0
+    return vcov
 end
 
 # =============================================================================
@@ -244,7 +299,7 @@ function _resolve_penalty(penalty, model::MultistateProcess)
     elseif penalty === :none
         # Explicit opt-out
         return nothing
-    elseif penalty === nothing
+    elseif isnothing(penalty)
         # Deprecated - warn and treat as :none
         @warn "penalty=nothing is deprecated. Use penalty=:none for explicit unpenalized fitting, " *
               "or penalty=:auto (default) for automatic penalization of spline hazards."
@@ -313,7 +368,7 @@ For inequality constraints `lcons ≤ c(θ) ≤ ucons`, a constraint is active i
   - `cons_fn`: Function that evaluates constraint values c(θ)
   - `lcons`: Lower bounds on constraint values
   - `ucons`: Upper bounds on constraint values
-- `tol::Float64=1e-6`: Tolerance for determining if constraint is active
+- `tol::Float64=ACTIVE_CONSTRAINT_TOL`: Tolerance for determining if constraint is active
 
 # Returns
 - `BitVector`: Boolean vector where `true` indicates constraint is active (binding)
@@ -328,7 +383,7 @@ active = identify_active_constraints(fitted_params, constraints)
 n_active = sum(active)  # Number of binding constraints
 ```
 """
-function identify_active_constraints(theta::AbstractVector, constraints; tol::Float64=1e-6)
+function identify_active_constraints(theta::AbstractVector, constraints; tol::Float64=ACTIVE_CONSTRAINT_TOL)
     # Evaluate constraints at theta
     c_vals = constraints.cons_fn(theta)
     
@@ -379,10 +434,10 @@ which can affect variance estimates (the parameter cannot move in one direction)
 - `theta::AbstractVector`: Parameter vector
 - `lb::AbstractVector`: Lower bounds
 - `ub::AbstractVector`: Upper bounds
-- `tol::Float64=1e-6`: Tolerance for determining if at bound
+- `tol::Float64=ACTIVE_CONSTRAINT_TOL`: Tolerance for determining if at bound
 
 # Returns
-- `BitVector`: Boolean vector where `true` indicates parameter is at a bound
+- `BitVector`: Boolean vector indicating parameters at bounds
 
 # Example
 ```julia
@@ -392,7 +447,7 @@ if any(at_bounds)
 end
 ```
 """
-function identify_bound_parameters(theta::AbstractVector, lb::AbstractVector, ub::AbstractVector; tol::Float64=1e-6)
+function identify_bound_parameters(theta::AbstractVector, lb::AbstractVector, ub::AbstractVector; tol::Float64=ACTIVE_CONSTRAINT_TOL)
     at_lower = abs.(theta .- lb) .< tol
     at_upper = abs.(theta .- ub) .< tol
     return at_lower .| at_upper
@@ -407,7 +462,7 @@ Check for parameters at bounds and issue a warning if any are found.
 - `theta::AbstractVector`: Parameter vector  
 - `lb::AbstractVector`: Lower bounds
 - `ub::AbstractVector`: Upper bounds
-- `tol::Float64=1e-6`: Tolerance for bound detection
+- `tol::Float64=ACTIVE_CONSTRAINT_TOL`: Tolerance for bound detection
 
 # Returns
 - `BitVector`: Indicators of which parameters are at bounds
@@ -415,7 +470,7 @@ Check for parameters at bounds and issue a warning if any are found.
 # Side Effects
 - Issues `@warn` if any parameters are at their bounds
 """
-function warn_bound_parameters(theta::AbstractVector, lb::AbstractVector, ub::AbstractVector; tol::Float64=1e-6)
+function warn_bound_parameters(theta::AbstractVector, lb::AbstractVector, ub::AbstractVector; tol::Float64=ACTIVE_CONSTRAINT_TOL)
     at_bounds = identify_bound_parameters(theta, lb, ub; tol=tol)
     if any(at_bounds)
         bound_params = findall(at_bounds)
@@ -429,6 +484,48 @@ end
 # =============================================================================
 
 function fit(model::MultistateModel; kwargs...)
+    # =========================================================================
+    # THREAD SAFETY WARNING
+    # =========================================================================
+    # fit() is NOT thread-safe. Calling fit() concurrently on the same model
+    # from multiple threads will cause data races and undefined behavior because:
+    #   1. initialize_parameters!() may be called and modifies model.parameters
+    #   2. The optimization process updates model state
+    #   3. Surrogate fitting modifies model.surrogate
+    #
+    # Safe usage patterns:
+    #   - Call fit() sequentially on the same model
+    #   - Call fit() in parallel on DIFFERENT model instances (deepcopy first)
+    #   - Use @threads with separate model copies per thread
+    #
+    # For parallel cross-validation or bootstrap, create independent model copies:
+    #   models = [deepcopy(model) for _ in 1:nfolds]
+    #   @threads for i in 1:nfolds
+    #       fitted[i] = fit(models[i]; ...)
+    #   end
+    # =========================================================================
+    
+    # Validate model.bounds exists (required for optimization)
+    # This can be missing for models deserialized from old versions or manually constructed
+    if !hasproperty(model, :bounds) || isnothing(model.bounds)
+        # Generate bounds on-demand if possible
+        if hasproperty(model, :hazards) && !isempty(model.hazards)
+            @warn "model.bounds is missing. This can happen with manually constructed models " *
+                  "or models deserialized from older versions. Generating bounds on-demand. " *
+                  "For full validation, consider rebuilding the model with multistatemodel()."
+            # Generate bounds using the standard function
+            model.bounds = build_parameter_bounds(model.hazards, model.parameters)
+        else
+            throw(ArgumentError(
+                "model.bounds is required for optimization but is missing. " *
+                "This can happen with:\n" *
+                "  1. Models deserialized from older MultistateModels.jl versions\n" *
+                "  2. Manually constructed MultistateModel objects\n" *
+                "Please rebuild the model using multistatemodel() to generate bounds."
+            ))
+        end
+    end
+    
     # Dispatch based on observation type and model structure
     if is_panel_data(model)
         if is_markov(model)

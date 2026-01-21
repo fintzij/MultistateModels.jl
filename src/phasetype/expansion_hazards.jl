@@ -318,7 +318,7 @@ function _build_expanded_hazard(h::HazardFunction,
     
     # Get the builder and create the hazard
     builder = get(_HAZARD_BUILDERS, family, nothing)
-    if builder === nothing
+    if isnothing(builder)
         throw(ArgumentError("Unknown hazard family for phase-type expansion: $(family). Supported: $(keys(_HAZARD_BUILDERS))"))
     end
     

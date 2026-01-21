@@ -236,12 +236,16 @@ Compute P = exp(Q * dt) using cached Schur decomposition (in-place).
 # Arguments
 - `P::Matrix{Float64}`: Output matrix (modified in-place)
 - `cached::CachedSchurDecomposition`: Pre-computed Schur decomposition
-- `dt::Float64`: Time interval
+- `dt::Float64`: Time interval (must be non-negative)
 
 # Returns
 Nothing (modifies P in-place)
+
+# Throws
+- `AssertionError`: if `dt < 0`
 """
 function compute_tpm_from_schur!(P::Matrix{Float64}, cached::CachedSchurDecomposition, dt::Float64)
+    @assert dt >= 0.0 "Time interval dt must be non-negative, got dt=$dt"
     n = size(cached.T, 1)
     if dt == 0.0
         # Identity matrix
@@ -256,6 +260,8 @@ function compute_tpm_from_schur!(P::Matrix{Float64}, cached::CachedSchurDecompos
         mul!(cached.tmp_work, cached.U, cached.E_work)
         mul!(P, cached.tmp_work, cached.U')
     end
+    # Debug assertion: verify TPM row sums ≈ 1.0 (M11_P2)
+    MSM_DEBUG_ASSERTIONS && @assert all(isapprox.(sum(P, dims=2), 1.0, atol=TPM_ROW_SUM_TOL)) "TPM row sums must be ≈ 1.0, got $(vec(sum(P, dims=2)))"
     return nothing
 end
 
@@ -266,19 +272,67 @@ Compute P = exp(Q * dt) using cached Schur decomposition.
 
 # Arguments
 - `cached::CachedSchurDecomposition`: Pre-computed Schur decomposition
-- `dt::Float64`: Time interval
+- `dt::Float64`: Time interval (must be non-negative)
 
 # Returns
 - `Matrix{Float64}`: Transition probability matrix
+
+# Throws
+- `AssertionError`: if `dt < 0`
 """
 function compute_tpm_from_schur(cached::CachedSchurDecomposition, dt::Float64)
+    @assert dt >= 0.0 "Time interval dt must be non-negative, got dt=$dt"
     n = size(cached.T, 1)
     P = Matrix{Float64}(undef, n, n)
     compute_tpm_from_schur!(P, cached, dt)
     return P
 end
 
+# =============================================================================
+# TPM Cache with Version Counter (M17_P2)
+# =============================================================================
+
+"""
+    TPMCache
+
+Mutable cache for pre-allocated arrays used in Markov likelihood computation.
+Stores hazard matrix book, TPM book, matrix exponential cache, and work arrays.
+
+# Cache Invalidation (M17_P2)
+
+The cache includes a `version` counter that should be incremented whenever
+hazard parameters change. Users of the cache should check `version` to detect
+stale cached values:
+
+```julia
+# At likelihood computation start:
+if cache.version != expected_version
+    # Recompute TPMs
+end
+
+# After updating parameters:
+cache.version += 1
+```
+
+The cache is automatically invalidated (version incremented) when parameters
+are modified via `set_parameters!`.
+
+# Fields
+- `version::Int`: Version counter for cache invalidation
+- `hazmat_book`: Pre-allocated hazard intensity matrices (one per covariate pattern)
+- `tpm_book`: Pre-allocated transition probability matrices (nested: pattern × time interval)
+- `exp_cache`: Pre-allocated workspace for matrix exponential computation
+- `q_work`: Work matrix for forward algorithm (S × S)
+- `lmat_work`: Work matrix for forward algorithm likelihood (S × max_obs+1)
+- `pars_cache`: Mutable parameter vectors for in-place updates
+- `covars_cache`: Pre-extracted covariates per unique covariate pattern
+- `hazard_rates_cache`: Pre-computed hazard rates per (pattern, hazard)
+- `eigen_cache`: Cached eigendecompositions (legacy)
+- `schur_cache`: Workspace for Schur decomposition-based matrix exponentials
+- `dt_values`: Unique Δt values per covariate pattern
+"""
 mutable struct TPMCache
+    version::Int  # Cache invalidation counter (M17_P2)
     hazmat_book::Vector{Matrix{Float64}}
     tpm_book::Vector{Vector{Matrix{Float64}}}
     exp_cache::Nothing  # ExponentialUtilities cache for ExpMethodGeneric (always Nothing)
@@ -294,6 +348,39 @@ mutable struct TPMCache
     schur_cache::SchurCache
     dt_values::Vector{Vector{Float64}}  # Unique Δt values per pattern
 end
+
+"""
+    invalidate_cache!(cache::TPMCache)
+
+Increment the cache version to invalidate all cached TPM values.
+
+Call this after modifying hazard parameters to ensure subsequent likelihood
+computations recompute the transition probability matrices.
+
+# Example
+```julia
+set_parameters!(model, new_params)
+invalidate_cache!(model_data.cache)  # If using MPanelData
+```
+"""
+function invalidate_cache!(cache::TPMCache)
+    cache.version += 1
+    return cache
+end
+
+"""
+    is_cache_valid(cache::TPMCache, expected_version::Int) -> Bool
+
+Check if the cache is valid for the expected version.
+
+# Arguments
+- `cache::TPMCache`: The TPM cache to check
+- `expected_version::Int`: The version the caller expects
+
+# Returns
+- `true` if cache.version == expected_version
+"""
+@inline is_cache_valid(cache::TPMCache, expected_version::Int) = cache.version == expected_version
 
 function TPMCache(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame}, 
                   model_data::DataFrame, hazards::Vector{<:_Hazard})
@@ -345,7 +432,8 @@ function TPMCache(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame},
     # Schur decomposition workspace for batched matrix exponentials
     schur_cache = SchurCache(nstates)
     
-    TPMCache(hazmat_book, tpm_book, exp_cache, q_work, lmat_work,
+    # Initialize with version 0
+    TPMCache(0, hazmat_book, tpm_book, exp_cache, q_work, lmat_work,
              pars_cache, covars_cache, hazard_rates_cache, eigen_cache, schur_cache, dt_values)
 end
 
@@ -416,7 +504,8 @@ function TPMCache(tmat::Matrix{Int64}, tpm_index::Vector{DataFrame})
     # Schur decomposition workspace
     schur_cache = SchurCache(nstates)
     
-    TPMCache(hazmat_book, tpm_book, exp_cache, q_work, lmat_work,
+    # Initialize with version 0 (M17_P2)
+    TPMCache(0, hazmat_book, tpm_book, exp_cache, q_work, lmat_work,
              pars_cache, covars_cache, hazard_rates_cache, eigen_cache, schur_cache, dt_values)
 end
 
@@ -550,16 +639,37 @@ end
 const TVC_INTERVAL_WORKSPACES = Dict{Int, TVCIntervalWorkspace}()
 const TVC_WORKSPACE_LOCK = ReentrantLock()
 
-"""Get or create thread-local TVCIntervalWorkspace"""
+"""
+    get_tvc_workspace()::TVCIntervalWorkspace
+
+Get or create thread-local TVCIntervalWorkspace.
+
+Thread-safe: The entire get-or-create operation is inside the lock to prevent
+TOCTOU race conditions when multiple threads initialize simultaneously.
+"""
 function get_tvc_workspace()::TVCIntervalWorkspace
     tid = Threads.threadid()
-    ws = get(TVC_INTERVAL_WORKSPACES, tid, nothing)
-    if isnothing(ws)
-        lock(TVC_WORKSPACE_LOCK) do
-            ws = get!(TVC_INTERVAL_WORKSPACES, tid) do
-                TVCIntervalWorkspace(200)
-            end
+    # Entire get-or-create must be inside lock to avoid TOCTOU race (C7_P2 fix)
+    lock(TVC_WORKSPACE_LOCK) do
+        return get!(TVC_INTERVAL_WORKSPACES, tid) do
+            TVCIntervalWorkspace(200)
         end
     end
-    return ws
+end
+
+"""
+    clear_tvc_workspaces!()
+
+Clear all thread-local TVC interval workspaces, freeing memory.
+
+This function should be called to reclaim memory in long-running processes
+after model fitting is complete. Thread-safe.
+
+See also: [`clear_all_workspaces!`](@ref) for clearing all workspace types.
+"""
+function clear_tvc_workspaces!()
+    lock(TVC_WORKSPACE_LOCK) do
+        empty!(TVC_INTERVAL_WORKSPACES)
+    end
+    return nothing
 end

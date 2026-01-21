@@ -172,8 +172,14 @@ function rebuild_parameters(new_param_vectors::Vector{Vector{Float64}}, model::M
     params_flat = flatten(reconstructor, params_nested)
     
     # Validate bounds before returning (v0.3.0+)
-    if validate_bounds && hasproperty(model, :bounds) && !isnothing(model.bounds)
-        validate_parameter_bounds!(params_flat, model)
+    if validate_bounds
+        if hasproperty(model, :bounds) && !isnothing(model.bounds)
+            validate_parameter_bounds!(params_flat, model)
+        else
+            @warn "Bounds validation skipped: model.bounds is nothing or missing. " *
+                  "This can happen with manually constructed models or old serialized models. " *
+                  "Consider rebuilding the model with multistatemodel() for full validation."
+        end
     end
     
     # v0.3.0+: No separate .natural field - compute on-demand via accessors
@@ -437,6 +443,18 @@ end
     get_subjinds(data::DataFrame)
 
 Return a vector with the row indices for each subject in the dataset.
+
+Subject indices are assumed to be contiguous (each subject's rows are consecutive).
+This is validated and a warning is issued if non-contiguous indices are detected,
+as this may indicate data sorting issues that could affect likelihood computation.
+
+# Returns
+- `subjinds`: Vector of vectors, where `subjinds[i]` contains row indices for subject i
+- `nsubj`: Number of unique subjects
+
+# Warning
+Issues a warning if any subject's row indices are non-contiguous (not consecutive),
+which may indicate the data needs to be sorted by subject ID.
 """
 function get_subjinds(data::DataFrame)
 
@@ -450,6 +468,21 @@ function get_subjinds(data::DataFrame)
     # get indices for each subject
     for i in eachindex(ids)
         subjinds[i] = findall(x -> x == ids[i], data.id)
+    end
+    
+    # Validate that indices are contiguous (consecutive)
+    # Non-contiguous indices indicate unsorted data which can cause issues
+    for i in eachindex(subjinds)
+        inds = subjinds[i]
+        if length(inds) > 1
+            # Check if indices are consecutive: diff should be all 1s
+            if any(diff(inds) .!= 1)
+                @warn "Subject $(ids[i]) has non-contiguous row indices: $(inds). " *
+                      "This may indicate the data is not sorted by subject ID. " *
+                      "Consider sorting the data: sort!(data, :id) before model construction."
+                break  # Only warn once to avoid flooding output
+            end
+        end
     end
 
     # return indices

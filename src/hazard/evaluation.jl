@@ -104,7 +104,9 @@ This is the primary interface for hazard evaluation. It handles:
             # Instead: get h₀(τ) by passing zero covariates, then multiply by exp(-linpred).
             
             if isempty(hazard.covar_names)
-                return hazard(t, pars, covars)
+                haz = hazard(t, pars, covars)
+                MSM_DEBUG_ASSERTIONS && @assert haz >= 0.0 "Hazard must be non-negative, got $haz at t=$t"
+                return haz
             else
                 # Compute linear predictor before zeroing covariates
                 linpred = _linear_predictor(pars, covars, hazard)
@@ -114,10 +116,14 @@ This is the primary interface for hazard evaluation. It handles:
                 zero_covars = NamedTuple{Tuple(hazard.covar_names)}(zero_vals)
                 
                 # h(t|x) = h₀(τ) × exp(-β'x) for AFT with effective time
-                return hazard(t, pars, zero_covars) * exp(-linpred)
+                haz = hazard(t, pars, zero_covars) * exp(-linpred)
+                MSM_DEBUG_ASSERTIONS && @assert haz >= 0.0 "Hazard must be non-negative, got $haz at t=$t"
+                return haz
             end
         else
-            return hazard(t, pars, covars)
+            haz = hazard(t, pars, covars)
+            MSM_DEBUG_ASSERTIONS && @assert haz >= 0.0 "Hazard must be non-negative, got $haz at t=$t"
+            return haz
         end
     end
 
@@ -138,7 +144,7 @@ This is the primary interface for hazard evaluation. It handles:
     
     eff_linpred = (use_effective_time && hazard.metadata.linpred_effect == :aft) ? zero(linpred) : linpred
 
-    val = if cache_context === nothing || hazard_slot === nothing
+    val = if isnothing(cache_context) || isnothing(hazard_slot)
         _time_transform_hazard(hazard, pars_vec, t, eff_linpred)
     else
         cache = _shared_or_local_cache(cache_context, hazard_slot, hazard)
@@ -148,11 +154,13 @@ This is the primary interface for hazard evaluation. It handles:
         end
     end
     
-    if use_effective_time && hazard.metadata.linpred_effect == :aft
-        return val * exp(-linpred)
+    haz = if use_effective_time && hazard.metadata.linpred_effect == :aft
+        val * exp(-linpred)
     else
-        return val
+        val
     end
+    MSM_DEBUG_ASSERTIONS && @assert haz >= 0.0 "Hazard must be non-negative, got $haz at t=$t"
+    return haz
 end
 
 """
@@ -216,7 +224,7 @@ This is the primary interface for cumulative hazard evaluation.
     
     eff_linpred = (use_effective_time && hazard.metadata.linpred_effect == :aft) ? zero(linpred) : linpred
 
-    if cache_context === nothing || hazard_slot === nothing
+    if isnothing(cache_context) || isnothing(hazard_slot)
         return _time_transform_cumhaz(hazard, pars_vec, lb, ub, eff_linpred)
     end
 
