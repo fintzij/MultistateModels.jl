@@ -38,7 +38,8 @@ Otherwise, builds surrogate hazards from scratch using the model's hazard specif
 - `MultistateModel` suitable for fitting as a Markov model
 """
 function make_surrogate_model(model::MultistateProcess)
-    if isnothing(model.markovsurrogate)
+    surr = model.surrogate
+    if isnothing(surr) || !(surr isa MarkovSurrogate)
         # Build surrogate hazards from scratch
         # Ensure hazards are sorted to match model.hazards order (which determines tmat indices)
         hazards = collect(model.modelcall.hazards)
@@ -47,7 +48,7 @@ function make_surrogate_model(model::MultistateProcess)
         surrogate_haz, surrogate_pars, _ = build_hazards(hazards...; data = model.data, surrogate = true)
         markov_surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars)
     else
-        markov_surrogate = model.markovsurrogate
+        markov_surrogate = surr
     end
     
     # Generate bounds for the surrogate model

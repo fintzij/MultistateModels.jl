@@ -295,11 +295,12 @@ function _init_from_surrogate_rates!(model::MultistateProcess;
                                       surrogate_constraints = nothing,
                                       surrogate_parameters = nothing)
     # Check if model already has a fitted surrogate
-    if !isnothing(model.markovsurrogate) && model.markovsurrogate.fitted
-        surrog = model.markovsurrogate
+    surr = model.surrogate
+    if !isnothing(surr) && surr isa MarkovSurrogate && surr.fitted
+        # Use existing fitted surrogate
     else
         # Fit Markov surrogate
-        surrog = fit_surrogate(model; surrogate_constraints = surrogate_constraints, 
+        surr = fit_surrogate(model; surrogate_constraints = surrogate_constraints, 
                                surrogate_parameters = surrogate_parameters, verbose = false)
     end
 
@@ -309,19 +310,19 @@ function _init_from_surrogate_rates!(model::MultistateProcess;
         
         # v0.3.0+: Get natural-scale baseline parameter from surrogate
         # Surrogate always has exponential hazards with one baseline param (rate)
-        surrog_nested = surrog.parameters.nested[hazname]
-        surrog_rate = first(values(surrog_nested.baseline))
+        surr_nested = surr.parameters.nested[hazname]
+        surr_rate = first(values(surr_nested.baseline))
         
         # Initialize baseline params using the surrogate rate
-        set_par_to = init_par(hazard, surrog_rate)
+        set_par_to = init_par(hazard, surr_rate)
 
         # Copy covariate effects if there are any
-        if hazard.has_covariates && haskey(surrog_nested, :covariates)
-            surrog_covar_values = collect(values(surrog_nested.covariates))
-            ncovar = length(surrog_covar_values)
+        if hazard.has_covariates && haskey(surr_nested, :covariates)
+            surr_covar_values = collect(values(surr_nested.covariates))
+            ncovar = length(surr_covar_values)
             nbaseline = hazard.npar_baseline
             # Covariate params are at the end of set_par_to
-            set_par_to[(nbaseline + 1):(nbaseline + ncovar)] .= surrog_covar_values
+            set_par_to[(nbaseline + 1):(nbaseline + ncovar)] .= surr_covar_values
         end
         
         set_parameters!(model, NamedTuple{(hazname,)}((set_par_to,)))

@@ -684,7 +684,8 @@ function calibrate_splines(model::MultistateProcess;
             verbose && @info "Using CDF inversion at reference level for knot calibration"
             
             # Ensure surrogate is fitted for cumulative incidence calculation
-            if isnothing(model.markovsurrogate) || !is_fitted(model.markovsurrogate)
+            surr = model.surrogate
+            if isnothing(surr) || !is_fitted(surr)
                 verbose && @info "  Fitting surrogate for cumulative incidence computation..."
                 initialize_surrogate!(model; type=:auto, verbose=false)
             end
