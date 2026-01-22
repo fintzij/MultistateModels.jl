@@ -408,8 +408,7 @@ function _init_from_surrogate_paths!(model::MultistateProcess,
     # Use select_lambda=:none to skip automatic λ selection during initialization
     # (λ selection on small simulated samples is unreliable and expensive)
     exact_fitted = fit(exact_model; constraints = constraints, 
-                       compute_vcov = false, compute_ij_vcov = false, 
-                       compute_jk_vcov = false, verbose = false,
+                       vcov_type = :none, verbose = false,
                        select_lambda = :none)
     
     # Step 7: Transfer parameters to original model

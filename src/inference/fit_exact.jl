@@ -8,7 +8,7 @@
 # Features:
 # - Direct MLE via Ipopt optimization
 # - Optional parallel likelihood evaluation
-# - Model-based and robust (IJ/jackknife) variance estimation
+# - Unified variance-covariance estimation via vcov_type
 # - Support for constrained optimization
 # - Penalized likelihood for spline hazards
 #
@@ -35,25 +35,25 @@ This is called by `fit()` when `is_panel_data(model) == false`.
   - `:efs`: Expected Fisher scoring criterion
   - `:perf`: Performance iteration criterion
   - `:none`: Use fixed λ from `lambda_init` (no automatic selection)
-
-# Variance Computation Dependencies
-
-The variance-covariance matrices have the following dependencies:
-- `vcov=nothing` implies `subject_gradients=nothing` (gradients only computed when vcov is computed)
-- `compute_ij_vcov=true` requires `compute_vcov=true` (IJ variance uses the same Hessian)
-- `compute_jk_vcov=true` requires subject gradients from vcov computation
-
-If you need subject-level gradients for custom analysis, ensure `compute_vcov=true`.
+- `vcov_type::Symbol=:ij`: Type of variance-covariance matrix to compute:
+  - `:ij` (default): Infinitesimal jackknife / sandwich variance (robust)
+  - `:model`: Model-based variance (inverse Fisher information)
+  - `:jk`: Jackknife variance (leave-one-out)
+  - `:none`: Skip variance computation
+- `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse
 
 See also: [`SplinePenalty`](@ref), [`build_penalty_config`](@ref), [`select_smoothing_parameters`](@ref)
 """
 function _fit_exact(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing,
              adtype = :auto,
              parallel = false, nthreads = nothing,
-             compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, 
-             compute_jk_vcov = false, loo_method = :direct,
+             vcov_type::Symbol = :ij, vcov_threshold = true,
+             loo_method = :direct,
              penalty = :auto, lambda_init::Float64 = 1.0, 
              select_lambda::Symbol = :pijcv, kwargs...)
+
+    # Validate vcov_type
+    _validate_vcov_type(vcov_type)
 
     # Resolve penalty specification (handles :auto, :none, deprecation warning)
     resolved_penalty = _resolve_penalty(penalty, model)
@@ -173,34 +173,18 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             rectify_coefs!(sol.u, model)
         end
         
-        # get vcov (use UNPENALIZED likelihood for Fisher information)
-        # Note: For penalized models, the vcov is an approximation; consider bootstrap for more accurate inference
+        # Check convergence and monotone spline constraints
         sol_converged = hasfield(typeof(sol), :retcode) ? 
             (sol.retcode == ReturnCode.Success || sol.retcode == :Success) : 
             (sol.retcode == ReturnCode.Success)
-        if compute_vcov && sol_converged && !any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
-            # Compute subject-level gradients and Hessians to cache them for robust variance
-            # This avoids redundant computation when computing robust variance estimates
-            subject_grads_cache = compute_subject_gradients(sol.u, model, samplepaths)
-            subject_hessians_cache = compute_subject_hessians_fast(sol.u, model, samplepaths)
-            
-            # Aggregate Fisher information from subject Hessians
-            nparams = length(sol.u)
-            fishinf = zeros(Float64, nparams, nparams)
-            for H_i in subject_hessians_cache
-                fishinf .-= H_i
-            end
-            
-            # Compute vcov using shared tolerance computation (H2_P1 fix)
-            pinv_tol = _compute_vcov_tolerance(length(samplepaths), nparams, vcov_threshold)
-            vcov = pinv(Symmetric(fishinf), atol = pinv_tol)
-            _clean_vcov_matrix!(vcov)
-            vcov = Symmetric(vcov)
-        else
-            subject_grads_cache = nothing
-            subject_hessians_cache = nothing
-            vcov = nothing
-        end
+        has_monotone = any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
+        
+        # Compute variance-covariance matrix based on vcov_type
+        vcov, vcov_type_used, subject_grads = _compute_vcov_exact(
+            sol.u, model, samplepaths, vcov_type;
+            vcov_threshold=vcov_threshold, loo_method=loo_method,
+            converged=sol_converged, has_monotone=has_monotone, verbose=verbose
+        )
     else
         # create constraint function and check that constraints are satisfied at the initial values
         _constraints = deepcopy(constraints)
@@ -242,99 +226,25 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         end
 
         # Check for parameters at box bounds (may affect variance estimates)
-        warn_bound_parameters(sol.u, lb, ub)
+        at_bounds = identify_bound_parameters(sol.u, lb, ub)
         
-        # Compute subject gradients and Hessians for IJ/JK variance (can be done with constraints)
-        # IJ/JK variance only requires subject-level score vectors and Hessians, which are
-        # computed at the MLE regardless of whether constraints were used to find it.
-        if compute_vcov || compute_ij_vcov || compute_jk_vcov
-            if verbose && (compute_ij_vcov || compute_jk_vcov)
-                println("Computing subject gradients and Hessians for variance estimation...")
-            end
-            # Compute subject gradients and Hessians separately (matching unconstrained branch)
-            subject_grads_cache = compute_subject_gradients(sol.u, model, samplepaths)
-            subject_hessians_cache = compute_subject_hessians_fast(sol.u, model, samplepaths)
-        else
-            subject_grads_cache = nothing
-            subject_hessians_cache = nothing
-        end
+        # Check convergence and monotone spline constraints  
+        sol_converged = hasfield(typeof(sol), :retcode) ? 
+            (sol.retcode == ReturnCode.Success || sol.retcode == :Success) : 
+            (sol.retcode == ReturnCode.Success)
+        has_monotone = any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
         
-        # Model-based vcov with constraints: use reduced Hessian approach
-        if compute_vcov && !isnothing(subject_hessians_cache)
-            # Build AD-compatible constraint function for Jacobian computation
-            # The function must return an array of the same type as input parameters
-            # to support ForwardDiff.jacobian
-            n_cons = length(constraints.cons)
-            cons_fn = function(x)
-                # Create result array with correct element type for AD compatibility
-                res = similar(x, n_cons)
-                consfun_multistate(res, x, nothing)
-                return res
-            end
-            constraints_for_jacobian = (cons_fn = cons_fn, lcons = constraints.lcons, ucons = constraints.ucons)
-            
-            # Identify which constraints are active at the solution
-            active = identify_active_constraints(sol.u, constraints_for_jacobian)
-            n_active = sum(active)
-            
-            if n_active > 0
-                # Compute Jacobian of active constraints
-                J_full = compute_constraint_jacobian(sol.u, constraints_for_jacobian)
-                J_active = J_full[active, :]
-                
-                if verbose
-                    println("Computing model-based variance with $(n_active) active constraint(s) using reduced Hessian...")
-                end
-                
-                # Use reduced Hessian approach
-                vcov = compute_constrained_vcov_from_components(subject_hessians_cache, J_active;
-                                                                vcov_threshold=vcov_threshold)
-            else
-                # No active constraints at solution - use standard inverse Hessian
-                if verbose
-                    println("No constraints active at solution; using standard model-based variance...")
-                end
-                nparams = length(sol.u)
-                fishinf = zeros(Float64, nparams, nparams)
-                for H_i in subject_hessians_cache
-                    fishinf .-= H_i
-                end
-                # Compute vcov using shared tolerance computation (H2_P1 fix)
-                pinv_tol = _compute_vcov_tolerance(length(samplepaths), nparams, vcov_threshold)
-                vcov = pinv(Symmetric(fishinf), atol = pinv_tol)
-                _clean_vcov_matrix!(vcov)
-                vcov = Symmetric(vcov)
-            end
-        else
-            vcov = nothing
-        end
+        # Compute variance-covariance matrix based on vcov_type
+        vcov, vcov_type_used, subject_grads = _compute_vcov_exact(
+            sol.u, model, samplepaths, vcov_type;
+            vcov_threshold=vcov_threshold, loo_method=loo_method,
+            converged=sol_converged, has_monotone=has_monotone, verbose=verbose,
+            at_bounds=at_bounds
+        )
     end
 
     # compute subject-level likelihood at the estimate (always UNPENALIZED for model comparison)
     ll_subj = loglik_exact(sol.u, ExactData(model, samplepaths); return_ll_subj = true)
-
-    # Compute robust variance estimates if requested
-    # IJ/JK variance can be computed with or without constraints - they use subject-level
-    # gradients which are computed at the MLE regardless of how it was found.
-    ij_variance = nothing
-    jk_variance = nothing
-    subject_grads = nothing
-    
-    if compute_ij_vcov || compute_jk_vcov
-        if verbose
-            println("Computing robust variance estimates...")
-        end
-        robust_result = compute_robust_vcov(sol.u, model, samplepaths;
-                                           compute_ij = compute_ij_vcov,
-                                           compute_jk = compute_jk_vcov,
-                                           loo_method = loo_method,
-                                           vcov_threshold = vcov_threshold,
-                                           subject_grads = subject_grads_cache,
-                                           subject_hessians = subject_hessians_cache)
-        ij_variance = robust_result.ij_vcov
-        jk_variance = robust_result.jk_vcov
-        subject_grads = robust_result.subject_gradients
-    end
 
     # Build parameters structure for fitted parameters
     # Use the unflatten function from the model to convert flat params back to nested
@@ -367,8 +277,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         model.bounds,  # Pass bounds from unfitted model
         (loglik = -sol.objective, subj_lml = ll_subj),
         vcov,
-        isnothing(ij_variance) ? nothing : Matrix(ij_variance),
-        isnothing(jk_variance) ? nothing : Matrix(jk_variance),
+        vcov_type_used,  # Type of vcov that was computed
         subject_grads,
         model.hazards,
         model.totalhazards,
@@ -389,6 +298,111 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
 
     # return fitted object
     return model_fitted;
+end
+
+"""
+    _compute_vcov_exact(params, model, samplepaths, vcov_type; kwargs...)
+
+Compute variance-covariance matrix for exact data fitting.
+
+Unified variance computation that handles all vcov_type options and constraint scenarios.
+
+# Arguments
+- `params::AbstractVector`: Fitted parameter vector
+- `model::MultistateModel`: Model
+- `samplepaths::Vector{SamplePath}`: Sample paths
+- `vcov_type::Symbol`: Type of variance (:ij, :model, :jk, :none)
+
+# Keyword Arguments
+- `vcov_threshold::Bool=true`: Use adaptive pseudo-inverse tolerance
+- `loo_method::Symbol=:direct`: LOO perturbation method
+- `converged::Bool=true`: Whether optimization converged
+- `has_monotone::Bool=false`: Whether model has monotone spline constraints
+- `verbose::Bool=true`: Print progress messages
+- `at_bounds::Union{Nothing,BitVector}=nothing`: Indicators for params at box bounds
+
+# Returns
+- `(vcov, vcov_type_used, subject_grads)`: Tuple with vcov matrix, actual type used, and gradients
+"""
+function _compute_vcov_exact(params::AbstractVector, model::MultistateModel, 
+                             samplepaths::Vector{SamplePath}, vcov_type::Symbol;
+                             vcov_threshold::Bool=true, loo_method::Symbol=:direct,
+                             converged::Bool=true, has_monotone::Bool=false,
+                             verbose::Bool=true, at_bounds::Union{Nothing,BitVector}=nothing)
+    
+    # Early return if no vcov requested
+    if vcov_type == :none
+        return nothing, :none, nothing
+    end
+    
+    # Skip vcov if not converged or has monotone constraints
+    if !converged
+        verbose && @warn "Optimization did not converge; skipping variance computation."
+        return nothing, :none, nothing
+    end
+    if has_monotone
+        verbose && @warn "Model has monotone spline constraints; variance computation not supported."
+        return nothing, :none, nothing
+    end
+    
+    nparams = length(params)
+    nsubj = length(samplepaths)
+    
+    # Compute subject-level gradients and Hessians (needed for all variance types)
+    if verbose
+        println("Computing subject gradients and Hessians for variance estimation...")
+    end
+    subject_grads = compute_subject_gradients(params, model, samplepaths)
+    subject_hessians = compute_subject_hessians_fast(params, model, samplepaths)
+    
+    # Aggregate Fisher information
+    fishinf = zeros(Float64, nparams, nparams)
+    for H_i in subject_hessians
+        fishinf .-= H_i
+    end
+    
+    # Compute base inverse Hessian (needed for most variance types)
+    pinv_tol = _compute_vcov_tolerance(nsubj, nparams, vcov_threshold)
+    H_inv = pinv(Symmetric(fishinf), atol=pinv_tol)
+    _clean_vcov_matrix!(H_inv)
+    
+    # Compute requested variance type
+    if vcov_type == :model
+        vcov = Symmetric(H_inv)
+        vcov_type_used = :model
+        
+    elseif vcov_type == :ij
+        # IJ / Sandwich variance: H⁻¹ J H⁻¹ where J = Σᵢ gᵢgᵢᵀ
+        J = subject_grads * subject_grads'  # p×n × n×p = p×p
+        vcov_mat = H_inv * J * H_inv
+        _clean_vcov_matrix!(vcov_mat)
+        vcov = Matrix(Symmetric(vcov_mat))
+        vcov_type_used = :ij
+        
+    elseif vcov_type == :jk
+        # Jackknife variance: ((n-1)/n) Σᵢ ΔᵢΔᵢᵀ where Δᵢ = H⁻¹gᵢ
+        deltas = H_inv * subject_grads  # p×n
+        vcov_mat = ((nsubj - 1) / nsubj) * (deltas * deltas')
+        _clean_vcov_matrix!(vcov_mat)
+        vcov = Matrix(Symmetric(vcov_mat))
+        vcov_type_used = :jk
+        
+    else
+        throw(ArgumentError("Unknown vcov_type: $vcov_type"))
+    end
+    
+    # Handle parameters at bounds: set variance to NaN with warning
+    if !isnothing(at_bounds) && any(at_bounds)
+        bound_indices = findall(at_bounds)
+        @warn "Parameters at bounds: $bound_indices. " *
+              "Setting variance to NaN for these parameters (standard asymptotics don't hold at boundaries)."
+        for i in bound_indices
+            vcov[i, :] .= NaN
+            vcov[:, i] .= NaN
+        end
+    end
+    
+    return vcov, vcov_type_used, subject_grads
 end
 
 # NOTE: fit(::PhaseTypeModel) has been removed as part of package streamlining.

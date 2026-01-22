@@ -343,6 +343,10 @@ end
 Struct that fully specifies a fitted multistate model.
 Parameters are stored in `parameters` as (flat, nested, reconstructor).
 
+# Variance-Covariance Field
+- `vcov`: Single variance-covariance matrix (type determined by `vcov_type`)
+- `vcov_type`: Symbol indicating the type of vcov computed (:ij, :model, :jk, or :none)
+
 # Penalty/Smoothing Fields (for penalized spline models)
 - `smoothing_parameters`: Selected λ values from cross-validation (nothing if unpenalized)
 - `edf`: Effective degrees of freedom NamedTuple with `total` and `per_term` (nothing if unpenalized)
@@ -352,9 +356,8 @@ mutable struct MultistateModelFitted <: MultistateProcess
     parameters::NamedTuple  # Sole parameter storage: (flat, nested, reconstructor)
     bounds::NamedTuple{(:lb, :ub), Tuple{Vector{Float64}, Vector{Float64}}}  # Parameter bounds for box-constrained optimization
     loglik::NamedTuple
-    vcov::Union{Nothing,Matrix{Float64}}
-    ij_vcov::Union{Nothing,Matrix{Float64}}  # Infinitesimal jackknife variance-covariance
-    jk_vcov::Union{Nothing,Matrix{Float64}}  # Jackknife variance-covariance
+    vcov::Union{Nothing,Matrix{Float64}}      # Single variance-covariance matrix
+    vcov_type::Symbol                          # Type of vcov: :ij, :model, :jk, or :none
     subject_gradients::Union{Nothing,Matrix{Float64}}  # Subject-level score vectors (p × n)
     hazards::Vector{<:_Hazard}
     totalhazards::Vector{_TotalHazard}
@@ -374,7 +377,7 @@ mutable struct MultistateModelFitted <: MultistateProcess
     edf::Union{Nothing, NamedTuple}                          # Effective degrees of freedom
 end
 
-# Backward compatibility accessors for old surrogate fields (DEPRECATED - use .surrogate instead)
+# Backward compatibility accessors for old surrogate fields (use .surrogate instead)
 function Base.getproperty(m::MultistateModelFitted, s::Symbol)
     if s === :markovsurrogate
         surr = getfield(m, :surrogate)

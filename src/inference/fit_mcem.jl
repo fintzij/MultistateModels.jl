@@ -69,10 +69,8 @@ single configuration object, improving readability and maintainability.
 - `return_proposed_paths::Bool`: Save latent paths and importance weights (default: false)
 
 ## Variance Estimation
-- `compute_vcov::Bool`: Compute model-based variance (default: true)
+- `vcov_type::Symbol`: Type of variance to compute (:ij, :model, :jk, :none). Default: :ij
 - `vcov_threshold::Bool`: Use adaptive threshold for pseudo-inverse (default: true)
-- `compute_ij_vcov::Bool`: Compute IJ/sandwich variance (default: true)
-- `compute_jk_vcov::Bool`: Compute jackknife variance (default: false)
 - `loo_method::Symbol`: Method for LOO perturbations (default: :direct)
 
 ## Penalty Configuration
@@ -125,10 +123,8 @@ Base.@kwdef struct MCEMConfig
     return_proposed_paths::Bool = false
     
     # Variance estimation
-    compute_vcov::Bool = true
+    vcov_type::Symbol = :ij
     vcov_threshold::Bool = true
-    compute_ij_vcov::Bool = true
-    compute_jk_vcov::Bool = false
     loo_method::Symbol = :direct
     
     # Penalty configuration
@@ -272,10 +268,12 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
 - `return_proposed_paths::Bool=false`: save latent paths and importance weights
 
 **Variance estimation:**
-- `compute_vcov::Bool=true`: compute model-based variance via Louis's identity (for diagnostics)
+- `vcov_type::Symbol=:ij`: Type of variance to compute:
+  - `:ij`: IJ/sandwich variance (robust, **recommended for inference**)
+  - `:model`: Model-based variance via Louis's identity (for diagnostics)
+  - `:jk`: Jackknife variance
+  - `:none`: Skip variance computation
 - `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse
-- `compute_ij_vcov::Bool=true`: compute IJ/sandwich variance (robust, **recommended for inference**)
-- `compute_jk_vcov::Bool=false`: compute jackknife variance
 - `loo_method::Symbol=:direct`: method for LOO perturbations Δᵢ (jackknife only, not IJ):
   - `:direct`: Δᵢ = H⁻¹gᵢ (faster)
   - `:cholesky`: exact H₋ᵢ⁻¹ via Cholesky downdates (stable)
@@ -292,9 +290,11 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
 
 # Variance Estimation (Default Behavior)
 
-By default, both model-based and IJ (sandwich) variance are computed:
-- **IJ variance** (`compute_ij_vcov=true`): Primary for inference (robust to misspecification)
-- **Model-based** (`compute_vcov=true`): For diagnostics via Louis's identity
+By default, IJ (sandwich) variance is computed:
+- **IJ variance** (`vcov_type=:ij`): Primary for inference (robust to misspecification)
+- **Model-based** (`vcov_type=:model`): For diagnostics via Louis's identity
+- **Jackknife** (`vcov_type=:jk`): Alternative robust variance
+- **None** (`vcov_type=:none`): Skip variance computation
 
 For semi-Markov models, the observed Fisher information is computed using Louis's identity,
 which accounts for the missing data (unobserved paths):
@@ -304,14 +304,14 @@ I_obs = E[I_comp | Y] - Var[S_comp | Y]
 
 # Example
 ```julia
-# Default fit: robust and model-based variance computed
+# Default fit: IJ variance computed
 fitted = fit(semimarkov_model; ess_target_initial=100, verbose=true)
 
 # Use robust SEs for inference
-robust_se = sqrt.(diag(get_vcov(fitted; type=:ij)))
+robust_se = sqrt.(diag(get_vcov(fitted)))
 
-# Diagnose model specification
-result = compare_variance_estimates(fitted)
+# Fit with model-based variance for diagnostics
+fitted_model = fit(semimarkov_model; vcov_type=:model)
 
 # Check convergence
 records = get_convergence_records(fitted)
@@ -324,7 +324,11 @@ fitted = fit(semimarkov_model; solver=Optim.BFGS())
 
 See also: [`fit`](@ref), [`compare_variance_estimates`](@ref)
 """
-function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = DEFAULT_MCEM_MAXITER, tol = DEFAULT_MCEM_TOL, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = DEFAULT_ESS_TARGET_INITIAL, max_ess = DEFAULT_MAX_ESS, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, sir::Symbol = :adaptive_lhs, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, sir_adaptive_threshold::Float64 = 2.0, sir_adaptive_min_iters::Int = 3, verbose = true, return_convergence_records = true, return_proposed_paths = false, compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, penalty = :auto, lambda_init = 1.0, kwargs...)
+function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = DEFAULT_MCEM_MAXITER, tol = DEFAULT_MCEM_TOL, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = DEFAULT_ESS_TARGET_INITIAL, max_ess = DEFAULT_MAX_ESS, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, sir::Symbol = :adaptive_lhs, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, sir_adaptive_threshold::Float64 = 2.0, sir_adaptive_min_iters::Int = 3, verbose = true, return_convergence_records = true, return_proposed_paths = false, vcov_type::Symbol = :ij, vcov_threshold = true, 
+    loo_method = :direct, penalty = :auto, lambda_init = 1.0, kwargs...)
+
+    # Validate vcov_type
+    _validate_vcov_type(vcov_type)
 
     # Resolve penalty specification (handles :auto, :none, deprecation warning)
     resolved_penalty = _resolve_penalty(penalty, model)
@@ -965,215 +969,16 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         rectify_coefs!(params_cur, model)
     end
 
-    # hessian
-    if !isnothing(constraints) || any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
-
-        # Model-based variance is complex with constraints in MCEM due to Louis's identity.
-        # For now, skip model-based variance but still compute IJ/JK (which work regardless).
-        if compute_vcov == true
-            @warn "Model-based variance (vcov) is not available for constrained MCEM or monotone splines. " *
-                  "IJ (sandwich) variance will be computed if compute_ij_vcov=true (default)."
-        end
-        vcov = nothing
+    # Compute variance-covariance matrix based on vcov_type
+    # For MCEM, model-based variance uses Louis's identity
+    has_constraints_or_monotone = !isnothing(constraints) || any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
     
-    elseif is_converged && compute_vcov
-        if verbose
-            println("Computing variance-covariance matrix at final estimates.")
-        end
-
-        # set up containers for path and sampling weight
-        path = Array{SamplePath}(undef, 1)
-        samplingweight = Vector{Float64}(undef, 1)
-        
-        # Get hazard parameter block sizes from hazard objects
-        nhaz = length(model.hazards)
-        block_sizes = [model.hazards[k].npar_total for k in 1:nhaz]
-        
-        # Build index ranges for each hazard block
-        elem_ptr = cumsum([1; block_sizes])
-        blocks = [elem_ptr[k]:(elem_ptr[k+1]-1) for k in 1:nhaz]
-        
-        # initialize Fisher information matrix containers
-        nparams = length(params_cur)
-        fishinf = zeros(Float64, nparams, nparams)
-        
-        # The Hessian of the log-likelihood is BLOCK-DIAGONAL with blocks corresponding to 
-        # each hazard's parameters. This is because:
-        #   log L = Σᵢ [-Λ₁(t) - Λ₂(t) - ... + log hₖ(t)]  (for path with transition via hazard k)
-        # Each hazard's parameters only appear in its own cumulative hazard Λₖ and log-hazard,
-        # so ∂²L/∂θₐ∂θᵦ = 0 when θₐ and θᵦ belong to different hazards.
-        #
-        # Note: This block-diagonal structure holds because we skip vcov computation when 
-        # there are constraints (constraints could couple parameters across hazards).
-        # For constrained problems, one would need to compute the bordered Hessian or use
-        # SparseDiffTools.jl with automatic sparsity detection.
-        #
-        # We exploit this structure by computing each block's Hessian separately, which is
-        # O(Σᵢ bᵢ²) instead of O(n²) for a dense Hessian (where bᵢ = size of block i, n = total params).
-        
-        # Decide whether to use block-diagonal or dense Hessian computation
-        # Due to function call overhead, we only use block-diagonal when theoretical speedup
-        # exceeds the threshold (default 2.0× speedup required)
-        sum_block_sq = sum(bs^2 for bs in block_sizes)
-        theoretical_speedup = nparams^2 / sum_block_sq
-        use_block_diagonal = theoretical_speedup > block_hessian_speedup && nhaz > 1
-        
-        # Full likelihood function
-        ll_full = pars -> (loglik_AD(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
-
-        if use_block_diagonal
-            # Block-diagonal Hessian computation (faster for models with many hazards)
-            
-            # Pre-allocate containers for each block
-            diffres_blocks = [DiffResults.HessianResult(zeros(bs)) for bs in block_sizes]
-            fish_i1_blocks = [zeros(Float64, bs, bs) for bs in block_sizes]
-            
-            # Create block likelihood functions (one per hazard)
-            # These compute likelihood as a function of only that block's parameters
-            params_base = copy(params_cur)
-            ll_blocks = Vector{Function}(undef, nhaz)
-            for k in 1:nhaz
-                block = blocks[k]
-                ll_blocks[k] = function(θ_block)
-                    T = eltype(θ_block)
-                    θ_full = T.(params_base)
-                    θ_full[block] = θ_block
-                    return ll_full(θ_full)
-                end
-            end
-            
-            # accumulate Fisher information
-            for i in 1:nsubj
-
-                # set importance weight
-                samplingweight[1] = model.SubjectWeights[i]
-
-                # number of paths
-                npaths = length(samplepaths[i])
-
-                # for accumulating gradients (full parameter vector)
-                grads = zeros(Float64, nparams, npaths)
-                
-                # Process each block independently (exploiting block-diagonal Hessian structure)
-                for (k, block) in enumerate(blocks)
-                    bs = block_sizes[k]
-                    fill!(fish_i1_blocks[k], 0.0)
-                    grads_block = zeros(Float64, bs, npaths)
-                    
-                    # calculate gradient and hessian for paths (block k only)
-                    for j in 1:npaths
-                        path[1] = samplepaths[i][j]
-                        diffres_blocks[k] = ForwardDiff.hessian!(diffres_blocks[k], ll_blocks[k], params_cur[block])
-
-                        # grab block hessian and gradient
-                        g_block = DiffResults.gradient(diffres_blocks[k])
-                        H_block = DiffResults.hessian(diffres_blocks[k])
-                        
-                        grads_block[:, j] = g_block
-                        grads[block, j] = g_block
-
-                        # just to be safe wrt nans or infs
-                        if !all(isfinite, H_block)
-                            fill!(H_block, 0.0)
-                        end
-
-                        if !all(isfinite, g_block)
-                            fill!(g_block, 0.0)
-                            grads_block[:, j] .= 0.0
-                            grads[block, j] .= 0.0
-                        end
-
-                        fish_i1_blocks[k] .+= ImportanceWeights[i][j] * (-H_block - g_block * transpose(g_block))
-                    end
-                    
-                    # Block contribution to fish_i2: (Σⱼ wⱼgⱼ)(Σⱼ wⱼgⱼ)ᵀ for this block
-                    g_weighted_block = grads_block * ImportanceWeights[i]
-                    fish_i2_block = g_weighted_block * transpose(g_weighted_block)
-                    
-                    fishinf[block, block] .+= fish_i1_blocks[k] .+ fish_i2_block
-                end
-            end
-        else
-            # Dense Hessian computation (faster for models with few hazards/parameters)
-            fish_i1 = zeros(Float64, nparams, nparams)
-            diffres = DiffResults.HessianResult(params_cur)
-            
-            # accumulate Fisher information
-            for i in 1:nsubj
-
-                # set importance weight
-                samplingweight[1] = model.SubjectWeights[i]
-
-                # number of paths
-                npaths = length(samplepaths[i])
-
-                # for accumulating gradients and hessians
-                grads = Array{Float64}(undef, nparams, npaths)
-
-                # reset matrices for accumulating Fisher info contributions
-                fill!(fish_i1, 0.0)
-
-                # calculate gradient and hessian for paths
-                for j in 1:npaths
-                    path[1] = samplepaths[i][j]
-                    diffres = ForwardDiff.hessian!(diffres, ll_full, params_cur)
-
-                    # grab hessian and gradient
-                    grads[:,j] = DiffResults.gradient(diffres)
-
-                    # just to be safe wrt nans or infs
-                    if !all(isfinite, DiffResults.hessian(diffres))
-                        fill!(DiffResults.hessian(diffres), 0.0)
-                    end
-
-                    if !all(isfinite, DiffResults.gradient(diffres))
-                        fill!(DiffResults.gradient(diffres), 0.0)
-                    end
-
-                    fish_i1 .+= ImportanceWeights[i][j] * (-DiffResults.hessian(diffres) - DiffResults.gradient(diffres) * transpose(DiffResults.gradient(diffres)))
-                end
-
-                # Optimized: Σⱼ Σₖ wⱼwₖ gⱼgₖᵀ = (Σⱼ wⱼgⱼ)(Σₖ wₖgₖ)ᵀ = g_weighted * g_weighted'
-                g_weighted = grads * ImportanceWeights[i]
-                fish_i2 = g_weighted * transpose(g_weighted)
-
-                fishinf .+= fish_i1 .+ fish_i2
-            end
-        end
-
-        # Compute vcov using shared tolerance computation (H2_P1 fix)
-        nparams = length(params_cur)
-        pinv_tol = _compute_vcov_tolerance(nsubj, nparams, vcov_threshold)
-        vcov = pinv(Symmetric(fishinf), atol = pinv_tol)
-        _clean_vcov_matrix!(vcov)
-        vcov = Symmetric(vcov)
-    else
-        vcov = nothing
-    end
-
-    # subject marginal likelihood
-    logliks = compute_loglik(model, loglik_surrog, loglik_target_cur, NormConstantProposal)
-
-    # Compute robust variance estimates if requested
-    # IJ/JK variance can be computed with or without constraints - they use subject-level
-    # gradients which are computed at the MLE regardless of how it was found.
-    ij_variance = nothing
-    jk_variance = nothing
-    subject_grads = nothing
-    
-    if (compute_ij_vcov || compute_jk_vcov) && is_converged
-        if verbose
-            println("Computing robust variance estimates...")
-        end
-        robust_result = compute_robust_vcov(params_cur, model, samplepaths, ImportanceWeights;
-                                           compute_ij = compute_ij_vcov,
-                                           compute_jk = compute_jk_vcov,
-                                           loo_method = loo_method,
-                                           vcov_threshold = vcov_threshold)
-        ij_variance = robust_result.ij_vcov
-        jk_variance = robust_result.jk_vcov
-        subject_grads = robust_result.subject_gradients
-    end
+    vcov, vcov_type_used, subject_grads = _compute_vcov_mcem(
+        params_cur, model, samplepaths, ImportanceWeights, vcov_type;
+        vcov_threshold=vcov_threshold, loo_method=loo_method, converged=is_converged,
+        has_constraints_or_monotone=has_constraints_or_monotone,
+        block_hessian_speedup=block_hessian_speedup, verbose=verbose
+    )
 
     # return convergence records
     if return_convergence_records
@@ -1235,6 +1040,26 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # The surrogate is already set from model.surrogate at MCEM start
     # (can be MarkovSurrogate or PhaseTypeSurrogate)
 
+    # Compute subject-level marginal log-likelihoods for model comparison
+    # Uses importance-weighted average over sampled paths for each subject
+    subj_mll = Vector{Float64}(undef, nsubj)
+    path = Array{SamplePath}(undef, 1)
+    samplingweight = [1.0]
+    for i in 1:nsubj
+        samplingweight[1] = model.SubjectWeights[i]
+        npaths_i = length(samplepaths[i])
+        ll_paths = Vector{Float64}(undef, npaths_i)
+        for j in 1:npaths_i
+            path[1] = samplepaths[i][j]
+            ll_paths[j] = loglik_AD(params_cur, ExactDataAD(path, samplingweight, model.hazards, model); neg=false)
+        end
+        # Importance-weighted average (log-scale)
+        subj_mll[i] = logsumexp(ll_paths .+ log.(ImportanceWeights[i])) - log(sum(ImportanceWeights[i]))
+    end
+    
+    # Create the logliks NamedTuple
+    logliks = (loglik = mll_cur, subj_lml = subj_mll)
+
     # wrap results
     model_fitted = MultistateModelFitted(
         data_original,
@@ -1242,8 +1067,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         model.bounds,  # Pass bounds from unfitted model
         logliks,
         vcov,
-        isnothing(ij_variance) ? nothing : Matrix(ij_variance),
-        isnothing(jk_variance) ? nothing : Matrix(jk_variance),
+        vcov_type_used,  # Type of vcov that was computed
         subject_grads,
         model.hazards,
         model.totalhazards,
@@ -1264,4 +1088,212 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
 
     # return fitted object
     return model_fitted;
+end
+
+"""
+    _compute_vcov_mcem(params, model, samplepaths, ImportanceWeights, vcov_type; kwargs...)
+
+Compute variance-covariance matrix for MCEM fitting.
+
+Unified variance computation that handles all vcov_type options for MCEM.
+For MCEM, model-based variance uses Louis's identity to account for missing data.
+
+# Arguments
+- `params::AbstractVector`: Fitted parameter vector
+- `model::MultistateModel`: Model
+- `samplepaths::Vector{Vector{SamplePath}}`: Sampled paths per subject
+- `ImportanceWeights::Vector{Vector{Float64}}`: Importance weights
+- `vcov_type::Symbol`: Type of variance (:ij, :model, :jk, :none)
+
+# Keyword Arguments
+- `vcov_threshold::Bool=true`: Use adaptive pseudo-inverse tolerance
+- `loo_method::Symbol=:direct`: LOO perturbation method
+- `converged::Bool=true`: Whether MCEM converged
+- `has_constraints_or_monotone::Bool=false`: Whether model has constraints or monotone splines
+- `block_hessian_speedup::Float64=2.0`: Threshold for block-diagonal Hessian
+- `verbose::Bool=true`: Print progress messages
+
+# Returns
+- `(vcov, vcov_type_used, subject_grads)`: Tuple with vcov matrix, actual type used, and gradients
+"""
+function _compute_vcov_mcem(params::AbstractVector, model::MultistateModel, 
+                            samplepaths::Vector{Vector{SamplePath}},
+                            ImportanceWeights::Vector{Vector{Float64}},
+                            vcov_type::Symbol;
+                            vcov_threshold::Bool=true, loo_method::Symbol=:direct,
+                            converged::Bool=true, has_constraints_or_monotone::Bool=false,
+                            block_hessian_speedup::Float64=2.0, verbose::Bool=true)
+    
+    # Early return if no vcov requested
+    if vcov_type == :none
+        return nothing, :none, nothing
+    end
+    
+    # Skip vcov if not converged
+    if !converged
+        verbose && @warn "MCEM did not converge; skipping variance computation."
+        return nothing, :none, nothing
+    end
+    
+    nparams = length(params)
+    nsubj = length(model.subjectindices)
+    
+    # For constrained MCEM or monotone splines, model-based variance is not supported
+    # but IJ variance works. Fall back to IJ if model was requested.
+    if has_constraints_or_monotone
+        if vcov_type == :model
+            verbose && @warn "Model-based variance (vcov) is not available for constrained MCEM or monotone splines. " *
+                  "Using IJ (sandwich) variance instead."
+        end
+        # Fall through to IJ computation
+        actual_vcov_type = vcov_type == :model ? :ij : vcov_type
+    else
+        actual_vcov_type = vcov_type
+    end
+    
+    # Compute IJ or JK variance using the existing robust_vcov function
+    if actual_vcov_type in (:ij, :jk)
+        if verbose
+            println("Computing robust variance estimates...")
+        end
+        robust_result = compute_robust_vcov(params, model, samplepaths, ImportanceWeights;
+                                           compute_ij = (actual_vcov_type == :ij),
+                                           compute_jk = (actual_vcov_type == :jk),
+                                           loo_method = loo_method,
+                                           vcov_threshold = vcov_threshold)
+        
+        if actual_vcov_type == :ij
+            vcov = isnothing(robust_result.ij_vcov) ? nothing : Matrix(robust_result.ij_vcov)
+        else
+            vcov = isnothing(robust_result.jk_vcov) ? nothing : Matrix(robust_result.jk_vcov)
+        end
+        return vcov, actual_vcov_type, robust_result.subject_gradients
+    end
+    
+    # Model-based variance using Louis's identity (only for unconstrained models)
+    if actual_vcov_type == :model && !has_constraints_or_monotone
+        if verbose
+            println("Computing variance-covariance matrix at final estimates using Louis's identity.")
+        end
+        
+        # set up containers for path and sampling weight
+        path = Array{SamplePath}(undef, 1)
+        samplingweight = Vector{Float64}(undef, 1)
+        
+        # Get hazard parameter block sizes from hazard objects
+        nhaz = length(model.hazards)
+        block_sizes = [model.hazards[k].npar_total for k in 1:nhaz]
+        
+        # Build index ranges for each hazard block
+        elem_ptr = cumsum([1; block_sizes])
+        blocks = [elem_ptr[k]:(elem_ptr[k+1]-1) for k in 1:nhaz]
+        
+        # initialize Fisher information matrix containers
+        fishinf = zeros(Float64, nparams, nparams)
+        
+        # Decide whether to use block-diagonal or dense Hessian computation
+        sum_block_sq = sum(bs^2 for bs in block_sizes)
+        theoretical_speedup = nparams^2 / sum_block_sq
+        use_block_diagonal = theoretical_speedup > block_hessian_speedup && nhaz > 1
+        
+        # Full likelihood function
+        ll_full = pars -> (loglik_AD(pars, ExactDataAD(path, samplingweight, model.hazards, model); neg=false))
+        
+        if use_block_diagonal
+            # Block-diagonal Hessian computation
+            diffres_blocks = [DiffResults.HessianResult(zeros(bs)) for bs in block_sizes]
+            fish_i1_blocks = [zeros(Float64, bs, bs) for bs in block_sizes]
+            
+            params_base = copy(params)
+            ll_blocks = Vector{Function}(undef, nhaz)
+            for k in 1:nhaz
+                block = blocks[k]
+                ll_blocks[k] = function(θ_block)
+                    T = eltype(θ_block)
+                    θ_full = T.(params_base)
+                    θ_full[block] = θ_block
+                    return ll_full(θ_full)
+                end
+            end
+            
+            for i in 1:nsubj
+                samplingweight[1] = model.SubjectWeights[i]
+                npaths = length(samplepaths[i])
+                grads = zeros(Float64, nparams, npaths)
+                
+                for (k, block) in enumerate(blocks)
+                    bs = block_sizes[k]
+                    fill!(fish_i1_blocks[k], 0.0)
+                    grads_block = zeros(Float64, bs, npaths)
+                    
+                    for j in 1:npaths
+                        path[1] = samplepaths[i][j]
+                        diffres_blocks[k] = ForwardDiff.hessian!(diffres_blocks[k], ll_blocks[k], params[block])
+                        
+                        g_block = DiffResults.gradient(diffres_blocks[k])
+                        H_block = DiffResults.hessian(diffres_blocks[k])
+                        
+                        grads_block[:, j] = g_block
+                        grads[block, j] = g_block
+                        
+                        if !all(isfinite, H_block)
+                            fill!(H_block, 0.0)
+                        end
+                        if !all(isfinite, g_block)
+                            fill!(g_block, 0.0)
+                            grads_block[:, j] .= 0.0
+                            grads[block, j] .= 0.0
+                        end
+                        
+                        fish_i1_blocks[k] .+= ImportanceWeights[i][j] * (-H_block - g_block * transpose(g_block))
+                    end
+                    
+                    g_weighted_block = grads_block * ImportanceWeights[i]
+                    fish_i2_block = g_weighted_block * transpose(g_weighted_block)
+                    fishinf[block, block] .+= fish_i1_blocks[k] .+ fish_i2_block
+                end
+            end
+        else
+            # Dense Hessian computation
+            fish_i1 = zeros(Float64, nparams, nparams)
+            diffres = DiffResults.HessianResult(params)
+            
+            for i in 1:nsubj
+                samplingweight[1] = model.SubjectWeights[i]
+                npaths = length(samplepaths[i])
+                grads = Array{Float64}(undef, nparams, npaths)
+                fill!(fish_i1, 0.0)
+                
+                for j in 1:npaths
+                    path[1] = samplepaths[i][j]
+                    diffres = ForwardDiff.hessian!(diffres, ll_full, params)
+                    grads[:,j] = DiffResults.gradient(diffres)
+                    
+                    if !all(isfinite, DiffResults.hessian(diffres))
+                        fill!(DiffResults.hessian(diffres), 0.0)
+                    end
+                    if !all(isfinite, DiffResults.gradient(diffres))
+                        fill!(DiffResults.gradient(diffres), 0.0)
+                    end
+                    
+                    fish_i1 .+= ImportanceWeights[i][j] * (-DiffResults.hessian(diffres) - DiffResults.gradient(diffres) * transpose(DiffResults.gradient(diffres)))
+                end
+                
+                g_weighted = grads * ImportanceWeights[i]
+                fish_i2 = g_weighted * transpose(g_weighted)
+                fishinf .+= fish_i1 .+ fish_i2
+            end
+        end
+        
+        # Compute vcov
+        pinv_tol = _compute_vcov_tolerance(nsubj, nparams, vcov_threshold)
+        vcov = pinv(Symmetric(fishinf), atol = pinv_tol)
+        _clean_vcov_matrix!(vcov)
+        vcov = Matrix(Symmetric(vcov))
+        
+        return vcov, :model, nothing
+    end
+    
+    # Shouldn't reach here
+    return nothing, :none, nothing
 end

@@ -9,7 +9,7 @@
 # - Matrix exponential likelihood via forward algorithm
 # - Support for censored state observations
 # - ForwardDiff or Mooncake AD backends
-# - Model-based and robust (IJ/jackknife) variance estimation
+# - Unified variance-covariance estimation via vcov_type
 #
 # =============================================================================
 
@@ -26,12 +26,19 @@ This is called by `fit()` when `is_panel_data(model) && is_markov(model)`.
 - `verbose::Bool=true`: print optimization messages
 - `solver`: optimization solver (default: Ipopt)
 - `adbackend::ADBackend=ForwardDiffBackend()`: automatic differentiation backend
+- `vcov_type::Symbol=:ij`: Type of variance-covariance matrix (:ij, :model, :jk, :none)
 
 # Notes
 - For Markov models, the likelihood involves matrix exponentials of the intensity matrix
 - Censored state observations are handled via marginalization over possible states
 """
-function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing, adbackend::ADBackend = ForwardDiffBackend(), compute_vcov = true, vcov_threshold = true, compute_ij_vcov = true, compute_jk_vcov = false, loo_method = :direct, kwargs...)
+function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbose = true, 
+                          solver = nothing, adbackend::ADBackend = ForwardDiffBackend(), 
+                          vcov_type::Symbol = :ij, vcov_threshold = true,
+                          loo_method = :direct, kwargs...)
+
+    # Validate vcov_type
+    _validate_vcov_type(vcov_type)
 
     # containers for bookkeeping TPMs
     books = build_tpm_mapping(model.data)
@@ -69,30 +76,13 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         # solve with user-specified solver or default Ipopt
         sol = _solve_optimization(prob, solver)
 
-        # get vcov
-        if compute_vcov && (sol.retcode == ReturnCode.Success)
-            # Compute subject-level gradients and Hessians to cache them for robust variance
-            # This avoids redundant computation when computing robust variance estimates
-            subject_grads_cache = compute_subject_gradients(sol.u, model, books)
-            subject_hessians_cache = compute_subject_hessians(sol.u, model, books)
-            
-            # Aggregate Fisher information from subject Hessians
-            nparams = length(sol.u)
-            fishinf = zeros(Float64, nparams, nparams)
-            for H_i in subject_hessians_cache
-                fishinf .-= H_i
-            end
-            
-            # Compute vcov using shared tolerance computation (H2_P1 fix)
-            pinv_tol = _compute_vcov_tolerance(nsubj, nparams, vcov_threshold)
-            vcov = pinv(Symmetric(fishinf), atol = pinv_tol)
-            _clean_vcov_matrix!(vcov)
-            vcov = Symmetric(vcov)
-        else
-            subject_grads_cache = nothing
-            subject_hessians_cache = nothing
-            vcov = nothing
-        end
+        # Compute variance-covariance based on vcov_type
+        converged = (sol.retcode == ReturnCode.Success)
+        vcov, vcov_type_used, subject_grads = _compute_vcov_markov(
+            sol.u, model, books, vcov_type;
+            vcov_threshold=vcov_threshold, loo_method=loo_method,
+            converged=converged, verbose=verbose
+        )
     else
         # create constraint function and check that constraints are satisfied at the initial values
         _constraints = deepcopy(constraints)
@@ -110,107 +100,28 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         # solve with user-specified solver or default Ipopt
         sol = _solve_optimization(prob, solver)
 
-        # Check for parameters at box bounds (may affect variance estimates)
-        warn_bound_parameters(sol.u, lb, ub)
+        # Check for parameters at box bounds
+        at_bounds = identify_bound_parameters(sol.u, lb, ub)
         
-        # Compute subject gradients and Hessians for variance estimation (can be done with constraints)
-        if compute_vcov || compute_ij_vcov || compute_jk_vcov
-            if verbose && (compute_ij_vcov || compute_jk_vcov)
-                println("Computing subject gradients and Hessians for variance estimation...")
-            end
-            subject_grads_cache = compute_subject_gradients(sol.u, model, books)
-            subject_hessians_cache = compute_subject_hessians(sol.u, model, books)
-        else
-            subject_grads_cache = nothing
-            subject_hessians_cache = nothing
-        end
-        
-        # Model-based vcov with constraints: use reduced Hessian approach
-        if compute_vcov && !isnothing(subject_hessians_cache)
-            # Build constraint function for Jacobian computation
-            # Note: result array must be compatible with ForwardDiff Dual types
-            n_cons = length(constraints.cons)
-            cons_fn = x -> consfun_markov(zeros(eltype(x), n_cons), x, nothing)
-            constraints_for_jacobian = (cons_fn = cons_fn, lcons = constraints.lcons, ucons = constraints.ucons)
-            
-            # Identify which constraints are active at the solution
-            active = identify_active_constraints(sol.u, constraints_for_jacobian)
-            n_active = sum(active)
-            
-            if n_active > 0
-                # Compute Jacobian of active constraints
-                J_full = compute_constraint_jacobian(sol.u, constraints_for_jacobian)
-                J_active = J_full[active, :]
-                
-                if verbose
-                    println("Computing model-based variance with $(n_active) active constraint(s) using reduced Hessian...")
-                end
-                
-                # Use reduced Hessian approach
-                vcov = compute_constrained_vcov_from_components(subject_hessians_cache, J_active;
-                                                                vcov_threshold=vcov_threshold)
-            else
-                # No active constraints at solution - use standard inverse Hessian
-                if verbose
-                    println("No constraints active at solution; using standard model-based variance...")
-                end
-                nparams = length(sol.u)
-                fishinf = zeros(Float64, nparams, nparams)
-                for H_i in subject_hessians_cache
-                    fishinf .-= H_i
-                end
-                # Compute vcov using shared tolerance computation (H2_P1 fix)
-                pinv_tol = _compute_vcov_tolerance(nsubj, nparams, vcov_threshold)
-                vcov = pinv(Symmetric(fishinf), atol = pinv_tol)
-                _clean_vcov_matrix!(vcov)
-                vcov = Symmetric(vcov)
-            end
-        else
-            vcov = nothing
-        end
+        # Compute variance-covariance based on vcov_type
+        converged = (sol.retcode == ReturnCode.Success)
+        vcov, vcov_type_used, subject_grads = _compute_vcov_markov(
+            sol.u, model, books, vcov_type;
+            vcov_threshold=vcov_threshold, loo_method=loo_method,
+            converged=converged, verbose=verbose, at_bounds=at_bounds
+        )
     end
 
     # compute loglikelihood at the estimate
     logliks = (loglik = -sol.objective, subj_lml = loglik_markov(sol.u, MPanelData(model, books); return_ll_subj = true))
 
-    # compute robust variance estimates if requested
-    # IJ variance uses outer product of gradients - works with or without constraints
-    # JK variance uses leave-one-out - works with or without constraints
-    ij_variance = nothing
-    jk_variance = nothing
-    subject_grads = nothing
-    
-    if compute_ij_vcov || compute_jk_vcov
-        if verbose
-            println("Computing robust variance estimates...")
-        end
-        robust_result = compute_robust_vcov(sol.u, model, books;
-                                           compute_ij = compute_ij_vcov,
-                                           compute_jk = compute_jk_vcov,
-                                           loo_method = loo_method,
-                                           vcov_threshold = vcov_threshold,
-                                           subject_grads = subject_grads_cache,
-                                           subject_hessians = subject_hessians_cache)
-        ij_variance = robust_result.ij_vcov
-        jk_variance = robust_result.jk_vcov
-        subject_grads = robust_result.subject_gradients
-    end
-
     # Build parameters structure for fitted parameters
     # Use the unflatten function from the model to convert flat params back to nested
     params_nested = unflatten(model.parameters.reconstructor, sol.u)
     
-    # Compute natural scale parameters (family-aware transformation)
-    params_natural_pairs = [
-        hazname => extract_natural_vector(params_nested[hazname], model.hazards[idx].family)
-        for (hazname, idx) in sort(collect(model.hazkeys), by = x -> x[2])
-    ]
-    params_natural = NamedTuple(params_natural_pairs)
-    
     parameters_fitted = (
         flat = Vector{Float64}(sol.u),
         nested = params_nested,
-        natural = params_natural,
         reconstructor = model.parameters.reconstructor  # Keep same reconstructor
     )
 
@@ -221,8 +132,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         model.bounds,  # Pass bounds from unfitted model
         logliks,
         vcov,
-        isnothing(ij_variance) ? nothing : Matrix(ij_variance),
-        isnothing(jk_variance) ? nothing : Matrix(jk_variance),
+        vcov_type_used,  # Type of vcov that was computed
         subject_grads,
         model.hazards,
         model.totalhazards,
@@ -240,4 +150,104 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         model.phasetype_expansion,
         nothing,  # smoothing_parameters (not yet implemented for Markov panel)
         nothing); # edf
+end
+
+"""
+    _compute_vcov_markov(params, model, books, vcov_type; kwargs...)
+
+Compute variance-covariance matrix for Markov panel data fitting.
+
+Unified variance computation that handles all vcov_type options.
+
+# Arguments
+- `params::AbstractVector`: Fitted parameter vector
+- `model::MultistateModel`: Model
+- `books::Tuple`: TPM bookkeeping structures
+- `vcov_type::Symbol`: Type of variance (:ij, :model, :jk, :none)
+
+# Keyword Arguments
+- `vcov_threshold::Bool=true`: Use adaptive pseudo-inverse tolerance
+- `loo_method::Symbol=:direct`: LOO perturbation method
+- `converged::Bool=true`: Whether optimization converged
+- `verbose::Bool=true`: Print progress messages
+- `at_bounds::Union{Nothing,BitVector}=nothing`: Indicators for params at box bounds
+
+# Returns
+- `(vcov, vcov_type_used, subject_grads)`: Tuple with vcov matrix, actual type used, and gradients
+"""
+function _compute_vcov_markov(params::AbstractVector, model::MultistateModel, 
+                              books::Tuple, vcov_type::Symbol;
+                              vcov_threshold::Bool=true, loo_method::Symbol=:direct,
+                              converged::Bool=true, verbose::Bool=true,
+                              at_bounds::Union{Nothing,BitVector}=nothing)
+    
+    # Early return if no vcov requested
+    if vcov_type == :none
+        return nothing, :none, nothing
+    end
+    
+    # Skip vcov if not converged
+    if !converged
+        verbose && @warn "Optimization did not converge; skipping variance computation."
+        return nothing, :none, nothing
+    end
+    
+    nparams = length(params)
+    nsubj = length(model.subjectindices)
+    
+    # Compute subject-level gradients and Hessians (needed for all variance types)
+    if verbose
+        println("Computing subject gradients and Hessians for variance estimation...")
+    end
+    subject_grads = compute_subject_gradients(params, model, books)
+    subject_hessians = compute_subject_hessians(params, model, books)
+    
+    # Aggregate Fisher information
+    fishinf = zeros(Float64, nparams, nparams)
+    for H_i in subject_hessians
+        fishinf .-= H_i
+    end
+    
+    # Compute base inverse Hessian (needed for most variance types)
+    pinv_tol = _compute_vcov_tolerance(nsubj, nparams, vcov_threshold)
+    H_inv = pinv(Symmetric(fishinf), atol=pinv_tol)
+    _clean_vcov_matrix!(H_inv)
+    
+    # Compute requested variance type
+    if vcov_type == :model
+        vcov = Symmetric(H_inv)
+        vcov_type_used = :model
+        
+    elseif vcov_type == :ij
+        # IJ / Sandwich variance: H⁻¹ J H⁻¹ where J = Σᵢ gᵢgᵢᵀ
+        J = subject_grads * subject_grads'  # p×n × n×p = p×p
+        vcov_mat = H_inv * J * H_inv
+        _clean_vcov_matrix!(vcov_mat)
+        vcov = Matrix(Symmetric(vcov_mat))
+        vcov_type_used = :ij
+        
+    elseif vcov_type == :jk
+        # Jackknife variance: ((n-1)/n) Σᵢ ΔᵢΔᵢᵀ where Δᵢ = H⁻¹gᵢ
+        deltas = H_inv * subject_grads  # p×n
+        vcov_mat = ((nsubj - 1) / nsubj) * (deltas * deltas')
+        _clean_vcov_matrix!(vcov_mat)
+        vcov = Matrix(Symmetric(vcov_mat))
+        vcov_type_used = :jk
+        
+    else
+        throw(ArgumentError("Unknown vcov_type: $vcov_type"))
+    end
+    
+    # Handle parameters at bounds: set variance to NaN with warning
+    if !isnothing(at_bounds) && any(at_bounds)
+        bound_indices = findall(at_bounds)
+        @warn "Parameters at bounds: $bound_indices. " *
+              "Setting variance to NaN for these parameters (standard asymptotics don't hold at boundaries)."
+        for i in bound_indices
+            vcov[i, :] .= NaN
+            vcov[:, i] .= NaN
+        end
+    end
+    
+    return vcov, vcov_type_used, subject_grads
 end

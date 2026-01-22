@@ -41,11 +41,12 @@ automatically selected based on the model's data type and hazard structure:
   - `Vector{SplinePenalty}`: Multiple rules resolved by specificity
   - `nothing`: DEPRECATED - use `:none` instead
 - `lambda_init::Float64=1.0`: Initial smoothing parameter value
-- `compute_vcov::Bool=true`: compute model-based variance-covariance matrix
+- `vcov_type::Symbol=:ij`: Type of variance-covariance matrix to compute:
+  - `:ij` (default): Infinitesimal jackknife / sandwich variance (robust, always computable)
+  - `:model`: Model-based variance (inverse Fisher information, requires unconstrained)
+  - `:jk`: Jackknife variance (leave-one-out, computationally expensive)
+  - `:none`: Skip variance computation
 - `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse
-- `compute_ij_vcov::Bool=true`: compute infinitesimal jackknife (sandwich) variance
-- `compute_jk_vcov::Bool=false`: compute jackknife variance
-- `loo_method::Symbol=:direct`: method for LOO perturbations (`:direct` or `:cholesky`)
 
 # Exact Data Arguments  
 - `parallel::Bool=false`: enable parallel likelihood evaluation
@@ -63,7 +64,7 @@ automatically selected based on the model's data type and hazard structure:
 - See `_fit_mcem` for full argument list
 
 # Returns
-- `MultistateModelFitted`: fitted model with estimates and variance matrices
+- `MultistateModelFitted`: fitted model with estimates and variance-covariance matrix
 
 # Model Type Detection
 
@@ -71,26 +72,37 @@ The fitting method is selected via traits:
 - `is_panel_data(model)`: true if constructed with panel/interval-censored observations
 - `is_markov(model)`: true if all hazards are Markov (no sojourn time dependence)
 
+# Variance Estimation
+
+The `vcov_type` argument controls which variance estimator is computed:
+- **IJ (sandwich)**: `H⁻¹ J H⁻¹` where H is Hessian, J is outer product of scores.
+  Robust to model misspecification; always computable including with constraints.
+  Parameters at active constraints get `NaN` variance with a warning.
+- **Model-based**: `H⁻¹` (inverse Fisher information). Assumes correct model specification.
+- **Jackknife**: Leave-one-out resampling variance. Computationally intensive.
+
+For constrained models (including phase-type), IJ variance is recommended as it
+handles active constraints by setting affected variances to `NaN`.
+
 # Examples
 ```julia
-# Exact data (obstype=1 in data)
+# Exact data with default IJ variance (obstype=1 in data)
 exact_model = multistatemodel(h12, h23; data=exact_data)
-fitted = fit(exact_model)  # Automatic penalty for spline hazards
+fitted = fit(exact_model)  # vcov_type=:ij by default
+vcov = get_vcov(fitted)    # Returns IJ variance
 
-# Explicit unpenalized fitting
-fitted_unpn = fit(exact_model; penalty=:none)
+# Model-based variance for unconstrained model
+fitted = fit(model; vcov_type=:model)
 
-# Panel data with Markov hazards (obstype=2, exponential/Weibull hazards)
-markov_panel = multistatemodel(h12_exp, h23_exp; data=panel_data)
-fitted = fit(markov_panel)
+# Skip variance computation for speed
+fitted = fit(model; vcov_type=:none)
 
-# Panel data with semi-Markov hazards (Gompertz or non-Markov)
+# Panel data with semi-Markov hazards
 semimarkov = multistatemodel(h12_gom, h23_wei; data=panel_data)
 fitted = fit(semimarkov; proposal=:markov, maxiter=50)
 ```
 
-See also: [`get_vcov`](@ref), [`compare_variance_estimates`](@ref),
-          [`is_markov`](@ref), [`is_panel_data`](@ref), [`SplinePenalty`](@ref)
+See also: [`get_vcov`](@ref), [`is_markov`](@ref), [`is_panel_data`](@ref), [`SplinePenalty`](@ref)
 """
 
 # =============================================================================
@@ -110,7 +122,7 @@ _is_ipopt_solver(solver) = isnothing(solver) || solver isa IpoptOptimizer
 Default Ipopt options for robust optimization with proper boundary handling.
 
 These defaults are tuned for multistate model fitting:
-- `print_level=0`: Suppress output
+- `print_level=0`: Suppress iteration output
 - `honor_original_bounds="yes"`: Ensure solution exactly satisfies box constraints
 - `bound_relax_factor=1e-10`: Tight bound relaxation (default 1e-8 can be too loose)
 - `bound_push=1e-4`: Don't push initial point far from bounds
@@ -119,6 +131,9 @@ These defaults are tuned for multistate model fitting:
 - `tol=1e-7`: Convergence tolerance
 - `acceptable_tol=1e-5`: "Good enough" tolerance
 - `acceptable_iter=10`: Iterations at acceptable before terminating
+
+Note: The Ipopt banner is suppressed via `additional_options=Dict("sb"=>"yes")` 
+in the IpoptOptimizer constructor.
 
 Users can override any of these by passing keyword arguments to `_solve_optimization`.
 """
@@ -156,13 +171,16 @@ _solve_optimization(prob, solver; tol=1e-8, mu_strategy="monotone")
 See `DEFAULT_IPOPT_OPTIONS` for the full list of default options.
 """
 function _solve_optimization(prob, solver; ipopt_options...)
-    _solver = isnothing(solver) ? IpoptOptimizer() : solver
     if _is_ipopt_solver(solver)
+        # Create IpoptOptimizer with sb="yes" to suppress banner
+        # This must be in additional_options, not solve() kwargs
+        _solver = IpoptOptimizer(additional_options=Dict("sb" => "yes"))
         # Merge defaults with user overrides (user options take precedence)
         merged_options = merge(DEFAULT_IPOPT_OPTIONS, ipopt_options)
         return solve(prob, _solver; merged_options...)
     else
-        # Optim.jl and other solvers don't support Ipopt options
+        # Non-Ipopt solver passed directly
+        _solver = isnothing(solver) ? IpoptOptimizer(additional_options=Dict("sb" => "yes")) : solver
         return solve(prob, _solver)
     end
 end
@@ -308,6 +326,27 @@ function _resolve_penalty(penalty, model::MultistateProcess)
         # User-specified penalty (SplinePenalty or Vector{SplinePenalty})
         return penalty
     end
+end
+
+"""
+    _validate_vcov_type(vcov_type::Symbol) -> Symbol
+
+Validate and return the vcov_type.
+
+# Arguments
+- `vcov_type::Symbol`: Type of variance (:ij, :model, :jk, :none)
+
+# Returns
+- `Symbol`: The validated vcov_type
+
+# Throws
+- `ArgumentError` if vcov_type is not valid
+"""
+function _validate_vcov_type(vcov_type::Symbol)
+    if !(vcov_type in (:ij, :model, :jk, :none))
+        throw(ArgumentError("vcov_type must be :ij, :model, :jk, or :none (got :$vcov_type)"))
+    end
+    return vcov_type
 end
 
 """

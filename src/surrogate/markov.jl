@@ -215,7 +215,7 @@ function _fit_markov_surrogate(model;
         # Fit via Markov model MLE
         # Note: Disable all variance computation for surrogate - we only need point estimates
         surrogate_fitted = fit(surrogate_model; constraints = surrogate_constraints, 
-                               compute_vcov = false, compute_ij_vcov = false, compute_jk_vcov = false,
+                               vcov_type = :none,
                                verbose = false)
         
         markov_surrogate = MarkovSurrogate(surrogate_fitted.hazards, surrogate_fitted.parameters; fitted=true)

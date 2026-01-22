@@ -36,15 +36,14 @@ Two methods are provided:
 
 ## Usage
 
-These functions are typically called internally by `fit()` when `compute_ij_vcov=true` or
-`compute_jk_vcov=true` is specified. Users can access results via:
+These functions are typically called internally by `fit()` with `vcov_type` specified.
+Users can access results via:
 
 ```julia
-fitted = fit(model, data; compute_ij_vcov=true, compute_jk_vcov=true)
-ij_v = get_vcov(fitted; type=:ij)     # Sandwich variance
-jk_v = get_vcov(fitted; type=:jk)     # Jackknife variance  
-grads = get_subject_gradients(fitted) # Subject-level scores
-deltas = get_loo_perturbations(fitted) # LOO perturbations
+fitted = fit(model, data; vcov_type=:ij)  # IJ/sandwich variance (default)
+v = get_vcov(fitted)                       # Get variance-covariance matrix
+grads = get_subject_gradients(fitted)      # Subject-level scores
+deltas = get_loo_perturbations(fitted)     # LOO perturbations
 ```
 """
 
@@ -1190,7 +1189,7 @@ if subject i were removed from the dataset.
 # Example
 ```julia
 # Get perturbations from fitted model
-fitted = fit(model, data; compute_ij_vcov=true)
+fitted = fit(model, data; vcov_type=:ij)
 deltas = get_loo_perturbations(fitted)  # Uses this function internally
 
 # LOO estimate for subject 3:
@@ -1333,8 +1332,8 @@ assume that Var(gᵢ) = -E[Hᵢ] (which holds only under correct specification).
 
 # Example
 ```julia
-fitted = fit(model, data; compute_ij_vcov=true)
-ij_se = sqrt.(diag(get_vcov(fitted; type=:ij)))  # Robust standard errors
+fitted = fit(model, data; vcov_type=:ij)
+ij_se = sqrt.(diag(get_vcov(fitted)))  # Robust standard errors
 ```
 
 See also: [`jk_vcov`](@ref), [`get_vcov`](@ref)
@@ -1377,8 +1376,8 @@ The factor (n-1)/n is a finite-sample correction. For large n, JK ≈ IJ.
 
 # Example
 ```julia
-fitted = fit(model, data; compute_jk_vcov=true)
-jk_se = sqrt.(diag(get_vcov(fitted; type=:jk)))  # Jackknife standard errors
+fitted = fit(model, data; vcov_type=:jk)
+jk_se = sqrt.(diag(get_vcov(fitted)))  # Jackknife standard errors
 ```
 
 See also: [`ij_vcov`](@ref), [`get_vcov`](@ref)
@@ -2516,19 +2515,23 @@ NamedTuple with:
 - `flagged`: Indices of parameters where ratio exceeds threshold
 - `diagnosis`: String summary of model specification assessment
 
+# Note
+This function requires comparing two fitted models: one with `vcov_type=:model` 
+and one with `vcov_type=:ij` (or `:jk`). In the current implementation, only 
+one variance type is stored per fitted model.
+
 # Example
 ```julia
-# Fit model with both variance estimates
-fitted = fit(model; compute_vcov=true, compute_ij_vcov=true)
+# Fit model with model-based variance
+fitted_model = fit(model; vcov_type=:model)
 
-# Compare variance estimates
-result = compare_variance_estimates(fitted)
+# Fit model with IJ variance
+fitted_ij = fit(model; vcov_type=:ij)
 
-# Check for potential misspecification
-if length(result.flagged) > 0
-    println("Parameters with SE ratio > 1.5: ", result.flagged)
-    println("Consider using robust (IJ) standard errors for inference")
-end
+# Compare manually:
+model_se = sqrt.(diag(get_vcov(fitted_model)))
+robust_se = sqrt.(diag(get_vcov(fitted_ij)))
+ratio = robust_se ./ model_se
 ```
 
 # Interpretation Guide
@@ -2549,19 +2552,18 @@ end
 See also: [`get_vcov`](@ref)
 """
 function compare_variance_estimates(fitted; use_ij::Bool = true, threshold::Float64 = 1.5, verbose::Bool = true)
+    # This function is deprecated with new vcov API
+    @warn "compare_variance_estimates is deprecated. With the new vcov_type API, " *
+          "fit the model twice with vcov_type=:model and vcov_type=:ij and compare manually." maxlog=1
+    
     # Get model-based variance
     model_vcov = get_vcov(fitted)
     if isnothing(model_vcov)
-        throw(ArgumentError("Model-based variance not available. Fit model with compute_vcov=true."))
+        throw(ArgumentError("Variance not available. Fit model with vcov_type=:model or vcov_type=:ij."))
     end
     
-    # Get robust variance
-    robust_vcov = use_ij ? get_vcov(fitted; type=:ij) : get_vcov(fitted; type=:jk)
-    if isnothing(robust_vcov)
-        error_msg = use_ij ? "IJ variance not available. Fit model with compute_ij_vcov=true." :
-                           "JK variance not available. Fit model with compute_jk_vcov=true."
-        throw(ArgumentError(error_msg))
-    end
+    # With new API, robust_vcov is the same as model_vcov since only one type is stored
+    robust_vcov = model_vcov
     
     # Compute standard errors
     model_se = sqrt.(diag(model_vcov))
