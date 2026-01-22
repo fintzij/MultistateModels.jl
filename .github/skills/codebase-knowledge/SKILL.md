@@ -8,7 +8,7 @@ applyTo: '**'
 
 **Read this skill file FIRST at the start of every session.** It provides the essential context needed to work effectively with this codebase.
 
-**Last Updated**: 2026-01-18  
+**Last Updated**: 2026-01-22  
 **Branch**: `penalized_splines` (active development)
 
 ---
@@ -172,15 +172,29 @@ end
 **MultistateModelFitted** adds:
 ```julia
     loglik::NamedTuple
-    vcov::Union{Nothing,Matrix{Float64}}
-    ij_vcov::Union{Nothing,Matrix{Float64}}
-    jk_vcov::Union{Nothing,Matrix{Float64}}
+    vcov::Union{Nothing,Matrix{Float64}}        # Single variance matrix (controlled by vcov_type)
+    vcov_type::Symbol                           # :ij, :model, :jk, or :none
     subject_gradients::Union{Nothing,Matrix{Float64}}
     smoothing_parameters::Union{Nothing,NamedTuple}  # λ per hazard (penalized splines)
     edf::Union{Nothing,NamedTuple}                   # Effective degrees of freedom
     ConvergenceRecords::...
     ProposedPaths::...
 ```
+
+### Variance-Covariance API (v0.4.0+)
+
+**Single `vcov_type` kwarg** controls variance computation:
+```julia
+fitted = fit(model; vcov_type=:ij)     # IJ/sandwich variance (DEFAULT, robust)
+fitted = fit(model; vcov_type=:model)  # Model-based variance (inverse Hessian)
+fitted = fit(model; vcov_type=:jk)     # Jackknife variance
+fitted = fit(model; vcov_type=:none)   # No variance computation
+
+# Accessor (no type kwarg needed - vcov_type is stored in fitted)
+vcov = get_vcov(fitted)  # Returns the single variance matrix
+```
+
+**BREAKING CHANGE**: Old kwargs (`compute_vcov`, `compute_ij_vcov`, `compute_jk_vcov`) no longer exist.
 
 ### Parameter Representations
 
@@ -526,6 +540,7 @@ Before ending any session where code was modified:
 
 | Date | Author | Changes |
 |------|--------|---------|
+| 2026-01-22 | julia-statistician | **Item #27 COMPLETE**: Refactored variance-covariance estimation to unified `vcov_type` API. Removed redundant `ij_vcov`/`jk_vcov` fields from `MultistateModelFitted`. Single `vcov` field now controlled by `vcov_type::Symbol` kwarg (`:ij`, `:model`, `:jk`, `:none`). Default is `:ij` (IJ/sandwich variance). Updated `_fit_exact`, `_fit_markov_panel`, `_fit_mcem`, `MCEMConfig`. Simplified `get_vcov()` accessor (no `type` kwarg needed). Breaking change: old kwargs (`compute_vcov`, `compute_ij_vcov`, `compute_jk_vcov`) removed. All 2164 tests updated and passing. |
 | 2026-01-18 | julia-statistician | **Item #36 COMPLETE**: Fixed PhaseType surrogate likelihood dt=0 bug. Primary fix: `compute_forward_loglik` now uses raw hazards Q[i,j] instead of normalized probabilities P[i,j]=Q[i,j]/(-Q[i,i]) for instantaneous transitions (dt=0). The distinction: probabilities are for sampling (choosing destination), hazards are for likelihood (density contribution). Secondary fix: Added retry mechanism (up to 10 attempts) for paths with -Inf surrogate likelihood, with fallback to Markov proposal likelihood. Also fixed: TestFixtures.jl missing phasetype_surrogate arg, test_splines.jl shared knots expectation, fit_mcem.jl NaN/negative ASE guard. All 2129 unit tests pass. MCEM longtests: PhaseType proposal no longer produces -Inf/NaN issues. |
 | 2026-01-17 | julia-statistician | **Item #35 COMPLETE**: PhaseType surrogate likelihood for MCEM now uses Schur caching for efficient TPM computation at sampled transition times. Added `CachedSchurDecomposition` struct to `data_containers.jl`, `schur_cache` parameter to `convert_expanded_path_to_censored_data`, `schur_cache_ph` parameter to `DrawSamplePaths!`, and creation/passing in `fit_mcem.jl`. Verified via unit test (machine precision match with direct exp(Q*dt)). Performance benefit: O(n³) decomposition once per covariate combo, then faster TPM computation for each interval. Updated gotcha section with implementation details. |
 | 2026-01-17 | julia-statistician | **Item #35 ANALYSIS COMPLETE, IMPLEMENTATION NEEDED**: Analyzed PhaseType surrogate likelihood for MCEM. Key insight: collapsed paths create implicit censoring (phase uncertainty) that must be handled via Markov infrastructure, NOT custom formulas. Partial fix was computing wrong quantity (marginal likelihood vs path density). Detailed implementation plan added to CODEBASE_REFACTORING_GUIDE.md. Updated gotcha section. Status changed from DONE to IN PROGRESS. |

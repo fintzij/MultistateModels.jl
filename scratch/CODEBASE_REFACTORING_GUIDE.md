@@ -1,7 +1,7 @@
 # MultistateModels.jl Codebase Refactoring Guide
 
 **Created**: 2026-01-08  
-**Last Updated**: 2026-01-21  
+**Last Updated**: 2026-01-22  
 **Branch**: penalized_splines  
 **Status**: 🔴 **BLOCKING BUG** — Unpenalized spline MCEM has boundary coefficient failure
 
@@ -13,10 +13,10 @@
 |--------|-------------|
 | ✅ Waves 1-3 | Foundation, technical debt, math correctness — COMPLETE |
 | ✅ Items #35-37 | PhaseType infrastructure cleanup — COMPLETE |
+| ✅ Item #27 (partial) | VCoV API unification — COMPLETE (constraint handling TODO) |
 | 🔴 Items #30-34 | Spline MCEM boundary coefficient bug — ACTIVE |
 | 🟡 Item #38 | MCEM surrogate-agnostic refactor — IN PROGRESS |
 | 🟡 Item #39 | PhaseType MCEM bias investigation — IN PROGRESS |
-| ⏳ Item #27 | Variance for constrained models — PLANNED |
 | ⏳ Item #28 | Simulation diagnostics — PLANNED |
 
 ---
@@ -180,22 +180,83 @@ Two bugs in `convert_expanded_path_to_censored_data` were fixed:
 
 ---
 
-## ⏳ Item #27: Variance-Covariance for Constrained Models
+## ✅ Item #27: Variance-Covariance API Unification (PARTIAL)
 
 **Priority**: 🟡 HIGH  
-**Status**: ⏳ PLANNED  
+**Status**: ✅ PARTIAL COMPLETE (2026-01-22)  
 **Effort**: 12-18 hours
 
 ### Problem
 
-Currently `fit()` returns `vcov=nothing` when constraints are present (including all phase-type models).
+Currently `fit()` returns `vcov=nothing` when constraints are present (including all phase-type models). The fitted model struct also has three separate vcov fields (`vcov`, `ij_vcov`, `jk_vcov`) which complicates post-processing.
 
-### Solution Plan
+### Completed (2026-01-22)
 
-1. **Reduced Hessian approach** for model-based variance with active constraints
-2. **IJ/JK variance** always computable (doesn't use Hessian)
-3. **`get_vcov(; type=:auto)`** auto-selects IJ when constrained
-4. **Warning** for parameters at box bounds
+**Unified `vcov_type` API**:
+- Removed `ij_vcov`, `jk_vcov` fields from `MultistateModelFitted`
+- Added `vcov_type::Symbol` field to store which variance type was computed
+- Added `vcov_type::Symbol=:ij` kwarg to `fit()` functions
+- Created `_validate_vcov_type()` helper in `fit_common.jl`
+- Simplified `get_vcov()` accessor (no `type` kwarg needed)
+- Updated all 36+ test files
+
+**VCoV Types Supported**:
+| Type | Description | When to Use |
+|------|-------------|-------------|
+| `:ij` (default) | Information-Jackknife/Sandwich: $H^{-1} J H^{-1}$ | Robust, always works |
+| `:model` | Model-based: $H^{-1}$ (inverse Fisher information) | When model is correctly specified |
+| `:jk` | Jackknife (leave-one-out) | Cross-validation of variance |
+| `:none` | Skip variance computation | Speed when vcov not needed |
+
+### Remaining Work (Item #27-B)
+
+**Parameters at Active Constraints** (not yet implemented):
+- Detect parameters at active box constraints (within `BOUND_TOL` of bounds)
+- Set variance to `NaN` for those parameters
+- Emit warning listing affected parameters
+- Add unit tests for constrained model variance
+
+### API Changes
+
+**Before:**
+```julia
+fitted = fit(model; compute_vcov=true, compute_ij_vcov=true, compute_jk_vcov=false)
+vcov = fitted.vcov        # or fitted.ij_vcov, fitted.jk_vcov
+vcov = get_vcov(fitted)   # returns model-based
+vcov = get_vcov(fitted; type=:ij)
+```
+
+**After:**
+```julia
+fitted = fit(model; vcov_type=:ij)  # default
+vcov = fitted.vcov        # single field
+vcov_type = fitted.vcov_type  # :ij, :model, :jk, or :none
+vcov = get_vcov(fitted)   # simple accessor
+```
+
+### Implementation Tasks (Completed)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| #27a | Remove `ij_vcov`, `jk_vcov` fields from `MultistateModelFitted` | ✅ Done |
+| #27b | Add `vcov_type::Symbol=:ij` kwarg to `fit()` | ✅ Done |
+| #27c | Implement `_compute_vcov_*` functions in fit files | ✅ Done |
+| #27d | Detect parameters at active constraints, set variance to NaN | ⏳ TODO |
+| #27e | Update `get_vcov()` accessor (remove `type` kwarg) | ✅ Done |
+| #27f | Update all tests that check vcov fields | ✅ Done (36+ files) |
+| #27g | Add tests for constrained model variance | ⏳ TODO |
+
+### Key Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/types/model_structs.jl` | Removed `ij_vcov`, `jk_vcov` fields; added `vcov_type::Symbol` |
+| `src/inference/fit_common.jl` | Added `_validate_vcov_type()` helper |
+| `src/inference/fit_exact.jl` | Added `vcov_type` kwarg, `_compute_vcov_exact()` |
+| `src/inference/fit_markov.jl` | Added `vcov_type` kwarg, `_compute_vcov_markov()` |
+| `src/inference/fit_mcem.jl` | Added `vcov_type` kwarg, `_compute_vcov_mcem()`, updated MCEMConfig |
+| `src/output/accessors.jl` | Simplified `get_vcov()` |
+| `src/output/variance.jl` | Updated docstrings |
 
 ---
 
