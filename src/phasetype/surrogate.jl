@@ -95,14 +95,20 @@ function build_phasetype_surrogate(tmat::Matrix{Int64}, config::PhaseTypeConfig;
                                    verbose::Bool=true)
     n_states = size(tmat, 1)
     
-    # Handle :auto - select via BIC
+    # Handle :auto - deprecated, fall back to heuristic
     if config.n_phases === :auto
-        if isnothing(data)
-            throw(ArgumentError("data is required when n_phases=:auto for BIC-based selection"))
+        @warn "n_phases=:auto is deprecated in build_phasetype_surrogate. Using :heuristic instead. " *
+              "For BIC-based selection, use select_surrogate() at model construction time." maxlog=1
+        if isnothing(hazards)
+            throw(ArgumentError("hazards is required when n_phases=:auto (falling back to :heuristic)"))
         end
-        n_phases = _select_n_phases_bic(tmat, data; max_phases=config.max_phases, verbose=verbose)
+        n_phases_vec = _compute_default_n_phases(tmat, hazards)
+        n_phases = Dict{Int,Int}(i => n_phases_vec[i] for i in eachindex(n_phases_vec))
         config = PhaseTypeConfig(n_phases=n_phases, constraints=config.constraints, 
                                  max_phases=config.max_phases)
+        if verbose
+            println("Heuristic n_phases per state: $n_phases")
+        end
     # Handle :heuristic - use smart defaults based on hazard types
     elseif config.n_phases === :heuristic
         if isnothing(hazards)

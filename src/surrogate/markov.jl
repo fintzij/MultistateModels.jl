@@ -233,21 +233,24 @@ end
 # =============================================================================
 
 """
-    _fit_phasetype_surrogate(model; method, n_phases, surrogate_parameters, surrogate_constraints, verbose, fit_tau)
+    _fit_phasetype_surrogate(model; method, n_phases, surrogate_parameters, surrogate_constraints, verbose)
 
 Internal function to fit a phase-type surrogate.
 
-- `:mle` method: First fits Markov surrogate via MLE, then optionally fits all rates via MLE
+- `:mle` method: First fits Markov surrogate via MLE, then fits all phase-type rates via MLE
 - `:heuristic` method: Uses crude rates divided by n_phases
+
+When method=:mle and any state has more than 1 phase, the phase-type rates (progression λ
+and absorption μ) are optimized via MLE. The structure constraints (SCTP + eigenvalue ordering)
+are enforced during optimization.
 
 # Arguments
 - `model`: The target multistate model
 - `method::Symbol=:mle`: Fitting method
-- `n_phases`: Number of phases per state
-- `surrogate_parameters`: Optional fixed parameters
-- `surrogate_constraints`: Optional constraints
+- `n_phases`: Number of phases per state (Int, Dict{Int,Int}, or :heuristic)
+- `surrogate_parameters`: Optional fixed parameters (skips fitting)
+- `surrogate_constraints`: Optional constraints for MLE fitting
 - `verbose::Bool=true`: Print progress
-- `fit_tau::Bool=true`: Estimate all phase-type rates via MLE (progression and absorption)
 
 # Returns
 - `PhaseTypeSurrogate` with fitted rates stored in `fitted_rates` field
@@ -257,8 +260,7 @@ function _fit_phasetype_surrogate(model;
     n_phases::Union{Int, Dict{Int,Int}, Symbol} = 2,
     surrogate_parameters = nothing,
     surrogate_constraints = nothing,
-    verbose = true,
-    fit_tau::Bool = true)
+    verbose = true)
     
     # First, get or fit the Markov surrogate
     markov_surrogate = _fit_markov_surrogate(model;
@@ -268,6 +270,12 @@ function _fit_phasetype_surrogate(model;
         verbose = verbose)
     
     # Build phase-type configuration
+    # Note: n_phases = :auto is no longer supported here - use select_surrogate() instead
+    if n_phases === :auto
+        @warn "n_phases=:auto is deprecated in _fit_phasetype_surrogate. Using :heuristic instead. " *
+              "For BIC-based selection, use select_surrogate() at model construction time." maxlog=1
+        n_phases = :heuristic
+    end
     config = ProposalConfig(type = :phasetype, n_phases = n_phases)
     
     # Determine n_phases_vec based on config
@@ -276,10 +284,7 @@ function _fit_phasetype_surrogate(model;
     transient_states = findall(.!is_absorbing)
     
     n_phases_resolved = config.n_phases
-    if n_phases_resolved === :auto
-        n_phases_vec = _select_n_phases_bic(model.tmat, model.data; 
-                                            max_phases = config.max_phases, verbose = verbose)
-    elseif n_phases_resolved === :heuristic
+    if n_phases_resolved === :heuristic
         n_phases_vec = _compute_default_n_phases(model.tmat, model.hazards)
     elseif n_phases_resolved isa Int
         n_phases_vec = [is_absorbing[s] ? 1 : n_phases_resolved for s in 1:n_states]
@@ -292,11 +297,15 @@ function _fit_phasetype_surrogate(model;
                 n_phases_vec[s] = get(n_phases_resolved, s, 1)
             end
         end
+    else
+        # Default fallback: use 2 phases
+        n_phases_vec = [is_absorbing[s] ? 1 : 2 for s in 1:n_states]
     end
     
-    # Fit all rates via MLE if requested and we have phases > 1
+    # Fit all rates via MLE when method=:mle and we have phases > 1
+    # This always happens now (no fit_tau option) - structure constraints are enforced during optimization
     fitted_rates = nothing
-    if fit_tau && method == :mle && any(n_phases_vec[s] > 1 for s in transient_states)
+    if method == :mle && any(n_phases_vec[s] > 1 for s in transient_states)
         if verbose
             println("Fitting phase-type rates via MLE...")
         end
@@ -350,11 +359,15 @@ function _build_phasetype_from_markov(model, markov_surrogate::MarkovSurrogate;
     transient_states = findall(.!is_absorbing)
     
     # Determine number of phases per state
+    # Note: n_phases = :auto is no longer supported here - use select_surrogate() instead
     n_phases = config.n_phases
     if n_phases === :auto
-        n_phases_vec = _select_n_phases_bic(model.tmat, model.data; 
-                                            max_phases = config.max_phases, verbose = verbose)
-    elseif n_phases === :heuristic
+        @warn "n_phases=:auto is deprecated in _build_phasetype_from_markov. Using :heuristic instead. " *
+              "For BIC-based selection, use select_surrogate() at model construction time." maxlog=1
+        n_phases = :heuristic
+    end
+    
+    if n_phases === :heuristic
         n_phases_vec = _compute_default_n_phases(model.tmat, model.hazards)
     elseif n_phases isa Int
         n_phases_vec = [is_absorbing[s] ? 1 : n_phases for s in 1:n_states]
@@ -368,6 +381,9 @@ function _build_phasetype_from_markov(model, markov_surrogate::MarkovSurrogate;
                 n_phases_vec[s] = get(n_phases, s, 1)
             end
         end
+    else
+        # Default fallback: use 2 phases
+        n_phases_vec = [is_absorbing[s] ? 1 : 2 for s in 1:n_states]
     end
     
     if verbose
@@ -579,21 +595,29 @@ function initialize_surrogate!(model::MultistateProcess;
     surrogate_constraints = nothing, 
     verbose = true)
     
-    _validate_surrogate_inputs(type, method)
-    
-    if type === :markov
+    # Handle :auto type via BIC-based selection
+    if type === :auto
+        if verbose
+            println("Selecting surrogate type via BIC comparison...")
+        end
+        surrogate = select_surrogate(model; verbose = verbose, return_all = false)
+    elseif type === :markov
+        _validate_surrogate_inputs(type, method)
         surrogate = _fit_markov_surrogate(model;
             method = method,
             surrogate_parameters = surrogate_parameters,
             surrogate_constraints = surrogate_constraints,
             verbose = verbose)
-    else  # :phasetype
+    elseif type === :phasetype
+        _validate_surrogate_inputs(type, method)
         surrogate = _fit_phasetype_surrogate(model;
             method = method,
             n_phases = n_phases,
             surrogate_parameters = surrogate_parameters,
             surrogate_constraints = surrogate_constraints,
             verbose = verbose)
+    else
+        throw(ArgumentError("type must be :markov, :phasetype, or :auto, got :$type"))
     end
     
     # Set the unified surrogate field
@@ -1402,4 +1426,285 @@ function _fit_phasetype_mle(model::MultistateProcess,
         :destinations => destinations,
         :param_layout => param_layout
     )
+end
+
+
+# =============================================================================
+# BIC-Based Surrogate Selection
+# =============================================================================
+
+"""
+    select_surrogate(model; candidates, verbose, return_all)
+
+Select the best surrogate for importance sampling by comparing BIC values.
+
+This function fits multiple surrogate candidates (Markov and/or phase-type with
+varying numbers of phases) and selects the one with the lowest BIC. If phase-type
+wins on BIC despite having more parameters, the observed sojourn times are non-
+exponential, and phase-type will be a better importance sampling proposal.
+
+# Arguments
+- `model`: Multistate model object
+- `candidates`: Vector of surrogate specifications (default: `[:markov, :phasetype_2, :phasetype_3]`)
+  - `:markov` → Markov (exponential) surrogate
+  - `:phasetype_N` → Phase-type surrogate with N phases (e.g., `:phasetype_2`, `:phasetype_3`)
+  - `(:phasetype, N)` → Tuple form for explicit phase count
+- `verbose::Bool=true`: Print progress and BIC values
+- `return_all::Bool=false`: If true, return NamedTuple with best surrogate and comparison table
+
+# Returns
+- If `return_all=false`: Best surrogate (`MarkovSurrogate` or `PhaseTypeSurrogate`)
+- If `return_all=true`: NamedTuple with:
+  - `best`: The best surrogate
+  - `comparison`: DataFrame with candidates, BIC values, and parameter counts
+  - `selected`: Symbol of selected candidate
+
+# Examples
+```julia
+# Default BIC-based selection
+surrogate = select_surrogate(model)
+
+# Custom candidates
+surrogate = select_surrogate(model; candidates=[:markov, :phasetype_2, :phasetype_4])
+
+# Get full comparison details
+result = select_surrogate(model; return_all=true)
+println(result.comparison)  # DataFrame showing BIC for each candidate
+```
+
+See also: [`fit_surrogate`](@ref), [`compute_surrogate_bic`](@ref)
+"""
+function select_surrogate(model::MultistateProcess;
+    candidates::Vector = [:markov, :phasetype_2, :phasetype_3],
+    verbose::Bool = true,
+    return_all::Bool = false)
+    
+    if verbose
+        println("="^60)
+        println("BIC-Based Surrogate Selection")
+        println("="^60)
+        println("Candidates: $candidates")
+        println()
+    end
+    
+    # Parse candidates into standardized form (type, n_phases)
+    parsed_candidates = _parse_surrogate_candidates(candidates)
+    
+    # Fit each candidate and compute BIC
+    results = Vector{NamedTuple{(:candidate, :surrogate, :bic, :n_params, :loglik), 
+                                Tuple{Any, Union{MarkovSurrogate, PhaseTypeSurrogate}, Float64, Int, Float64}}}()
+    
+    for (orig_candidate, (type, n_phases)) in zip(candidates, parsed_candidates)
+        if verbose
+            if type === :markov
+                println("Fitting candidate: $orig_candidate (Markov)")
+            else
+                println("Fitting candidate: $orig_candidate (Phase-type, $n_phases phases)")
+            end
+        end
+        
+        # Fit surrogate - n_phases only used for phase-type
+        surrogate = if type === :markov
+            fit_surrogate(model; 
+                type = type,
+                method = :mle,
+                verbose = verbose)
+        else
+            fit_surrogate(model; 
+                type = type, 
+                n_phases = n_phases,
+                method = :mle,
+                verbose = verbose)
+        end
+        
+        # Compute BIC
+        bic_val, loglik, n_params = compute_surrogate_bic(model, surrogate)
+        
+        push!(results, (candidate = orig_candidate, surrogate = surrogate, 
+                       bic = bic_val, n_params = n_params, loglik = loglik))
+        
+        if verbose
+            println("  BIC = $(round(bic_val, digits=2)) (loglik=$(round(loglik, digits=2)), p=$n_params)")
+            println()
+        end
+    end
+    
+    # Select best by BIC (lowest wins)
+    best_idx = argmin([r.bic for r in results])
+    best_result = results[best_idx]
+    
+    if verbose
+        println("="^60)
+        println("Selected: $(best_result.candidate) (BIC = $(round(best_result.bic, digits=2)))")
+        println("="^60)
+    end
+    
+    if return_all
+        # Build comparison DataFrame
+        comparison = DataFrame(
+            candidate = [r.candidate for r in results],
+            bic = [r.bic for r in results],
+            loglik = [r.loglik for r in results],
+            n_params = [r.n_params for r in results],
+            selected = [i == best_idx for i in 1:length(results)]
+        )
+        return (best = best_result.surrogate, 
+                comparison = comparison, 
+                selected = best_result.candidate)
+    else
+        return best_result.surrogate
+    end
+end
+
+"""
+    _parse_surrogate_candidates(candidates)
+
+Parse surrogate candidate specifications into standardized (type, n_phases) tuples.
+
+# Supported formats
+- `:markov` → `(:markov, nothing)`
+- `:phasetype_N` → `(:phasetype, N)` where N is extracted from symbol
+- `(:phasetype, N)` → `(:phasetype, N)` (pass-through)
+"""
+function _parse_surrogate_candidates(candidates::Vector)
+    parsed = Vector{Tuple{Symbol, Union{Nothing, Int}}}()
+    
+    for c in candidates
+        if c === :markov
+            push!(parsed, (:markov, nothing))
+        elseif c isa Symbol
+            # Parse :phasetype_N format
+            s = string(c)
+            if startswith(s, "phasetype_")
+                n_str = s[11:end]  # After "phasetype_"
+                n = tryparse(Int, n_str)
+                if isnothing(n) || n < 1
+                    throw(ArgumentError("Invalid phase-type candidate: $c. Expected :phasetype_N where N is a positive integer."))
+                end
+                push!(parsed, (:phasetype, n))
+            else
+                throw(ArgumentError("Unknown surrogate candidate: $c. Expected :markov or :phasetype_N."))
+            end
+        elseif c isa Tuple{Symbol, Int}
+            type, n = c
+            if type === :phasetype && n >= 1
+                push!(parsed, (:phasetype, n))
+            elseif type === :markov
+                push!(parsed, (:markov, nothing))
+            else
+                throw(ArgumentError("Invalid candidate tuple: $c. Expected (:phasetype, N) or (:markov, _)."))
+            end
+        else
+            throw(ArgumentError("Invalid candidate format: $c. Expected Symbol or Tuple{Symbol, Int}."))
+        end
+    end
+    
+    return parsed
+end
+
+"""
+    compute_surrogate_bic(model, surrogate)
+
+Compute the Bayesian Information Criterion (BIC) for a fitted surrogate.
+
+BIC = -2 × loglik + log(n) × p
+
+where:
+- loglik: Marginal log-likelihood of observed data under the surrogate
+- n: Number of subjects
+- p: Number of surrogate parameters
+
+# Arguments
+- `model::MultistateProcess`: The multistate model containing the data
+- `surrogate::Union{MarkovSurrogate, PhaseTypeSurrogate}`: Fitted surrogate
+
+# Returns
+- `(bic, loglik, n_params)`: Tuple of BIC value, log-likelihood, and parameter count
+
+# Parameter Counting
+- Markov: One rate parameter per transition
+- Phase-type: For each transient state with n phases and d destinations:
+  - (n-1) progression rates + n×d absorption rates
+"""
+function compute_surrogate_bic(model::MultistateProcess, surrogate::MarkovSurrogate)
+    # Log-likelihood under Markov surrogate
+    loglik = compute_markov_marginal_loglik(model, surrogate)
+    
+    # Parameter count: one rate per transition
+    n_params = length(surrogate.hazards)
+    
+    # Number of subjects
+    n_subjects = length(model.subjectindices)
+    
+    # BIC
+    bic = -2.0 * loglik + log(n_subjects) * n_params
+    
+    return (bic, loglik, n_params)
+end
+
+function compute_surrogate_bic(model::MultistateProcess, surrogate::PhaseTypeSurrogate)
+    # Log-likelihood under phase-type surrogate
+    loglik = _compute_phasetype_surrogate_loglik(model, surrogate)
+    
+    # Parameter count: count all rates in expanded Q matrix
+    n_params = _count_phasetype_params(surrogate, model.tmat)
+    
+    # Number of subjects
+    n_subjects = length(model.subjectindices)
+    
+    # BIC
+    bic = -2.0 * loglik + log(n_subjects) * n_params
+    
+    return (bic, loglik, n_params)
+end
+
+"""
+    _compute_phasetype_surrogate_loglik(model, surrogate)
+
+Compute the panel data log-likelihood under a phase-type surrogate.
+"""
+function _compute_phasetype_surrogate_loglik(model::MultistateProcess, surrogate::PhaseTypeSurrogate)
+    # Use the expanded Q matrix stored in the surrogate
+    expanded_Q = surrogate.expanded_Q
+    state_to_phases = surrogate.state_to_phases
+    phase_to_state = surrogate.phase_to_state
+    n_expanded = surrogate.n_expanded_states
+    
+    # Compute log-likelihood via forward algorithm
+    return _compute_phasetype_panel_loglik_ad(model, expanded_Q, state_to_phases, 
+                                               phase_to_state, n_expanded)
+end
+
+"""
+    _count_phasetype_params(surrogate, tmat)
+
+Count the number of free parameters in a phase-type surrogate.
+
+For each transient state s with n_s phases and d_s destinations:
+- Progression rates: (n_s - 1)  
+- Absorption rates: n_s × d_s
+
+Total = Σ_s [(n_s - 1) + n_s × d_s]
+"""
+function _count_phasetype_params(surrogate::PhaseTypeSurrogate, tmat::Matrix{Int})
+    n_states = surrogate.n_observed_states
+    is_absorbing = [all(tmat[s, :] .== 0) for s in 1:n_states]
+    
+    n_params = 0
+    for s in 1:n_states
+        if is_absorbing[s]
+            continue
+        end
+        
+        # Number of phases for this state
+        n_phases = length(surrogate.state_to_phases[s])
+        
+        # Number of destinations
+        n_dests = sum(tmat[s, :] .!= 0)
+        
+        # Parameters: (n_phases - 1) progression + n_phases × n_dests absorption
+        n_params += max(0, n_phases - 1) + n_phases * n_dests
+    end
+    
+    return n_params
 end

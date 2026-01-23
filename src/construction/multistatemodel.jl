@@ -31,9 +31,11 @@ will insert the intercept-only design automatically as described in `Hazard`'s d
   Set to `false` if you want to manually set parameters before fitting.
 - `surrogate::Symbol = :none`: surrogate model for importance sampling in MCEM.
   - `:none` (default): no surrogate created (for Markov models or exact data)
-  - `:auto`: automatically select surrogate type based on hazard families:
-    - Exponential hazards only → `:markov`
-    - Non-exponential hazards (Weibull, Gompertz, spline) → `:phasetype`
+  - `:auto`: automatically select surrogate type via BIC comparison. Fits multiple
+    candidate surrogates (Markov, phase-type with 2 and 3 phases) and selects the
+    one with lowest BIC. If phase-type wins on BIC despite having more parameters,
+    the observed sojourn times are non-exponential, and phase-type will be a better
+    importance sampling proposal. See `select_surrogate` for manual control.
   - `:markov`: create a Markov surrogate (exponential approximation)
   - `:phasetype`: create a phase-type surrogate (better for non-exponential hazards)
 - `fit_surrogate::Bool = true`: if `surrogate != :none`, fit the surrogate via MLE at model creation time.
@@ -220,27 +222,25 @@ function multistatemodel(hazards::HazardFunction...;
     _hazards, parameters, hazkeys = build_hazards(hazards...; data = data, surrogate = false)
     _totalhazards = build_totalhazards(_hazards, tmat)
 
-    # Resolve :auto surrogate option based on hazard types
-    # - :auto → :markov (exponential) or :phasetype (non-exponential)
-    resolved_surrogate = if surrogate === :auto
-        needs_phasetype_proposal(_hazards) ? :phasetype : :markov
-    else
-        surrogate
-    end
-
-    # Build surrogate if requested (initially unfitted)
+    # Resolve surrogate option
+    # - :none → no surrogate
+    # - :markov/:phasetype → explicit surrogate type (built but not fitted here)
+    # - :auto → defer BIC-based selection to fit_surrogate step
+    resolved_surrogate = surrogate  # Preserve :auto for later BIC-based selection
+    
+    # Build initial surrogate structure if requested (initially unfitted)
+    # For :auto, we build a Markov surrogate as placeholder - select_surrogate() will replace it
     # The surrogate field can hold either MarkovSurrogate or PhaseTypeSurrogate
     model_surrogate::Union{Nothing, AbstractSurrogate} = nothing
-    if resolved_surrogate in (:markov, :phasetype)
-        # Always build the Markov surrogate first (needed for both types)
+    if resolved_surrogate in (:markov, :phasetype, :auto)
+        # Always build the Markov surrogate first (needed as placeholder or for Markov case)
         # The MarkovSurrogate stores the exponential hazards and covariate coefficients
         surrogate_haz, surrogate_pars_ph, _ = build_hazards(hazards...; data = data, surrogate = true)
         markov_surrogate = MarkovSurrogate(surrogate_haz, surrogate_pars_ph; fitted=false)
         model_surrogate = markov_surrogate  # Default to Markov
         
-        # For :phasetype, we need to fit the Markov surrogate first, then build PhaseType from it
-        # This is deferred to the fit_surrogate step below since we need fitted rates
-        # For now, just store the Markov surrogate - initialize_surrogate! will handle conversion
+        # For :phasetype and :auto, the actual surrogate is fitted later via initialize_surrogate!
+        # which will call select_surrogate() for :auto
     end
 
     components = (
@@ -283,12 +283,12 @@ function multistatemodel(hazards::HazardFunction...;
     end
     
     # Fit surrogate at model creation time (default: true)
-    if fit_surrogate && resolved_surrogate in (:markov, :phasetype)
+    if fit_surrogate && resolved_surrogate in (:markov, :phasetype, :auto)
         if verbose
             println("Fitting surrogate at model creation time...")
         end
         # Use initialize_surrogate! to fit the appropriate surrogate type
-        # This replaces direct _fit_markov_surrogate call
+        # For :auto, this will use BIC-based selection via select_surrogate()
         try
             initialize_surrogate!(model; 
                 type = resolved_surrogate,
