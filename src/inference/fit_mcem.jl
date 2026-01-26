@@ -284,6 +284,11 @@ with Pareto-smoothed importance sampling (PSIS) for stable weight estimation.
   - `Vector{SplinePenalty}`: Multiple rules resolved by specificity
   - `nothing`: DEPRECATED - use `:none` instead
 - `lambda_init::Float64=1.0`: initial smoothing parameter value (used when penalty is specified)
+- `select_lambda::Symbol=:none`: automatic λ selection method:
+  - `:none` (default): Use fixed `lambda_init` throughout
+  - `:pijcv`: PIJCV selection (Wood 2024 NCV) at every MCEM iteration
+  - `:efs`: EFS/REML criterion at every MCEM iteration
+  - `:perf`: PERF criterion at every MCEM iteration
 
 # Returns
 - `MultistateModelFitted`: fitted model with MCEM solution and variance estimates
@@ -325,7 +330,7 @@ fitted = fit(semimarkov_model; solver=Optim.BFGS())
 See also: [`fit`](@ref), [`compare_variance_estimates`](@ref)
 """
 function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = DEFAULT_MCEM_MAXITER, tol = DEFAULT_MCEM_TOL, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = DEFAULT_ESS_TARGET_INITIAL, max_ess = DEFAULT_MAX_ESS, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, sir::Symbol = :adaptive_lhs, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, sir_adaptive_threshold::Float64 = 2.0, sir_adaptive_min_iters::Int = 3, verbose = true, return_convergence_records = true, return_proposed_paths = false, vcov_type::Symbol = :ij, vcov_threshold = true, 
-    loo_method = :direct, penalty = :auto, lambda_init = 1.0, kwargs...)
+    loo_method = :direct, penalty = :auto, lambda_init = 1.0, select_lambda::Symbol = :none, kwargs...)
 
     # Validate vcov_type
     _validate_vcov_type(vcov_type)
@@ -443,9 +448,33 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     end
     use_penalty = has_penalties(penalty_config)
     
+    # Check if any penalty uses adaptive (at-risk) weighting
+    use_adaptive_penalty_weighting = has_adaptive_weighting(resolved_penalty)
+    
     if verbose && use_penalty
         println("Using penalized likelihood with $(penalty_config.n_lambda) smoothing parameter(s).\n")
+        if use_adaptive_penalty_weighting
+            println("Using adaptive at-risk penalty weighting (updated at each MCEM iteration).\n")
+        end
     end
+    
+    # Set up λ selection
+    # Resolve selector from select_lambda kwarg
+    lambda_selector = _resolve_selector(select_lambda, penalty_config)
+    use_lambda_selection = !(lambda_selector isa NoSelection) && use_penalty
+    
+    # Validate: λ selection not supported with constraints
+    if use_lambda_selection && !isnothing(constraints)
+        throw(ArgumentError("Automatic λ selection (select_lambda=:$select_lambda) is not supported with parameter constraints."))
+    end
+    
+    if verbose && use_lambda_selection
+        println("Using automatic λ selection via $(select_lambda) at each MCEM iteration.\n")
+    end
+    
+    # Track λ history for convergence records
+    lambda_trace = use_lambda_selection ? ElasticArray{Float64, 2}(undef, penalty_config.n_lambda, 0) : nothing
+    edf_trace = use_lambda_selection ? Vector{Float64}() : nothing
 
     # initialize ess target
     ess_target = ess_target_initial
@@ -701,6 +730,68 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
             end
         end
         
+        # =====================================================================
+        # Adaptive Penalty Weighting Update (Phase 4: MCEM Integration)
+        # If using AtRiskWeighting, recompute penalty matrices using path-weighted
+        # at-risk counts from the current importance-weighted sample paths.
+        # This must happen BEFORE the λ-step and M-step.
+        # =====================================================================
+        if use_adaptive_penalty_weighting
+            # For SIR: use subsampled paths for penalty weight computation
+            if use_sir
+                sir_data = create_sir_subsampled_data(samplepaths, sir_subsample_indices)
+                penalty_config = update_penalty_weights_mcem(
+                    penalty_config, model, sir_data.paths, sir_data.weights, resolved_penalty
+                )
+            else
+                penalty_config = update_penalty_weights_mcem(
+                    penalty_config, model, samplepaths, ImportanceWeights, resolved_penalty
+                )
+            end
+        end
+        
+        # =====================================================================
+        # λ-step: Select smoothing parameter using PIJCV (before M-step)
+        # Within each MCEM iteration, paths/weights are FIXED. Q(β; paths, weights) is valid for 
+        # ANY β via importance weighting. This allows jointly optimizing (λ, β) within each 
+        # iteration using the same Monte Carlo approximation.
+        # =====================================================================
+        warmstart_beta = params_cur
+        
+        if use_lambda_selection
+            # Create selection data from current paths/weights
+            # For SIR: use subsampled paths for λ selection (same as M-step)
+            if use_sir
+                sir_data = create_sir_subsampled_data(samplepaths, sir_subsample_indices)
+                selection_data = MCEMSelectionData(model, sir_data.paths, sir_data.weights)
+            else
+                selection_data = MCEMSelectionData(model, samplepaths, ImportanceWeights)
+            end
+            
+            # Select λ for this iteration
+            lambda_result = _select_hyperparameters(
+                model, selection_data, penalty_config, lambda_selector;
+                beta_init=params_cur,
+                inner_maxiter=50,  # Relaxed for inner loop
+                outer_maxiter=100,
+                lambda_tol=1e-3,
+                verbose=(verbose && iter <= 3)  # Only print for first few iterations
+            )
+            
+            # Update penalty configuration with selected λ
+            penalty_config = lambda_result.penalty
+            warmstart_beta = lambda_result.warmstart_beta
+            
+            # Track λ and EDF (extract total from NamedTuple)
+            append!(lambda_trace, lambda_result.lambda)
+            push!(edf_trace, lambda_result.edf.total)
+            
+            if verbose
+                lambda_val = lambda_result.lambda
+                println("  λ-step: λ=$(round.(lambda_val, sigdigits=3)), EDF=$(round(lambda_result.edf.total, digits=1))")
+            end
+        end
+        
         # solve M-step: use user-specified solver or default Ipopt
         # For SIR: use subsampled paths with uniform weights
         if use_sir
@@ -710,10 +801,26 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
             mstep_data = SMPanelData(model, samplepaths, ImportanceWeights)
         end
         
+        # Update M-step problem with new penalty_config (if λ changed)
+        if use_penalty
+            # Recreate penalized objective with updated penalty_config
+            penalized_loglik_updated = (params, data) -> loglik(params, data, penalty_config)
+            if isnothing(constraints)
+                optf_updated = OptimizationFunction(penalized_loglik_updated, Optimization.AutoForwardDiff())
+                prob = OptimizationProblem(optf_updated, warmstart_beta, mstep_data; lb=lb, ub=ub)
+            else
+                optf_updated = OptimizationFunction(penalized_loglik_updated, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
+                prob = OptimizationProblem(optf_updated, warmstart_beta, mstep_data; lb=lb, ub=ub, lcons = constraints.lcons, ucons = constraints.ucons)
+            end
+        else
+            # Recreate unpenalized problem with warmstart
+            prob = remake(prob, u0 = Vector(warmstart_beta), p = mstep_data)
+        end
+        
         # Note: constraints handling happens in prob definition earlier
         # This if-else currently does the same thing - kept for future differentiation
         params_prop_optim = _solve_optimization(
-            remake(prob, u0 = Vector(params_cur), p = mstep_data), 
+            prob, 
             solver
         )
         params_prop = params_prop_optim.u
@@ -1059,6 +1166,36 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     
     # Create the logliks NamedTuple
     logliks = (loglik = mll_cur, subj_lml = subj_mll)
+    
+    # Build smoothing_parameters and edf for fitted model
+    # If λ selection was used, use final λ values; otherwise use lambda_init
+    final_smoothing_parameters = nothing
+    final_edf = nothing
+    
+    if use_penalty
+        # Get final λ values
+        final_lambda = get_hyperparameters(penalty_config)
+        final_smoothing_parameters = final_lambda
+        
+        # Compute final EDF 
+        selection_data = MCEMSelectionData(model, samplepaths, ImportanceWeights)
+        edf_total = compute_edf_mcem(params_cur, final_lambda, penalty_config, selection_data)
+        final_edf = (total = edf_total, per_term = [edf_total])  # TODO: per-hazard EDF breakdown
+        
+        if verbose
+            println("Final smoothing parameters: λ=$(round.(final_lambda, sigdigits=3))")
+            println("Effective degrees of freedom: $(round(edf_total, digits=2))")
+        end
+    end
+    
+    # Add λ selection records to convergence records if used
+    if return_convergence_records && use_lambda_selection && !isnothing(lambda_trace)
+        lambda_selection_records = (
+            lambda_trace = lambda_trace,
+            edf_trace = edf_trace
+        )
+        ConvergenceRecords = merge(ConvergenceRecords, lambda_selection_records)
+    end
 
     # wrap results
     model_fitted = MultistateModelFitted(
@@ -1083,8 +1220,8 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         ProposedPaths,
         model.modelcall,
         model.phasetype_expansion,
-        nothing,  # smoothing_parameters (not yet implemented for MCEM)
-        nothing)  # edf
+        final_smoothing_parameters,
+        final_edf)
 
     # return fitted object
     return model_fitted;

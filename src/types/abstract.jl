@@ -59,3 +59,48 @@ Enables switching between ForwardDiff (forward-mode, mutation-tolerant) and
 Enzyme (reverse-mode, mutation-free) based on problem characteristics.
 """
 abstract type ADBackend end
+
+# =============================================================================
+# Penalty and Hyperparameter Selection Type Hierarchy
+# =============================================================================
+
+"""
+    AbstractPenalty
+
+Abstract type for penalty configurations in penalized likelihood fitting.
+
+**Required Interface Methods:**
+- `compute_penalty(params::AbstractVector, penalty) -> Real`: Compute penalty contribution
+- `n_hyperparameters(penalty) -> Int`: Number of tuning parameters (λ values)
+- `get_hyperparameters(penalty) -> Vector{Float64}`: Extract current λ values
+- `set_hyperparameters(penalty, lambda::Vector{Float64}) -> AbstractPenalty`: Return new penalty with updated λ
+- `hyperparameter_bounds(penalty) -> Tuple{Vector{Float64}, Vector{Float64}}`: (lb, ub) for log(λ)
+- `has_penalties(penalty) -> Bool`: Whether penalty is active (n_hyperparameters > 0)
+
+**Concrete Subtypes:**
+- `NoPenalty`: Unpenalized MLE
+- `QuadraticPenalty`: P(β; λ) = (1/2) Σⱼ λⱼ βⱼᵀ Sⱼ βⱼ
+
+See also: [`NoPenalty`](@ref), [`QuadraticPenalty`](@ref)
+"""
+abstract type AbstractPenalty end
+
+"""
+    AbstractHyperparameterSelector
+
+Abstract type for hyperparameter (smoothing parameter) selection strategies.
+
+Selection functions dispatch on this type to determine which algorithm to use
+for choosing optimal λ values. Selection functions return `HyperparameterSelectionResult`
+containing the optimal λ and a warm-start point, NOT a fitted model.
+
+**Concrete Subtypes:**
+- `NoSelection`: Use fixed λ (no selection)
+- `PIJCVSelector`: Newton-approximated LOO-CV (Wood 2024 NCV algorithm)
+- `ExactCVSelector`: Exact cross-validation (requires refitting)
+- `REMLSelector`: REML/EFS criterion
+- `PERFSelector`: PERF criterion (Marra & Radice 2020)
+
+See also: [`HyperparameterSelectionResult`](@ref)
+"""
+abstract type AbstractHyperparameterSelector end

@@ -46,9 +46,23 @@ is typically sufficient since:
 
 ## Variance Estimation
 
-MultistateModels.jl provides three variance estimators, controlled by keyword arguments to `fit()`:
+MultistateModels.jl provides three variance estimators, controlled by the `vcov_type` keyword argument to `fit()`:
 
-### Model-Based Variance (`compute_vcov=true`)
+```julia
+# IJ/Sandwich variance (DEFAULT - recommended for inference)
+fitted = fit(model; vcov_type=:ij)
+
+# Model-based variance (inverse Hessian)
+fitted = fit(model; vcov_type=:model)
+
+# Jackknife variance
+fitted = fit(model; vcov_type=:jk)
+
+# Skip variance computation
+fitted = fit(model; vcov_type=:none)
+```
+
+### Model-Based Variance (`vcov_type=:model`)
 
 The standard MLE variance estimator:
 ```math
@@ -59,9 +73,9 @@ The standard MLE variance estimator:
 - Computed via ForwardDiff automatic differentiation
 - For semi-Markov models, uses Louis's identity to account for missing data
 
-### Infinitesimal Jackknife / Sandwich Variance (`compute_ij_vcov=true`)
+### Infinitesimal Jackknife / Sandwich Variance (`vcov_type=:ij`)
 
-**Recommended for inference.** The robust sandwich estimator:
+**Recommended for inference (DEFAULT).** The robust sandwich estimator:
 ```math
 \text{Var}_{IJ}(\hat{\theta}) = H^{-1} K H^{-1}, \quad K = \sum_i g_i g_i^\top
 ```
@@ -72,7 +86,7 @@ where ``g_i = \nabla \ell_i(\hat{\theta})`` is the score contribution from subje
 - Compare to model-based variance to diagnose misspecification:
   if ``\text{SE}_{IJ} \gg \text{SE}_{model}``, the model may be misspecified
 
-### Jackknife Variance (`compute_jk_vcov=false`)
+### Jackknife Variance (`vcov_type=:jk`)
 
 The finite-sample delete-one jackknife:
 ```math
@@ -269,22 +283,22 @@ se_robust = sqrt.(diag(get_ij_vcov(fitted)))
 ### Variance Estimation Recommendations
 
 ```julia
-# Default: both model-based and IJ (recommended)
-fitted = fit(model)
+# Default: IJ/sandwich variance (recommended for inference)
+fitted = fit(model)  # vcov_type=:ij is the default
 
-# Get robust standard errors for inference
+# Get robust standard errors
 using LinearAlgebra
-robust_se = sqrt.(diag(get_ij_vcov(fitted)))
+robust_se = sqrt.(diag(fitted.vcov))
 
-# Compare variances to check model specification
-result = compare_variance_estimates(fitted)
+# Compare IJ vs model-based to check specification
+fitted_model = fit(model; vcov_type=:model)
 # Large ratios (SE_IJ / SE_model >> 1) suggest misspecification
 
-# Speed-focused: skip robust variance
-fitted = fit(model; compute_ij_vcov=false)
+# Speed-focused: skip variance estimation
+fitted = fit(model; vcov_type=:none)
 
 # Research/diagnostics: include jackknife
-fitted = fit(model; compute_jk_vcov=true)
+fitted = fit(model; vcov_type=:jk)
 ```
 
 ## Pseudo-Inverse Thresholding (`vcov_threshold`)

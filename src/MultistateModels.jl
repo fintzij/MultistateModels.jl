@@ -142,16 +142,50 @@ export
     # Note: EnzymeBackend and MooncakeBackend are internal-only (not production-ready)
     
     # --------------------------------------------------------------------------
-    # Spline penalty configuration
+    # Penalty types and configuration
     # --------------------------------------------------------------------------
+    # Abstract types
+    AbstractPenalty,
+    AbstractHyperparameterSelector,
+    
+    # Penalty weighting types
+    PenaltyWeighting,
+    UniformWeighting,
+    AtRiskWeighting,
+    
+    # Concrete penalty types
+    NoPenalty,
+    QuadraticPenalty,
+    PenaltyConfig,  # Alias for QuadraticPenalty (backward compatibility)
+    
+    # Hyperparameter selector types
+    NoSelection,
+    PIJCVSelector,
+    ExactCVSelector,
+    REMLSelector,
+    PERFSelector,
+    
+    # Selection result type
+    HyperparameterSelectionResult,
+    
+    # User-facing penalty specification
     SplinePenalty,
-    PenaltyConfig,
+    
+    # Interface methods
     has_penalties,
     compute_penalty,
+    n_hyperparameters,
+    get_hyperparameters,
+    set_hyperparameters,
+    hyperparameter_bounds,
+    
+    # Penalty construction
     build_penalty_config,
-    select_smoothing_parameters,
     get_smoothing_parameters,
     get_edf,
+    
+    # Note: select_smoothing_parameters is no longer exported (Phase 4 refactoring).
+    # Smoothing parameter selection now happens automatically via fit() with select_lambda kwarg.
     
     # --------------------------------------------------------------------------
     # MCEM proposal configuration
@@ -193,12 +227,19 @@ export
     calibrate_splines,
     calibrate_splines!,
     build_penalty_matrix,
+    build_weighted_penalty_matrix,
     build_spline_hazard_info,
     place_interior_knots_pooled,
     validate_shared_knots,
     center_covariates,
     compute_hazard,
     compute_cumulative_hazard,
+    compute_atrisk_counts_mcem,
+    compute_atrisk_counts_mcem_at_knot_midpoints,
+    compute_atrisk_interval_averages,
+    compute_atrisk_interval_averages_mcem,
+    update_penalty_weights_mcem,
+    has_adaptive_weighting,
     cumulative_incidence,
     cumulative_incidence_at_reference,
     draw_paths,
@@ -245,6 +286,9 @@ include("types/data_containers.jl")
 
 # Infrastructure types (AD backends, threading config)
 include("types/infrastructure.jl")
+
+# Penalty types for penalized likelihood fitting
+include("types/penalties.jl")
 
 # =============================================================================
 # Utilities (from utilities/ subfolder)
@@ -342,6 +386,7 @@ include("inference/sir.jl")
 
 # model fitting (split for maintainability)
 include("inference/fit_common.jl")   # Entry point, dispatch, common helpers
+include("inference/fit_penalized.jl")# Penalized fitting with hyperparameter selection
 include("inference/fit_exact.jl")    # Exact data fitting
 include("inference/fit_markov.jl")   # Markov panel fitting
 include("inference/fit_mcem.jl")     # Semi-Markov MCEM fitting
@@ -381,6 +426,9 @@ include("hazard/spline.jl")
 
 # penalty configuration builder (must be after spline.jl)
 include("utilities/penalty_config.jl")
+
+# penalty weighting utilities (at-risk counts for adaptive weighting)
+include("utilities/penalty_weighting.jl")
 
 # cross-validation and robust covariance estimation
 include("output/variance.jl")

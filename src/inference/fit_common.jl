@@ -329,6 +329,65 @@ function _resolve_penalty(penalty, model::MultistateProcess)
 end
 
 """
+    _resolve_selector(select_lambda::Symbol, penalty::AbstractPenalty) -> AbstractHyperparameterSelector
+
+Resolve the smoothing parameter selection method specification to a concrete selector type.
+
+# Arguments
+- `select_lambda::Symbol`: User specification:
+  - `:none`: No selection (use fixed λ from lambda_init)
+  - `:pijcv` (default): Newton-approximated LOO-CV (Wood 2024 NCV)
+  - `:pijcv5`, `:pijcv10`, `:pijcv20`: k-fold Newton-approximated CV
+  - `:loocv`: Exact leave-one-out cross-validation
+  - `:cv5`, `:cv10`, `:cv20`: Exact k-fold cross-validation
+  - `:efs`: REML/EFS criterion
+  - `:perf`: PERF criterion (Marra & Radice 2020)
+- `penalty::AbstractPenalty`: The resolved penalty configuration
+
+# Returns
+- `AbstractHyperparameterSelector`: Concrete selector type
+
+# Notes
+- If penalty is `NoPenalty`, returns `NoSelection()` regardless of select_lambda
+- The `:pijlcv` alias is accepted as equivalent to `:pijcv`
+
+See also: [`AbstractHyperparameterSelector`](@ref), [`PIJCVSelector`](@ref), [`ExactCVSelector`](@ref)
+"""
+function _resolve_selector(select_lambda::Symbol, penalty::AbstractPenalty)
+    # No penalty means no selection needed
+    penalty isa NoPenalty && return NoSelection()
+    
+    # Map symbol to selector type
+    return if select_lambda == :none
+        NoSelection()
+    elseif select_lambda == :pijcv || select_lambda == :pijlcv
+        PIJCVSelector(0)  # LOO (0 means leave-one-out)
+    elseif select_lambda == :pijcv5
+        PIJCVSelector(5)
+    elseif select_lambda == :pijcv10
+        PIJCVSelector(10)
+    elseif select_lambda == :pijcv20
+        PIJCVSelector(20)
+    elseif select_lambda == :loocv
+        ExactCVSelector(0)  # 0 = n_subjects (leave-one-out)
+    elseif select_lambda == :cv5
+        ExactCVSelector(5)
+    elseif select_lambda == :cv10
+        ExactCVSelector(10)
+    elseif select_lambda == :cv20
+        ExactCVSelector(20)
+    elseif select_lambda == :efs
+        REMLSelector()
+    elseif select_lambda == :perf
+        PERFSelector()
+    else
+        throw(ArgumentError("Unknown select_lambda: :$select_lambda. " *
+            "Valid options are: :none, :pijcv, :pijcv5, :pijcv10, :pijcv20, " *
+            ":loocv, :cv5, :cv10, :cv20, :efs, :perf"))
+    end
+end
+
+"""
     _validate_vcov_type(vcov_type::Symbol) -> Symbol
 
 Validate and return the vcov_type.

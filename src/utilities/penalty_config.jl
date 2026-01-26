@@ -6,7 +6,59 @@
 # SplinePenalty specifications. It must be loaded AFTER hazard/spline.jl
 # since it uses build_spline_hazard_info and validate_shared_knots.
 #
+# Also AFTER penalty_weighting.jl for compute_atrisk_counts functions.
+#
 # =============================================================================
+
+"""
+    _build_penalty_matrix_with_weighting(model, hazard, order, weighting) -> Matrix{Float64}
+
+Build the penalty matrix for a spline hazard, accounting for weighting specification.
+
+For `UniformWeighting`, uses the standard GPS penalty matrix.
+For `AtRiskWeighting`, computes at-risk counts at knot midpoints and builds
+a weighted penalty matrix.
+
+# Arguments
+- `model`: MultistateProcess with data
+- `hazard`: RuntimeSplineHazard 
+- `order::Int`: Penalty derivative order
+- `weighting::PenaltyWeighting`: Weighting specification
+
+# Returns
+- Penalty matrix (K × K), possibly transformed for monotone splines
+"""
+function _build_penalty_matrix_with_weighting(model::MultistateProcess, 
+                                               hazard, 
+                                               order::Int, 
+                                               weighting::PenaltyWeighting)
+    # Rebuild basis from hazard
+    basis = _rebuild_spline_basis(hazard)
+    
+    # Build penalty matrix based on weighting type
+    S_bspline = if weighting isa UniformWeighting
+        # Standard GPS penalty matrix
+        build_penalty_matrix(basis, order)
+    elseif weighting isa AtRiskWeighting
+        # Compute interval-averaged at-risk counts (preferred over midpoint evaluation)
+        transition = (hazard.statefrom, hazard.stateto)
+        atrisk = compute_atrisk_interval_averages(model, hazard, transition)
+        
+        # Build weighted penalty matrix
+        build_weighted_penalty_matrix(basis, order, weighting, atrisk)
+    else
+        throw(ArgumentError("Unsupported weighting type: $(typeof(weighting))"))
+    end
+    
+    # For monotone splines, transform penalty to I-spline parameter space
+    if hazard.monotone != 0
+        S = transform_penalty_for_monotone(S_bspline, basis; direction=hazard.monotone)
+    else
+        S = S_bspline
+    end
+    
+    return S
+end
 
 """
     build_penalty_config(model::MultistateProcess, 
@@ -109,7 +161,7 @@ function build_penalty_config(model::MultistateProcess,
     end
     
     # Resolve settings for each spline hazard
-    resolved_settings = Dict{Int, NamedTuple}()  # hazard_index => (order, share_lambda, total_hazard)
+    resolved_settings = Dict{Int, NamedTuple}()  # hazard_index => (order, share_lambda, total_hazard, weighting, specificity)
     
     for haz_idx in spline_hazard_indices
         hazard = model.hazards[haz_idx]
@@ -120,6 +172,7 @@ function build_penalty_config(model::MultistateProcess,
         order = 2
         share_lambda = false
         total_hazard = false
+        weighting = UniformWeighting()  # Default: uniform weighting
         
         # Apply rules in order of decreasing specificity
         for rule in penalty_rules
@@ -132,10 +185,12 @@ function build_penalty_config(model::MultistateProcess,
                     order = rule.order
                     share_lambda = rule.share_lambda
                     total_hazard = rule.total_hazard
+                    weighting = rule.weighting
                     resolved_settings[haz_idx] = (
                         order=order, 
                         share_lambda=share_lambda, 
                         total_hazard=total_hazard,
+                        weighting=weighting,
                         specificity=specificity
                     )
                 end
@@ -144,7 +199,8 @@ function build_penalty_config(model::MultistateProcess,
         
         # Ensure we have settings even if no rule matched
         if !haskey(resolved_settings, haz_idx)
-            resolved_settings[haz_idx] = (order=2, share_lambda=false, total_hazard=false, specificity=0)
+            resolved_settings[haz_idx] = (order=2, share_lambda=false, total_hazard=false, 
+                                          weighting=UniformWeighting(), specificity=0)
         end
     end
     
@@ -204,8 +260,8 @@ function build_penalty_config(model::MultistateProcess,
                 hazard = model.hazards[haz_idx]
                 settings = resolved_settings[haz_idx]
                 
-                # Build SplineHazardInfo if not cached
-                info = build_spline_hazard_info(hazard; penalty_order=settings.order)
+                # Build penalty matrix with weighting
+                S = _build_penalty_matrix_with_weighting(model, hazard, settings.order, settings.weighting)
                 
                 # Parameter indices for this hazard's baseline coefficients
                 offset_start, offset_end = param_offsets[haz_idx]
@@ -213,7 +269,7 @@ function build_penalty_config(model::MultistateProcess,
                 idx_range = offset_start:(offset_start + n_baseline - 1)
                 
                 push!(terms, PenaltyTerm(
-                    idx_range, info.S, lambda_init, settings.order, [hazard.hazname]
+                    idx_range, S, lambda_init, settings.order, [hazard.hazname]
                 ))
                 push!(group_term_indices, length(terms))
             end
@@ -226,8 +282,8 @@ function build_penalty_config(model::MultistateProcess,
                 hazard = model.hazards[haz_idx]
                 settings = resolved_settings[haz_idx]
                 
-                # Build SplineHazardInfo
-                info = build_spline_hazard_info(hazard; penalty_order=settings.order)
+                # Build penalty matrix with weighting
+                S = _build_penalty_matrix_with_weighting(model, hazard, settings.order, settings.weighting)
                 
                 # Parameter indices
                 offset_start, offset_end = param_offsets[haz_idx]
@@ -235,7 +291,7 @@ function build_penalty_config(model::MultistateProcess,
                 idx_range = offset_start:(offset_start + n_baseline - 1)
                 
                 push!(terms, PenaltyTerm(
-                    idx_range, info.S, lambda_init, settings.order, [hazard.hazname]
+                    idx_range, S, lambda_init, settings.order, [hazard.hazname]
                 ))
             end
         end
@@ -408,4 +464,178 @@ function _compute_hazard_param_offsets(model::MultistateProcess)
     end
     
     return offsets
+end
+
+# =============================================================================
+# MCEM Penalty Update (Phase 4)
+# =============================================================================
+
+"""
+    update_penalty_weights_mcem(penalty_config::PenaltyConfig,
+                                 model::MultistateProcess,
+                                 samplepaths::Vector{Vector{SamplePath}},
+                                 weights::Vector{Vector{Float64}},
+                                 penalty_specs::Union{SplinePenalty, Vector{SplinePenalty}}) -> PenaltyConfig
+
+Create updated penalty configuration for adaptive weighting using MCEM sampled paths.
+
+This function is called during MCEM iterations to update penalty matrices based
+on the current importance-weighted sample paths. It only updates terms that use
+`AtRiskWeighting`; terms with `UniformWeighting` are unchanged.
+
+Since `PenaltyTerm` and `PenaltyConfig` are immutable, this returns a new config
+with updated penalty matrices rather than mutating in place.
+
+# Arguments
+- `penalty_config::PenaltyConfig`: Current penalty configuration
+- `model::MultistateProcess`: Model with hazard definitions
+- `samplepaths`: samplepaths[i][j] = j-th sampled path for subject i
+- `weights`: weights[i][j] = normalized importance weight for path i,j
+- `penalty_specs`: Original SplinePenalty specifications (to get weighting info)
+
+# Returns
+- New `PenaltyConfig` with updated penalty matrices for `AtRiskWeighting` terms
+- If no updates needed, returns the original `penalty_config`
+
+# Notes
+- Only updates terms where the corresponding hazard has `AtRiskWeighting`
+- Returns a new PenaltyConfig (immutable structs prevent in-place modification)
+- Thread-safe: each term is processed independently
+
+# Example
+```julia
+# In MCEM loop, after E-step:
+if has_adaptive_weighting(penalty_specs)
+    penalty_config = update_penalty_weights_mcem(penalty_config, model, samplepaths, 
+                                                  ImportanceWeights, penalty_specs)
+end
+```
+
+See also: [`compute_atrisk_counts_mcem`](@ref), [`build_weighted_penalty_matrix`](@ref)
+"""
+function update_penalty_weights_mcem(penalty_config::PenaltyConfig,
+                                      model::MultistateProcess,
+                                      samplepaths::Vector{Vector{SamplePath}},
+                                      weights::Vector{Vector{Float64}},
+                                      penalty_specs::Union{SplinePenalty, Vector{SplinePenalty}})
+    # Normalize to vector
+    specs = penalty_specs isa SplinePenalty ? [penalty_specs] : penalty_specs
+    
+    # Build map from hazard name to weighting specification
+    # We need to match penalty terms back to their original weighting specs
+    hazard_weightings = Dict{Symbol, Tuple{PenaltyWeighting, Int}}()
+    for spec in specs
+        for (haz_idx, hazard) in enumerate(model.hazards)
+            if hazard isa _SplineHazard
+                origin = hazard.statefrom
+                dest = hazard.stateto
+                if _rule_matches(spec.selector, origin, dest)
+                    # Store weighting and order for this hazard
+                    hazard_weightings[hazard.hazname] = (spec.weighting, spec.order)
+                end
+            end
+        end
+    end
+    
+    # Build new terms vector, replacing S matrices where needed
+    new_terms = Vector{PenaltyTerm}(undef, length(penalty_config.terms))
+    any_updated = false
+    
+    for (term_idx, term) in enumerate(penalty_config.terms)
+        # Check if this term needs updating
+        needs_update = false
+        weighting_to_use = nothing
+        order_to_use = nothing
+        hazard_to_use = nothing
+        
+        for hazname in term.hazard_names
+            weighting_info = get(hazard_weightings, hazname, nothing)
+            if !isnothing(weighting_info)
+                weighting, order = weighting_info
+                if weighting isa AtRiskWeighting
+                    # Find the hazard
+                    haz_idx = findfirst(h -> h isa _SplineHazard && h.hazname == hazname, model.hazards)
+                    if !isnothing(haz_idx)
+                        needs_update = true
+                        weighting_to_use = weighting
+                        order_to_use = order
+                        hazard_to_use = model.hazards[haz_idx]
+                        break
+                    end
+                end
+            end
+        end
+        
+        if needs_update && !isnothing(hazard_to_use)
+            # Rebuild basis
+            basis = _rebuild_spline_basis(hazard_to_use)
+            
+            # Compute interval-averaged path-weighted at-risk counts
+            transition = (hazard_to_use.statefrom, hazard_to_use.stateto)
+            atrisk = compute_atrisk_interval_averages_mcem(
+                samplepaths, weights, hazard_to_use, transition
+            )
+            
+            # Build new weighted penalty matrix
+            S_bspline = build_weighted_penalty_matrix(basis, order_to_use, weighting_to_use, atrisk)
+            
+            # Transform for monotone splines if needed
+            S_new = if hazard_to_use.monotone != 0
+                transform_penalty_for_monotone(S_bspline, basis; direction=hazard_to_use.monotone)
+            else
+                S_bspline
+            end
+            
+            # Create new PenaltyTerm with updated S
+            new_terms[term_idx] = PenaltyTerm(
+                term.hazard_indices,
+                S_new,
+                term.lambda,
+                term.order,
+                term.hazard_names
+            )
+            any_updated = true
+        else
+            # Keep original term
+            new_terms[term_idx] = term
+        end
+    end
+    
+    # If nothing was updated, return original config
+    if !any_updated
+        return penalty_config
+    end
+    
+    # Return new PenaltyConfig with updated terms
+    return PenaltyConfig(
+        new_terms,
+        penalty_config.total_hazard_terms,
+        penalty_config.smooth_covariate_terms,
+        penalty_config.shared_lambda_groups,
+        penalty_config.shared_smooth_groups,
+        penalty_config.n_lambda
+    )
+end
+
+"""
+    has_adaptive_weighting(penalty_specs::Union{Nothing, SplinePenalty, Vector{SplinePenalty}}) -> Bool
+
+Check if any penalty specification uses adaptive (non-uniform) weighting.
+
+Returns true if at least one SplinePenalty specifies `AtRiskWeighting`.
+This is used to determine whether `update_penalty_weights_mcem` needs to be
+called during MCEM iterations.
+"""
+function has_adaptive_weighting(penalty_specs::Union{Nothing, SplinePenalty, Vector{SplinePenalty}})
+    isnothing(penalty_specs) && return false
+    
+    specs = penalty_specs isa SplinePenalty ? [penalty_specs] : penalty_specs
+    
+    for spec in specs
+        if spec.weighting isa AtRiskWeighting
+            return true
+        end
+    end
+    
+    return false
 end

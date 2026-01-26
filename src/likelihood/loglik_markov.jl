@@ -515,3 +515,102 @@ function _loglik_markov_mutating(parameters, data::MPanelData; neg = true, retur
     end
 end
 
+# =============================================================================
+# Penalized Markov Likelihood
+# =============================================================================
+
+"""
+    loglik_markov_penalized(parameters, data::MPanelData, penalty::AbstractPenalty; kwargs...)
+
+Compute penalized (negative) log-likelihood for Markov panel data.
+
+This function combines the base Markov likelihood with a quadratic penalty term
+for regularization of spline hazards.
+
+# Arguments
+- `parameters`: Flat parameter vector (natural scale)
+- `data::MPanelData`: Markov panel data container
+- `penalty::AbstractPenalty`: Penalty configuration (typically QuadraticPenalty)
+
+# Keyword Arguments
+- `neg::Bool=true`: Return negative log-likelihood (for minimization)
+
+# Returns
+- Penalized (negative) log-likelihood: L(β) + λ/2 βᵀSβ
+
+# Notes
+- The penalty is ADDED to negative log-likelihood (since we minimize)
+- Uses ForwardDiff-compatible mutating implementation via `_loglik_markov_mutating`
+- AD compatible: works with ForwardDiff Dual numbers
+
+# Examples
+```julia
+penalty_config = build_penalty_config(model, SplinePenalty())
+nll_penalized = loglik_markov_penalized(params, data, penalty_config)
+```
+
+See also: [`loglik_markov`](@ref), [`compute_penalty`](@ref), [`QuadraticPenalty`](@ref)
+"""
+function loglik_markov_penalized(
+    parameters::AbstractVector{T},
+    data::MPanelData,
+    penalty::AbstractPenalty;
+    neg::Bool = true
+) where T
+    # Base Markov likelihood (uses ForwardDiff-compatible mutating implementation)
+    ll_base = _loglik_markov_mutating(parameters, data; neg=neg, return_ll_subj=false)
+    
+    # Add penalty contribution
+    # compute_penalty returns the penalty value (positive)
+    # For negative log-likelihood (minimization), we ADD the penalty
+    # For positive log-likelihood, we SUBTRACT the penalty
+    pen = compute_penalty(parameters, penalty)
+    
+    if neg
+        return ll_base + pen
+    else
+        return ll_base - pen
+    end
+end
+
+"""
+    loglik(parameters, data::MPanelData, penalty::AbstractPenalty; kwargs...)
+
+Dispatch method for penalized Markov panel data. Calls `loglik_markov_penalized`.
+
+Provides consistent interface across all data types for penalized likelihood.
+
+See [`loglik_markov_penalized`](@ref) for details.
+"""
+loglik(parameters, data::MPanelData, penalty::AbstractPenalty; neg=true) = 
+    loglik_markov_penalized(parameters, data, penalty; neg=neg)
+
+"""
+    loglik_subject(parameters, data::MPanelData, subject_idx::Int)
+
+Compute log-likelihood for a single subject in Markov panel data.
+
+This function is used by PIJCV criterion computation to evaluate the actual
+likelihood at leave-one-out parameter estimates.
+
+# Arguments
+- `parameters`: Flat parameter vector (natural scale)
+- `data::MPanelData`: Markov panel data container
+- `subject_idx::Int`: Subject index (1-based)
+
+# Returns
+- `Float64`: Subject-level log-likelihood (positive, not negated)
+
+# Notes
+- Extracts subject-level likelihood via `loglik_markov` with `return_ll_subj=true`
+- More efficient than refitting the full likelihood
+"""
+function loglik_subject(parameters, data::MPanelData, subject_idx::Int)
+    # Validate subject index
+    n_subj = length(data.model.subjectindices)
+    @assert 1 <= subject_idx <= n_subj "Subject index $subject_idx out of range [1, $n_subj]"
+    
+    # Get all subject-level log-likelihoods and extract the one we need
+    ll_subj_vec = loglik_markov(parameters, data; neg=false, return_ll_subj=true)
+    return ll_subj_vec[subject_idx]
+end

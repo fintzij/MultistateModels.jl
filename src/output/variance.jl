@@ -106,6 +106,136 @@ function compute_subject_gradients(params::AbstractVector, model::MultistateMode
 end
 
 """
+    compute_subject_gradients_threaded(params, model::MultistateModel, samplepaths)
+
+Compute subject-level score vectors (gradients) using multiple threads.
+
+This is the parallelized version of `compute_subject_gradients` for exact data.
+
+# Arguments
+- `params::AbstractVector`: parameter vector (flat, on transformed scale)
+- `model::MultistateModel`: multistate model with exact observation times
+- `samplepaths::Vector{SamplePath}`: observed paths for each subject
+
+# Returns
+- `Matrix{Float64}`: p × n matrix where column i contains the score vector gᵢ
+"""
+function compute_subject_gradients_threaded(params::AbstractVector, model::MultistateModel, samplepaths::Vector{SamplePath})
+    nsubj = length(samplepaths)
+    nparams = length(params)
+    
+    # preallocate output
+    grads = Matrix{Float64}(undef, nparams, nsubj)
+    
+    # Cache model references for thread safety
+    hazards = model.hazards
+    totalhazards = model.totalhazards
+    tmat = model.tmat
+    
+    Threads.@threads for i in 1:nsubj
+        path = samplepaths[i]
+        w = model.SubjectWeights[i]
+        
+        function ll_subj_i(pars)
+            pars_nested = unflatten_parameters(pars, model)
+            subj_inds = model.subjectindices[path.subj]
+            subj_dat = view(model.data, subj_inds, :)
+            subjdat_df = make_subjdat(path, subj_dat)
+            return loglik_path(pars_nested, subjdat_df, hazards, totalhazards, tmat) * w
+        end
+        
+        grads[:, i] = ForwardDiff.gradient(ll_subj_i, params)
+    end
+    
+    return grads
+end
+
+"""
+    compute_subject_grads_and_hessians_fast(params, model::MultistateModel, samplepaths; use_threads=:auto)
+
+Compute both subject-level gradients AND Hessians together efficiently.
+
+This combined function avoids redundant computation when both quantities are needed,
+and uses threading for parallelization when available.
+
+# Arguments
+- `params::AbstractVector`: parameter vector
+- `model::MultistateModel`: multistate model with exact observation times
+- `samplepaths::Vector{SamplePath}`: observed paths for each subject
+- `use_threads::Symbol`: `:auto` (default), `:always`, or `:never`
+
+# Returns
+- `(grads::Matrix{Float64}, hessians::Vector{Matrix{Float64}})`: 
+  - `grads`: p × n matrix of subject gradients
+  - `hessians`: length-n vector of p × p Hessian matrices
+"""
+function compute_subject_grads_and_hessians_fast(params::AbstractVector, model::MultistateModel, 
+                                                  samplepaths::Vector{SamplePath};
+                                                  use_threads::Symbol = :auto)
+    nsubj = length(samplepaths)
+    nparams = length(params)
+    
+    # Preallocate outputs
+    grads = Matrix{Float64}(undef, nparams, nsubj)
+    hessians = [Matrix{Float64}(undef, nparams, nparams) for _ in 1:nsubj]
+    
+    # Cache model references for thread safety
+    hazards = model.hazards
+    totalhazards = model.totalhazards
+    tmat = model.tmat
+    
+    should_thread = use_threads == :always || (use_threads == :auto && Threads.nthreads() > 1)
+    
+    # Pre-allocate DiffResults containers for each thread to avoid allocation in hot loop
+    if should_thread
+        # Create per-thread DiffResults to avoid contention
+        # Use max thread ID possible in the system to handle all threading scenarios
+        max_tid = Threads.maxthreadid()
+        diffresults = [DiffResults.HessianResult(params) for _ in 1:max_tid]
+        
+        Threads.@threads for i in 1:nsubj
+            tid = Threads.threadid()
+            path = samplepaths[i]
+            w = model.SubjectWeights[i]
+            
+            function ll_subj_i(pars)
+                pars_nested = unflatten_parameters(pars, model)
+                subj_inds = model.subjectindices[path.subj]
+                subj_dat = view(model.data, subj_inds, :)
+                subjdat_df = make_subjdat(path, subj_dat)
+                return loglik_path(pars_nested, subjdat_df, hazards, totalhazards, tmat) * w
+            end
+            
+            # Compute gradient and Hessian in ONE forward pass using DiffResults
+            ForwardDiff.hessian!(diffresults[tid], ll_subj_i, params)
+            grads[:, i] = DiffResults.gradient(diffresults[tid])
+            hessians[i] .= DiffResults.hessian(diffresults[tid])
+        end
+    else
+        diffresult = DiffResults.HessianResult(params)
+        for i in 1:nsubj
+            path = samplepaths[i]
+            w = model.SubjectWeights[i]
+            
+            function ll_subj_i(pars)
+                pars_nested = unflatten_parameters(pars, model)
+                subj_inds = model.subjectindices[path.subj]
+                subj_dat = view(model.data, subj_inds, :)
+                subjdat_df = make_subjdat(path, subj_dat)
+                return loglik_path(pars_nested, subjdat_df, hazards, totalhazards, tmat) * w
+            end
+            
+            # Compute gradient and Hessian in ONE forward pass
+            ForwardDiff.hessian!(diffresult, ll_subj_i, params)
+            grads[:, i] = DiffResults.gradient(diffresult)
+            hessians[i] .= DiffResults.hessian(diffresult)
+        end
+    end
+    
+    return grads, hessians
+end
+
+"""
     compute_subject_gradients(params, model::MultistateProcess, books)
 
 Compute subject-level score vectors (gradients of log-likelihood) for Markov panel data.

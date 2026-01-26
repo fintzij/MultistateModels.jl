@@ -10,6 +10,8 @@
 .vscode/
 .github/
 scratch/data/*
+scratch/archive/
+scratch/refs/
 LocalPreferences.toml
 test/testcoverage-gfm.md
 test/testcoverage.html

@@ -424,6 +424,191 @@ function build_penalty_matrix(basis, order::Int;
 end
 
 # =============================================================================
+# Weighted Penalty Matrix for Adaptive P-Splines
+# =============================================================================
+
+"""
+    build_weighted_penalty_matrix(basis, order::Int, weighting::AtRiskWeighting,
+                                   atrisk_at_knots::Vector{Float64}) -> Matrix{Float64}
+
+Construct a weighted penalty matrix S_w for adaptive penalty weighting.
+
+The weighted penalty matrix uses time-varying weights w(t) = Y(t)^(-α) where Y(t) 
+is the at-risk count and α is the adaptation power. This penalizes more heavily 
+where fewer subjects are at risk, allowing more flexibility where data is plentiful.
+
+# Arguments
+- `basis`: BSplineKit basis object (BSplineBasis or RecombinedBSplineBasis)
+- `order::Int`: Derivative order (m). Default 2 = curvature penalty.
+- `weighting::AtRiskWeighting`: Weighting specification with α parameter
+- `atrisk_at_knots::Vector{Float64}`: At-risk counts Y(t) at knot midpoints.
+  The length should be n_unique_knots - 1 (number of knot intervals).
+
+# Returns
+- `S_w`: Weighted penalty matrix (K × K), symmetric positive semi-definite
+
+# Mathematical Details
+The weighted penalty is:
+
+    P(β; α) = λ ∫₀ᵀ w(t; α) [f^(m)(t)]² dt = λ βᵀ S_w(α) β
+
+where:
+    w(t; α) = Y(t)^(-α)
+
+The matrix S_w is computed via Gauss-Legendre quadrature:
+
+    S_w[i,j] = ∫ w(t) B_i^(m)(t) B_j^(m)(t) dt
+
+The weight function w(t) is piecewise constant on each knot interval, using the
+at-risk count evaluated at the interval midpoint.
+
+# Edge Cases
+- When Y(t) = 0, the at-risk count should be floored to 1.0 by `compute_atrisk_counts()`
+  to avoid division by zero. If any value < 1.0 is passed, it is clamped internally.
+- When α = 0, the weights are all 1.0, recovering the standard (unweighted) penalty.
+
+# Properties
+The weighted penalty matrix:
+- Is symmetric: S_w = S_w'
+- Is positive semi-definite: all eigenvalues ≥ 0
+- Has the same null space structure as the unweighted matrix (polynomials of degree < order)
+
+# Example
+```julia
+using BSplineKit
+using MultistateModels: build_weighted_penalty_matrix, AtRiskWeighting
+
+# Create cubic B-spline basis
+knots = [0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0]
+basis = BSplineBasis(BSplineOrder(4), knots)
+
+# At-risk counts at 4 knot midpoints: [0.5, 1.5, 2.5, 3.5, 4.5]
+# Suppose: [100, 80, 50, 30, 10] subjects at risk
+atrisk = [100.0, 80.0, 50.0, 30.0, 10.0]
+
+weighting = AtRiskWeighting(alpha=1.0)
+S_w = build_weighted_penalty_matrix(basis, 2, weighting, atrisk)
+```
+
+See also: [`build_penalty_matrix`](@ref), [`AtRiskWeighting`](@ref), 
+    [`compute_atrisk_counts`](@ref)
+"""
+function build_weighted_penalty_matrix(basis, order::Int, 
+                                        weighting::AtRiskWeighting,
+                                        atrisk_at_knots::Vector{Float64})
+    order >= 1 || throw(ArgumentError("Penalty order must be ≥ 1, got $order"))
+    
+    # Get knot vector - handle both BSplineBasis and RecombinedBSplineBasis
+    knots = if basis isa BSplineBasis
+        collect(BSplineKit.knots(basis))
+    elseif basis isa RecombinedBSplineBasis
+        collect(BSplineKit.knots(parent(basis)))
+    else
+        throw(ArgumentError("Unsupported basis type: $(typeof(basis)). Supported: BSplineBasis, RecombinedBSplineBasis"))
+    end
+    
+    # Get number of basis functions
+    K = length(basis)
+    
+    # Get spline order (degree + 1)
+    spline_order = BSplineKit.order(basis)
+    
+    # Derivative reduces order
+    deriv_order = spline_order - order
+    if deriv_order < 1
+        # Derivative order exceeds spline degree, penalty is identically zero
+        return zeros(K, K)
+    end
+    
+    # Unique interior breakpoints (excluding repeated boundary knots)
+    unique_knots = unique(knots)
+    n_intervals = length(unique_knots) - 1
+    
+    # Validate atrisk_at_knots length
+    if length(atrisk_at_knots) != n_intervals
+        throw(ArgumentError("atrisk_at_knots must have length $(n_intervals) " *
+                           "(number of knot intervals), got $(length(atrisk_at_knots))"))
+    end
+    
+    # Compute weights w_q = Y(t_q)^(-α) for each interval
+    α = weighting.alpha
+    interval_weights = if α ≈ 0.0
+        # α = 0: uniform weights (standard penalty)
+        ones(n_intervals)
+    else
+        # Clamp at-risk counts to minimum of 1.0 to avoid Inf weights
+        clamped_atrisk = max.(atrisk_at_knots, 1.0)
+        clamped_atrisk .^ (-α)
+    end
+    
+    # Number of Gauss-Legendre points per interval
+    # Use enough points to integrate exactly: degree of B^(m) is (d-1-m), 
+    # so product B^(m)*B^(m) has degree 2*(d-1-m). Need ≥ ceil((degree+1)/2) points.
+    n_gauss = max(deriv_order, 3)  # At least 3 for accuracy
+    
+    # Get Gauss-Legendre nodes and weights on [-1, 1]
+    gl_nodes, gl_weights = _gauss_legendre(n_gauss)
+    
+    # Initialize penalty matrix
+    S_w = zeros(K, K)
+    
+    # Integrate over each knot interval with interval-specific weight
+    for q in 1:n_intervals
+        a, b = unique_knots[q], unique_knots[q + 1]
+        h = b - a
+        
+        # Skip degenerate intervals
+        h < 1e-14 && continue
+        
+        # Weight for this interval
+        w_interval = interval_weights[q]
+        
+        # Transform Gauss points to [a, b]
+        t_points = @. a + (gl_nodes + 1) * h / 2
+        w_scaled = @. gl_weights * h / 2 * w_interval  # Include interval weight
+        
+        # Evaluate basis derivatives at quadrature points
+        for (i_pt, t) in enumerate(t_points)
+            # Get derivative values at this point
+            deriv_vals = _evaluate_basis_derivatives(basis, t, order)
+            
+            # Outer product contribution to penalty matrix
+            w = w_scaled[i_pt]
+            for i in 1:K
+                for j in i:K  # Only upper triangle due to symmetry
+                    S_w[i, j] += w * deriv_vals[i] * deriv_vals[j]
+                end
+            end
+        end
+    end
+    
+    # Symmetrize (copy upper to lower)
+    for i in 1:K
+        for j in (i+1):K
+            S_w[j, i] = S_w[i, j]
+        end
+    end
+    
+    return S_w
+end
+
+"""
+    build_weighted_penalty_matrix(basis, order::Int, weighting::UniformWeighting,
+                                   atrisk_at_knots::Vector{Float64}) -> Matrix{Float64}
+
+Dispatch for uniform weighting - ignores at-risk counts and returns standard penalty matrix.
+
+This method ensures backward compatibility: when `UniformWeighting` is used, the
+standard GPS penalty matrix is returned regardless of the at-risk count argument.
+"""
+function build_weighted_penalty_matrix(basis, order::Int, 
+                                        weighting::UniformWeighting,
+                                        atrisk_at_knots::Vector{Float64})
+    # Uniform weighting: ignore at-risk counts, use standard GPS method
+    return build_penalty_matrix_gps(basis, order)
+end
+
+# =============================================================================
 # Helper Functions
 # =============================================================================
 

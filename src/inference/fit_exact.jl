@@ -17,9 +17,13 @@
 """
     _fit_exact(model::MultistateModel; kwargs...)
 
-Internal implementation: Fit a multistate model to continuously observed (exact) data.
+Dispatcher for exact data fitting: routes to penalized or unpenalized paths.
 
 This is called by `fit()` when `is_panel_data(model) == false`.
+
+# Dispatch Logic
+- **Penalized path** (`_fit_exact_penalized`): When `penalty` is active and model has spline hazards
+- **Unpenalized path**: Standard MLE with Ipopt when no penalties apply
 
 # Keyword Arguments
 - `penalty`: Penalty specification for spline hazards. Can be:
@@ -28,12 +32,13 @@ This is called by `fit()` when `is_panel_data(model) == false`.
   - `SplinePenalty()`: Curvature penalty on all spline hazards
   - `Vector{SplinePenalty}`: Multiple rules resolved by specificity
   - `nothing`: DEPRECATED - use `:none` instead
-- `lambda_init::Float64=1.0`: Initial smoothing parameter value
+- `lambda_init::Float64=1.0`: Initial smoothing parameter value for penalized fitting
 - `select_lambda::Symbol=:pijcv`: Method for selecting smoothing parameter λ when penalty is active
-  - `:pijcv` (default): Proximal iteration jackknife CV (fast, AD-optimized)
+  - `:pijcv` (default): Newton-approximated LOO CV (Wood 2024 NCV)
   - `:pijcv5`, `:pijcv10`, `:pijcv20`: k-fold Newton-approximated CV
-  - `:efs`: Expected Fisher scoring criterion
-  - `:perf`: Performance iteration criterion
+  - `:efs`: Expected Fisher scoring / REML criterion
+  - `:perf`: PERF criterion (Marra & Radice 2020)
+  - `:loocv`, `:cv5`, `:cv10`, `:cv20`: Exact cross-validation (grid search)
   - `:none`: Use fixed λ from `lambda_init` (no automatic selection)
 - `vcov_type::Symbol=:ij`: Type of variance-covariance matrix to compute:
   - `:ij` (default): Infinitesimal jackknife / sandwich variance (robust)
@@ -41,8 +46,18 @@ This is called by `fit()` when `is_panel_data(model) == false`.
   - `:jk`: Jackknife variance (leave-one-out)
   - `:none`: Skip variance computation
 - `vcov_threshold::Bool=true`: use adaptive threshold for pseudo-inverse
+- `constraints`: Parameter constraints (only supported with unpenalized fitting or fixed λ)
+- `verbose::Bool=true`: Print progress messages
+- `solver`: Optimization solver (default: Ipopt)
+- `adtype`: AD backend (:auto selects ForwardDiff)
+- `parallel::Bool=false`: Enable parallel likelihood evaluation
+- `nthreads`: Number of threads for parallel evaluation
 
-See also: [`SplinePenalty`](@ref), [`build_penalty_config`](@ref), [`select_smoothing_parameters`](@ref)
+# Notes
+All optimizations use Ipopt with ForwardDiff for robust box-constrained optimization.
+The penalized path uses nested optimization for automatic λ selection via `_select_hyperparameters`.
+
+See also: [`_fit_exact_penalized`](@ref), [`SplinePenalty`](@ref), [`build_penalty_config`](@ref)
 """
 function _fit_exact(model::MultistateModel; constraints = nothing, verbose = true, solver = nothing,
              adtype = :auto,
@@ -52,23 +67,75 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
              penalty = :auto, lambda_init::Float64 = 1.0, 
              select_lambda::Symbol = :pijcv, kwargs...)
 
-    # Validate vcov_type
+    # =========================================================================
+    # Validate inputs
+    # =========================================================================
     _validate_vcov_type(vcov_type)
 
     # Resolve penalty specification (handles :auto, :none, deprecation warning)
     resolved_penalty = _resolve_penalty(penalty, model)
 
-    # initialize array of sample paths
-    samplepaths = extract_paths(model)
-
-    # extract model parameters
-    # Phase 3: Use ParameterHandling.jl flat parameters (natural scale since v0.3.0)
-    parameters = get_parameters_flat(model)
-
+    # Build penalty configuration from resolved penalty
+    penalty_config = build_penalty_config(model, resolved_penalty; lambda_init=lambda_init)
+    use_penalty = has_penalties(penalty_config)
+    
     # Use model constraints if none provided and model has them
     if isnothing(constraints) && haskey(model.modelcall, :constraints) && !isnothing(model.modelcall.constraints)
         constraints = model.modelcall.constraints
     end
+
+    # =========================================================================
+    # DISPATCH: Penalized vs Unpenalized path
+    # =========================================================================
+    # If penalty is active AND we have baseline spline terms (resolved_penalty != nothing),
+    # dispatch to the new _fit_exact_penalized function which handles hyperparameter
+    # selection and uses Ipopt for all optimizations.
+    #
+    # The unpenalized path (below) handles: no penalties, or smooth covariate terms
+    # only (which don't have baseline hazard smoothing parameters).
+    
+    if use_penalty && !isnothing(resolved_penalty)
+        # Resolve selector from symbol to type
+        selector = _resolve_selector(select_lambda, penalty_config)
+        
+        if verbose
+            println("Using penalized likelihood with $(penalty_config.n_lambda) smoothing parameter(s)")
+        end
+        
+        # Initialize sample paths and data
+        samplepaths = extract_paths(model)
+        data = ExactData(model, samplepaths)
+        
+        # Dispatch to the new penalized fitting function
+        return _fit_exact_penalized(
+            model, data, samplepaths, penalty_config, selector;
+            constraints=constraints,
+            verbose=verbose,
+            solver=solver,
+            adtype=adtype,
+            parallel=parallel,
+            nthreads=nthreads,
+            vcov_type=vcov_type,
+            vcov_threshold=vcov_threshold,
+            loo_method=loo_method,
+            lambda_init=lambda_init,
+            kwargs...
+        )
+    end
+
+    # =========================================================================
+    # UNPENALIZED PATH: Standard MLE fitting
+    # =========================================================================
+    # This path is used when:
+    # - Model has no spline hazards (resolved_penalty === nothing)
+    # - User explicitly requested penalty=:none
+    # - Only smooth covariate terms (no baseline spline smoothing)
+    
+    # Initialize array of sample paths
+    samplepaths = extract_paths(model)
+
+    # Extract model parameters (natural scale since v0.3.0)
+    parameters = get_parameters_flat(model)
 
     # Configure threading
     n_paths = length(samplepaths)
@@ -79,93 +146,28 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         println("Using $(threading_config.nthreads) threads for likelihood evaluation ($(n_paths) paths)")
     end
 
-    # Build penalty configuration from resolved penalty
-    penalty_config = build_penalty_config(model, resolved_penalty; lambda_init=lambda_init)
-    use_penalty = has_penalties(penalty_config)
-    
-    if use_penalty && verbose
-        println("Using penalized likelihood with $(penalty_config.n_lambda) smoothing parameter(s)")
-    end
-
     # Use parameter bounds from model (generated at construction time)
     lb, ub = model.bounds.lb, model.bounds.ub
 
-    # =========================================================================
-    # SMOOTHING PARAMETER SELECTION (when penalty is active)
-    # =========================================================================
-    # If penalty is active and select_lambda != :none, use performance iteration
-    # to jointly optimize (β, λ). This replaces the fixed-λ optimization below.
-    # Note: Only perform selection when resolved_penalty is not nothing (i.e., when
-    # there are baseline spline terms, not just smooth covariate terms).
-    
-    smoothing_result = nothing  # Will hold λ, edf, etc. if selection is performed
-    
-    if use_penalty && select_lambda != :none && isnothing(constraints) && !isnothing(resolved_penalty)
-        if verbose
-            println("Selecting smoothing parameter(s) via :$select_lambda...")
-        end
-        
-        # Call select_smoothing_parameters with performance iteration
-        smoothing_result = select_smoothing_parameters(
-            model, resolved_penalty;
-            method=select_lambda,
-            lambda_init=lambda_init,
-            verbose=verbose
-        )
-        
-        if verbose
-            println("Selected λ: $(round.(smoothing_result.lambda, sigdigits=4))")
-            println("Effective degrees of freedom: $(round(smoothing_result.edf.total, digits=2))")
-        end
-        
-        # Update penalty_config with selected λ values
-        penalty_config = smoothing_result.penalty_config
-    end
-
-    # parse constraints, or not, and solve
+    # Parse constraints, or not, and solve
     if isnothing(constraints) 
-        # If smoothing parameter selection was performed, use those results
-        # Otherwise, run standard optimization
-        if !isnothing(smoothing_result)
-            # Use results from performance iteration (already computed optimal β at optimal λ)
-            sol_u = smoothing_result.beta
-            sol_objective = loglik_exact_penalized(sol_u, ExactData(model, samplepaths), penalty_config; neg=true)
-            sol_retcode = smoothing_result.converged ? ReturnCode.Success : ReturnCode.MaxIters
-            
-            # Create a mock solution struct compatible with downstream code
-            sol = (u = sol_u, objective = sol_objective, retcode = sol_retcode)
+        # Standard unpenalized optimization path
+        # Create likelihood function - parallel or sequential
+        if use_parallel
+            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
         else
-            # Standard optimization path (unpenalized or fixed λ)
-            # Create likelihood function - parallel or sequential
-            # Note: ForwardDiff uses the function passed to OptimizationFunction for both
-            # objective and gradient. We pass the sequential version for AD correctness,
-            # but create a parallel version for objective-only evaluation.
-            if use_penalty
-                # Penalized likelihood
-                if use_parallel
-                    loglik_fn = (params, data) -> loglik_exact_penalized(params, data, penalty_config; neg=true, parallel=true)
-                else
-                    loglik_fn = (params, data) -> loglik_exact_penalized(params, data, penalty_config; neg=true, parallel=false)
-                end
-            else
-                # Unpenalized likelihood
-                if use_parallel
-                    loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
-                else
-                    loglik_fn = loglik_exact
-                end
-            end
-            
-            # get estimates - use Ipopt for box-constrained optimization
-            # Resolve AD backend: :auto selects based on solver requirements
-            resolved_adtype = _resolve_adtype(adtype, solver)
-
-            optf = OptimizationFunction(loglik_fn, resolved_adtype)
-            prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths); lb=lb, ub=ub)
-
-            # solve with user-specified solver or default Ipopt
-            sol = _solve_optimization(prob, solver)
+            loglik_fn = loglik_exact
         end
+        
+        # Get estimates - use Ipopt for box-constrained optimization
+        # Resolve AD backend: :auto selects based on solver requirements
+        resolved_adtype = _resolve_adtype(adtype, solver)
+
+        optf = OptimizationFunction(loglik_fn, resolved_adtype)
+        prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths); lb=lb, ub=ub)
+
+        # Solve with user-specified solver or default Ipopt
+        sol = _solve_optimization(prob, solver)
 
         # Rectify spline coefficients to clean up numerical errors from I-spline transformation.
         # See rectify_coefs! docstring in hazard/spline.jl for mathematical justification.
@@ -185,8 +187,9 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             vcov_threshold=vcov_threshold, loo_method=loo_method,
             converged=sol_converged, has_monotone=has_monotone, verbose=verbose
         )
+        at_bounds = nothing
     else
-        # create constraint function and check that constraints are satisfied at the initial values
+        # Constrained optimization path (unpenalized)
         _constraints = deepcopy(constraints)
         consfun_multistate = parse_constraints(_constraints.cons, model.hazards; consfun_name = :consfun_multistate)
 
@@ -196,19 +199,11 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             throw(ArgumentError("Constraints $badcons are violated at the initial parameter values."))
         end
 
-        # Create likelihood function - parallel or sequential, with or without penalty
-        if use_penalty
-            if use_parallel
-                loglik_fn = (params, data) -> loglik_exact_penalized(params, data, penalty_config; neg=true, parallel=true)
-            else
-                loglik_fn = (params, data) -> loglik_exact_penalized(params, data, penalty_config; neg=true, parallel=false)
-            end
+        # Create likelihood function - parallel or sequential (unpenalized)
+        if use_parallel
+            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
         else
-            if use_parallel
-                loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
-            else
-                loglik_fn = loglik_exact
-            end
+            loglik_fn = loglik_exact
         end
 
         # Resolve AD backend
@@ -217,10 +212,10 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         optf = OptimizationFunction(loglik_fn, resolved_adtype, cons = consfun_multistate)
         prob = OptimizationProblem(optf, parameters, ExactData(model, samplepaths); lb=lb, ub=ub, lcons = constraints.lcons, ucons = constraints.ucons)
         
-        # solve with user-specified solver or default Ipopt
+        # Solve with user-specified solver or default Ipopt
         sol = _solve_optimization(prob, solver)
 
-        # rectify spline coefs
+        # Rectify spline coefs
         if any(isa.(model.hazards, _SplineHazard))
             rectify_coefs!(sol.u, model)
         end
@@ -243,7 +238,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         )
     end
 
-    # compute subject-level likelihood at the estimate (always UNPENALIZED for model comparison)
+    # Compute subject-level likelihood at the estimate (always UNPENALIZED for model comparison)
     ll_subj = loglik_exact(sol.u, ExactData(model, samplepaths); return_ll_subj = true)
 
     # Build parameters structure for fitted parameters
@@ -257,20 +252,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         reconstructor = model.parameters.reconstructor  # Keep same reconstructor
     )
 
-    # Split sol.u into per-hazard vectors for spline remaking
-    block_sizes = [model.hazards[i].npar_total for i in 1:length(model.hazards)]
-    fitted_params = Vector{Vector{Float64}}(undef, length(block_sizes))
-    offset = 0
-    for i in eachindex(block_sizes)
-        fitted_params[i] = sol.u[(offset+1):(offset+block_sizes[i])]
-        offset += block_sizes[i]
-    end
-
-    # Extract smoothing parameters and EDF from smoothing result (if available)
-    selected_lambda = isnothing(smoothing_result) ? nothing : smoothing_result.lambda
-    selected_edf = isnothing(smoothing_result) ? nothing : smoothing_result.edf
-
-    # wrap results
+    # Wrap results - unpenalized path has no smoothing parameters or EDF
     model_fitted = MultistateModelFitted(
         model.data,
         parameters_fitted,
@@ -289,15 +271,15 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         model.ObservationWeights,
         model.CensoringPatterns,
         model.surrogate,  # Unified surrogate field
-        (solution = sol,), # ConvergenceRecords::Union{Nothing, NamedTuple}
+        (solution = sol,), # ConvergenceRecords::Union{Nothing, NamedTuple} - REAL solution object
         nothing, # ProposedPaths::Union{Nothing, NamedTuple}
         model.modelcall,
         model.phasetype_expansion,
-        selected_lambda,  # smoothing_parameters
-        selected_edf)     # edf
+        nothing,  # smoothing_parameters - not applicable for unpenalized
+        nothing)  # edf - not applicable for unpenalized
 
     # return fitted object
-    return model_fitted;
+    return model_fitted
 end
 
 """
