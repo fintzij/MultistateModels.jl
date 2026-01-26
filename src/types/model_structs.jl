@@ -343,9 +343,10 @@ end
 Struct that fully specifies a fitted multistate model.
 Parameters are stored in `parameters` as (flat, nested, reconstructor).
 
-# Variance-Covariance Field
-- `vcov`: Single variance-covariance matrix (type determined by `vcov_type`)
+# Variance-Covariance Fields
+- `vcov`: Variance-covariance matrix (type determined by `vcov_type`)
 - `vcov_type`: Symbol indicating the type of vcov computed (:ij, :model, :jk, or :none)
+- `vcov_model`: Model-based variance (H⁻¹), stored when IJ/JK variance is requested
 
 # Penalty/Smoothing Fields (for penalized spline models)
 - `smoothing_parameters`: Selected λ values from cross-validation (nothing if unpenalized)
@@ -356,8 +357,9 @@ mutable struct MultistateModelFitted <: MultistateProcess
     parameters::NamedTuple  # Sole parameter storage: (flat, nested, reconstructor)
     bounds::NamedTuple{(:lb, :ub), Tuple{Vector{Float64}, Vector{Float64}}}  # Parameter bounds for box-constrained optimization
     loglik::NamedTuple
-    vcov::Union{Nothing,Matrix{Float64}}      # Single variance-covariance matrix
+    vcov::Union{Nothing,Matrix{Float64}}      # Variance-covariance matrix (type determined by vcov_type)
     vcov_type::Symbol                          # Type of vcov: :ij, :model, :jk, or :none
+    vcov_model::Union{Nothing,Matrix{Float64}} # Model-based variance (H⁻¹), stored when IJ/JK requested
     subject_gradients::Union{Nothing,Matrix{Float64}}  # Subject-level score vectors (p × n)
     hazards::Vector{<:_Hazard}
     totalhazards::Vector{_TotalHazard}

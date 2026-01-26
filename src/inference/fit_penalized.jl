@@ -12,6 +12,7 @@
 # Contents:
 # - _fit_exact_penalized: Main penalized fitting function with optional selection
 # - _fit_coefficients_at_fixed_hyperparameters: Final optimization at fixed λ
+# - Alpha learning iteration for adaptive penalty weighting
 #
 # All optimizations use Ipopt with ForwardDiff (no LBFGS, no finite differences).
 #
@@ -27,6 +28,8 @@ This function handles all penalized fitting paths:
 2. Selection-based λ (selector = PIJCVSelector, etc.): 
    - First select optimal λ via nested optimization
    - Then perform final fit at selected λ
+3. Alpha learning (when `penalty_specs` contains `AtRiskWeighting(learn=true)`):
+   - Alternates between fitting β/λ and updating α until convergence
 
 # Key Architectural Decision
 Selection functions return `HyperparameterSelectionResult` with a `warmstart_beta`
@@ -53,6 +56,10 @@ return the final fitted model.
 - `loo_method::Symbol=:direct`: LOO perturbation method
 - `inner_maxiter::Int=100`: Maximum iterations for inner coefficient fitting
 - `lambda_init::Float64=1.0`: Initial λ for selection (if selector != NoSelection)
+- `penalty_specs::Union{Nothing, SplinePenalty, Vector{SplinePenalty}}=nothing`: 
+  Original penalty specification (for alpha learning)
+- `alpha_maxiter::Int=5`: Maximum iterations for alpha learning
+- `alpha_tol::Float64=1e-2`: Convergence tolerance for alpha changes
 
 # Returns
 - `MultistateModelFitted`: Fitted model with coefficients, variance, and λ selection info
@@ -74,6 +81,9 @@ function _fit_exact_penalized(
     loo_method::Symbol = :direct,
     inner_maxiter::Int = 100,
     lambda_init::Float64 = 1.0,
+    penalty_specs::Union{Nothing, SplinePenalty, Vector{SplinePenalty}} = nothing,
+    alpha_maxiter::Int = 5,
+    alpha_tol::Float64 = 1e-2,
     kwargs...
 )
     # =========================================================================
@@ -106,6 +116,32 @@ function _fit_exact_penalized(
     end
     
     # =========================================================================
+    # Check for alpha learning
+    # =========================================================================
+    do_alpha_learning = !isnothing(penalty_specs) && needs_alpha_learning(penalty_specs)
+    alpha_info = if do_alpha_learning
+        collect_alpha_learning_info(model, penalty, penalty_specs)
+    else
+        Dict{Int, AlphaLearningInfo}()
+    end
+    alpha_groups = do_alpha_learning ? get_shared_alpha_groups(penalty, alpha_info) : Vector{Vector{Int}}()
+    
+    # Initialize current alphas
+    current_alphas = Dict{Int, Float64}()
+    if do_alpha_learning
+        for (term_idx, info) in alpha_info
+            # Get initial alpha from specs
+            specs = penalty_specs isa SplinePenalty ? [penalty_specs] : penalty_specs
+            for spec in specs
+                if spec.weighting isa AtRiskWeighting
+                    current_alphas[term_idx] = spec.weighting.alpha
+                    break
+                end
+            end
+        end
+    end
+    
+    # =========================================================================
     # Hyperparameter selection (if selector is not NoSelection)
     # =========================================================================
     smoothing_result = nothing
@@ -119,7 +155,7 @@ function _fit_exact_penalized(
         
         # Call the dispatcher - returns HyperparameterSelectionResult, NOT a fitted model
         smoothing_result = _select_hyperparameters(
-            model, data, penalty, selector;
+            model, data, final_penalty, selector;
             beta_init=parameters,
             inner_maxiter=inner_maxiter,
             verbose=verbose
@@ -133,6 +169,96 @@ function _fit_exact_penalized(
         # Update penalty with selected λ and get warmstart
         final_penalty = smoothing_result.penalty
         warmstart_beta = smoothing_result.warmstart_beta
+    end
+    
+    # =========================================================================
+    # Alpha learning iteration (if needed)
+    # =========================================================================
+    # When learn_alpha=true in SplinePenalty, we alternate between:
+    # 1. Fitting β and selecting λ at current α
+    # 2. Updating α via marginal likelihood maximization
+    # This typically converges in 3-5 iterations.
+    
+    if do_alpha_learning && !isempty(alpha_info)
+        if verbose
+            println("Learning adaptive penalty weighting parameters (α)...")
+        end
+        
+        for alpha_iter in 1:alpha_maxiter
+            alpha_changed = false
+            max_alpha_change = 0.0
+            
+            # Fit beta at current penalty (with current alpha values)
+            if alpha_iter > 1
+                # Re-fit beta at updated penalty
+                warmstart_beta = _fit_inner_coefficients(
+                    model, data, final_penalty, warmstart_beta;
+                    lb=lb, ub=ub, maxiter=inner_maxiter
+                )
+            end
+            
+            # Update alpha for each group
+            for group in alpha_groups
+                # Use first term's info for shared groups
+                term_idx = group[1]
+                info = alpha_info[term_idx]
+                old_alpha = current_alphas[term_idx]
+                
+                # Learn optimal alpha via marginal likelihood
+                new_alpha = learn_alpha(
+                    model, data, final_penalty, warmstart_beta,
+                    term_idx, info.hazard, info.atrisk;
+                    alpha_bounds=(0.0, 2.0), tol=alpha_tol
+                )
+                
+                # Update penalty matrix for all terms in group
+                for idx in group
+                    term_info = alpha_info[idx]
+                    final_penalty = update_penalty_with_alpha(
+                        final_penalty, model, idx, new_alpha,
+                        term_info.hazard, term_info.atrisk
+                    )
+                    current_alphas[idx] = new_alpha
+                end
+                
+                # Track convergence
+                alpha_change = abs(new_alpha - old_alpha)
+                max_alpha_change = max(max_alpha_change, alpha_change)
+                
+                if alpha_change > alpha_tol
+                    alpha_changed = true
+                end
+                
+                if verbose
+                    terms_str = length(group) > 1 ? "terms $(group)" : "term $(term_idx)"
+                    println("  Iter $alpha_iter: α=$( round(new_alpha, digits=4)) for $terms_str (Δα=$(round(alpha_change, digits=4)))")
+                end
+            end
+            
+            # Check convergence
+            if !alpha_changed
+                if verbose
+                    println("Alpha learning converged after $alpha_iter iteration(s)")
+                end
+                break
+            end
+            
+            # Re-select lambda with updated penalty if not NoSelection
+            if !(selector isa NoSelection) && alpha_iter < alpha_maxiter
+                smoothing_result = _select_hyperparameters(
+                    model, data, final_penalty, selector;
+                    beta_init=warmstart_beta,
+                    inner_maxiter=inner_maxiter,
+                    verbose=false
+                )
+                final_penalty = smoothing_result.penalty
+                warmstart_beta = smoothing_result.warmstart_beta
+            end
+        end
+        
+        if verbose
+            println("Final α values: $(collect(values(current_alphas)))")
+        end
     end
     
     # =========================================================================
@@ -185,7 +311,7 @@ function _fit_exact_penalized(
     end
     
     # Compute variance-covariance matrix
-    vcov, vcov_type_used, subject_grads = _compute_vcov_exact(
+    vcov, vcov_type_used, subject_grads, vcov_model_base = _compute_vcov_exact(
         sol.u, model, samplepaths, vcov_type;
         vcov_threshold=vcov_threshold, loo_method=loo_method,
         converged=sol_converged, has_monotone=has_monotone, verbose=verbose,
@@ -233,6 +359,7 @@ function _fit_exact_penalized(
         (loglik = -sol.objective, subj_lml = ll_subj),
         vcov,
         vcov_type_used,
+        vcov_model_base,  # Model-based variance (H⁻¹) when IJ/JK requested
         subject_grads,
         model.hazards,
         model.totalhazards,

@@ -251,6 +251,50 @@ println(fitted.smoothing_parameters)  # Optimal λ values
 - `:perf`: Performance iteration (GCV-like)
 - `:loocv`: Exact leave-one-out CV (slow but exact)
 
+### Adaptive Penalty Weighting
+
+By default, spline penalties apply uniform smoothing across time. However, when the number of subjects at risk varies substantially over time (e.g., many subjects at early times, few at late times), it can be beneficial to penalize more heavily where less information is available.
+
+**At-risk weighting** adapts the penalty strength based on $w(t) = Y(t)^{-\alpha}$, where $Y(t)$ is the number at risk at time $t$:
+- $\alpha = 0$: Uniform weighting (standard P-spline)
+- $\alpha = 1$: Penalize proportionally to $1/Y(t)$ (default when enabled)
+- $\alpha > 1$: Stronger adaptation to at-risk counts
+
+```julia
+# At-risk adaptive weighting with default α=1.0
+fitted = fit(model;
+             penalty=SplinePenalty(adaptive_weight=:atrisk),
+             select_lambda=:efs)
+
+# Custom α value
+fitted = fit(model;
+             penalty=SplinePenalty(adaptive_weight=:atrisk, alpha=0.5),
+             select_lambda=:efs)
+
+# Learn α from data via marginal likelihood
+fitted = fit(model;
+             penalty=SplinePenalty(adaptive_weight=:atrisk, learn_alpha=true),
+             select_lambda=:efs)
+```
+
+**When to use adaptive weighting:**
+- Right-censored survival data with few events at late times
+- Panel data with varying observation intensity across time
+- Competing risks where different transitions have different at-risk patterns
+
+**Per-transition specification:**
+```julia
+# Different settings for different transitions
+fitted = fit(model;
+             penalty=[
+                 SplinePenalty((1,2), adaptive_weight=:atrisk, alpha=1.0),
+                 SplinePenalty((1,3), adaptive_weight=:atrisk, alpha=0.5)
+             ],
+             select_lambda=:efs)
+```
+
+When `share_lambda=true` is used, grouped transitions automatically share the same α value.
+
 See the [Optimization](optimization.md) documentation for details on penalty configuration and smoothing parameter selection.
 
 ## Warning Messages

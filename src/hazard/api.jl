@@ -24,9 +24,56 @@ function _make_covar_namedtuple(covar_names::Vector{Symbol}, covar_dict::Dict{Sy
 end
 
 """
-    cumulative_incidence(t, model::MultistateProcess, subj::Int=1)
+    cumulative_incidence(t, model::MultistateProcess, subj::Int=1) -> Matrix{Float64}
 
-Compute the cumulative incidence for each possible transition as a function of time since state entry. Assumes the subject starts their observation period at risk and saves cumulative incidence at the supplied vector of times, t.
+Compute the cumulative incidence function (CIF) for all transitions.
+
+The cumulative incidence at time t gives the probability of having made each specific
+transition by time t, accounting for competing risks from other transitions.
+
+# Arguments
+- `t`: Vector of times at which to evaluate cumulative incidence
+- `model::MultistateProcess`: Multistate model object
+- `subj::Int=1`: Subject ID for covariate lookup
+
+# Returns
+- `Matrix{Float64}`: `length(t) × n_hazards` matrix where entry `[i,j]` is the cumulative
+  incidence of the j-th transition by time `t[i]`
+
+# Details
+For a subject starting in a transient state, the cumulative incidence to state k is:
+
+    CIF_k(t) = ∫₀ᵗ S(u) × h_k(u) du
+
+where S(u) is the overall survival (remaining in origin state) and h_k(u) is the
+cause-specific hazard for transition k.
+
+The sum of cumulative incidences across all competing risks equals 1 - S(t).
+
+# Example
+```julia
+# Three-state illness-death model
+model = multistatemodel(h12, h13, h23; data=df)
+fitted = fit(model)
+
+# Compute cumulative incidence at regular intervals
+t = collect(0.0:0.5:10.0)
+cif = cumulative_incidence(t, fitted.model, 1)
+
+# cif[:, 1] = cumulative incidence of transition 1 (h12)
+# cif[:, 2] = cumulative incidence of transition 2 (h13)
+# cif[:, 3] = cumulative incidence of transition 3 (h23)
+
+# Plot stacked cumulative incidence
+using Plots
+areaplot(t, cif[:, 1:2], 
+         label=["1→2 (illness)" "1→3 (death)"],
+         xlabel="Time", ylabel="Probability")
+```
+
+# See also
+- [`compute_hazard`](@ref): Instantaneous hazard rate
+- [`compute_cumulative_hazard`](@ref): Integrated hazard
 """
 function cumulative_incidence(t, model::MultistateProcess, subj::Int=1)
 
@@ -161,15 +208,49 @@ function cumulative_incidence(t, model::MultistateProcess, parameters, statefrom
 end
 
 """
-    compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int=1)
+    compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int=1) -> Vector{Float64}
 
-Compute the hazard at times t. 
+Compute the instantaneous hazard rate h(t) at specified times.
+
+Evaluates the hazard function for a specific transition at one or more time points,
+using the subject's covariate values.
 
 # Arguments
-- t: time or vector of times. 
-- model: MultistateProcess object. 
-- hazard: Symbol specifying the hazard, e.g., :h12 for the hazard for transitioning from state 1 to state 2. 
-- subj: subject id. 
+- `t`: Time or vector of times at which to evaluate the hazard
+- `model::MultistateProcess`: Multistate model object
+- `hazard::Symbol`: Transition hazard name (e.g., `:h12` for state 1→2)
+- `subj::Int=1`: Subject ID for covariate lookup
+
+# Returns
+- `Vector{Float64}`: Hazard values at each time point
+
+# Details
+For time-varying covariates, the function uses the covariate values from the
+observation interval containing each time point. If the model contains spline hazards,
+ensure they have been calibrated (see [`calibrate_splines!`](@ref)).
+
+# Example
+```julia
+# Simple illness-death model
+model = multistatemodel(h12, h13, h23; data=df)
+fitted = fit(model)
+
+# Compute hazard at specific times for first subject
+t = collect(0.0:0.5:10.0)
+haz_12 = compute_hazard(t, fitted.model, :h12, 1)
+
+# Plot hazard function
+using Plots
+plot(t, haz_12, xlabel="Time", ylabel="h₁₂(t)", label="1→2 hazard")
+
+# Compare hazards across subjects
+haz_subj1 = compute_hazard(t, fitted.model, :h12, 1)
+haz_subj2 = compute_hazard(t, fitted.model, :h12, 2)
+```
+
+# See also
+- [`compute_cumulative_hazard`](@ref): Integrated hazard over intervals
+- [`cumulative_incidence`](@ref): Probability of transition by time t
 """
 function compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int = 1)
 
@@ -197,16 +278,47 @@ function compute_hazard(t, model::MultistateProcess, hazard::Symbol, subj::Int =
 end
 
 """
-    compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, hazard::Symbol, subj::Int=1)
+    compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, hazard::Symbol, subj::Int=1) -> Vector{Float64}
 
-Compute the cumulative hazard over [tstart,tstop]. 
+Compute the cumulative (integrated) hazard H(tstart, tstop) = ∫_{tstart}^{tstop} h(u) du.
+
+The cumulative hazard is related to the survival probability by S(t) = exp(-H(0, t)).
 
 # Arguments
-- tstart: starting times
-- tstop: stopping times
-- model: MultistateProcess object. 
-- hazard: Symbol specifying the hazard, e.g., :h12 for the hazard for transitioning from state 1 to state 2. 
-- subj: subject id. 
+- `tstart`: Start time(s) of integration interval(s)
+- `tstop`: End time(s) of integration interval(s)
+- `model::MultistateProcess`: Multistate model object
+- `hazard::Symbol`: Transition hazard name (e.g., `:h12` for state 1→2)
+- `subj::Int=1`: Subject ID for covariate lookup
+
+# Returns
+- `Vector{Float64}`: Cumulative hazard values for each interval
+
+# Details
+- If `tstart` and `tstop` are vectors, they must have the same length or one must be scalar
+- For time-varying covariates, integration respects covariate change points within intervals
+- The function handles covariate changes by summing contributions from each sub-interval
+
+# Example
+```julia
+# Compute cumulative hazard over fixed interval
+H = compute_cumulative_hazard(0.0, 5.0, model, :h12, 1)
+
+# Compute survival probability from cumulative hazard
+S = exp(-H[1])  # P(survive beyond t=5)
+
+# Multiple intervals at once
+tstart = [0.0, 1.0, 2.0]
+tstop = [1.0, 2.0, 3.0]
+H_intervals = compute_cumulative_hazard(tstart, tstop, model, :h12, 1)
+
+# Single start, multiple stops
+H_cumulative = compute_cumulative_hazard(0.0, [1.0, 2.0, 5.0, 10.0], model, :h12, 1)
+```
+
+# See also
+- [`compute_hazard`](@ref): Instantaneous hazard rate at specific times
+- [`cumulative_incidence`](@ref): Probability of transition accounting for competing risks
 """
 function compute_cumulative_hazard(tstart, tstop, model::MultistateProcess, hazard::Symbol, subj::Int = 1)
 

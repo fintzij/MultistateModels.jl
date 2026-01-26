@@ -89,11 +89,14 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         end
         
         # Dispatch to penalized fitting function
+        # Pass resolved_penalty (SplinePenalty specs) for alpha learning
         return _fit_markov_panel_penalized(
             model, books, penalty_config, selector;
             constraints=constraints, verbose=verbose, solver=solver,
             vcov_type=vcov_type, vcov_threshold=vcov_threshold,
-            loo_method=loo_method, lambda_init=lambda_init, kwargs...
+            loo_method=loo_method, lambda_init=lambda_init,
+            penalty_specs=resolved_penalty,  # Original SplinePenalty for alpha learning
+            kwargs...
         )
     end
 
@@ -131,7 +134,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
 
         # Compute variance-covariance based on vcov_type
         converged = (sol.retcode == ReturnCode.Success)
-        vcov, vcov_type_used, subject_grads = _compute_vcov_markov(
+        vcov, vcov_type_used, subject_grads, vcov_model_base = _compute_vcov_markov(
             sol.u, model, books, vcov_type;
             vcov_threshold=vcov_threshold, loo_method=loo_method,
             converged=converged, verbose=verbose
@@ -158,7 +161,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         
         # Compute variance-covariance based on vcov_type
         converged = (sol.retcode == ReturnCode.Success)
-        vcov, vcov_type_used, subject_grads = _compute_vcov_markov(
+        vcov, vcov_type_used, subject_grads, vcov_model_base = _compute_vcov_markov(
             sol.u, model, books, vcov_type;
             vcov_threshold=vcov_threshold, loo_method=loo_method,
             converged=converged, verbose=verbose, at_bounds=at_bounds
@@ -186,6 +189,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
         logliks,
         vcov,
         vcov_type_used,  # Type of vcov that was computed
+        vcov_model_base,  # Model-based variance (H⁻¹) when IJ/JK requested
         subject_grads,
         model.hazards,
         model.totalhazards,
@@ -226,7 +230,7 @@ Unified variance computation that handles all vcov_type options.
 - `at_bounds::Union{Nothing,BitVector}=nothing`: Indicators for params at box bounds
 
 # Returns
-- `(vcov, vcov_type_used, subject_grads)`: Tuple with vcov matrix, actual type used, and gradients
+- `(vcov, vcov_type_used, subject_grads, vcov_model_base)`: Tuple with vcov matrix, actual type used, gradients, and model-based vcov
 """
 function _compute_vcov_markov(params::AbstractVector, model::MultistateModel, 
                               books::Tuple, vcov_type::Symbol;
@@ -236,13 +240,13 @@ function _compute_vcov_markov(params::AbstractVector, model::MultistateModel,
     
     # Early return if no vcov requested
     if vcov_type == :none
-        return nothing, :none, nothing
+        return nothing, :none, nothing, nothing
     end
     
     # Skip vcov if not converged
     if !converged
         verbose && @warn "Optimization did not converge; skipping variance computation."
-        return nothing, :none, nothing
+        return nothing, :none, nothing, nothing
     end
     
     nparams = length(params)
@@ -267,9 +271,12 @@ function _compute_vcov_markov(params::AbstractVector, model::MultistateModel,
     _clean_vcov_matrix!(H_inv)
     
     # Compute requested variance type
+    vcov_model_base = nothing  # Store H⁻¹ for later IJ/JK computation via get_vcov
+    
     if vcov_type == :model
         vcov = Symmetric(H_inv)
         vcov_type_used = :model
+        # vcov_model_base stays nothing since vcov already is H⁻¹
         
     elseif vcov_type == :ij
         # IJ / Sandwich variance: H⁻¹ J H⁻¹ where J = Σᵢ gᵢgᵢᵀ
@@ -278,6 +285,7 @@ function _compute_vcov_markov(params::AbstractVector, model::MultistateModel,
         _clean_vcov_matrix!(vcov_mat)
         vcov = Matrix(Symmetric(vcov_mat))
         vcov_type_used = :ij
+        vcov_model_base = Matrix(Symmetric(H_inv))  # Store H⁻¹ for get_vcov(; type=:model)
         
     elseif vcov_type == :jk
         # Jackknife variance: ((n-1)/n) Σᵢ ΔᵢΔᵢᵀ where Δᵢ = H⁻¹gᵢ
@@ -286,6 +294,7 @@ function _compute_vcov_markov(params::AbstractVector, model::MultistateModel,
         _clean_vcov_matrix!(vcov_mat)
         vcov = Matrix(Symmetric(vcov_mat))
         vcov_type_used = :jk
+        vcov_model_base = Matrix(Symmetric(H_inv))  # Store H⁻¹ for get_vcov(; type=:model)
         
     else
         throw(ArgumentError("Unknown vcov_type: $vcov_type"))
@@ -300,9 +309,16 @@ function _compute_vcov_markov(params::AbstractVector, model::MultistateModel,
             vcov[i, :] .= NaN
             vcov[:, i] .= NaN
         end
+        # Also apply to vcov_model_base if it exists
+        if !isnothing(vcov_model_base)
+            for i in bound_indices
+                vcov_model_base[i, :] .= NaN
+                vcov_model_base[:, i] .= NaN
+            end
+        end
     end
     
-    return vcov, vcov_type_used, subject_grads
+    return vcov, vcov_type_used, subject_grads, vcov_model_base
 end
 # =============================================================================
 # Penalized Markov Panel Fitting (Phase M1)
@@ -359,6 +375,9 @@ function _fit_markov_panel_penalized(
     inner_maxiter::Int = 50,
     outer_maxiter::Int = 100,
     lambda_tol::Float64 = 1e-3,
+    penalty_specs::Union{Nothing, SplinePenalty, Vector{SplinePenalty}} = nothing,
+    alpha_maxiter::Int = 5,
+    alpha_tol::Float64 = 1e-2,
     kwargs...
 )
     # =========================================================================
@@ -385,6 +404,31 @@ function _fit_markov_panel_penalized(
     data = MPanelData(model, books)
     
     # =========================================================================
+    # Check for alpha learning
+    # =========================================================================
+    do_alpha_learning = !isnothing(penalty_specs) && needs_alpha_learning(penalty_specs)
+    alpha_info = if do_alpha_learning
+        collect_alpha_learning_info(model, penalty, penalty_specs)
+    else
+        Dict{Int, AlphaLearningInfo}()
+    end
+    alpha_groups = do_alpha_learning ? get_shared_alpha_groups(penalty, alpha_info) : Vector{Vector{Int}}()
+    
+    # Initialize current alphas
+    current_alphas = Dict{Int, Float64}()
+    if do_alpha_learning
+        for (term_idx, info) in alpha_info
+            specs = penalty_specs isa SplinePenalty ? [penalty_specs] : penalty_specs
+            for spec in specs
+                if spec.weighting isa AtRiskWeighting
+                    current_alphas[term_idx] = spec.weighting.alpha
+                    break
+                end
+            end
+        end
+    end
+    
+    # =========================================================================
     # Hyperparameter Selection (if selector != NoSelection)
     # =========================================================================
     smoothing_result = nothing
@@ -398,7 +442,7 @@ function _fit_markov_panel_penalized(
         end
         
         smoothing_result = _select_hyperparameters(
-            model, data, penalty, selector;
+            model, data, final_penalty, selector;
             beta_init=parameters,
             inner_maxiter=inner_maxiter,
             outer_maxiter=outer_maxiter,
@@ -418,6 +462,87 @@ function _fit_markov_panel_penalized(
         if verbose
             lambda_vals = get_hyperparameters(final_penalty)
             println("Fitting with fixed λ = $(round.(lambda_vals, sigdigits=4))")
+        end
+    end
+    
+    # =========================================================================
+    # Alpha learning iteration (if needed)
+    # =========================================================================
+    if do_alpha_learning && !isempty(alpha_info)
+        if verbose
+            println("Learning adaptive penalty weighting parameters (α)...")
+        end
+        
+        for alpha_iter in 1:alpha_maxiter
+            alpha_changed = false
+            
+            # Fit beta at current penalty (with current alpha values)
+            if alpha_iter > 1
+                warmstart_beta = _fit_inner_coefficients(
+                    model, data, final_penalty, warmstart_beta;
+                    lb=lb, ub=ub, maxiter=inner_maxiter
+                )
+            end
+            
+            # Update alpha for each group
+            for group in alpha_groups
+                term_idx = group[1]
+                info = alpha_info[term_idx]
+                old_alpha = current_alphas[term_idx]
+                
+                # Learn optimal alpha via marginal likelihood
+                new_alpha = learn_alpha(
+                    model, data, final_penalty, warmstart_beta,
+                    term_idx, info.hazard, info.atrisk;
+                    alpha_bounds=(0.0, 2.0), tol=alpha_tol
+                )
+                
+                # Update penalty matrix for all terms in group
+                for idx in group
+                    term_info = alpha_info[idx]
+                    final_penalty = update_penalty_with_alpha(
+                        final_penalty, model, idx, new_alpha,
+                        term_info.hazard, term_info.atrisk
+                    )
+                    current_alphas[idx] = new_alpha
+                end
+                
+                alpha_change = abs(new_alpha - old_alpha)
+                if alpha_change > alpha_tol
+                    alpha_changed = true
+                end
+                
+                if verbose
+                    terms_str = length(group) > 1 ? "terms $(group)" : "term $(term_idx)"
+                    println("  Iter $alpha_iter: α=$(round(new_alpha, digits=4)) for $terms_str (Δα=$(round(alpha_change, digits=4)))")
+                end
+            end
+            
+            # Check convergence
+            if !alpha_changed
+                if verbose
+                    println("Alpha learning converged after $alpha_iter iteration(s)")
+                end
+                break
+            end
+            
+            # Re-select lambda with updated penalty if not NoSelection
+            if !(selector isa NoSelection) && alpha_iter < alpha_maxiter
+                smoothing_result = _select_hyperparameters(
+                    model, data, final_penalty, selector;
+                    beta_init=warmstart_beta,
+                    inner_maxiter=inner_maxiter,
+                    outer_maxiter=outer_maxiter,
+                    lambda_tol=lambda_tol,
+                    verbose=false
+                )
+                final_penalty = smoothing_result.penalty
+                warmstart_beta = smoothing_result.warmstart_beta
+            end
+        end
+        
+        if verbose
+            println("Final α values: $(collect(values(current_alphas)))")
         end
     end
     
@@ -472,7 +597,7 @@ function _fit_markov_panel_penalized(
     end
     
     # Compute variance-covariance matrix
-    vcov, vcov_type_used, subject_grads = _compute_vcov_markov(
+    vcov, vcov_type_used, subject_grads, vcov_model_base = _compute_vcov_markov(
         sol.u, model, books, vcov_type;
         vcov_threshold=vcov_threshold, loo_method=loo_method,
         converged=sol_converged, verbose=verbose
@@ -517,6 +642,7 @@ function _fit_markov_panel_penalized(
         logliks,
         vcov,
         vcov_type_used,
+        vcov_model_base,  # Model-based variance (H⁻¹) when IJ/JK requested
         subject_grads,
         model.hazards,
         model.totalhazards,

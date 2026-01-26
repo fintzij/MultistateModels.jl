@@ -680,3 +680,511 @@ function _path_time_in_state_in_interval(path::SamplePath, state::Int,
     
     return total_time
 end
+
+# =============================================================================
+# Alpha Learning for Adaptive Penalty Weighting (Phase 5)
+# =============================================================================
+
+"""
+    AlphaLearningInfo
+
+Struct to hold precomputed data needed for alpha learning.
+
+# Fields
+- `hazard_idx::Int`: Index of hazard in model.hazards
+- `hazard::_Hazard`: The hazard object
+- `transition::Tuple{Int,Int}`: (origin, dest) state pair
+- `order::Int`: Penalty derivative order
+- `atrisk::Vector{Float64}`: Pre-computed interval-averaged at-risk counts
+- `param_indices::UnitRange{Int}`: Indices into flat parameter vector
+"""
+struct AlphaLearningInfo
+    hazard_idx::Int
+    hazard::_Hazard  # Runtime hazard object
+    transition::Tuple{Int,Int}
+    order::Int
+    atrisk::Vector{Float64}  # At-risk interval averages
+    param_indices::UnitRange{Int}  # Indices into flat beta vector
+end
+
+"""
+    learn_alpha(model::MultistateProcess,
+                data,
+                penalty::QuadraticPenalty,
+                beta::Vector{Float64},
+                term_idx::Int,
+                hazard,
+                atrisk::Vector{Float64};
+                alpha_bounds::Tuple{Float64,Float64}=(0.0, 2.0),
+                tol::Float64=1e-2) -> Float64
+
+Estimate optimal α for a single penalty term by maximizing marginal likelihood.
+
+For fixed λ and β, the marginal likelihood criterion for α is:
+    p(y|λ,α) ∝ |H + λS_w(α)|^(-1/2) exp(-ℓ(β) - λ/2 β'S_w(α)β)
+
+Taking log and ignoring constants:
+    log p(y|λ,α) = -1/2 log|H + λS_w(α)| - ℓ(β) - λ/2 β'S_w(α)β
+
+Since ℓ(β) is fixed, we minimize:
+    -1/2 log|H + λS_w(α)| + λ/2 β'S_w(α)β
+
+Uses 1D optimization (Brent's method) since α is scalar.
+
+# Arguments
+- `model::MultistateProcess`: Model with hazard definitions
+- `data`: Data container (ExactData or MPanelData)
+- `penalty::QuadraticPenalty`: Current penalty configuration
+- `beta::Vector{Float64}`: Current coefficient estimates
+- `term_idx::Int`: Index of penalty term to update
+- `hazard`: RuntimeSplineHazard for this term
+- `atrisk::Vector{Float64}`: At-risk interval averages for this hazard
+
+# Keyword Arguments  
+- `alpha_bounds::Tuple{Float64,Float64}=(0.0, 2.0)`: Bounds on α search
+- `tol::Float64=1e-2`: Convergence tolerance for α
+
+# Returns
+- `Float64`: Optimal α value
+
+# Notes
+- Uses Brent's method for 1D optimization (bracketed search)
+- α=0 recovers uniform weighting (standard P-spline)
+- α>2 rarely needed in practice
+"""
+function learn_alpha(model::MultistateProcess,
+                     data,
+                     penalty::QuadraticPenalty,
+                     beta::Vector{Float64},
+                     term_idx::Int,
+                     hazard,
+                     atrisk::Vector{Float64};
+                     alpha_bounds::Tuple{Float64,Float64}=(0.0, 2.0),
+                     tol::Float64=1e-2)
+    
+    # Get term info
+    term = penalty.terms[term_idx]
+    λ = term.lambda
+    β_j = @view beta[term.hazard_indices]
+    
+    # Rebuild basis for this hazard
+    basis = _rebuild_spline_basis(hazard)
+    
+    # Compute Hessian of log-likelihood at current beta (negative Fisher info)
+    H = _compute_hessian_block(model, data, beta, term.hazard_indices)
+    
+    # Define objective: -1/2 log|H + λS_w(α)| + λ/2 β'S_w(α)β
+    # We MINIMIZE this (corresponds to maximizing marginal likelihood)
+    function objective(α)
+        # Build weighted penalty matrix at this α
+        weighting = AtRiskWeighting(alpha=α, learn=false)
+        S_bspline = build_weighted_penalty_matrix(basis, term.order, weighting, atrisk)
+        
+        # Transform for monotone splines if needed
+        S_w = if hazard.monotone != 0
+            transform_penalty_for_monotone(S_bspline, basis; direction=hazard.monotone)
+        else
+            S_bspline
+        end
+        
+        # Penalized Hessian: H + λS_w(α)
+        H_pen = H + λ * S_w
+        
+        # Log determinant term (use eigenvalues for numerical stability)
+        # Add small ridge for numerical stability
+        eigvals = eigen(Symmetric(H_pen)).values
+        # Replace near-zero eigenvalues with small positive value
+        eigvals_safe = max.(eigvals, 1e-10)
+        logdet_term = sum(log.(eigvals_safe))
+        
+        # Quadratic penalty term
+        quad_term = λ * dot(β_j, S_w * β_j)
+        
+        return -0.5 * logdet_term + 0.5 * quad_term
+    end
+    
+    # Brent's method for 1D minimization on [α_min, α_max]
+    α_min, α_max = alpha_bounds
+    
+    # Use golden section search with Brent's method
+    result = _brent_minimize(objective, α_min, α_max; tol=tol)
+    
+    return result
+end
+
+"""
+    _brent_minimize(f, a, b; tol=1e-4, maxiter=100) -> Float64
+
+Brent's method for 1D minimization on interval [a, b].
+
+Combines golden section and parabolic interpolation for efficient convergence.
+
+# Arguments
+- `f`: Function to minimize
+- `a, b`: Bracket endpoints (must contain minimum)
+- `tol`: Convergence tolerance
+- `maxiter`: Maximum iterations
+
+# Returns
+- Approximate minimizer x* ∈ [a, b]
+"""
+function _brent_minimize(f, a::Float64, b::Float64; tol::Float64=1e-4, maxiter::Int=100)
+    # Golden ratio constant
+    ϕ = 0.5 * (3.0 - sqrt(5.0))  # ≈ 0.382
+    
+    # Initialize
+    x = w = v = a + ϕ * (b - a)
+    fx = fw = fv = f(x)
+    
+    e = 0.0  # Distance moved on step before last
+    d = 0.0  # Most recent step size
+    
+    for iter in 1:maxiter
+        midpoint = 0.5 * (a + b)
+        tol1 = tol * abs(x) + 1e-10
+        tol2 = 2.0 * tol1
+        
+        # Check convergence
+        if abs(x - midpoint) <= tol2 - 0.5 * (b - a)
+            return x
+        end
+        
+        # Try parabolic interpolation
+        if abs(e) > tol1
+            # Fit parabola
+            r = (x - w) * (fx - fv)
+            q = (x - v) * (fx - fw)
+            p = (x - v) * q - (x - w) * r
+            q = 2.0 * (q - r)
+            
+            if q > 0
+                p = -p
+            else
+                q = -q
+            end
+            
+            r = e
+            e = d
+            
+            # Check if parabolic step is acceptable
+            if abs(p) < abs(0.5 * q * r) && p > q * (a - x) && p < q * (b - x)
+                # Take parabolic step
+                d = p / q
+                u = x + d
+                
+                # f must not be evaluated too close to a or b
+                if (u - a) < tol2 || (b - u) < tol2
+                    d = x < midpoint ? tol1 : -tol1
+                end
+            else
+                # Take golden section step
+                e = (x < midpoint ? b : a) - x
+                d = ϕ * e
+            end
+        else
+            # Take golden section step
+            e = (x < midpoint ? b : a) - x
+            d = ϕ * e
+        end
+        
+        # Compute new trial point
+        if abs(d) >= tol1
+            u = x + d
+        else
+            u = x + (d > 0 ? tol1 : -tol1)
+        end
+        
+        fu = f(u)
+        
+        # Update state
+        if fu <= fx
+            if u < x
+                b = x
+            else
+                a = x
+            end
+            v, fv = w, fw
+            w, fw = x, fx
+            x, fx = u, fu
+        else
+            if u < x
+                a = u
+            else
+                b = u
+            end
+            
+            if fu <= fw || w == x
+                v, fv = w, fw
+                w, fw = u, fu
+            elseif fu <= fv || v == x || v == w
+                v, fv = u, fu
+            end
+        end
+    end
+    
+    # Return best found even if maxiter reached
+    return x
+end
+
+"""
+    _compute_hessian_block(model, data::ExactData, beta, indices) -> Matrix{Float64}
+
+Compute the Hessian block for a subset of parameters (for alpha learning).
+
+Returns the negative Hessian of the UNPENALIZED log-likelihood with respect
+to parameters at `indices`.
+"""
+function _compute_hessian_block(model::MultistateProcess, 
+                                 data::ExactData, 
+                                 beta::Vector{Float64},
+                                 indices::UnitRange{Int})
+    K = length(indices)
+    
+    # Extract sub-parameters
+    β_sub = beta[indices]
+    
+    # Wrapper that maps sub-parameters to full likelihood
+    # Must create β_full with element type matching β_k for AD compatibility
+    function loglik_wrapper(β_k)
+        T = eltype(β_k)
+        β_full = Vector{T}(undef, length(beta))
+        copyto!(β_full, beta)  # Copy Float64 values, promoted to T
+        β_full[indices] = β_k
+        return -loglik_exact(β_full, data; neg=false)  # Return negative log-lik
+    end
+    
+    # Compute Hessian using ForwardDiff
+    H = ForwardDiff.hessian(loglik_wrapper, β_sub)
+    
+    return H
+end
+
+"""
+    _compute_hessian_block(model, data::MPanelData, beta, indices) -> Matrix{Float64}
+
+Compute the Hessian block for Markov panel data.
+"""
+function _compute_hessian_block(model::MultistateProcess, 
+                                 data::MPanelData, 
+                                 beta::Vector{Float64},
+                                 indices::UnitRange{Int})
+    K = length(indices)
+    
+    β_sub = beta[indices]
+    
+    # Must create β_full with element type matching β_k for AD compatibility
+    function loglik_wrapper(β_k)
+        T = eltype(β_k)
+        β_full = Vector{T}(undef, length(beta))
+        copyto!(β_full, beta)  # Copy Float64 values, promoted to T
+        β_full[indices] = β_k
+        return _loglik_markov_mutating(β_full, data; neg=true, return_ll_subj=false)
+    end
+    
+    H = ForwardDiff.hessian(loglik_wrapper, β_sub)
+    
+    return H
+end
+
+"""
+    needs_alpha_learning(penalty_specs::Union{Nothing, SplinePenalty, Vector{SplinePenalty}}) -> Bool
+
+Check if any penalty specification requires alpha learning.
+
+Returns true if at least one SplinePenalty has `AtRiskWeighting` with `learn=true`.
+"""
+function needs_alpha_learning(penalty_specs::Union{Nothing, SplinePenalty, Vector{SplinePenalty}})
+    isnothing(penalty_specs) && return false
+    
+    specs = penalty_specs isa SplinePenalty ? [penalty_specs] : penalty_specs
+    
+    for spec in specs
+        if spec.weighting isa AtRiskWeighting && spec.weighting.learn
+            return true
+        end
+    end
+    
+    return false
+end
+
+"""
+    update_penalty_with_alpha(penalty::QuadraticPenalty,
+                               model::MultistateProcess,
+                               term_idx::Int,
+                               alpha::Float64,
+                               hazard,
+                               atrisk::Vector{Float64}) -> QuadraticPenalty
+
+Create new penalty config with updated penalty matrix for new alpha value.
+
+# Arguments
+- `penalty`: Current penalty configuration
+- `model`: Model with hazard definitions
+- `term_idx`: Index of term to update
+- `alpha`: New alpha value
+- `hazard`: Hazard for this term
+- `atrisk`: At-risk interval averages
+
+# Returns
+- New `QuadraticPenalty` with updated S matrix for specified term
+"""
+function update_penalty_with_alpha(penalty::QuadraticPenalty,
+                                    model::MultistateProcess,
+                                    term_idx::Int,
+                                    alpha::Float64,
+                                    hazard,
+                                    atrisk::Vector{Float64})
+    term = penalty.terms[term_idx]
+    
+    # Rebuild basis
+    basis = _rebuild_spline_basis(hazard)
+    
+    # Build new weighted penalty matrix
+    weighting = AtRiskWeighting(alpha=alpha, learn=false)
+    S_bspline = build_weighted_penalty_matrix(basis, term.order, weighting, atrisk)
+    
+    # Transform for monotone splines if needed
+    S_new = if hazard.monotone != 0
+        transform_penalty_for_monotone(S_bspline, basis; direction=hazard.monotone)
+    else
+        S_bspline
+    end
+    
+    # Create new terms vector
+    new_terms = copy(penalty.terms)
+    new_terms[term_idx] = PenaltyTerm(
+        term.hazard_indices,
+        S_new,
+        term.lambda,
+        term.order,
+        term.hazard_names
+    )
+    
+    return QuadraticPenalty(
+        new_terms,
+        penalty.total_hazard_terms,
+        penalty.smooth_covariate_terms,
+        penalty.shared_lambda_groups,
+        penalty.shared_smooth_groups,
+        penalty.n_lambda
+    )
+end
+
+"""
+    collect_alpha_learning_info(model::MultistateProcess,
+                                 penalty::QuadraticPenalty,
+                                 penalty_specs::Union{SplinePenalty, Vector{SplinePenalty}}) -> Dict{Int, AlphaLearningInfo}
+
+Collect precomputed information for all terms that need alpha learning.
+
+Returns a Dict mapping term_idx to AlphaLearningInfo struct.
+
+# Arguments
+- `model`: Model with hazard definitions
+- `penalty`: Penalty configuration
+- `penalty_specs`: Original SplinePenalty specifications
+
+# Returns  
+- Dict{Int, AlphaLearningInfo}: Maps term index to learning info
+
+# Notes
+- Only includes terms where the SplinePenalty has AtRiskWeighting with learn=true
+- Precomputes at-risk interval averages for efficiency
+- Handles share_lambda grouping (grouped terms share the same alpha)
+"""
+function collect_alpha_learning_info(model::MultistateProcess,
+                                      penalty::QuadraticPenalty,
+                                      penalty_specs::Union{SplinePenalty, Vector{SplinePenalty}})
+    specs = penalty_specs isa SplinePenalty ? [penalty_specs] : penalty_specs
+    result = Dict{Int, AlphaLearningInfo}()
+    
+    # Build map from hazard name to (spec, hazard_idx)
+    # We need to match penalty terms to their original specs
+    for (term_idx, term) in enumerate(penalty.terms)
+        # Find the hazard for this term
+        for hazname in term.hazard_names
+            # Find spec that matches this hazard
+            haz_idx = findfirst(h -> h isa _SplineHazard && h.hazname == hazname, model.hazards)
+            isnothing(haz_idx) && continue
+            
+            hazard = model.hazards[haz_idx]
+            origin = hazard.statefrom
+            dest = hazard.stateto
+            
+            # Find matching spec
+            for spec in specs
+                if _rule_matches(spec.selector, origin, dest)
+                    if spec.weighting isa AtRiskWeighting && spec.weighting.learn
+                        # This term needs alpha learning
+                        transition = (origin, dest)
+                        
+                        # Compute at-risk interval averages
+                        atrisk = compute_atrisk_interval_averages(model, hazard, transition)
+                        
+                        result[term_idx] = AlphaLearningInfo(
+                            haz_idx,
+                            hazard,
+                            transition,
+                            term.order,
+                            atrisk,
+                            term.hazard_indices
+                        )
+                        break
+                    end
+                end
+            end
+            break  # Only process first hazard name (they share same settings if grouped)
+        end
+    end
+    
+    return result
+end
+
+"""
+    get_shared_alpha_groups(penalty::QuadraticPenalty,
+                            alpha_info::Dict{Int, AlphaLearningInfo}) -> Vector{Vector{Int}}
+
+Get groups of term indices that should share the same alpha.
+
+Terms share alpha when:
+1. They are in the same share_lambda group, AND
+2. They all need alpha learning
+
+# Arguments
+- `penalty`: Penalty configuration (contains shared_lambda_groups)
+- `alpha_info`: Dict mapping term_idx to AlphaLearningInfo
+
+# Returns
+- Vector of groups, each group is a Vector{Int} of term indices sharing alpha
+- Terms not in any group are returned as singleton groups
+"""
+function get_shared_alpha_groups(penalty::QuadraticPenalty,
+                                  alpha_info::Dict{Int, AlphaLearningInfo})
+    # Start with all alpha-learning terms as singletons
+    term_indices = Set(keys(alpha_info))
+    grouped = Set{Int}()
+    groups = Vector{Vector{Int}}()
+    
+    # Check shared_lambda_groups
+    for (origin, group_term_indices) in penalty.shared_lambda_groups
+        # Find which of these terms need alpha learning
+        alpha_terms = [idx for idx in group_term_indices if idx in term_indices]
+        
+        if length(alpha_terms) > 1
+            # These terms share alpha
+            push!(groups, alpha_terms)
+            for idx in alpha_terms
+                push!(grouped, idx)
+            end
+        end
+    end
+    
+    # Add remaining terms as singletons
+    for idx in term_indices
+        if !(idx in grouped)
+            push!(groups, [idx])
+        end
+    end
+    
+    return groups
+end

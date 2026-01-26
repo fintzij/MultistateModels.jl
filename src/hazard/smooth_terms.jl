@@ -5,11 +5,9 @@
 # Implementation of s(x) and te(x, y) for smooth covariate effects.
 # Extends StatsModels.jl formula DSL following mgcv conventions.
 #
+# Note: This file is included into MultistateModels module. Dependencies
+# (StatsModels, BSplineKit, LinearAlgebra) are imported at module level.
 # =============================================================================
-
-using StatsModels
-using BSplineKit
-using LinearAlgebra
 
 # -----------------------------------------------------------------------------
 # Syntax Functions

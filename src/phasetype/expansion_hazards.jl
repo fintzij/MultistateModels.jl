@@ -235,7 +235,7 @@ function _build_exit_hazard(pt_spec::PhaseTypeHazard,
         time_transform = false  # Exit hazards are exponential
     )
     
-    # TODO: Extract smooth_info from pt_spec if exit hazards support s(x) in future
+    # Note: Phase-type exit hazards are exponential by definition; smooth terms are not supported
     haz = MarkovHazard(
         hazname,
         from_phase,

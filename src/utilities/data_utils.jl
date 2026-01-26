@@ -232,7 +232,7 @@ df_invalid = DataFrame(
     id = [1, 1],
     tstart = [0.0, 1.0],
     tstop = [1.0, 2.0],
-    statefrom = [1, 2],  # BUG: should be [1, 1]
+    statefrom = [1, 2],  # Intentionally wrong: should match previous stateto=1
     stateto = [1, 3],
     obstype = [2, 1]
 )

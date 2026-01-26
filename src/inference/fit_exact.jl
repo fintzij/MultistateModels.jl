@@ -107,6 +107,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         data = ExactData(model, samplepaths)
         
         # Dispatch to the new penalized fitting function
+        # Pass resolved_penalty (SplinePenalty specs) for alpha learning
         return _fit_exact_penalized(
             model, data, samplepaths, penalty_config, selector;
             constraints=constraints,
@@ -119,6 +120,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             vcov_threshold=vcov_threshold,
             loo_method=loo_method,
             lambda_init=lambda_init,
+            penalty_specs=resolved_penalty,  # Original SplinePenalty for alpha learning
             kwargs...
         )
     end
@@ -182,7 +184,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         has_monotone = any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
         
         # Compute variance-covariance matrix based on vcov_type
-        vcov, vcov_type_used, subject_grads = _compute_vcov_exact(
+        vcov, vcov_type_used, subject_grads, vcov_model_base = _compute_vcov_exact(
             sol.u, model, samplepaths, vcov_type;
             vcov_threshold=vcov_threshold, loo_method=loo_method,
             converged=sol_converged, has_monotone=has_monotone, verbose=verbose
@@ -230,7 +232,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         has_monotone = any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
         
         # Compute variance-covariance matrix based on vcov_type
-        vcov, vcov_type_used, subject_grads = _compute_vcov_exact(
+        vcov, vcov_type_used, subject_grads, vcov_model_base = _compute_vcov_exact(
             sol.u, model, samplepaths, vcov_type;
             vcov_threshold=vcov_threshold, loo_method=loo_method,
             converged=sol_converged, has_monotone=has_monotone, verbose=verbose,
@@ -260,6 +262,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         (loglik = -sol.objective, subj_lml = ll_subj),
         vcov,
         vcov_type_used,  # Type of vcov that was computed
+        vcov_model_base,  # Model-based variance (H⁻¹) when IJ/JK requested
         subject_grads,
         model.hazards,
         model.totalhazards,
@@ -304,7 +307,7 @@ Unified variance computation that handles all vcov_type options and constraint s
 - `at_bounds::Union{Nothing,BitVector}=nothing`: Indicators for params at box bounds
 
 # Returns
-- `(vcov, vcov_type_used, subject_grads)`: Tuple with vcov matrix, actual type used, and gradients
+- `(vcov, vcov_type_used, subject_grads, vcov_model_base)`: Tuple with vcov matrix, actual type used, gradients, and model-based vcov
 """
 function _compute_vcov_exact(params::AbstractVector, model::MultistateModel, 
                              samplepaths::Vector{SamplePath}, vcov_type::Symbol;
@@ -314,17 +317,17 @@ function _compute_vcov_exact(params::AbstractVector, model::MultistateModel,
     
     # Early return if no vcov requested
     if vcov_type == :none
-        return nothing, :none, nothing
+        return nothing, :none, nothing, nothing
     end
     
     # Skip vcov if not converged or has monotone constraints
     if !converged
         verbose && @warn "Optimization did not converge; skipping variance computation."
-        return nothing, :none, nothing
+        return nothing, :none, nothing, nothing
     end
     if has_monotone
         verbose && @warn "Model has monotone spline constraints; variance computation not supported."
-        return nothing, :none, nothing
+        return nothing, :none, nothing, nothing
     end
     
     nparams = length(params)
@@ -349,9 +352,12 @@ function _compute_vcov_exact(params::AbstractVector, model::MultistateModel,
     _clean_vcov_matrix!(H_inv)
     
     # Compute requested variance type
+    vcov_model_base = nothing  # Store H⁻¹ for later IJ/JK computation via get_vcov
+    
     if vcov_type == :model
         vcov = Symmetric(H_inv)
         vcov_type_used = :model
+        # vcov_model_base stays nothing since vcov already is H⁻¹
         
     elseif vcov_type == :ij
         # IJ / Sandwich variance: H⁻¹ J H⁻¹ where J = Σᵢ gᵢgᵢᵀ
@@ -360,6 +366,7 @@ function _compute_vcov_exact(params::AbstractVector, model::MultistateModel,
         _clean_vcov_matrix!(vcov_mat)
         vcov = Matrix(Symmetric(vcov_mat))
         vcov_type_used = :ij
+        vcov_model_base = Matrix(Symmetric(H_inv))  # Store H⁻¹ for get_vcov(; type=:model)
         
     elseif vcov_type == :jk
         # Jackknife variance: ((n-1)/n) Σᵢ ΔᵢΔᵢᵀ where Δᵢ = H⁻¹gᵢ
@@ -368,6 +375,7 @@ function _compute_vcov_exact(params::AbstractVector, model::MultistateModel,
         _clean_vcov_matrix!(vcov_mat)
         vcov = Matrix(Symmetric(vcov_mat))
         vcov_type_used = :jk
+        vcov_model_base = Matrix(Symmetric(H_inv))  # Store H⁻¹ for get_vcov(; type=:model)
         
     else
         throw(ArgumentError("Unknown vcov_type: $vcov_type"))
@@ -382,9 +390,16 @@ function _compute_vcov_exact(params::AbstractVector, model::MultistateModel,
             vcov[i, :] .= NaN
             vcov[:, i] .= NaN
         end
+        # Also apply to vcov_model_base if it exists
+        if !isnothing(vcov_model_base)
+            for i in bound_indices
+                vcov_model_base[i, :] .= NaN
+                vcov_model_base[:, i] .= NaN
+            end
+        end
     end
     
-    return vcov, vcov_type_used, subject_grads
+    return vcov, vcov_type_used, subject_grads, vcov_model_base
 end
 
 # NOTE: fit(::PhaseTypeModel) has been removed as part of package streamlining.

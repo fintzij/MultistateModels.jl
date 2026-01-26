@@ -64,9 +64,18 @@ end
     compute_intervals_from_path!(ws::TVCIntervalWorkspace, path::SamplePath, subject_covar::SubjectCovarCache)
 
 Workspace-based version that minimizes allocations for repeated calls.
+
+Returns an empty vector if the path has fewer than 2 time points (no transitions).
 """
 function compute_intervals_from_path!(ws::TVCIntervalWorkspace, path::SamplePath, subject_covar::SubjectCovarCache)
-    n_transitions = length(path.times) - 1
+    n_times = length(path.times)
+    
+    # Guard against empty or single-point paths (no transitions to compute)
+    if n_times < 2
+        return LightweightInterval[]
+    end
+    
+    n_transitions = n_times - 1
     
     if isempty(subject_covar.covar_data) || nrow(subject_covar.covar_data) <= 1
         # No time-varying covariates - use path times directly

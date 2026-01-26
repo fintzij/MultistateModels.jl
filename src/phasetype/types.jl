@@ -22,17 +22,17 @@ Configuration for MCEM path proposals.
 
 # Fields
 - `type::Symbol`: `:markov` (default) or `:phasetype`
-- `n_phases::Union{Symbol,Int,Dict{Int,Int}}`: `:auto` (BIC), `:heuristic`, `Int`, or `Dict`
+- `n_phases::Union{Symbol,Int,Dict{Int,Int}}`: `:heuristic` (default), `Int`, or `Dict`
 - `structure::Symbol`: `:sctp` (default), `:sctp_increasing`, `:sctp_decreasing`, or `:unstructured`
-- `max_phases::Int`: Max for BIC selection (default: 5)
+- `max_phases::Int`: Max phases (default: 5)
 - `optimize::Bool`: Optimize surrogate params (default: true)
 - `parameters`: Manual override (default: nothing)
 - `constraints`: Optimization constraints (default: nothing)
 
 # Example
 ```julia
-# Default uses SCTP constraint
-fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=:auto))
+# Default uses SCTP constraint with heuristic phase selection
+fit(model; proposal=ProposalConfig(type=:phasetype, n_phases=:heuristic))
 fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3)))
 
 # With increasing eigenvalue ordering (late exits more likely)
@@ -111,13 +111,13 @@ fit(model; proposal=MarkovProposal(optimize=false, parameters=my_params))
 MarkovProposal(; kwargs...) = ProposalConfig(type=:markov; kwargs...)
 
 """
-    PhaseTypeProposal(; n_phases=:auto, max_phases=5, kwargs...)
+    PhaseTypeProposal(; n_phases=:heuristic, max_phases=5, kwargs...)
 
 Convenience constructor for phase-type proposal configuration.
 
 # Arguments
-- `n_phases`: `:auto` (BIC), `:heuristic`, `Int`, or `Dict{Int,Int}`
-- `max_phases`: Max for BIC selection (default: 5)
+- `n_phases`: `:heuristic` (default), `Int`, or `Dict{Int,Int}`
+- `max_phases`: Max phases (default: 5)
 - `optimize`, `parameters`, `constraints`: See `ProposalConfig`
 
 # Example
@@ -125,7 +125,7 @@ Convenience constructor for phase-type proposal configuration.
 fit(model; proposal=PhaseTypeProposal(n_phases=Dict(1 => 3, 2 => 2)))
 ```
 """
-PhaseTypeProposal(; n_phases::Union{Symbol, Int, Dict{Int,Int}} = :auto, kwargs...) = 
+PhaseTypeProposal(; n_phases::Union{Symbol, Int, Dict{Int,Int}} = :heuristic, kwargs...) = 
     ProposalConfig(type=:phasetype, n_phases=n_phases; kwargs...)
 
 """

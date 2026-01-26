@@ -47,6 +47,28 @@ or more samples may be needed.
 """
 const PARETO_K_THRESHOLD = 0.7
 
+"""
+Large fallback value for optimization criterion when numerical failures occur.
+
+Used in smoothing parameter selection to indicate failed computations (e.g.,
+Cholesky factorization failed, linear solve failed). The optimizer will avoid
+regions with this criterion value.
+
+Note: Returned as `T(CRITERION_FAILURE_VALUE)` to preserve AD type information.
+"""
+const CRITERION_FAILURE_VALUE = 1e10
+
+"""
+Large negative value for log-likelihood when model is invalid.
+
+Used as a sentinel value to indicate that the likelihood computation encountered
+an invalid configuration (e.g., zero probability paths, numerical underflow).
+The optimizer will move away from such regions.
+
+Note: Returned as `T(LOGLIK_FAILURE_VALUE)` to preserve AD type information.
+"""
+const LOGLIK_FAILURE_VALUE = -1e10
+
 # =============================================================================
 # Observation Type Conventions
 # =============================================================================

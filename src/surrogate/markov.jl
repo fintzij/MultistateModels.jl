@@ -270,11 +270,13 @@ function _fit_phasetype_surrogate(model;
         verbose = verbose)
     
     # Build phase-type configuration
-    # Note: n_phases = :auto is no longer supported here - use select_surrogate() instead
+    # Note: n_phases = :auto is no longer supported - use select_surrogate() instead
     if n_phases === :auto
-        @warn "n_phases=:auto is deprecated in _fit_phasetype_surrogate. Using :heuristic instead. " *
-              "For BIC-based selection, use select_surrogate() at model construction time." maxlog=1
-        n_phases = :heuristic
+        throw(ArgumentError(
+            "n_phases=:auto is no longer supported. Use n_phases=:heuristic for automatic " *
+            "phase selection, or specify n_phases as an Int or Dict{Int,Int}. " *
+            "For BIC-based selection, use select_surrogate() at model construction time."
+        ))
     end
     config = ProposalConfig(type = :phasetype, n_phases = n_phases)
     
@@ -359,12 +361,14 @@ function _build_phasetype_from_markov(model, markov_surrogate::MarkovSurrogate;
     transient_states = findall(.!is_absorbing)
     
     # Determine number of phases per state
-    # Note: n_phases = :auto is no longer supported here - use select_surrogate() instead
+    # Note: n_phases = :auto is no longer supported - use select_surrogate() instead
     n_phases = config.n_phases
     if n_phases === :auto
-        @warn "n_phases=:auto is deprecated in _build_phasetype_from_markov. Using :heuristic instead. " *
-              "For BIC-based selection, use select_surrogate() at model construction time." maxlog=1
-        n_phases = :heuristic
+        throw(ArgumentError(
+            "n_phases=:auto is no longer supported. Use n_phases=:heuristic for automatic " *
+            "phase selection, or specify n_phases as an Int or Dict{Int,Int}. " *
+            "For BIC-based selection, use select_surrogate() at model construction time."
+        ))
     end
     
     if n_phases === :heuristic
@@ -1074,7 +1078,7 @@ function _compute_phasetype_panel_loglik_ad(model::MultistateProcess,
             scale = sum(α_curr)
             if scale <= 0
                 # Return very negative log-likelihood to signal invalid model
-                return T(-1e10)
+                return T(LOGLIK_FAILURE_VALUE)
             end
             ll += log(scale)
             α_curr ./= scale

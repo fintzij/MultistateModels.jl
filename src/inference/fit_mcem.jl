@@ -128,7 +128,7 @@ Base.@kwdef struct MCEMConfig
     loo_method::Symbol = :direct
     
     # Penalty configuration
-    penalty::Any = :auto
+    penalty::Union{Symbol, Nothing, SplinePenalty, Vector{SplinePenalty}} = :auto
     lambda_init::Float64 = 1.0
 end
 
@@ -1080,7 +1080,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # For MCEM, model-based variance uses Louis's identity
     has_constraints_or_monotone = !isnothing(constraints) || any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
     
-    vcov, vcov_type_used, subject_grads = _compute_vcov_mcem(
+    vcov, vcov_type_used, subject_grads, vcov_model_base = _compute_vcov_mcem(
         params_cur, model, samplepaths, ImportanceWeights, vcov_type;
         vcov_threshold=vcov_threshold, loo_method=loo_method, converged=is_converged,
         has_constraints_or_monotone=has_constraints_or_monotone,
@@ -1180,7 +1180,8 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         # Compute final EDF 
         selection_data = MCEMSelectionData(model, samplepaths, ImportanceWeights)
         edf_total = compute_edf_mcem(params_cur, final_lambda, penalty_config, selection_data)
-        final_edf = (total = edf_total, per_term = [edf_total])  # TODO: per-hazard EDF breakdown
+        # Note: per-hazard EDF breakdown would require tracking penalty term contributions separately
+        final_edf = (total = edf_total, per_term = [edf_total])
         
         if verbose
             println("Final smoothing parameters: λ=$(round.(final_lambda, sigdigits=3))")
@@ -1205,6 +1206,7 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         logliks,
         vcov,
         vcov_type_used,  # Type of vcov that was computed
+        vcov_model_base,  # Model-based variance (H⁻¹) when IJ/JK requested
         subject_grads,
         model.hazards,
         model.totalhazards,
@@ -1251,7 +1253,7 @@ For MCEM, model-based variance uses Louis's identity to account for missing data
 - `verbose::Bool=true`: Print progress messages
 
 # Returns
-- `(vcov, vcov_type_used, subject_grads)`: Tuple with vcov matrix, actual type used, and gradients
+- `(vcov, vcov_type_used, subject_grads, vcov_model_base)`: Tuple with vcov matrix, actual type used, gradients, and model-based vcov
 """
 function _compute_vcov_mcem(params::AbstractVector, model::MultistateModel, 
                             samplepaths::Vector{Vector{SamplePath}},
@@ -1263,13 +1265,13 @@ function _compute_vcov_mcem(params::AbstractVector, model::MultistateModel,
     
     # Early return if no vcov requested
     if vcov_type == :none
-        return nothing, :none, nothing
+        return nothing, :none, nothing, nothing
     end
     
     # Skip vcov if not converged
     if !converged
         verbose && @warn "MCEM did not converge; skipping variance computation."
-        return nothing, :none, nothing
+        return nothing, :none, nothing, nothing
     end
     
     nparams = length(params)
@@ -1304,7 +1306,9 @@ function _compute_vcov_mcem(params::AbstractVector, model::MultistateModel,
         else
             vcov = isnothing(robust_result.jk_vcov) ? nothing : Matrix(robust_result.jk_vcov)
         end
-        return vcov, actual_vcov_type, robust_result.subject_gradients
+        # robust_result.vcov contains H⁻¹ (model-based variance)
+        vcov_model_base = isnothing(robust_result.vcov) ? nothing : Matrix(robust_result.vcov)
+        return vcov, actual_vcov_type, robust_result.subject_gradients, vcov_model_base
     end
     
     # Model-based variance using Louis's identity (only for unconstrained models)
@@ -1428,9 +1432,9 @@ function _compute_vcov_mcem(params::AbstractVector, model::MultistateModel,
         _clean_vcov_matrix!(vcov)
         vcov = Matrix(Symmetric(vcov))
         
-        return vcov, :model, nothing
+        return vcov, :model, nothing, nothing  # vcov_model_base is nothing when vcov_type is :model
     end
     
     # Shouldn't reach here
-    return nothing, :none, nothing
+    return nothing, :none, nothing, nothing
 end

@@ -636,14 +636,16 @@ Return the variance-covariance matrix at the maximum likelihood estimate.
 - `model::MultistateModelFitted`: fitted model
 - `type::Symbol=:auto`: Which variance type to return
   - `:auto` (default) - Returns the computed vcov (whatever type was specified at fit time)
-  - `:model`, `:ij`, `:jk` - Returns vcov only if it matches the computed type; otherwise warns and returns nothing
+  - `:model` - Returns model-based variance (H⁻¹). Available if vcov_type was :model, :ij, or :jk.
+  - `:ij` - Returns IJ variance. Computed on-the-fly if vcov_type was :model (requires subject_gradients).
+  - `:jk` - Returns JK variance. Computed on-the-fly if vcov_type was :model or :ij (requires subject_gradients).
 
 # Returns
 - `Matrix{Float64}`: p × p variance-covariance matrix, or `nothing` if not computed
 
 # Details
 
-The type of variance estimator is now determined at fit time via the `vcov_type` keyword argument:
+The primary variance estimator is determined at fit time via the `vcov_type` keyword argument:
 
 - `:ij` (default) - Infinitesimal jackknife / sandwich / robust variance (H⁻¹ K H⁻¹).
   Valid under model misspecification and works with constraints.
@@ -652,6 +654,10 @@ The type of variance estimator is now determined at fit time via the `vcov_type`
 - `:jk` - Jackknife variance with finite-sample correction. 
   Related to IJ by: Var_JK = ((n-1)/n) × Var_IJ.
 - `:none` - No variance computed.
+
+When fitting with `:ij` or `:jk`, the model-based variance (H⁻¹) is also stored, allowing
+retrieval via `get_vcov(fitted; type=:model)`. Additionally, IJ and JK can be computed
+on-the-fly from stored gradients if not directly computed.
 
 To check what type of variance was computed, examine `model.vcov_type`.
 
@@ -662,9 +668,10 @@ For parameters at active bounds/constraints, the corresponding variance elements
 
 # Example
 ```julia
-# Fit model with default IJ variance
-fitted = fit(model)  # vcov_type=:ij (default)
-se = sqrt.(diag(get_vcov(fitted)))
+# Fit model with IJ variance (default)
+fitted = fit(model)  # vcov_type=:ij
+se_ij = sqrt.(diag(get_vcov(fitted)))
+se_model = sqrt.(diag(get_vcov(fitted; type=:model)))  # Also available!
 
 # Fit with model-based variance (unconstrained models only)
 fitted_model = fit(model; vcov_type=:model)
@@ -677,16 +684,83 @@ println("Variance type: ", fitted.vcov_type)  # :ij, :model, :jk, or :none
 - [`get_subject_gradients`](@ref) - Get subject-level score vectors
 - [`get_pseudovalues`](@ref) - Get jackknife or IJ pseudo-values
 """
-function get_vcov(model::MultistateModelFitted)
-    if isnothing(model.vcov)
-        if model.vcov_type == :none
-            @warn "Variance was not computed (vcov_type=:none was specified at fit time)."
-        else
-            @warn "Variance-covariance matrix is not available. Model may not have converged or encountered numerical issues."
-        end
+function get_vcov(model::MultistateModelFitted; type::Symbol=:auto)
+    # Early return for no variance
+    if model.vcov_type == :none
+        @warn "Variance was not computed (vcov_type=:none was specified at fit time)."
         return nothing
     end
-    return model.vcov
+    
+    # Auto mode: return whatever was computed
+    if type == :auto
+        if isnothing(model.vcov)
+            @warn "Variance-covariance matrix is not available. Model may not have converged or encountered numerical issues."
+        end
+        return model.vcov
+    end
+    
+    # Requested type matches computed type
+    if type == model.vcov_type
+        return model.vcov
+    end
+    
+    # Requested :model variance
+    if type == :model
+        # If IJ or JK was computed, model-based (H⁻¹) is stored in vcov_model
+        if model.vcov_type in (:ij, :jk) && !isnothing(model.vcov_model)
+            return model.vcov_model
+        elseif model.vcov_type == :model
+            return model.vcov
+        else
+            @warn "Model-based variance (H⁻¹) is not available. Fit with vcov_type=:ij or :jk to get model-based variance."
+            return nothing
+        end
+    end
+    
+    # Requested :ij variance  
+    if type == :ij
+        # If model was computed, we need gradients to compute IJ
+        if model.vcov_type == :model && !isnothing(model.subject_gradients)
+            H_inv = model.vcov
+            J = model.subject_gradients * model.subject_gradients'
+            return Matrix(Symmetric(H_inv * J * H_inv))
+        elseif model.vcov_type == :ij
+            return model.vcov
+        elseif model.vcov_type == :jk && !isnothing(model.vcov_model) && !isnothing(model.subject_gradients)
+            # Compute IJ from stored H⁻¹ and gradients
+            H_inv = model.vcov_model
+            J = model.subject_gradients * model.subject_gradients'
+            return Matrix(Symmetric(H_inv * J * H_inv))
+        else
+            @warn "IJ variance cannot be computed. Subject gradients not available."
+            return nothing
+        end
+    end
+    
+    # Requested :jk variance
+    if type == :jk
+        nsubj = length(model.subjectindices)
+        
+        if model.vcov_type == :jk
+            return model.vcov
+        elseif model.vcov_type == :ij && !isnothing(model.vcov_model) && !isnothing(model.subject_gradients)
+            # Compute JK from stored H⁻¹ and gradients
+            H_inv = model.vcov_model
+            deltas = H_inv * model.subject_gradients
+            return Matrix(Symmetric(((nsubj - 1) / nsubj) * (deltas * deltas')))
+        elseif model.vcov_type == :model && !isnothing(model.subject_gradients)
+            # Compute JK from model vcov and gradients
+            H_inv = model.vcov
+            deltas = H_inv * model.subject_gradients
+            return Matrix(Symmetric(((nsubj - 1) / nsubj) * (deltas * deltas')))
+        else
+            @warn "JK variance cannot be computed. Required components not available."
+            return nothing
+        end
+    end
+    
+    # Unknown type
+    throw(ArgumentError("Unknown variance type: $type. Use :auto, :model, :ij, or :jk."))
 end
 
 """

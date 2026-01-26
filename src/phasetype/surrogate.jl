@@ -74,7 +74,7 @@ Construct a PhaseTypeSurrogate from transition matrix and configuration.
 # Arguments
 - `tmat::Matrix{Int64}`: Transition matrix (tmat[i,j] > 0 means i→j allowed)
 - `config::PhaseTypeConfig`: Phase count and structure specification
-- `data`: Required for `n_phases=:auto` (BIC selection)
+- `data`: Data for model context (optional)
 - `hazards`: Required for `n_phases=:heuristic`
 - `verbose::Bool`: Print selection results
 
@@ -83,8 +83,8 @@ Construct a PhaseTypeSurrogate from transition matrix and configuration.
 
 # Example
 ```julia
-config = PhaseTypeConfig(n_phases=:auto)
-surrogate = build_phasetype_surrogate(tmat, config; data=my_data)
+config = PhaseTypeConfig(n_phases=:heuristic)
+surrogate = build_phasetype_surrogate(tmat, config; hazards=my_hazards)
 ```
 
 See also: [`PhaseTypeConfig`](@ref), [`PhaseTypeSurrogate`](@ref)
@@ -95,20 +95,13 @@ function build_phasetype_surrogate(tmat::Matrix{Int64}, config::PhaseTypeConfig;
                                    verbose::Bool=true)
     n_states = size(tmat, 1)
     
-    # Handle :auto - deprecated, fall back to heuristic
+    # Handle :auto - no longer supported, throw error
     if config.n_phases === :auto
-        @warn "n_phases=:auto is deprecated in build_phasetype_surrogate. Using :heuristic instead. " *
-              "For BIC-based selection, use select_surrogate() at model construction time." maxlog=1
-        if isnothing(hazards)
-            throw(ArgumentError("hazards is required when n_phases=:auto (falling back to :heuristic)"))
-        end
-        n_phases_vec = _compute_default_n_phases(tmat, hazards)
-        n_phases = Dict{Int,Int}(i => n_phases_vec[i] for i in eachindex(n_phases_vec))
-        config = PhaseTypeConfig(n_phases=n_phases, constraints=config.constraints, 
-                                 max_phases=config.max_phases)
-        if verbose
-            println("Heuristic n_phases per state: $n_phases")
-        end
+        throw(ArgumentError(
+            "n_phases=:auto is no longer supported. Use n_phases=:heuristic for automatic " *
+            "phase selection, or specify n_phases as an Int or Dict{Int,Int}. " *
+            "For BIC-based selection, use select_surrogate() at model construction time."
+        ))
     # Handle :heuristic - use smart defaults based on hazard types
     elseif config.n_phases === :heuristic
         if isnothing(hazards)

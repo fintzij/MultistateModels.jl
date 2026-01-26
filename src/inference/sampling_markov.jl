@@ -269,7 +269,12 @@ function _update_ess_and_weights!(i::Int, samplepaths, loglik_surrog, loglik_tar
         psiw = try
             ParetoSmooth.psis(reshape(copy(_logImportanceWeights[i]), 1, length(_logImportanceWeights[i]), 1); source = "other")
         catch e
-            if e isa ArgumentError && occursin("all tail values are the same", string(e))
+            # Handle both direct ArgumentError and TaskFailedException wrapping ArgumentError
+            # The error message "all tail values are the same" indicates degenerate importance weights
+            # which is a recoverable condition
+            error_str = sprint(showerror, e)
+            is_tail_error = occursin("all tail values are the same", error_str)
+            if is_tail_error
                 @warn "PSIS failed for subject $i (degenerate tail); using uniform weights" maxlog=5
                 nothing
             else
@@ -550,7 +555,11 @@ function DrawSamplePaths!(i, model::MultistateProcess; ess_target, ess_cur, max_
                 psiw = try
                     ParetoSmooth.psis(reshape(copy(_logImportanceWeights[i]), 1, length(_logImportanceWeights[i]), 1); source = "other")
                 catch e
-                    if e isa ArgumentError && occursin("all tail values are the same", string(e))
+                    # Handle both direct ArgumentError and TaskFailedException wrapping ArgumentError
+                    # Use sprint(showerror, e) to get full error message including nested exceptions
+                    error_str = sprint(showerror, e)
+                    is_tail_error = occursin("all tail values are the same", error_str)
+                    if is_tail_error
                         # Fall back to uniform weights when tail is degenerate
                         @warn "PSIS failed for subject $i (degenerate tail); using uniform weights" maxlog=5
                         nothing
@@ -967,10 +976,30 @@ function _compute_ess_and_weights!(
     end
 
     if paretosmooth
-        psiw = psis(logweights; source = "other")
-        copyto!(ImportanceWeights[i], psiw.weights)
-        subj_ess[i] = psiw.ess[1]
-        subj_pareto_k[i] = psiw.pareto_k[1]
+        psiw = try
+            psis(logweights; source = "other")
+        catch e
+            # Handle both direct ArgumentError and TaskFailedException wrapping ArgumentError
+            # Use sprint(showerror, e) to get full error message including nested exceptions
+            error_str = sprint(showerror, e)
+            is_tail_error = occursin("all tail values are the same", error_str)
+            if is_tail_error
+                @warn "PSIS failed for subject $i (_update_subj_ess_importance_weights!); using uniform weights" maxlog=5
+                nothing
+            else
+                rethrow(e)
+            end
+        end
+        if isnothing(psiw)
+            # PSIS failed, use uniform weights
+            fill!(ImportanceWeights[i], 1/length(ImportanceWeights[i]))
+            subj_ess[i] = length(samplepaths[i])
+            subj_pareto_k[i] = Inf
+        else
+            copyto!(ImportanceWeights[i], psiw.weights)
+            subj_ess[i] = psiw.ess[1]
+            subj_pareto_k[i] = psiw.pareto_k[1]
+        end
     else
         weights_raw = exp.(vec(logweights))
         copyto!(ImportanceWeights[i], normalize(weights_raw, 1))
@@ -1607,7 +1636,11 @@ function ComputeImportanceWeightsESS!(loglik_target, loglik_surrog, _logImportan
                 psiw = try
                     ParetoSmooth.psis(reshape(copy(_logImportanceWeights[i]), 1, length(_logImportanceWeights[i]), 1); source = "other")
                 catch e
-                    if e isa ArgumentError && occursin("all tail values are the same", string(e))
+                    # Handle both direct ArgumentError and TaskFailedException wrapping ArgumentError
+                    # Use sprint(showerror, e) to get full error message including nested exceptions
+                    error_str = sprint(showerror, e)
+                    is_tail_error = occursin("all tail values are the same", error_str)
+                    if is_tail_error
                         # Fall back to uniform weights when tail is degenerate
                         @warn "PSIS failed for subject $i in ComputeImportanceWeightsESS! (degenerate tail); using uniform weights" maxlog=5
                         nothing
