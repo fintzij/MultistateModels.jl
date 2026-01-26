@@ -44,6 +44,7 @@ function _nested_optimization_pijcv(
     inner_maxiter::Int = 50,
     outer_maxiter::Int = 100,
     lambda_tol::Float64 = 1e-3,
+    lambda_init::Union{Nothing, Vector{Float64}} = nothing,  # Warm-start for λ (skips EFS)
     verbose::Bool = false
 )
     # Get bounds and setup
@@ -140,24 +141,34 @@ function _nested_optimization_pijcv(
         return V
     end
     
-    # Bounds for log(λ) ∈ [-8, 8] corresponds to λ ∈ [0.00034, 2981]
-    log_lb = fill(-8.0, n_lambda)
-    log_ub = fill(8.0, n_lambda)
+    # Adaptive bounds for log(λ) based on sample size
+    log_lb_scalar, log_ub_scalar = compute_lambda_bounds(n_subjects, n_params)
+    log_lb = fill(log_lb_scalar, n_lambda)
+    log_ub = fill(log_ub_scalar, n_lambda)
     
-    # OPTIMIZATION: Get EFS estimate as warmstart for faster PIJCV convergence
-    # EFS is ~6x faster and provides a good initial λ guess, reducing PIJCV iterations from ~70 to ~15
-    if verbose
-        println("  Getting EFS initial estimate for fast convergence...")
+    # Initialize λ: Use lambda_init if provided (warm-start), otherwise get EFS estimate
+    # Warm-starting with previous λ skips the expensive EFS computation (~3x speedup in α learning)
+    current_log_lambda = if !isnothing(lambda_init) && length(lambda_init) >= n_lambda
+        # Use provided warm-start (e.g., from previous alpha iteration)
+        if verbose
+            println("  Using provided λ warm-start (skipping EFS)")
+        end
+        log.(lambda_init[1:n_lambda])
+    else
+        # OPTIMIZATION: Get EFS estimate as warmstart for faster PIJCV convergence
+        # EFS is ~6x faster and provides a good initial λ guess, reducing PIJCV iterations from ~70 to ~15
+        if verbose
+            println("  Getting EFS initial estimate for fast convergence...")
+        end
+        efs_result = _nested_optimization_reml(model, data, penalty;
+                                               beta_init=beta_init,
+                                               inner_maxiter=inner_maxiter,
+                                               outer_maxiter=30,
+                                               lambda_tol=0.1,
+                                               verbose=false)
+        current_beta_ref[] = efs_result.warmstart_beta
+        log.(efs_result.lambda[1:n_lambda])
     end
-    efs_result = _nested_optimization_reml(model, data, penalty;
-                                           beta_init=beta_init,
-                                           inner_maxiter=inner_maxiter,
-                                           outer_maxiter=30,
-                                           lambda_tol=0.1,
-                                           verbose=false)
-    efs_log_lambda = log.(efs_result.lambda[1:n_lambda])
-    current_log_lambda = efs_log_lambda
-    current_beta_ref[] = efs_result.warmstart_beta
     
     # Use ForwardDiff for robust bounded optimization
     adtype = Optimization.AutoForwardDiff()
@@ -424,8 +435,10 @@ function _nested_optimization_criterion(
         return V
     end
     
-    log_lb = fill(-8.0, n_lambda)
-    log_ub = fill(8.0, n_lambda)
+    # Adaptive bounds for log(λ) based on sample size
+    log_lb_scalar, log_ub_scalar = compute_lambda_bounds(n_subjects, n_params)
+    log_lb = fill(log_lb_scalar, n_lambda)
+    log_ub = fill(log_ub_scalar, n_lambda)
     current_log_lambda = zeros(n_lambda)
     
     adtype = Optimization.AutoForwardDiff()

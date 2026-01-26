@@ -257,3 +257,50 @@ function extract_lambda_vector(config::PenaltyConfig)
     return lambdas
 end
 
+"""
+    compute_lambda_bounds(n_subjects::Int, n_params::Int) -> Tuple{Float64, Float64}
+
+Compute adaptive bounds for log(λ) based on data characteristics.
+
+The bounds are chosen so that:
+- Lower bound: λ_min gives negligible smoothing (effectively unpenalized)
+- Upper bound: λ_max gives heavy smoothing (approaching parametric limit)
+
+# Arguments
+- `n_subjects::Int`: Number of subjects in the data
+- `n_params::Int`: Number of spline coefficients (total across all hazards)
+
+# Returns
+- `(log_lb, log_ub)`: Bounds for log(λ) optimization
+
+# Rationale
+With normalized penalty matrices (max eigenvalue = max eigenvalue of uniform penalty),
+the scale of λ has consistent interpretation:
+- λ ≈ 1: roughly equal weight to data fit and smoothness
+- λ << 1: data fit dominates (wiggly)  
+- λ >> 1: smoothness dominates (flat)
+
+The bounds are set as:
+- log_lb = -10: λ_min ≈ 4.5e-5 (essentially no smoothing)
+- log_ub = log(n): λ_max scales with sample size
+
+This follows the intuition that with more data, more aggressive smoothing
+can be supported before overfitting. The upper bound scales with n rather
+than being fixed, avoiding the issue of hitting arbitrary boundaries.
+
+# Notes
+- These bounds are intentionally wide to avoid constraining the optimizer
+- The actual optimal λ is typically found well within these bounds
+- With normalized penalties, λ values are comparable across different weighting schemes
+"""
+function compute_lambda_bounds(n_subjects::Int, n_params::Int)
+    # Lower bound: very little smoothing (log(λ) = -10 → λ ≈ 4.5e-5)
+    log_lb = -10.0
+    
+    # Upper bound: scales with sample size
+    # log(n) provides natural scaling: more data → can support more smoothing
+    # Add buffer (+2) to ensure we never hit the boundary in practice
+    log_ub = log(n_subjects) + 2.0
+    
+    return (log_lb, log_ub)
+end

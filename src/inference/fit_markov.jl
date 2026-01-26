@@ -376,8 +376,8 @@ function _fit_markov_panel_penalized(
     outer_maxiter::Int = 100,
     lambda_tol::Float64 = 1e-3,
     penalty_specs::Union{Nothing, SplinePenalty, Vector{SplinePenalty}} = nothing,
-    alpha_maxiter::Int = 5,
-    alpha_tol::Float64 = 1e-2,
+    alpha_maxiter::Int = 3,  # Coarse tolerance is usually sufficient
+    alpha_tol::Float64 = 0.05,  # α rarely needs > 1 decimal precision
     kwargs...
 )
     # =========================================================================
@@ -527,13 +527,17 @@ function _fit_markov_panel_penalized(
             end
             
             # Re-select lambda with updated penalty if not NoSelection
+            # OPTIMIZATION: Warm-start λ from previous iteration (skips EFS, ~3x faster)
+            # Also use reduced outer_maxiter since λ typically changes little between α iterations
             if !(selector isa NoSelection) && alpha_iter < alpha_maxiter
+                previous_lambda = get_hyperparameters(final_penalty)
                 smoothing_result = _select_hyperparameters(
                     model, data, final_penalty, selector;
                     beta_init=warmstart_beta,
                     inner_maxiter=inner_maxiter,
-                    outer_maxiter=outer_maxiter,
+                    outer_maxiter=30,  # Reduced from default (λ is already close)
                     lambda_tol=lambda_tol,
+                    lambda_init=previous_lambda,  # Warm-start from previous iteration
                     verbose=false
                 )
                 final_penalty = smoothing_result.penalty

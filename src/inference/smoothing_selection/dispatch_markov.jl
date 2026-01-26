@@ -44,6 +44,7 @@ function _select_hyperparameters(
     inner_maxiter::Int = 50,
     outer_maxiter::Int = 100,
     lambda_tol::Float64 = 1e-3,
+    lambda_init::Union{Nothing, Vector{Float64}} = nothing,  # Warm-start for λ
     verbose::Bool = false
 )
     # NoSelection: return default λ with no optimization
@@ -73,6 +74,7 @@ function _select_hyperparameters(
             inner_maxiter=inner_maxiter,
             outer_maxiter=outer_maxiter,
             lambda_tol=lambda_tol,
+            lambda_init=lambda_init,
             verbose=verbose
         )
     end
@@ -196,6 +198,7 @@ function _nested_optimization_pijcv_markov(
     inner_maxiter::Int = 50,
     outer_maxiter::Int = 100,
     lambda_tol::Float64 = 1e-3,
+    lambda_init::Union{Nothing, Vector{Float64}} = nothing,  # Warm-start for λ
     verbose::Bool = false
 )
     # Get bounds and setup
@@ -283,10 +286,21 @@ function _nested_optimization_pijcv_markov(
         return V
     end
     
-    # Bounds for log(λ) ∈ [-8, 8] corresponds to λ ∈ [0.00034, 2981]
-    log_lb = fill(-8.0, n_lambda)
-    log_ub = fill(8.0, n_lambda)
-    current_log_lambda = zeros(n_lambda)  # Start at λ = 1
+    # Adaptive bounds for log(λ) based on sample size
+    log_lb_scalar, log_ub_scalar = compute_lambda_bounds(n_subjects, n_params)
+    log_lb = fill(log_lb_scalar, n_lambda)
+    log_ub = fill(log_ub_scalar, n_lambda)
+    
+    # Initialize λ: Use lambda_init if provided (warm-start), otherwise start at λ = 1
+    # Warm-starting with previous λ is crucial for α learning efficiency
+    current_log_lambda = if !isnothing(lambda_init) && length(lambda_init) >= n_lambda
+        if verbose
+            println("  Using provided λ warm-start")
+        end
+        log.(lambda_init[1:n_lambda])
+    else
+        zeros(n_lambda)  # Start at λ = 1
+    end
     
     # Use Ipopt with ForwardDiff for robust bounded optimization
     adtype = Optimization.AutoForwardDiff()
@@ -570,8 +584,10 @@ function _nested_optimization_criterion_markov(
         return V
     end
     
-    log_lb = fill(-8.0, n_lambda)
-    log_ub = fill(8.0, n_lambda)
+    # Adaptive bounds for log(λ) based on sample size
+    log_lb_scalar, log_ub_scalar = compute_lambda_bounds(n_subjects, n_params)
+    log_lb = fill(log_lb_scalar, n_lambda)
+    log_ub = fill(log_ub_scalar, n_lambda)
     current_log_lambda = zeros(n_lambda)
     
     adtype = Optimization.AutoForwardDiff()

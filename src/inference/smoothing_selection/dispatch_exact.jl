@@ -61,6 +61,7 @@ function _select_hyperparameters(
     inner_maxiter::Int = 50,
     outer_maxiter::Int = 100,
     lambda_tol::Float64 = 1e-3,
+    lambda_init::Union{Nothing, Vector{Float64}} = nothing,  # Warm-start for λ (skips EFS)
     verbose::Bool = false
 )
     # NoSelection: return default λ with no optimization
@@ -89,6 +90,7 @@ function _select_hyperparameters(
             inner_maxiter=inner_maxiter,
             outer_maxiter=outer_maxiter,
             lambda_tol=lambda_tol,
+            lambda_init=lambda_init,
             verbose=verbose
         )
     end

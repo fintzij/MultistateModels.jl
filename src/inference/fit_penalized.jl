@@ -58,8 +58,8 @@ return the final fitted model.
 - `lambda_init::Float64=1.0`: Initial λ for selection (if selector != NoSelection)
 - `penalty_specs::Union{Nothing, SplinePenalty, Vector{SplinePenalty}}=nothing`: 
   Original penalty specification (for alpha learning)
-- `alpha_maxiter::Int=5`: Maximum iterations for alpha learning
-- `alpha_tol::Float64=1e-2`: Convergence tolerance for alpha changes
+- `alpha_maxiter::Int=3`: Maximum iterations for alpha learning (coarse tolerance is usually sufficient)
+- `alpha_tol::Float64=0.05`: Convergence tolerance for alpha changes (α rarely needs > 1 decimal precision)
 
 # Returns
 - `MultistateModelFitted`: Fitted model with coefficients, variance, and λ selection info
@@ -82,8 +82,8 @@ function _fit_exact_penalized(
     inner_maxiter::Int = 100,
     lambda_init::Float64 = 1.0,
     penalty_specs::Union{Nothing, SplinePenalty, Vector{SplinePenalty}} = nothing,
-    alpha_maxiter::Int = 5,
-    alpha_tol::Float64 = 1e-2,
+    alpha_maxiter::Int = 3,  # Coarse tolerance is usually sufficient
+    alpha_tol::Float64 = 0.05,  # α rarely needs > 1 decimal precision
     kwargs...
 )
     # =========================================================================
@@ -244,15 +244,46 @@ function _fit_exact_penalized(
             end
             
             # Re-select lambda with updated penalty if not NoSelection
+            # OPTIMIZATION: Warm-start λ from previous iteration (skips EFS, ~3x faster)
+            # Also use reduced outer_maxiter since λ typically changes little between α iterations
             if !(selector isa NoSelection) && alpha_iter < alpha_maxiter
+                previous_lambda = get_hyperparameters(final_penalty)
                 smoothing_result = _select_hyperparameters(
                     model, data, final_penalty, selector;
                     beta_init=warmstart_beta,
                     inner_maxiter=inner_maxiter,
+                    outer_maxiter=30,  # Reduced from default (λ is already close)
+                    lambda_init=previous_lambda,  # Warm-start from previous iteration
                     verbose=false
                 )
                 final_penalty = smoothing_result.penalty
                 warmstart_beta = smoothing_result.warmstart_beta
+            end
+        end
+        
+        # CRITICAL: Final λ re-selection after α converges
+        # The within-loop λ re-selection only happens when alpha_iter < alpha_maxiter,
+        # so we need a final re-selection after α learning completes to ensure λ is
+        # optimized at the converged α values.
+        if !(selector isa NoSelection)
+            if verbose
+                println("Re-selecting λ at final α values...")
+            end
+            previous_lambda = get_hyperparameters(final_penalty)
+            smoothing_result = _select_hyperparameters(
+                model, data, final_penalty, selector;
+                beta_init=warmstart_beta,
+                inner_maxiter=inner_maxiter,
+                outer_maxiter=30,
+                lambda_init=previous_lambda,
+                verbose=false
+            )
+            final_penalty = smoothing_result.penalty
+            warmstart_beta = smoothing_result.warmstart_beta
+            
+            if verbose
+                final_lambda = get_hyperparameters(final_penalty)
+                println("Final λ at converged α: $(round.(final_lambda, digits=4))")
             end
         end
         

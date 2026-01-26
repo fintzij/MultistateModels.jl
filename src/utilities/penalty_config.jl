@@ -27,6 +27,11 @@ a weighted penalty matrix.
 
 # Returns
 - Penalty matrix (K × K), possibly transformed for monotone splines
+
+# Notes
+For at-risk weighted penalties, the matrix is normalized so that its maximum
+eigenvalue equals that of the corresponding uniform penalty. This ensures that
+the smoothing parameter λ has comparable interpretation across weighting schemes.
 """
 function _build_penalty_matrix_with_weighting(model::MultistateProcess, 
                                                hazard, 
@@ -44,8 +49,23 @@ function _build_penalty_matrix_with_weighting(model::MultistateProcess,
         transition = (hazard.statefrom, hazard.stateto)
         atrisk = compute_atrisk_interval_averages(model, hazard, transition)
         
-        # Build weighted penalty matrix
-        build_weighted_penalty_matrix(basis, order, weighting, atrisk)
+        # Build weighted penalty matrix (unnormalized)
+        S_weighted = build_weighted_penalty_matrix(basis, order, weighting, atrisk)
+        
+        # CRITICAL: Normalize so λ has comparable meaning to uniform penalty
+        # Without normalization, at-risk weighting can produce penalty matrices
+        # with eigenvalues ~500x smaller, causing λ selection to hit upper bounds.
+        # We scale so that max eigenvalue of weighted = max eigenvalue of uniform.
+        S_uniform = build_penalty_matrix(basis, order)
+        λ_max_uniform = maximum(eigvals(Symmetric(S_uniform)))
+        λ_max_weighted = maximum(eigvals(Symmetric(S_weighted)))
+        
+        if λ_max_weighted > 1e-14  # Avoid division by near-zero
+            scale_factor = λ_max_uniform / λ_max_weighted
+            S_weighted * scale_factor
+        else
+            S_weighted  # Degenerate case: penalty is essentially zero
+        end
     else
         throw(ArgumentError("Unsupported weighting type: $(typeof(weighting))"))
     end

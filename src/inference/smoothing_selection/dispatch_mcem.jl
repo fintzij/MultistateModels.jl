@@ -315,9 +315,10 @@ function _nested_optimization_pijcv_mcem(
         return V
     end
     
-    # Bounds for log(λ) ∈ [-8, 8] corresponds to λ ∈ [0.00034, 2981]
-    log_lb = fill(-8.0, n_lambda)
-    log_ub = fill(8.0, n_lambda)
+    # Adaptive bounds for log(λ) based on sample size
+    log_lb_scalar, log_ub_scalar = compute_lambda_bounds(n_subjects, n_params)
+    log_lb = fill(log_lb_scalar, n_lambda)
+    log_ub = fill(log_ub_scalar, n_lambda)
     current_log_lambda = zeros(n_lambda)  # Start at λ = 1
     
     # Use Brent's method for 1D or NelderMead for multi-D (gradient-free due to MC noise)
@@ -587,8 +588,10 @@ function _nested_optimization_criterion_mcem(
         return V
     end
     
-    log_lb = fill(-8.0, n_lambda)
-    log_ub = fill(8.0, n_lambda)
+    # Adaptive bounds for log(λ) based on sample size
+    log_lb_scalar, log_ub_scalar = compute_lambda_bounds(n_subjects, n_params)
+    log_lb = fill(log_lb_scalar, n_lambda)
+    log_ub = fill(log_ub_scalar, n_lambda)
     current_log_lambda = zeros(n_lambda)
     
     adtype = Optimization.AutoForwardDiff()

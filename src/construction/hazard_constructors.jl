@@ -219,9 +219,8 @@ function Hazard(
         
         monotone in (-1, 0, 1) || throw(ArgumentError("monotone must be -1 (decreasing), 0 (unconstrained), or 1 (increasing), got $monotone"))
         
-        # Validate knots if provided
-        if !isnothing(knots) && knots isa Vector{Float64}
-            length(knots) >= 1 || throw(ArgumentError("knots vector must contain at least 1 knot, got empty vector"))
+        # Validate knots if provided (empty vector is allowed - means boundary knots only)
+        if !isnothing(knots) && knots isa Vector{Float64} && !isempty(knots)
             issorted(knots) || throw(ArgumentError("knots must be in strictly increasing order. Got: $knots"))
             allunique(knots) || throw(ArgumentError("knots must be distinct (no duplicates). Got: $knots"))
         end

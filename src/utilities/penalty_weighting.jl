@@ -790,12 +790,22 @@ function learn_alpha(model::MultistateProcess,
         # Penalized Hessian: H + λS_w(α)
         H_pen = H + λ * S_w
         
-        # Log determinant term (use eigenvalues for numerical stability)
-        # Add small ridge for numerical stability
-        eigvals = eigen(Symmetric(H_pen)).values
-        # Replace near-zero eigenvalues with small positive value
-        eigvals_safe = max.(eigvals, 1e-10)
-        logdet_term = sum(log.(eigvals_safe))
+        # OPTIMIZATION: Use Cholesky for log-determinant (2x faster than eigendecomposition)
+        # log|A| = 2*sum(log(diag(L))) where A = LL'
+        # Fall back to eigenvalues only if Cholesky fails (non-positive-definite)
+        logdet_term = try
+            C = cholesky(Symmetric(H_pen))
+            2.0 * sum(log.(diag(C.L)))
+        catch e
+            if e isa PosDefException || e isa LAPACKException
+                # Fall back to eigenvalues for non-PD case
+                eigvals = eigen(Symmetric(H_pen)).values
+                eigvals_safe = max.(eigvals, 1e-10)
+                sum(log.(eigvals_safe))
+            else
+                rethrow(e)
+            end
+        end
         
         # Quadratic penalty term
         quad_term = λ * dot(β_j, S_w * β_j)
@@ -1041,7 +1051,21 @@ function update_penalty_with_alpha(penalty::QuadraticPenalty,
     
     # Build new weighted penalty matrix
     weighting = AtRiskWeighting(alpha=alpha, learn=false)
-    S_bspline = build_weighted_penalty_matrix(basis, term.order, weighting, atrisk)
+    S_weighted = build_weighted_penalty_matrix(basis, term.order, weighting, atrisk)
+    
+    # CRITICAL: Normalize so λ has comparable meaning to uniform penalty
+    # Without normalization, at-risk weighting can produce penalty matrices
+    # with eigenvalues much smaller, causing λ selection to hit upper bounds.
+    S_uniform = build_penalty_matrix(basis, term.order)
+    λ_max_uniform = maximum(eigvals(Symmetric(S_uniform)))
+    λ_max_weighted = maximum(eigvals(Symmetric(S_weighted)))
+    
+    S_bspline = if λ_max_weighted > 1e-14
+        scale_factor = λ_max_uniform / λ_max_weighted
+        S_weighted * scale_factor
+    else
+        S_weighted  # Degenerate case: penalty is essentially zero
+    end
     
     # Transform for monotone splines if needed
     S_new = if hazard.monotone != 0

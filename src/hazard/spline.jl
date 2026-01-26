@@ -497,35 +497,47 @@ function default_nknots(n_observations::Integer)
 end
 
 """
-    default_nknots_penalized(n_observations::Integer)
+    default_nknots_penalized()
 
 Default number of interior knots for penalized (P-spline) estimation.
 
-Uses floor(n^(1/3)) following recommendations in the smoothing literature.
-For penalized splines, the penalty controls overfitting, so more knots are 
-acceptable (and often desirable) for flexibility. The key is having enough 
-knots to capture the underlying shape—the penalty prevents overfitting.
+Returns 9 interior knots, which divides the time axis into 10 intervals.
+Knots are placed at quantiles 0.1, 0.2, ..., 0.9 of the sojourn time distribution.
 
-For typical survival data sizes:
-- n = 100: 4 knots
-- n = 500: 7 knots
-- n = 1000: 10 knots
-- n = 10000: 21 knots
+For penalized splines, the smoothing penalty controls overfitting, so a fixed 
+number of well-placed knots is sufficient. The key is having enough knots to 
+capture the underlying shape—the penalty prevents overfitting regardless of 
+sample size.
 
-Bounded to [4, 40] knots: at least 4 for flexibility, at most 40 to avoid
-computational overhead.
+This fixed approach (rather than sample-size-dependent) follows the philosophy 
+that with penalization, the number of knots primarily needs to exceed the 
+complexity of the true function, not scale with data size.
 
 # References
 - Ruppert, D. (2002). "Selecting the number of knots for penalized splines."
   JCGS 11(4), 735-757.
-- Wood, S.N. (2017). "Generalized Additive Models: An Introduction with R."
-  2nd ed. Chapman & Hall/CRC, Chapter 5.
+- Eilers, P.H.C. & Marx, B.D. (1996). "Flexible smoothing with B-splines and penalties."
+  Statistical Science 11(2), 89-121.
 
-See also: [`default_nknots`](@ref)
+See also: [`default_nknots`](@ref), [`default_quantiles_penalized`](@ref)
 """
-function default_nknots_penalized(n_observations::Integer)
-    n_observations <= 0 && return 0
-    return clamp(floor(Int, n_observations^(1/3)), 4, 40)
+function default_nknots_penalized()
+    return 9
+end
+
+"""
+    default_quantiles_penalized()
+
+Default quantile levels for penalized spline knot placement.
+
+Returns `[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]`, placing 9 interior 
+knots at deciles of the sojourn time distribution. This divides the time axis 
+into 10 equal-probability intervals.
+
+See also: [`default_nknots_penalized`](@ref)
+"""
+function default_quantiles_penalized()
+    return collect(0.1:0.1:0.9)
 end
 
 # =============================================================================
