@@ -282,8 +282,11 @@ function select_smoothing_parameters(model::MultistateProcess, data::ExactData,
     ub = fill(8.0, n_lambda)
     current_log_lambda = zeros(n_lambda)  # Start at λ = 1
     
-    # Use Ipopt with ForwardDiff for robust bounded optimization
-    adtype = Optimization.AutoForwardDiff()
+    # Use Ipopt with SecondOrder ForwardDiff for robust bounded optimization
+    adtype = DifferentiationInterface.SecondOrder(
+        Optimization.AutoForwardDiff(), 
+        Optimization.AutoForwardDiff()
+    )
     optf = OptimizationFunction(ncv_criterion_with_nested_beta, adtype)
     prob = OptimizationProblem(optf, current_log_lambda, nothing; lb=lb, ub=ub)
     

@@ -1806,8 +1806,8 @@ function _nested_optimization_pijcv_implicit(
     # Solve with Fminbox L-BFGS
     sol = solve(prob, OptimizationOptimJL.Fminbox(OptimizationOptimJL.LBFGS());
                 maxiters=outer_maxiter,
-                f_tol=lambda_tol,
-                x_tol=lambda_tol)
+                f_reltol=lambda_tol,
+                x_abstol=lambda_tol)
     
     optimal_log_lambda = sol.u
     best_criterion = sol.objective
@@ -2054,8 +2054,8 @@ function _nested_optimization_pijcv_markov_implicit(
     # Solve with Fminbox L-BFGS
     sol = solve(prob, OptimizationOptimJL.Fminbox(OptimizationOptimJL.LBFGS());
                 maxiters=outer_maxiter,
-                f_tol=lambda_tol,
-                x_tol=lambda_tol)
+                f_reltol=lambda_tol,
+                x_abstol=lambda_tol)
     
     optimal_log_lambda = sol.u
     best_criterion = sol.objective
@@ -2290,8 +2290,8 @@ function _nested_optimization_pijcv_mcem_implicit(
     # Solve with Fminbox L-BFGS
     sol = solve(prob, OptimizationOptimJL.Fminbox(OptimizationOptimJL.LBFGS());
                 maxiters=outer_maxiter,
-                f_tol=lambda_tol,
-                x_tol=lambda_tol)
+                f_reltol=lambda_tol,
+                x_abstol=lambda_tol)
     
     optimal_log_lambda = sol.u
     best_criterion = sol.objective

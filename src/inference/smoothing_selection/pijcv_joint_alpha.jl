@@ -767,8 +767,11 @@ function run_joint_alpha_lambda_optimization(
         return compute_pijcv_criterion_joint(theta_vec, state)
     end
     
-    # Setup optimization
-    adtype = Optimization.AutoForwardDiff()
+    # Setup optimization with SecondOrder AD (IPNewton requires Hessians)
+    adtype = DifferentiationInterface.SecondOrder(
+        Optimization.AutoForwardDiff(), 
+        Optimization.AutoForwardDiff()
+    )
     optf = OptimizationFunction(criterion, adtype)
     prob = OptimizationProblem(optf, theta_init, nothing; lb=theta_lb, ub=theta_ub)
     

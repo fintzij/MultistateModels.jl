@@ -324,8 +324,11 @@ function _nested_optimization_pijcv_markov(
         zeros(n_lambda)  # Start at λ = 1
     end
     
-    # Use Ipopt with ForwardDiff for robust bounded optimization
-    adtype = Optimization.AutoForwardDiff()
+    # Use Ipopt with SecondOrder ForwardDiff for robust bounded optimization
+    adtype = DifferentiationInterface.SecondOrder(
+        Optimization.AutoForwardDiff(), 
+        Optimization.AutoForwardDiff()
+    )
     optf = OptimizationFunction(ncv_criterion_with_nested_beta, adtype)
     prob = OptimizationProblem(optf, current_log_lambda, nothing; lb=log_lb, ub=log_ub)
     
@@ -612,7 +615,10 @@ function _nested_optimization_criterion_markov(
     log_ub = fill(log_ub_scalar, n_lambda)
     current_log_lambda = zeros(n_lambda)
     
-    adtype = Optimization.AutoForwardDiff()
+    adtype = DifferentiationInterface.SecondOrder(
+        Optimization.AutoForwardDiff(), 
+        Optimization.AutoForwardDiff()
+    )
     optf = OptimizationFunction(criterion_with_nested_beta, adtype)
     prob = OptimizationProblem(optf, current_log_lambda, nothing; lb=log_lb, ub=log_ub)
     

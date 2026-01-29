@@ -343,8 +343,11 @@ function _nested_optimization_pijcv_mcem(
     current_log_lambda = zeros(n_lambda)  # Start at λ = 1
     
     # Use Brent's method for 1D or NelderMead for multi-D (gradient-free due to MC noise)
-    # But for consistency with Markov, use IPNewton with AutoForwardDiff
-    adtype = Optimization.AutoForwardDiff()
+    # But for consistency with Markov, use IPNewton with SecondOrder ForwardDiff
+    adtype = DifferentiationInterface.SecondOrder(
+        Optimization.AutoForwardDiff(), 
+        Optimization.AutoForwardDiff()
+    )
     optf = OptimizationFunction(ncv_criterion_with_nested_beta, adtype)
     prob = OptimizationProblem(optf, current_log_lambda, nothing; lb=log_lb, ub=log_ub)
     
@@ -615,7 +618,10 @@ function _nested_optimization_criterion_mcem(
     log_ub = fill(log_ub_scalar, n_lambda)
     current_log_lambda = zeros(n_lambda)
     
-    adtype = Optimization.AutoForwardDiff()
+    adtype = DifferentiationInterface.SecondOrder(
+        Optimization.AutoForwardDiff(), 
+        Optimization.AutoForwardDiff()
+    )
     optf = OptimizationFunction(criterion_with_nested_beta, adtype)
     prob = OptimizationProblem(optf, current_log_lambda, nothing; lb=log_lb, ub=log_ub)
     
