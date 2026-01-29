@@ -62,6 +62,8 @@ function _select_hyperparameters(
     outer_maxiter::Int = 100,
     lambda_tol::Float64 = 1e-3,
     lambda_init::Union{Nothing, Vector{Float64}} = nothing,  # Warm-start for λ (skips EFS)
+    alpha_info::Union{Nothing, Dict{Int, AlphaLearningInfo}} = nothing,  # For joint α optimization
+    alpha_groups::Union{Nothing, Vector{Vector{Int}}} = nothing,  # Groups of terms sharing α
     verbose::Bool = false
 )
     # NoSelection: return default λ with no optimization
@@ -84,6 +86,21 @@ function _select_hyperparameters(
     # PIJCVSelector: Newton-approximated CV (Wood 2024 NCV)
     if selector isa PIJCVSelector
         method = selector.nfolds == 0 ? :pijcv : Symbol("pijcv$(selector.nfolds)")
+        
+        # Dispatch to implicit differentiation version if requested
+        if selector.use_implicit_diff
+            return _nested_optimization_pijcv_implicit(
+                model, data, penalty, selector;
+                beta_init=beta_init,
+                inner_maxiter=inner_maxiter,
+                outer_maxiter=outer_maxiter,
+                lambda_tol=lambda_tol,
+                lambda_init=lambda_init,
+                verbose=verbose
+            )
+        end
+        
+        # Default: legacy nested AD
         return _nested_optimization_pijcv(
             model, data, penalty, selector;
             beta_init=beta_init,
@@ -91,6 +108,8 @@ function _select_hyperparameters(
             outer_maxiter=outer_maxiter,
             lambda_tol=lambda_tol,
             lambda_init=lambda_init,
+            alpha_info=alpha_info,
+            alpha_groups=alpha_groups,
             verbose=verbose
         )
     end
@@ -135,6 +154,125 @@ function _select_hyperparameters(
 end
 
 """
+    InnerOptimizationCache
+
+Reusable optimization cache for inner coefficient fitting.
+
+This avoids the 1.5 GB allocation overhead of recreating OptimizationFunction,
+OptimizationProblem, and AD infrastructure on each of ~59 inner fits during
+PIJCV λ selection.
+
+Also stores pre-built SubjectCovarCache and covariate names to avoid
+rebuilding them on every loglik_exact call (~2 MB per call at n=1000).
+
+# Usage
+```julia
+# Build once before the loop
+cache = build_inner_optimization_cache(model, data, penalty_config, beta_init; lb, ub)
+
+# Reuse in the loop  
+for λ in lambda_values
+    penalty = set_hyperparameters(penalty_config, λ)
+    beta = fit_inner_with_cache!(cache, penalty, current_beta; maxiter=50)
+end
+```
+"""
+struct InnerOptimizationCache
+    opt_cache::Any  # Optimization.jl cache (type too complex to specify)
+    penalty_ref::Ref{AbstractPenalty}  # Mutable reference to current penalty
+    subject_covars::Vector{SubjectCovarCache}  # Pre-built subject covariate caches
+    covar_names_per_hazard::Vector{Vector{Symbol}}  # Pre-computed covariate names
+end
+
+"""
+    build_inner_optimization_cache(model, data, penalty, beta_init; lb, ub) -> InnerOptimizationCache
+
+Build a reusable optimization cache for inner coefficient fitting.
+
+This should be called ONCE before the nested optimization loop. The cache
+is then reused via `fit_inner_with_cache!` for each λ trial.
+"""
+function build_inner_optimization_cache(
+    model::MultistateProcess,
+    data::ExactData,
+    penalty::AbstractPenalty,
+    beta_init::Vector{Float64};
+    lb::Vector{Float64},
+    ub::Vector{Float64}
+)
+    # Mutable reference to penalty (will be updated for each λ)
+    penalty_ref = Ref{AbstractPenalty}(penalty)
+    
+    # Pre-build subject covariate caches (avoids ~2 MB allocation per loglik_exact call)
+    subject_covars = build_subject_covar_cache(model)
+    
+    # Pre-compute covariate names per hazard
+    hazards = model.hazards
+    covar_names_per_hazard = [
+        hasfield(typeof(hazards[h]), :covar_names) ? 
+            hazards[h].covar_names : 
+            extract_covar_names(hazards[h].parnames)
+        for h in 1:length(hazards)
+    ]
+    
+    # Define penalized negative log-likelihood objective
+    # Captures penalty_ref and pre-built caches so we can update λ without rebuilding
+    function penalized_nll(β, p)
+        nll = loglik_exact(β, data; neg=true, 
+                          subject_covars=subject_covars,
+                          covar_names_per_hazard=covar_names_per_hazard)
+        pen = compute_penalty(β, penalty_ref[])
+        return nll + pen
+    end
+    
+    # Set up optimization with second-order AD
+    adtype = DifferentiationInterface.SecondOrder(
+        Optimization.AutoForwardDiff(), 
+        Optimization.AutoForwardDiff()
+    )
+    optf = OptimizationFunction(penalized_nll, adtype)
+    prob = OptimizationProblem(optf, beta_init, nothing; lb=lb, ub=ub)
+    
+    # Initialize cache (this is the expensive part - only done once!)
+    opt_cache = Optimization.init(prob, IpoptOptimizer(additional_options=Dict("sb" => "yes"));
+                                   maxiters=50,
+                                   tol=LAMBDA_SELECTION_INNER_TOL,
+                                   print_level=0,
+                                   honor_original_bounds="yes",
+                                   bound_relax_factor=IPOPT_BOUND_RELAX_FACTOR,
+                                   mu_strategy="adaptive")
+    
+    return InnerOptimizationCache(opt_cache, penalty_ref, subject_covars, covar_names_per_hazard)
+end
+
+"""
+    fit_inner_with_cache!(cache::InnerOptimizationCache, penalty, beta_init; maxiter) -> Vector{Float64}
+
+Fit coefficients using a pre-built optimization cache.
+
+This avoids the ~1.5 GB allocation overhead of creating new OptimizationFunction
+and OptimizationProblem on each call, plus ~2 MB per loglik_exact call from
+SubjectCovarCache rebuilding.
+"""
+function fit_inner_with_cache!(
+    cache::InnerOptimizationCache,
+    penalty::AbstractPenalty,
+    beta_init::Vector{Float64};
+    maxiter::Int = 50
+)
+    # Update penalty (λ changes, but objective function structure is the same)
+    cache.penalty_ref[] = penalty
+    
+    # Reinitialize with new starting point (avoids full cache rebuild)
+    Optimization.reinit!(cache.opt_cache; u0=beta_init)
+    
+    # Solve using existing cache
+    sol = Optimization.solve!(cache.opt_cache)
+    
+    return sol.u
+end
+
+"""
     _fit_inner_coefficients(model, data, penalty, beta_init; kwargs...) -> Vector{Float64}
 
 Inner loop coefficient fitting at fixed hyperparameters.
@@ -161,6 +299,8 @@ to the final fit (which uses `_fit_coefficients_at_fixed_hyperparameters`).
 - Uses Ipopt with ForwardDiff (HARD REQUIREMENT - no LBFGS, no finite differences)
 - Relaxed convergence tolerance compared to final fit
 - Returns just the coefficient vector, not an OptimizationSolution
+- For repeated calls (e.g., PIJCV), use `build_inner_optimization_cache` + 
+  `fit_inner_with_cache!` to avoid 1.5 GB allocation per call.
 """
 function _fit_inner_coefficients(
     model::MultistateProcess,
@@ -178,7 +318,7 @@ function _fit_inner_coefficients(
         return nll + pen
     end
     
-    # Set up optimization with second-order AD (required for Ipopt)
+    # Set up optimization with second-order AD
     adtype = DifferentiationInterface.SecondOrder(
         Optimization.AutoForwardDiff(), 
         Optimization.AutoForwardDiff()
@@ -186,7 +326,9 @@ function _fit_inner_coefficients(
     optf = OptimizationFunction(penalized_nll, adtype)
     prob = OptimizationProblem(optf, beta_init, nothing; lb=lb, ub=ub)
     
-    # Solve with Ipopt using relaxed tolerance for inner loop
+    # Solve with Ipopt (standard call for non-cached usage)
+    # NOTE: For repeated calls (PIJCV), use build_inner_optimization_cache + 
+    #       fit_inner_with_cache! which avoids 1.5 GB allocation per call
     sol = solve(prob, IpoptOptimizer(additional_options=Dict("sb" => "yes"));
                 maxiters=maxiter,
                 tol=LAMBDA_SELECTION_INNER_TOL,

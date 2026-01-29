@@ -23,24 +23,27 @@
 # =============================================================================
 
 """
-    loglik(parameters, data::SMPanelData; neg=true, use_sampling_weight=true)
+    loglik(parameters, data::SMPanelData; neg=true, use_sampling_weight=true, hazard_eval_ctx=nothing)
 
 Dispatch method for semi-Markov panel data. Calls `loglik_semi_markov`.
 
 See [`loglik_semi_markov`](@ref) for details.
 """
-loglik(parameters, data::SMPanelData; neg=true, use_sampling_weight=true) = 
-    loglik_semi_markov(parameters, data; neg=neg, use_sampling_weight=use_sampling_weight)
+loglik(parameters, data::SMPanelData; neg=true, use_sampling_weight=true, 
+       hazard_eval_ctx::Union{Nothing, HazardEvalContext}=nothing) = 
+    loglik_semi_markov(parameters, data; neg=neg, use_sampling_weight=use_sampling_weight,
+                       hazard_eval_ctx=hazard_eval_ctx)
 
 """
-    loglik!(parameters, logliks::Vector{}, data::SMPanelData)
+    loglik!(parameters, logliks::Vector{}, data::SMPanelData; hazard_eval_ctx=nothing)
 
 In-place dispatch method for semi-Markov panel data. Calls `loglik_semi_markov!`.
 
 See [`loglik_semi_markov!`](@ref) for details.
 """
-loglik!(parameters, logliks::Vector{}, data::SMPanelData) = 
-    loglik_semi_markov!(parameters, logliks, data)
+loglik!(parameters, logliks::Vector{}, data::SMPanelData;
+        hazard_eval_ctx::Union{Nothing, HazardEvalContext}=nothing) = 
+    loglik_semi_markov!(parameters, logliks, data; hazard_eval_ctx=hazard_eval_ctx)
 
 """
     loglik(parameters, data::MPanelData; neg=true, return_ll_subj=false)

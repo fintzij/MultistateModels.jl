@@ -301,9 +301,11 @@ optf = OptimizationFunction((p, d) -> loglik_exact_penalized(p, d, config), Auto
 See also: [`loglik_exact`](@ref), [`build_penalty_config`](@ref), [`compute_penalty`](@ref)
 """
 function loglik_exact_penalized(parameters, data::ExactData, penalty_config::PenaltyConfig;
-                                 neg::Bool=true, parallel::Bool=false)
+                                 neg::Bool=true, parallel::Bool=false,
+                                 hazard_eval_ctx::Union{Nothing, HazardEvalContext}=nothing)
     # Compute base log-likelihood (always as negative for consistency)
-    nll_base = loglik_exact(parameters, data; neg=true, return_ll_subj=false, parallel=parallel)
+    nll_base = loglik_exact(parameters, data; neg=true, return_ll_subj=false, parallel=parallel,
+                            hazard_eval_ctx=hazard_eval_ctx)
     
     # If no penalties, return base likelihood
     has_penalties(penalty_config) || return neg ? nll_base : -nll_base
@@ -345,7 +347,10 @@ the sequential path). Use parallel for objective evaluation during line search.
 - If `return_ll_subj=false`: Scalar (negative) log-likelihood
 - If `return_ll_subj=true`: Vector of per-path weighted log-likelihoods
 """
-function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false, parallel=false)
+function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=false, parallel=false,
+                      subject_covars::Union{Nothing, Vector{SubjectCovarCache}}=nothing,
+                      covar_names_per_hazard::Union{Nothing, Vector{Vector{Symbol}}}=nothing,
+                      hazard_eval_ctx::Union{Nothing, HazardEvalContext}=nothing)
     # Unflatten parameters to natural scale - preserves dual number types (AD-compatible)
     pars = unflatten_parameters(parameters, data.model)
     
@@ -357,24 +362,45 @@ function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=fals
     n_paths = length(data.paths)
     
     # Build subject covariate cache (this is type-stable, no parameters involved)
-    subject_covars = build_subject_covar_cache(data.model)
+    # Use pre-built cache if provided, then check HazardEvalContext, else build fresh
+    _subject_covars = if !isnothing(subject_covars)
+        subject_covars
+    elseif !isnothing(hazard_eval_ctx)
+        hazard_eval_ctx.subject_covars
+    else
+        build_subject_covar_cache(data.model)
+    end
     
     # Element type for AD compatibility (Float64 or Dual)
     T = eltype(parameters)
     
     # Get covariate names for each hazard (precomputed, doesn't depend on parameters)
-    covar_names_per_hazard = [
-        hasfield(typeof(hazards[h]), :covar_names) ? 
-            hazards[h].covar_names : 
-            extract_covar_names(hazards[h].parnames)
-        for h in 1:n_hazards
-    ]
+    # Use pre-computed names if provided, then check HazardEvalContext, else compute fresh
+    _covar_names_per_hazard = if !isnothing(covar_names_per_hazard)
+        covar_names_per_hazard
+    elseif !isnothing(hazard_eval_ctx)
+        hazard_eval_ctx.covar_names_per_hazard
+    else
+        [
+            hasfield(typeof(hazards[h]), :covar_names) ? 
+                hazards[h].covar_names : 
+                extract_covar_names(hazards[h].parnames)
+            for h in 1:n_hazards
+        ]
+    end
     
     # Check if any hazard uses time transform
     any_time_transform = any(h -> h.metadata.time_transform, hazards)
     
     # Subject weights (precomputed lookup for efficiency)
     subj_weights = data.model.SubjectWeights
+    
+    # Extract hazard caches for spline optimization (if context provided and not AD mode)
+    _hazard_caches = if !isnothing(hazard_eval_ctx) && !is_ad_mode(T)
+        hazard_eval_ctx.hazard_caches
+    else
+        nothing
+    end
     
     # Parallel vs sequential execution
     use_parallel = parallel && Threads.nthreads() > 1 && n_paths >= 10
@@ -388,7 +414,7 @@ function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=fals
             
             # Thread-local TimeTransformContext (avoid cache sharing)
             tt_context = if any_time_transform
-                sample_subj = subject_covars[path.subj]
+                sample_subj = _subject_covars[path.subj]
                 sample_df = isempty(sample_subj.covar_data) ? nothing : sample_subj.covar_data[1:1, :]
                 maybe_time_transform_context(pars, sample_df, hazards)
             else
@@ -397,15 +423,16 @@ function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=fals
             
             ll_array[path_idx] = _compute_path_loglik_fused(
                 path, pars, hazards, totalhazards, tmat,
-                subject_covars[path.subj], covar_names_per_hazard,
-                tt_context, T
+                _subject_covars[path.subj], _covar_names_per_hazard,
+                tt_context, T;
+                flat_pars=parameters, hazard_caches=_hazard_caches
             )
         end
     else
         # Sequential path: functional style for reverse-mode AD compatibility
         # Create TimeTransformContext once (shared across all paths)
         tt_context = if any_time_transform && !isempty(data.paths)
-            sample_subj = subject_covars[data.paths[1].subj]
+            sample_subj = _subject_covars[data.paths[1].subj]
             sample_df = isempty(sample_subj.covar_data) ? nothing : sample_subj.covar_data[1:1, :]
             maybe_time_transform_context(pars, sample_df, hazards)
         else
@@ -415,8 +442,9 @@ function loglik_exact(parameters, data::ExactData; neg=true, return_ll_subj=fals
         ll_paths = map(enumerate(data.paths)) do (path_idx, path)
             _compute_path_loglik_fused(
                 path, pars, hazards, totalhazards, tmat, 
-                subject_covars[path.subj], covar_names_per_hazard,
-                tt_context, T
+                _subject_covars[path.subj], _covar_names_per_hazard,
+                tt_context, T;
+                flat_pars=parameters, hazard_caches=_hazard_caches
             )
         end
         ll_array = collect(T, ll_paths)
@@ -434,7 +462,8 @@ end
 
 """
     _compute_path_loglik_fused(path, pars, hazards, totalhazards, tmat, 
-                                subj_cache, covar_names_per_hazard, tt_context, T)
+                                subj_cache, covar_names_per_hazard, tt_context, T;
+                                flat_pars=nothing, hazard_caches=nothing)
 
 Compute log-likelihood for a single path. Extracted for functional style (reverse-mode AD).
 
@@ -442,6 +471,14 @@ This function is the core likelihood computation shared by `loglik_exact` and `l
 It uses a path-centric approach that iterates over sojourn intervals in a sample path, 
 accumulating log-survival contributions (via `eval_cumhaz`) and transition hazard 
 contributions (via `eval_hazard`).
+
+# Optional Arguments for Spline Caching
+- `flat_pars`: Flat parameter vector (needed for spline cache key computation)
+- `hazard_caches`: Vector of HazardEvalCache (one per hazard) for spline caching
+
+When both are provided and the hazard is a RuntimeSplineHazard, uses the external
+HazardEvalCache system for type-stable spline evaluation, avoiding the Ref{Any}
+caches in spline closures.
 
 See also: `loglik_exact`, `loglik_semi_markov`, `eval_cumhaz`
 """
@@ -454,7 +491,9 @@ function _compute_path_loglik_fused(
     subj_cache::SubjectCovarCache, 
     covar_names_per_hazard::Vector{Vector{Symbol}},
     tt_context,
-    ::Type{T}
+    ::Type{T};
+    flat_pars::Union{Nothing, AbstractVector} = nothing,
+    hazard_caches::Union{Nothing, Vector{<:HazardEvalCache}} = nothing
 ) where T
     
     n_hazards = length(hazards)
@@ -470,6 +509,35 @@ function _compute_path_loglik_fused(
     # Pre-extract hazard parameters by index to avoid repeated NamedTuple lookups
     # This converts dynamic symbol lookup to static tuple indexing
     pars_indexed = values(pars)  # Convert NamedTuple to Tuple for indexed access
+    
+    # Determine if we can use spline caching
+    # Only use caching for Float64 (not AD mode) when caches are provided
+    use_spline_cache = !is_ad_mode(T) && hazard_caches !== nothing && flat_pars !== nothing
+    
+    # Pre-build spline objects for all spline hazards (if caching enabled)
+    # This is done once per path evaluation instead of per-interval
+    spline_objects = if use_spline_cache
+        # Build vector of (spline_ext, cumhaz_spline) tuples, nothing for non-spline hazards
+        map(1:n_hazards) do h
+            hazard = hazards[h]
+            if hazard isa RuntimeSplineHazard
+                cache = hazard_caches[h]
+                # Extract baseline parameters for this hazard from flat_pars
+                # Get parameter indices for this hazard
+                start_idx = 1
+                for k in 1:(h-1)
+                    start_idx += hazards[k].npar_total
+                end
+                end_idx = start_idx + hazard.npar_total - 1
+                hazard_flat_pars = flat_pars[start_idx:end_idx]
+                get_or_build_spline!(cache, hazard, hazard_flat_pars)
+            else
+                nothing
+            end
+        end
+    else
+        nothing
+    end
     
     # Check if we have time-varying covariates
     has_tvc = !isempty(subj_cache.covar_data) && nrow(subj_cache.covar_data) > 1
@@ -508,6 +576,9 @@ function _compute_path_loglik_fused(
                     # Check for AFT
                     is_aft = hazard.metadata.linpred_effect == :aft
                     
+                    # Check if we can use cached spline evaluation
+                    spline_cached = use_spline_cache && spline_objects[h] !== nothing
+                    
                     # Calculate effective time increment
                     # For PH, scale is 1.0, so effective time = clock time
                     # For AFT, scale = exp(-linpred)
@@ -526,20 +597,31 @@ function _compute_path_loglik_fused(
                         effective_times[h] = tau_end
                         
                         # Cumulative hazard using effective time
-                        cumhaz = eval_cumhaz(
-                            hazard, tau_start, tau_end, hazard_pars, covars;
-                            apply_transform = hazard.metadata.time_transform,
-                            cache_context = tt_context,
-                            hazard_slot = h,
-                            use_effective_time = true)
+                        cumhaz = if spline_cached
+                            spline_ext, cumhaz_spline = spline_objects[h]
+                            # For AFT with effective time, just evaluate baseline cumhaz
+                            _eval_cumhaz_with_extrap(spline_ext, cumhaz_spline, tau_start, tau_end)
+                        else
+                            eval_cumhaz(
+                                hazard, tau_start, tau_end, hazard_pars, covars;
+                                apply_transform = hazard.metadata.time_transform,
+                                cache_context = tt_context,
+                                hazard_slot = h,
+                                use_effective_time = true)
+                        end
                     else
                         # Standard PH evaluation (effective time = clock time)
-                        cumhaz = eval_cumhaz(
-                            hazard, lb, ub, hazard_pars, covars;
-                            apply_transform = hazard.metadata.time_transform,
-                            cache_context = tt_context,
-                            hazard_slot = h,
-                            use_effective_time = false)
+                        cumhaz = if spline_cached
+                            spline_ext, cumhaz_spline = spline_objects[h]
+                            eval_spline_cumhaz_cached(hazard, lb, ub, hazard_pars, covars, spline_ext, cumhaz_spline)
+                        else
+                            eval_cumhaz(
+                                hazard, lb, ub, hazard_pars, covars;
+                                apply_transform = hazard.metadata.time_transform,
+                                cache_context = tt_context,
+                                hazard_slot = h,
+                                use_effective_time = false)
+                        end
                     end
                     
                     ll -= cumhaz
@@ -558,24 +640,37 @@ function _compute_path_loglik_fused(
                     covars = extract_covariates_lightweight(subj_cache, 1, covar_names_per_hazard[trans_h])
                     
                     is_aft = hazard.metadata.linpred_effect == :aft
+                    spline_cached = use_spline_cache && spline_objects[trans_h] !== nothing
                     
                     if is_aft
                         # Use the effective time we just calculated
                         tau_end = effective_times[trans_h]
                         
-                        haz_value = eval_hazard(
-                            hazard, tau_end, hazard_pars, covars;
-                            apply_transform = hazard.metadata.time_transform,
-                            cache_context = tt_context,
-                            hazard_slot = trans_h,
-                            use_effective_time = true)
+                        haz_value = if spline_cached
+                            spline_ext, _ = spline_objects[trans_h]
+                            # For AFT with effective time, need h₀(τ) × exp(-β'x)
+                            linpred = hazard.has_covariates ? _linear_predictor(hazard_pars, covars, hazard) : 0.0
+                            spline_ext(tau_end) * exp(-linpred)
+                        else
+                            eval_hazard(
+                                hazard, tau_end, hazard_pars, covars;
+                                apply_transform = hazard.metadata.time_transform,
+                                cache_context = tt_context,
+                                hazard_slot = trans_h,
+                                use_effective_time = true)
+                        end
                     else
-                        haz_value = eval_hazard(
-                            hazard, ub, hazard_pars, covars;
-                            apply_transform = hazard.metadata.time_transform,
-                            cache_context = tt_context,
-                            hazard_slot = trans_h,
-                            use_effective_time = false)
+                        haz_value = if spline_cached
+                            spline_ext, _ = spline_objects[trans_h]
+                            eval_spline_hazard_cached(hazard, ub, hazard_pars, covars, spline_ext)
+                        else
+                            eval_hazard(
+                                hazard, ub, hazard_pars, covars;
+                                apply_transform = hazard.metadata.time_transform,
+                                cache_context = tt_context,
+                                hazard_slot = trans_h,
+                                use_effective_time = false)
+                        end
                     end
                     
                     ll += NaNMath.log(haz_value)
@@ -604,6 +699,7 @@ function _compute_path_loglik_fused(
                     covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[h])
                     
                     is_aft = hazard.metadata.linpred_effect == :aft
+                    spline_cached = use_spline_cache && spline_objects[h] !== nothing
                     
                     if is_aft
                         linpred = _linear_predictor(hazard_pars, covars, hazard)
@@ -614,19 +710,29 @@ function _compute_path_loglik_fused(
                         tau_end = tau_start + delta_tau
                         effective_times[h] = tau_end
                         
-                        cumhaz = eval_cumhaz(
-                            hazard, tau_start, tau_end, hazard_pars, covars;
-                            apply_transform = hazard.metadata.time_transform,
-                            cache_context = tt_context,
-                            hazard_slot = h,
-                            use_effective_time = true)
+                        cumhaz = if spline_cached
+                            spline_ext, cumhaz_spline = spline_objects[h]
+                            _eval_cumhaz_with_extrap(spline_ext, cumhaz_spline, tau_start, tau_end)
+                        else
+                            eval_cumhaz(
+                                hazard, tau_start, tau_end, hazard_pars, covars;
+                                apply_transform = hazard.metadata.time_transform,
+                                cache_context = tt_context,
+                                hazard_slot = h,
+                                use_effective_time = true)
+                        end
                     else
-                        cumhaz = eval_cumhaz(
-                            hazard, interval.lb, interval.ub, hazard_pars, covars;
-                            apply_transform = hazard.metadata.time_transform,
-                            cache_context = tt_context,
-                            hazard_slot = h,
-                            use_effective_time = false)
+                        cumhaz = if spline_cached
+                            spline_ext, cumhaz_spline = spline_objects[h]
+                            eval_spline_cumhaz_cached(hazard, interval.lb, interval.ub, hazard_pars, covars, spline_ext, cumhaz_spline)
+                        else
+                            eval_cumhaz(
+                                hazard, interval.lb, interval.ub, hazard_pars, covars;
+                                apply_transform = hazard.metadata.time_transform,
+                                cache_context = tt_context,
+                                hazard_slot = h,
+                                use_effective_time = false)
+                        end
                     end
                     
                     ll -= cumhaz
@@ -639,23 +745,35 @@ function _compute_path_loglik_fused(
                     covars = extract_covariates_lightweight(subj_cache, interval.covar_row_idx, covar_names_per_hazard[trans_h])
                     
                     is_aft = hazard.metadata.linpred_effect == :aft
+                    spline_cached = use_spline_cache && spline_objects[trans_h] !== nothing
                     
                     if is_aft
                         tau_end = effective_times[trans_h]
                         
-                        haz_value = eval_hazard(
-                            hazard, tau_end, hazard_pars, covars;
-                            apply_transform = hazard.metadata.time_transform,
-                            cache_context = tt_context,
-                            hazard_slot = trans_h,
-                            use_effective_time = true)
+                        haz_value = if spline_cached
+                            spline_ext, _ = spline_objects[trans_h]
+                            linpred = hazard.has_covariates ? _linear_predictor(hazard_pars, covars, hazard) : 0.0
+                            spline_ext(tau_end) * exp(-linpred)
+                        else
+                            eval_hazard(
+                                hazard, tau_end, hazard_pars, covars;
+                                apply_transform = hazard.metadata.time_transform,
+                                cache_context = tt_context,
+                                hazard_slot = trans_h,
+                                use_effective_time = true)
+                        end
                     else
-                        haz_value = eval_hazard(
-                            hazard, interval.ub, hazard_pars, covars;
-                            apply_transform = hazard.metadata.time_transform,
-                            cache_context = tt_context,
-                            hazard_slot = trans_h,
-                            use_effective_time = false)
+                        haz_value = if spline_cached
+                            spline_ext, _ = spline_objects[trans_h]
+                            eval_spline_hazard_cached(hazard, interval.ub, hazard_pars, covars, spline_ext)
+                        else
+                            eval_hazard(
+                                hazard, interval.ub, hazard_pars, covars;
+                                apply_transform = hazard.metadata.time_transform,
+                                cache_context = tt_context,
+                                hazard_slot = trans_h,
+                                use_effective_time = false)
+                        end
                     end
                     
                     ll += NaNMath.log(haz_value)
@@ -859,6 +977,10 @@ function build_pijcv_eval_cache(data::ExactData)
     # Check if any hazard uses time transform
     any_time_transform = any(h -> h.metadata.time_transform, hazards)
     
+    # NOTE: We intentionally do NOT include hazard_caches here.
+    # PIJCV evaluates with different LOO parameters for each subject,
+    # so spline caching would cause constant rebuilds (O(n²) cost).
+    
     return PIJCVEvaluationCache(
         subject_covars,
         covar_names_per_hazard,
@@ -917,12 +1039,177 @@ function loglik_subject_cached(parameters, cache::PIJCVEvaluationCache, subject_
         nothing
     end
     
+    # NOTE: We intentionally do NOT use spline caching here.
+    # PIJCV evaluates with different LOO parameters for each subject (beta + delta_i),
+    # so caching would cause constant rebuilds (n subjects × n criterion evals = O(n²) rebuilds).
+    # The uncached path is faster for PIJCV's access pattern.
+    
     # Compute single-path log-likelihood using pre-cached structures
     ll = _compute_path_loglik_fused(
         path, pars, cache.hazards, cache.totalhazards, cache.tmat,
         cache.subject_covars[path.subj], cache.covar_names_per_hazard,
         tt_context, T
+        # flat_pars and hazard_caches intentionally omitted for PIJCV
     )
     
     return ll * w
+end
+
+# =============================================================================
+# PIJCV Evaluation Cache for Markov Panel Data
+# =============================================================================
+
+"""
+    PIJCVEvaluationCacheMarkov
+
+Pre-built cache for efficient repeated subject-level likelihood evaluation
+for Markov panel data.
+
+# Fields  
+- `data::MPanelData`: Reference to Markov panel data
+- `model::MultistateProcess`: Model reference
+"""
+struct PIJCVEvaluationCacheMarkov
+    data::MPanelData
+    model::MultistateProcess
+end
+
+"""
+    build_pijcv_eval_cache(data::MPanelData) -> PIJCVEvaluationCacheMarkov
+
+Build cache for Markov panel data PIJCV evaluation.
+
+For Markov data, the cache is lightweight since `loglik_subject` already uses
+the efficient `loglik_markov` with `return_ll_subj=true`.
+"""
+function build_pijcv_eval_cache(data::MPanelData)
+    PIJCVEvaluationCacheMarkov(data, data.model)
+end
+
+"""
+    loglik_subject_cached(parameters, cache::PIJCVEvaluationCacheMarkov, subject_idx::Int)
+
+Compute single-subject log-likelihood for Markov panel data using cache.
+"""
+function loglik_subject_cached(parameters, cache::PIJCVEvaluationCacheMarkov, subject_idx::Int)
+    # Delegate to the standard loglik_subject for MPanelData
+    return loglik_subject(parameters, cache.data, subject_idx)
+end
+
+# =============================================================================
+# PIJCV Evaluation Cache for MCEM Data
+# =============================================================================
+
+"""
+    PIJCVEvaluationCacheMCEM
+
+Pre-built cache for efficient repeated subject-level likelihood evaluation
+for MCEM (importance-weighted) data.
+
+# Fields
+- `data::MCEMSelectionData`: Reference to MCEM data with paths and weights
+- `model::MultistateProcess`: Model reference
+- `subject_covars::Vector{SubjectCovarCache}`: Pre-built covariate caches
+- `covar_names_per_hazard::Vector{Vector{Symbol}}`: Covariate names per hazard
+- `any_time_transform::Bool`: Whether any hazard uses time transform
+"""
+struct PIJCVEvaluationCacheMCEM
+    data::MCEMSelectionData
+    model::MultistateProcess
+    subject_covars::Vector{SubjectCovarCache}
+    covar_names_per_hazard::Vector{Vector{Symbol}}
+    any_time_transform::Bool
+end
+
+"""
+    build_pijcv_eval_cache(data::MCEMSelectionData) -> PIJCVEvaluationCacheMCEM
+
+Build cache for MCEM data PIJCV evaluation.
+"""
+function build_pijcv_eval_cache(data::MCEMSelectionData)
+    model = data.model
+    hazards = model.hazards
+    n_hazards = length(hazards)
+    
+    # Build subject covariate caches
+    subject_covars = build_subject_covar_cache(model)
+    
+    # Pre-compute covariate names per hazard
+    covar_names_per_hazard = [
+        hasfield(typeof(hazards[h]), :covar_names) ? 
+            hazards[h].covar_names : 
+            extract_covar_names(hazards[h].parnames)
+        for h in 1:n_hazards
+    ]
+    
+    # Check if any hazard uses time transform
+    any_time_transform = any(h -> h.metadata.time_transform, hazards)
+    
+    return PIJCVEvaluationCacheMCEM(
+        data,
+        model,
+        subject_covars,
+        covar_names_per_hazard,
+        any_time_transform
+    )
+end
+
+"""
+    loglik_subject_cached(parameters, cache::PIJCVEvaluationCacheMCEM, subject_idx::Int)
+
+Compute single-subject importance-weighted log-likelihood for MCEM data using cache.
+"""
+function loglik_subject_cached(parameters, cache::PIJCVEvaluationCacheMCEM, subject_idx::Int)
+    model = cache.model
+    paths = cache.data.paths
+    weights = cache.data.weights
+    hazards = model.hazards
+    totalhazards = model.totalhazards
+    tmat = model.tmat
+    
+    # Unflatten parameters
+    pars = unflatten_parameters(parameters, model)
+    
+    # Element type for AD
+    T = eltype(parameters)
+    
+    # Get subject weight
+    subj_weight = model.SubjectWeights[subject_idx]
+    
+    # Accumulate importance-weighted log-likelihood over paths
+    ll_i = zero(T)
+    n_paths = length(paths[subject_idx])
+    
+    for j in 1:n_paths
+        path = paths[subject_idx][j]
+        w_j = weights[subject_idx][j]
+        
+        # Skip paths with zero/non-finite weight
+        if !isfinite(w_j) || w_j == 0
+            continue
+        end
+        
+        # Get covariate cache for this subject
+        subj_cache = cache.subject_covars[path.subj]
+        
+        # Create TimeTransformContext if needed
+        tt_context = if cache.any_time_transform
+            sample_df = isempty(subj_cache.covar_data) ? nothing : subj_cache.covar_data[1:1, :]
+            maybe_time_transform_context(pars, sample_df, hazards)
+        else
+            nothing
+        end
+        
+        # Compute path log-likelihood
+        ll_path = _compute_path_loglik_fused(
+            path, pars, hazards, totalhazards, tmat,
+            subj_cache, cache.covar_names_per_hazard,
+            tt_context, T
+        )
+        
+        # Accumulate with importance weight
+        ll_i += w_j * ll_path
+    end
+    
+    return ll_i * subj_weight
 end

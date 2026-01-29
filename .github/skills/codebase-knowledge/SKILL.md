@@ -8,7 +8,7 @@ applyTo: '**'
 
 **Read this skill file FIRST at the start of every session.** It provides the essential context needed to work effectively with this codebase.
 
-**Last Updated**: 2026-01-22  
+**Last Updated**: 2026-01-25  
 **Branch**: `penalized_splines` (active development)
 
 ---
@@ -396,6 +396,9 @@ julia --project=MultistateModelsTests -e 'include("MultistateModelsTests/longtes
 | Item #19 | 🔴 HIGH | `fit()` doesn't call `select_smoothing_parameters()` automatically | TODO |
 | Item #24 | 🟡 MED | Make splines penalized by default (API change) | TODO |
 | PT Identifiability | ✅ DONE | Implement covariate constraints, ordered SCTP, update defaults | Complete 2026-01-10 |
+| PIJCV Efficiency | ✅ DONE | PIJCVEvaluationCache, EFS warmstart, DiffResults optimization, covariate caching | Complete 2026-01-25 |
+| PIJCV Cholesky | 🟡 MED | Replace O(p³) eigendecomp with O(kp²) Cholesky downdate (Woodbury identity) | See handoff |
+| PIJCV BFGS Outer | 🟡 MED | Add BFGS outer optimizer option with gradient clamping for indefinite λ | See handoff |
 
 **See**: [scratch/CODEBASE_REFACTORING_GUIDE.md](scratch/CODEBASE_REFACTORING_GUIDE.md) for full details and implementation plan.
 
@@ -540,6 +543,7 @@ Before ending any session where code was modified:
 
 | Date | Author | Changes |
 |------|--------|---------|
+| 2026-01-25 | julia-statistician | **PIJCV Efficiency Optimization**: (1) Confirmed covariate caching working via `build_pijcv_eval_cache()` and `loglik_subject_cached()`. (2) Analyzed Wood (2024) NCV paper efficiency strategies: Cholesky downdate O(kp²) vs eigendecomp O(p³), BFGS outer with gradient clamping. (3) Created comprehensive handoff document at `scratch/PIJCV_EFFICIENCY_HANDOFF_2026-01-25.md` (468 lines) with math, pseudocode, and implementation plan. (4) Current status: PIJCV ~1.45x faster than CV10; target 3-5x. Remaining work: Cholesky downdate (Woodbury identity), BFGS outer optimizer option. |
 | 2026-01-22 | julia-statistician | **Item #27 COMPLETE**: Refactored variance-covariance estimation to unified `vcov_type` API. Removed redundant `ij_vcov`/`jk_vcov` fields from `MultistateModelFitted`. Single `vcov` field now controlled by `vcov_type::Symbol` kwarg (`:ij`, `:model`, `:jk`, `:none`). Default is `:ij` (IJ/sandwich variance). Updated `_fit_exact`, `_fit_markov_panel`, `_fit_mcem`, `MCEMConfig`. Simplified `get_vcov()` accessor (no `type` kwarg needed). Breaking change: old kwargs (`compute_vcov`, `compute_ij_vcov`, `compute_jk_vcov`) removed. All 2164 tests updated and passing. |
 | 2026-01-18 | julia-statistician | **Item #36 COMPLETE**: Fixed PhaseType surrogate likelihood dt=0 bug. Primary fix: `compute_forward_loglik` now uses raw hazards Q[i,j] instead of normalized probabilities P[i,j]=Q[i,j]/(-Q[i,i]) for instantaneous transitions (dt=0). The distinction: probabilities are for sampling (choosing destination), hazards are for likelihood (density contribution). Secondary fix: Added retry mechanism (up to 10 attempts) for paths with -Inf surrogate likelihood, with fallback to Markov proposal likelihood. Also fixed: TestFixtures.jl missing phasetype_surrogate arg, test_splines.jl shared knots expectation, fit_mcem.jl NaN/negative ASE guard. All 2129 unit tests pass. MCEM longtests: PhaseType proposal no longer produces -Inf/NaN issues. |
 | 2026-01-17 | julia-statistician | **Item #35 COMPLETE**: PhaseType surrogate likelihood for MCEM now uses Schur caching for efficient TPM computation at sampled transition times. Added `CachedSchurDecomposition` struct to `data_containers.jl`, `schur_cache` parameter to `convert_expanded_path_to_censored_data`, `schur_cache_ph` parameter to `DrawSamplePaths!`, and creation/passing in `fit_mcem.jl`. Verified via unit test (machine precision match with direct exp(Q*dt)). Performance benefit: O(n³) decomposition once per covariate combo, then faster TPM computation for each interval. Updated gotcha section with implementation details. |

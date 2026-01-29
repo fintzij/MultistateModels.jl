@@ -595,6 +595,14 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # For PhaseType: marginal likelihood via forward algorithm on expanded space
     NormConstantProposal = compute_normalizing_constant(model, infra)
 
+    # ==========================================================================
+    # Build hazard evaluation context for efficient caching
+    # ==========================================================================
+    # This context pre-builds subject covariate caches and covariate name mappings
+    # that would otherwise be rebuilt on every likelihood evaluation.
+    # During AD (Dual parameters), the context is ignored for correctness.
+    hazard_eval_ctx = build_hazard_eval_context(model)
+
     # draw sample paths until the target ess is reached 
     if verbose  println("Initializing sample paths ...\n") end
     
@@ -639,9 +647,10 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
 
     # generate optimization problem
     # If using penalty, wrap objective to include penalty term
+    # Capture hazard_eval_ctx in closures for caching support
     if use_penalty
-        # Create penalized objective that captures penalty_config
-        penalized_loglik = (params, data) -> loglik(params, data, penalty_config)
+        # Create penalized objective that captures penalty_config and hazard_eval_ctx
+        penalized_loglik = (params, data) -> loglik(params, data, penalty_config; hazard_eval_ctx=hazard_eval_ctx)
         if isnothing(constraints)
             optf = OptimizationFunction(penalized_loglik, Optimization.AutoForwardDiff())
             prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights); lb=lb, ub=ub)
@@ -651,10 +660,13 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         end
     else
         if isnothing(constraints)
-            optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff())
+            # Create unpenalized objective with hazard_eval_ctx
+            unpenalized_loglik = (params, data) -> loglik(params, data; hazard_eval_ctx=hazard_eval_ctx)
+            optf = OptimizationFunction(unpenalized_loglik, Optimization.AutoForwardDiff())
             prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights); lb=lb, ub=ub)
         else
-            optf = OptimizationFunction(loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
+            unpenalized_loglik = (params, data) -> loglik(params, data; hazard_eval_ctx=hazard_eval_ctx)
+            optf = OptimizationFunction(unpenalized_loglik, Optimization.AutoForwardDiff(), cons = consfun_semimarkov)
             prob = OptimizationProblem(optf, params_cur, SMPanelData(model, samplepaths, ImportanceWeights); lb=lb, ub=ub, lcons = constraints.lcons, ucons = constraints.ucons)
         end
     end
@@ -803,8 +815,8 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         
         # Update M-step problem with new penalty_config (if λ changed)
         if use_penalty
-            # Recreate penalized objective with updated penalty_config
-            penalized_loglik_updated = (params, data) -> loglik(params, data, penalty_config)
+            # Recreate penalized objective with updated penalty_config and hazard_eval_ctx
+            penalized_loglik_updated = (params, data) -> loglik(params, data, penalty_config; hazard_eval_ctx=hazard_eval_ctx)
             if isnothing(constraints)
                 optf_updated = OptimizationFunction(penalized_loglik_updated, Optimization.AutoForwardDiff())
                 prob = OptimizationProblem(optf_updated, warmstart_beta, mstep_data; lb=lb, ub=ub)
@@ -847,7 +859,8 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
 
         # calculate the log likelihoods for the proposed parameters on FULL pool
         # (needed for importance weight recalculation)
-        loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights))
+        loglik!(params_prop, loglik_target_prop, SMPanelData(model, samplepaths, ImportanceWeights);
+                hazard_eval_ctx=hazard_eval_ctx)
         
         # calculate the marginal log likelihood 
         # For SIR: use simple averages on subsampled paths

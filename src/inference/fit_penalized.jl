@@ -116,6 +116,14 @@ function _fit_exact_penalized(
     end
     
     # =========================================================================
+    # Build hazard evaluation context for efficient caching
+    # =========================================================================
+    # This context pre-builds subject covariate caches and covariate name mappings
+    # that would otherwise be rebuilt on every likelihood evaluation.
+    # During AD (Dual parameters), the context is ignored for correctness.
+    hazard_eval_ctx = build_hazard_eval_context(model)
+    
+    # =========================================================================
     # Check for alpha learning
     # =========================================================================
     do_alpha_learning = !isnothing(penalty_specs) && needs_alpha_learning(penalty_specs)
@@ -144,151 +152,55 @@ function _fit_exact_penalized(
     # =========================================================================
     # Hyperparameter selection (if selector is not NoSelection)
     # =========================================================================
+    # When alpha learning is needed, pass alpha_info to _select_hyperparameters
+    # for joint (λ, α) optimization (replaces the old alternating approach).
     smoothing_result = nothing
     final_penalty = penalty
     warmstart_beta = parameters  # Default: start from model parameters
     
     if !(selector isa NoSelection)
         if verbose
-            println("Selecting smoothing parameter(s) via $(typeof(selector))...")
+            if do_alpha_learning && !isempty(alpha_info)
+                println("Selecting smoothing parameter(s) and α via joint optimization...")
+            else
+                println("Selecting smoothing parameter(s) via $(typeof(selector))...")
+            end
         end
         
         # Call the dispatcher - returns HyperparameterSelectionResult, NOT a fitted model
+        # When alpha_info is provided, joint (λ, α) optimization is used automatically
         smoothing_result = _select_hyperparameters(
             model, data, final_penalty, selector;
             beta_init=parameters,
             inner_maxiter=inner_maxiter,
+            alpha_info=(do_alpha_learning && !isempty(alpha_info)) ? alpha_info : nothing,
+            alpha_groups=(do_alpha_learning && !isempty(alpha_groups)) ? alpha_groups : nothing,
             verbose=verbose
         )
         
         if verbose
             println("Selected λ: $(round.(smoothing_result.lambda, sigdigits=4))")
             println("Effective degrees of freedom: $(round(smoothing_result.edf.total, digits=2))")
+            # Report final α if joint optimization was used
+            if haskey(smoothing_result.diagnostics, :alpha)
+                println("Selected α: $(round.(smoothing_result.diagnostics.alpha, digits=3))")
+            end
         end
         
         # Update penalty with selected λ and get warmstart
         final_penalty = smoothing_result.penalty
         warmstart_beta = smoothing_result.warmstart_beta
-    end
-    
-    # =========================================================================
-    # Alpha learning iteration (if needed)
-    # =========================================================================
-    # When learn_alpha=true in SplinePenalty, we alternate between:
-    # 1. Fitting β and selecting λ at current α
-    # 2. Updating α via marginal likelihood maximization
-    # This typically converges in 3-5 iterations.
-    
-    if do_alpha_learning && !isempty(alpha_info)
-        if verbose
-            println("Learning adaptive penalty weighting parameters (α)...")
-        end
         
-        for alpha_iter in 1:alpha_maxiter
-            alpha_changed = false
-            max_alpha_change = 0.0
-            
-            # Fit beta at current penalty (with current alpha values)
-            if alpha_iter > 1
-                # Re-fit beta at updated penalty
-                warmstart_beta = _fit_inner_coefficients(
-                    model, data, final_penalty, warmstart_beta;
-                    lb=lb, ub=ub, maxiter=inner_maxiter
-                )
-            end
-            
-            # Update alpha for each group
+        # Update current_alphas if joint optimization was performed
+        if haskey(smoothing_result.diagnostics, :alpha)
+            alpha_vec = smoothing_result.diagnostics.alpha
+            alpha_idx = 0
             for group in alpha_groups
-                # Use first term's info for shared groups
-                term_idx = group[1]
-                info = alpha_info[term_idx]
-                old_alpha = current_alphas[term_idx]
-                
-                # Learn optimal alpha via marginal likelihood
-                new_alpha = learn_alpha(
-                    model, data, final_penalty, warmstart_beta,
-                    term_idx, info.hazard, info.atrisk;
-                    alpha_bounds=(0.0, 2.0), tol=alpha_tol
-                )
-                
-                # Update penalty matrix for all terms in group
-                for idx in group
-                    term_info = alpha_info[idx]
-                    final_penalty = update_penalty_with_alpha(
-                        final_penalty, model, idx, new_alpha,
-                        term_info.hazard, term_info.atrisk
-                    )
-                    current_alphas[idx] = new_alpha
-                end
-                
-                # Track convergence
-                alpha_change = abs(new_alpha - old_alpha)
-                max_alpha_change = max(max_alpha_change, alpha_change)
-                
-                if alpha_change > alpha_tol
-                    alpha_changed = true
-                end
-                
-                if verbose
-                    terms_str = length(group) > 1 ? "terms $(group)" : "term $(term_idx)"
-                    println("  Iter $alpha_iter: α=$( round(new_alpha, digits=4)) for $terms_str (Δα=$(round(alpha_change, digits=4)))")
+                alpha_idx += 1
+                for term_idx in group
+                    current_alphas[term_idx] = alpha_vec[alpha_idx]
                 end
             end
-            
-            # Check convergence
-            if !alpha_changed
-                if verbose
-                    println("Alpha learning converged after $alpha_iter iteration(s)")
-                end
-                break
-            end
-            
-            # Re-select lambda with updated penalty if not NoSelection
-            # OPTIMIZATION: Warm-start λ from previous iteration (skips EFS, ~3x faster)
-            # Also use reduced outer_maxiter since λ typically changes little between α iterations
-            if !(selector isa NoSelection) && alpha_iter < alpha_maxiter
-                previous_lambda = get_hyperparameters(final_penalty)
-                smoothing_result = _select_hyperparameters(
-                    model, data, final_penalty, selector;
-                    beta_init=warmstart_beta,
-                    inner_maxiter=inner_maxiter,
-                    outer_maxiter=30,  # Reduced from default (λ is already close)
-                    lambda_init=previous_lambda,  # Warm-start from previous iteration
-                    verbose=false
-                )
-                final_penalty = smoothing_result.penalty
-                warmstart_beta = smoothing_result.warmstart_beta
-            end
-        end
-        
-        # CRITICAL: Final λ re-selection after α converges
-        # The within-loop λ re-selection only happens when alpha_iter < alpha_maxiter,
-        # so we need a final re-selection after α learning completes to ensure λ is
-        # optimized at the converged α values.
-        if !(selector isa NoSelection)
-            if verbose
-                println("Re-selecting λ at final α values...")
-            end
-            previous_lambda = get_hyperparameters(final_penalty)
-            smoothing_result = _select_hyperparameters(
-                model, data, final_penalty, selector;
-                beta_init=warmstart_beta,
-                inner_maxiter=inner_maxiter,
-                outer_maxiter=30,
-                lambda_init=previous_lambda,
-                verbose=false
-            )
-            final_penalty = smoothing_result.penalty
-            warmstart_beta = smoothing_result.warmstart_beta
-            
-            if verbose
-                final_lambda = get_hyperparameters(final_penalty)
-                println("Final λ at converged α: $(round.(final_lambda, digits=4))")
-            end
-        end
-        
-        if verbose
-            println("Final α values: $(collect(values(current_alphas)))")
         end
     end
     
@@ -309,7 +221,8 @@ function _fit_exact_penalized(
         solver=solver, adtype=adtype,
         parallel=use_parallel, nthreads=nthreads,
         maxiter=500,  # Full convergence for final fit
-        verbose=verbose
+        verbose=verbose,
+        hazard_eval_ctx=hazard_eval_ctx
     )
     
     # =========================================================================
@@ -354,7 +267,7 @@ function _fit_exact_penalized(
     # =========================================================================
     
     # Compute subject-level likelihood at the estimate (always UNPENALIZED for model comparison)
-    ll_subj = loglik_exact(sol.u, data; return_ll_subj=true)
+    ll_subj = loglik_exact(sol.u, data; return_ll_subj=true, hazard_eval_ctx=hazard_eval_ctx)
     
     # Build parameters structure for fitted parameters
     params_nested = unflatten(model.parameters.reconstructor, sol.u)
@@ -439,6 +352,7 @@ a fake tuple or mock object.
 - `nthreads::Union{Nothing,Int}=nothing`: Number of threads
 - `maxiter::Int=500`: Maximum iterations
 - `verbose::Bool=false`: Print optimization progress
+- `hazard_eval_ctx::Union{Nothing, HazardEvalContext}=nothing`: Pre-built hazard evaluation context for caching
 
 # Returns
 - `OptimizationSolution`: REAL solution object from Ipopt optimization
@@ -460,12 +374,15 @@ function _fit_coefficients_at_fixed_hyperparameters(
     parallel::Bool = false,
     nthreads = nothing,
     maxiter::Int = 500,
-    verbose::Bool = false
+    verbose::Bool = false,
+    hazard_eval_ctx::Union{Nothing, HazardEvalContext} = nothing
 )
     # Build penalized likelihood function
+    # Capture hazard_eval_ctx in closure for caching support
     function penalized_nll(params, data)
         # Unpenalized negative log-likelihood
-        nll = loglik_exact(params, data; neg=true, parallel=parallel)
+        nll = loglik_exact(params, data; neg=true, parallel=parallel,
+                           hazard_eval_ctx=hazard_eval_ctx)
         # Add penalty
         pen = compute_penalty(params, penalty)
         return nll + pen

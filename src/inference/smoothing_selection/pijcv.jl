@@ -2,6 +2,97 @@
 # PIJCV and Cross-Validation Criterion Functions
 # =============================================================================
 
+# =============================================================================
+# LOO Conditioning Diagnostics
+# =============================================================================
+
+"""
+    check_loo_conditioning(H_loo::AbstractMatrix, subject_idx::Int;
+                          threshold::Float64 = LOO_CONDITIONING_THRESHOLD) -> (cond_number, is_ill_conditioned)
+
+Check conditioning of leave-one-out Hessian matrix H_{λ,-i}.
+
+When the condition number is large, it indicates that subject i is critical
+for identifying certain parameters — removing them makes the problem nearly
+singular. This typically happens when:
+1. Subject i is the only one informing a particular transition
+2. The penalty λS doesn't fully regularize the null space
+
+# Arguments
+- `H_loo`: The leave-one-out penalized Hessian H_λ - Hᵢ
+- `subject_idx`: Subject index (for diagnostic messages)
+- `threshold`: Condition number threshold for flagging issues
+
+# Returns
+- `cond_number::Float64`: Estimated condition number (using 1-norm)
+- `is_ill_conditioned::Bool`: Whether cond_number > threshold
+"""
+function check_loo_conditioning(H_loo::AbstractMatrix, subject_idx::Int;
+                                threshold::Float64 = LOO_CONDITIONING_THRESHOLD)
+    # Use 1-norm condition number (faster than 2-norm)
+    H_sym = Symmetric(H_loo)
+    cond_number = try
+        cond(H_sym, 1)
+    catch
+        # If cond fails, likely singular
+        Inf
+    end
+    
+    is_ill_conditioned = cond_number > threshold
+    return (cond_number, is_ill_conditioned)
+end
+
+"""
+    LOOConditioningReport
+
+Summary of LOO conditioning issues across all subjects.
+
+# Fields
+- `n_ill_conditioned::Int`: Number of subjects with ill-conditioned H_{λ,-i}
+- `ill_conditioned_subjects::Vector{Int}`: Indices of affected subjects (up to max)
+- `worst_cond_number::Float64`: Largest condition number observed
+- `worst_subject::Int`: Subject with worst conditioning
+"""
+struct LOOConditioningReport
+    n_ill_conditioned::Int
+    ill_conditioned_subjects::Vector{Int}
+    worst_cond_number::Float64
+    worst_subject::Int
+end
+
+"""
+    log_loo_conditioning_summary(report::LOOConditioningReport, n_subjects::Int; 
+                                  context::String = "NCV")
+
+Log a summary of LOO conditioning issues if any were detected.
+
+Only logs if there are ill-conditioned subjects. Uses @warn for the summary
+to ensure visibility without flooding the log.
+"""
+function log_loo_conditioning_summary(report::LOOConditioningReport, n_subjects::Int;
+                                       context::String = "NCV")
+    report.n_ill_conditioned == 0 && return
+    
+    pct = round(100 * report.n_ill_conditioned / n_subjects, digits=1)
+    
+    # Build message
+    msg = "$context: $(report.n_ill_conditioned) of $n_subjects subjects ($pct%) " *
+          "have ill-conditioned leave-one-out Hessians. " *
+          "Worst: subject $(report.worst_subject) with cond=$(round(report.worst_cond_number, sigdigits=3)). "
+    
+    if report.n_ill_conditioned <= MAX_LOO_CONDITIONING_WARNINGS
+        msg *= "Affected subjects: $(report.ill_conditioned_subjects). "
+    else
+        msg *= "First $(MAX_LOO_CONDITIONING_WARNINGS) affected: " *
+               "$(report.ill_conditioned_subjects[1:MAX_LOO_CONDITIONING_WARNINGS]). "
+    end
+    
+    msg *= "These subjects may be critical for identifying certain parameters. " *
+           "Consider: (1) increasing λ, (2) checking if transitions have sparse data."
+    
+    @warn msg
+end
+
 """
     compute_pijcv_criterion(log_lambda::Vector{Float64}, state::SmoothingSelectionState) -> Float64
 
@@ -44,7 +135,8 @@ only when the actual likelihood is non-finite (Wood 2024, Section 4.1).
 # References
 - Wood, S.N. (2024). "On Neighbourhood Cross Validation." arXiv:2404.16490v4
 """
-function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState) where T<:Real
+function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::SmoothingSelectionState;
+                                  check_conditioning::Bool = true) where T<:Real
     lambda = exp.(log_lambda)
     
     # Build penalized Hessian (penalty is quadratic: λ βᵀSβ)
@@ -94,11 +186,32 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
     V = zero(T)
     n_fallback = 0  # Track how many times we fall back to V_q
     
+    # Conditioning diagnostics (only in Float64 mode, not during AD)
+    ill_conditioned_subjects = Int[]
+    worst_cond = 0.0
+    worst_subject = 0
+    track_conditioning = check_conditioning && (T === Float64)
+    
     for i in 1:state.n_subjects
         # Get subject i's gradient and Hessian (of negative log-likelihood)
         # Convention: gᵢ = ∇Dᵢ = -∇ℓᵢ, Hᵢ = ∇²Dᵢ = -∇²ℓᵢ
         g_i = @view state.subject_grads[:, i]
         H_i = state.subject_hessians[i]
+        
+        # Compute H_loo for conditioning check and direct solve
+        H_lambda_loo = H_lambda - H_i
+        
+        # Check LOO conditioning (only on first evaluation or when requested)
+        if track_conditioning
+            cond_num, is_ill_cond = check_loo_conditioning(H_lambda_loo, i)
+            if is_ill_cond
+                push!(ill_conditioned_subjects, i)
+            end
+            if cond_num > worst_cond
+                worst_cond = cond_num
+                worst_subject = i
+            end
+        end
         
         # Solve for coefficient perturbation: Δ⁻ⁱ = H_{λ,-i}⁻¹ gᵢ
         delta_i = if use_cholesky_downdate && chol_fact !== nothing
@@ -111,7 +224,6 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
         if isnothing(delta_i)
             # Either Cholesky downdate failed or we're in AD mode
             # Use direct solve: (H_λ - H_i)⁻¹ g_i
-            H_lambda_loo = H_lambda - H_i
             H_loo_sym = Symmetric(H_lambda_loo)
             
             delta_i = try
@@ -146,6 +258,17 @@ function compute_pijcv_criterion(log_lambda::AbstractVector{T}, state::Smoothing
         end
         
         V += D_i
+    end
+    
+    # Log conditioning summary if issues were detected
+    if track_conditioning && !isempty(ill_conditioned_subjects)
+        report = LOOConditioningReport(
+            length(ill_conditioned_subjects),
+            ill_conditioned_subjects,
+            worst_cond,
+            worst_subject
+        )
+        log_loo_conditioning_summary(report, state.n_subjects; context="NCV criterion")
     end
     
     return V

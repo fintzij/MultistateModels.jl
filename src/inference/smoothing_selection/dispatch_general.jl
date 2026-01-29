@@ -45,8 +45,30 @@ function _nested_optimization_pijcv(
     outer_maxiter::Int = 100,
     lambda_tol::Float64 = 1e-3,
     lambda_init::Union{Nothing, Vector{Float64}} = nothing,  # Warm-start for λ (skips EFS)
+    alpha_info::Union{Nothing, Dict{Int, AlphaLearningInfo}} = nothing,  # For joint α optimization
+    alpha_groups::Union{Nothing, Vector{Vector{Int}}} = nothing,  # Groups of terms sharing α
     verbose::Bool = false
 )
+    # Check if joint (α, λ) optimization is needed
+    do_joint_alpha = !isnothing(alpha_info) && !isempty(alpha_info) && 
+                     !isnothing(alpha_groups) && !isempty(alpha_groups)
+    
+    if do_joint_alpha
+        # Use joint optimization
+        return _nested_optimization_pijcv_joint_alpha(
+            model, data, penalty, selector;
+            beta_init=beta_init,
+            inner_maxiter=inner_maxiter,
+            outer_maxiter=outer_maxiter,
+            lambda_tol=lambda_tol,
+            lambda_init=lambda_init,
+            alpha_info=alpha_info,
+            alpha_groups=alpha_groups,
+            verbose=verbose
+        )
+    end
+    
+    # Standard λ-only optimization (no alpha learning)
     # Get bounds and setup
     lb, ub = model.bounds.lb, model.bounds.ub
     n_lambda = n_hyperparameters(penalty)
@@ -82,6 +104,21 @@ function _nested_optimization_pijcv(
     # This is a PenaltyConfig (alias for QuadraticPenalty) which is compatible with existing code
     penalty_config = penalty isa QuadraticPenalty ? penalty : build_penalty_config(model, SplinePenalty())
     
+    # PIJCV OPTIMIZATION: Build evaluation cache ONCE before optimization loop
+    # This cache holds pre-computed SubjectCovarCache, covariate names, etc.
+    # Without this, build_pijcv_eval_cache was called ~59 times (once per criterion eval)
+    # causing massive memory allocations and 50-100x slowdown.
+    pijcv_cache = if !selector.use_quadratic
+        build_pijcv_eval_cache(data)
+    else
+        nothing  # Quadratic approximation V_q doesn't need the cache
+    end
+    
+    # INNER FIT OPTIMIZATION: Build reusable optimization cache ONCE
+    # This avoids ~1.5 GB allocation per inner fit call (59 calls = 90 GB!)
+    # by reusing OptimizationFunction, OptimizationProblem, and AD infrastructure
+    inner_opt_cache = build_inner_optimization_cache(model, data, penalty, beta_init; lb=lb, ub=ub)
+    
     # Define the NCV criterion function with nested β optimization
     function ncv_criterion_with_nested_beta(log_lambda_vec, _)
         # Extract Float64 values for the inner optimization
@@ -92,9 +129,9 @@ function _nested_optimization_pijcv(
         # Update penalty with current lambda for inner fit
         inner_penalty = set_hyperparameters(penalty, lambda_expanded)
         
-        # Inner optimization: fit β̂(λ) at this trial λ, warm-started from previous β̂
-        beta_at_lambda = _fit_inner_coefficients(model, data, inner_penalty, current_beta_ref[];
-                                                  lb=lb, ub=ub, maxiter=inner_maxiter)
+        # Inner optimization: fit β̂(λ) using REUSABLE cache (avoids 1.5 GB alloc per call)
+        beta_at_lambda = fit_inner_with_cache!(inner_opt_cache, inner_penalty, current_beta_ref[];
+                                                maxiter=inner_maxiter)
         
         # Update warm-start for next evaluation
         current_beta_ref[] = beta_at_lambda
@@ -110,6 +147,7 @@ function _nested_optimization_pijcv(
         H_unpenalized = sum(subject_hessians)
         
         # Create state for criterion evaluation at β̂(λ)
+        # Pass pre-built pijcv_cache to avoid rebuilding it 59x
         state = SmoothingSelectionState(
             copy(beta_at_lambda),
             H_unpenalized,
@@ -119,7 +157,8 @@ function _nested_optimization_pijcv(
             n_subjects,
             n_params,
             model,
-            data
+            data,
+            pijcv_cache  # Pre-built cache, or nothing for V_q mode
         )
         current_state_ref[] = state
         
@@ -170,19 +209,23 @@ function _nested_optimization_pijcv(
         log.(efs_result.lambda[1:n_lambda])
     end
     
-    # Use ForwardDiff for robust bounded optimization
+    # Use ForwardDiff for the outer λ optimization
+    # This is the LEGACY NON-IMPLICIT version: each V(λ) evaluation requires solving the inner
+    # β optimization, requiring nested AD. For better performance, use the implicit version
+    # (_nested_optimization_pijcv_implicit) which uses ImplicitDifferentiation.jl.
+    # NOTE: With use_implicit_diff=true (default), this code path is rarely taken.
     adtype = Optimization.AutoForwardDiff()
     optf = OptimizationFunction(ncv_criterion_with_nested_beta, adtype)
     prob = OptimizationProblem(optf, current_log_lambda, nothing; lb=log_lb, ub=log_ub)
     
-    # Solve with IPNewton (interior-point Newton with automatic Hessian via ForwardDiff)
+    # Solve with Fminbox L-BFGS (quasi-Newton with ForwardDiff gradients)
     if verbose
-        println("  Using IPNewton outer optimizer...")
+        println("  Using L-BFGS outer optimizer (ForwardDiff, nested AD)...")
     end
-    sol = solve(prob, OptimizationOptimJL.IPNewton();
+    sol = solve(prob, OptimizationOptimJL.Fminbox(OptimizationOptimJL.LBFGS());
                 maxiters=outer_maxiter,
-                abstol=lambda_tol,
-                reltol=lambda_tol)
+                f_tol=lambda_tol,
+                x_tol=lambda_tol)
     
     optimal_log_lambda = sol.u
     best_criterion = sol.objective
@@ -441,12 +484,18 @@ function _nested_optimization_criterion(
     log_ub = fill(log_ub_scalar, n_lambda)
     current_log_lambda = zeros(n_lambda)
     
+    # Use ForwardDiff for the outer λ optimization (nested AD through inner β fit)
+    # EFS/PERF are primarily used for warm-starts, so some overhead is acceptable.
+    # λ is low-dimensional (1-5 params), so ForwardDiff is efficient here.
     adtype = Optimization.AutoForwardDiff()
     optf = OptimizationFunction(criterion_with_nested_beta, adtype)
     prob = OptimizationProblem(optf, current_log_lambda, nothing; lb=log_lb, ub=log_ub)
     
-    sol = solve(prob, OptimizationOptimJL.IPNewton();
-                maxiters=outer_maxiter, abstol=lambda_tol, reltol=lambda_tol)
+    # Solve with Fminbox L-BFGS (quasi-Newton with ForwardDiff gradients)
+    sol = solve(prob, OptimizationOptimJL.Fminbox(OptimizationOptimJL.LBFGS());
+                maxiters=outer_maxiter,
+                f_tol=lambda_tol,
+                x_tol=lambda_tol)
     
     optimal_log_lambda = sol.u
     optimal_lambda = exp.(optimal_log_lambda)

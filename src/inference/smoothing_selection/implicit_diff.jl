@@ -30,6 +30,162 @@ using ImplicitDifferentiation: MatrixRepresentation, DirectLinearSolver
 using ADTypes: AutoForwardDiff
 
 # =============================================================================
+# Robust Linear Solve for Leave-One-Out Hessians
+# =============================================================================
+
+"""
+    solve_hloo(H_loo::AbstractMatrix, b::AbstractVector; 
+               damping_init::Float64=1e-8,
+               damping_max::Float64=1e-2,
+               verbose::Bool=false) -> Vector{Float64}
+
+Robustly solve H_loo * x = b for leave-one-out Hessian systems.
+
+Uses progressive damping with Cholesky factorization for efficiency and
+numerical stability. Falls back to general solver if Cholesky fails.
+
+# Algorithm
+1. Symmetrize H_loo (in case of numerical asymmetry)
+2. Try Cholesky with increasing damping: τ ∈ [0, 1e-8, 1e-7, 1e-6, 1e-2]
+3. If all fail, fall back to general `\\` solver
+4. If that fails too, return NaN vector
+
+# Arguments
+- `H_loo`: Leave-one-out Hessian matrix H_{λ,-i} = H_λ - Hᵢ
+- `b`: Right-hand side vector
+
+# Keyword Arguments
+- `damping_init::Float64=1e-8`: Initial damping value for Tikhonov regularization
+- `damping_max::Float64=1e-2`: Maximum damping before giving up on Cholesky
+- `verbose::Bool=false`: Print diagnostic messages
+
+# Returns
+Solution vector x, or vector of NaN if solve fails completely.
+
+# Notes
+- Damping adds τI to the matrix, improving conditioning: (H + τI)x = b
+- This is equivalent to Tikhonov regularization in the Newton step
+- The small damping values (1e-8 to 1e-2) have minimal effect on the solution
+  when the matrix is well-conditioned, but stabilize ill-conditioned cases
+"""
+function solve_hloo(H_loo::AbstractMatrix, b::AbstractVector;
+                    damping_init::Float64 = 1e-8,
+                    damping_max::Float64 = 1e-2,
+                    verbose::Bool = false)
+    n = length(b)
+    
+    # Symmetrize to handle numerical asymmetry
+    H_sym = Symmetric(0.5 * (H_loo + H_loo'))
+    
+    # Progressive damping schedule
+    damping_values = [0.0, damping_init, damping_init * 10, damping_init * 100, damping_max]
+    
+    for τ in damping_values
+        try
+            H_damped = τ > 0 ? H_sym + τ * I : H_sym
+            fact = cholesky(H_damped)
+            x = fact \ b
+            verbose && τ > 0 && @info "solve_hloo: used damping τ=$τ"
+            return x
+        catch e
+            # Continue to next damping value
+            continue
+        end
+    end
+    
+    # Fall back to general solver (handles indefinite matrices)
+    try
+        verbose && @warn "solve_hloo: Cholesky failed with all damping values, using general solver"
+        return H_sym \ b
+    catch e
+        verbose && @error "solve_hloo: All solvers failed" exception=e
+        return fill(NaN, n)
+    end
+end
+
+# =============================================================================
+# Barrier-Augmented LOO Solve (Phase 7)
+# =============================================================================
+
+"""
+    solve_hloo_barrier(H_loo, g, lb, beta; μ=1e-6) -> NamedTuple
+
+Compute barrier-augmented LOO Newton step that respects lower bounds.
+
+# Mathematical Formulation
+
+Instead of solving H⁻¹g directly (which may violate β ≥ L), we solve:
+
+    Δ = (H + μD⁻²)⁻¹ (g + μD⁻¹𝟙)
+
+where D = diag(β - L + √μ) is the regularized distance to lower bounds.
+
+This is equivalent to a single Newton step on the barrier-augmented problem:
+    min ½(β-β̂)ᵀH(β-β̂) + gᵀ(β-β̂) - μΣₖlog(βₖ - Lₖ)
+
+# Arguments
+- `H_loo`: Leave-one-out Hessian H_{λ,-i} (p × p matrix)
+- `g`: Subject gradient gᵢ (p-vector, loss convention: g = -∇ℓ)
+- `lb`: Lower bounds L (p-vector)
+- `beta`: Current parameter estimate β̂ (p-vector)
+
+# Keyword Arguments
+- `μ::Float64=1e-6`: Barrier strength. Offset is √μ ≈ 0.001.
+  At bound: Hessian contribution = μ/(√μ)² = 1 (well-scaled).
+  Interior: negligible when δ >> √μ.
+
+# Returns
+NamedTuple with fields:
+- `Δ`: Barrier-augmented Newton step (p-vector)
+- `d`: Regularized distances d = β - L + √μ (for gradient computation)
+- `D_inv`: 1/d element-wise
+- `D_inv_sq`: 1/d² element-wise  
+- `A_fact`: Factorization of augmented Hessian (for reuse in gradient)
+
+# Notes
+- Uses offset √μ (not ε=1e-10) so barrier Hessian is O(1) at bounds, not O(10^14)
+- For well-interior parameters (δ >> √μ), this matches solve_hloo to O(μ/δ²)
+- Near-boundary parameters get barrier push-back proportional to constraint tightness
+- Always returns finite values (no NaN from bound violations)
+
+# Reference
+Novel extension of Wood (2024) "On Neighbourhood Cross Validation" Section 4.1
+"""
+function solve_hloo_barrier(
+    H_loo::AbstractMatrix,
+    g::AbstractVector,
+    lb::AbstractVector,
+    beta::AbstractVector;
+    μ::Float64 = 1e-6
+)
+    n = length(beta)
+    
+    # Regularized distance to lower bounds: D = β - L + √μ
+    # Using √μ (not tiny ε) ensures barrier Hessian is O(1) at bounds
+    sqrt_μ = sqrt(μ)
+    d = beta .- lb .+ sqrt_μ
+    
+    # Barrier contributions
+    D_inv = 1.0 ./ d        # For gradient term: μD⁻¹𝟙
+    D_inv_sq = D_inv .^ 2   # For Hessian term: μD⁻²
+    
+    # Augmented system: (H + μD⁻²)Δ = g + μD⁻¹𝟙
+    H_augmented = Symmetric(0.5 * (H_loo + H_loo') + μ * Diagonal(D_inv_sq))
+    rhs = g .+ μ .* D_inv
+    
+    # Solve and return factorization for reuse in gradient computation
+    A_fact = try
+        cholesky(H_augmented)
+    catch
+        # Fall back to LU if not positive definite
+        lu(H_augmented)
+    end
+    Δ = A_fact \ rhs
+    
+    return (Δ=Δ, d=d, D_inv=D_inv, D_inv_sq=D_inv_sq, A_fact=A_fact)
+end
+
+# =============================================================================
 # Cache Structure for Implicit Differentiation
 # =============================================================================
 
@@ -179,8 +335,8 @@ function forward_beta_solve(ρ::AbstractVector, cache::ImplicitBetaCache)
     # Compute penalized Hessian at solution (for diagnostics/byproduct)
     H_lambda = _compute_penalized_hessian_at_beta(β_opt, λ, cache)
     
-    # Return β and byproduct
-    return β_opt, (H_lambda=H_lambda, lambda=λ)
+    # Return β and byproduct (including beta_float for KKT-aware conditions)
+    return β_opt, (beta_float=β_opt, H_lambda=H_lambda, lambda=λ)
 end
 
 """
@@ -263,23 +419,28 @@ function _fit_inner_coefficients_cached(
 end
 
 # =============================================================================
-# Conditions Function: Optimality
+# Conditions Function: Optimality (KKT-aware)
 # =============================================================================
 
 """
     beta_optimality_conditions(ρ, β, z, cache::ImplicitBetaCache) -> Vector
 
-Optimality conditions c(ρ, β) for the penalized problem.
+KKT-aware optimality conditions c(ρ, β) for the penalized problem.
 
-At the optimum β̂(ρ), these conditions are zero:
-    c(ρ, β) = ∇_β ℓ(β) - Σⱼ λⱼ Sⱼ β = 0
+For interior parameters, the standard first-order condition applies:
+    c_i(ρ, β) = ∇_β ℓ(β)_i - (Σⱼ λⱼ Sⱼ β)_i = 0
 
-where λⱼ = exp(ρⱼ).
+For parameters at active bounds, we use the constraint as the condition:
+    c_i(ρ, β) = β_i - lb_i  (if β_i ≈ lb_i)
+    c_i(ρ, β) = β_i - ub_i  (if β_i ≈ ub_i)
+
+This ensures ∂c_i/∂β_i = 1 and ∂c_i/∂ρ = 0 for active bounds, which via the
+implicit function theorem gives dβ̂_i/dρ = 0 as expected.
 
 # Arguments
 - `ρ`: Log-smoothing parameters (may contain Dual numbers for AD)
 - `β`: Coefficient vector (may contain Dual numbers for AD)
-- `z`: Byproduct from forward solve (ignored here)
+- `z`: Byproduct from forward solve (contains beta_float for bound detection)
 - `cache`: ImplicitBetaCache with model, data, penalty info
 
 # Returns
@@ -292,19 +453,36 @@ differentiate through it to compute the Jacobians ∂c/∂β and ∂c/∂ρ.
 function beta_optimality_conditions(ρ::AbstractVector, β::AbstractVector, z, cache::ImplicitBetaCache)
     # Convert ρ to λ (AD-compatible)
     λ = exp.(ρ)
+    n = length(β)
     
-    # Compute gradient of log-likelihood ∇_β ℓ(β)
-    # This must be AD-compatible
+    # Get Float64 β from byproduct for bound detection
+    β_float = z.beta_float
+    lb, ub = cache.lb, cache.ub
+    
+    # Compute unconstrained gradient conditions
     grad_ll = _compute_ll_gradient(β, cache)
-    
-    # Compute gradient of penalty: Σⱼ λⱼ Sⱼ β
     grad_penalty = _compute_penalty_gradient(β, λ, cache)
+    unconstrained_conditions = grad_ll - grad_penalty
     
-    # Optimality condition: ∇_β ℓ(β) - ∇_β penalty = 0
-    # We minimize -ℓ + penalty, so gradient is -∇ℓ + ∇penalty = 0
-    # Rearranged: ∇ℓ = ∇penalty
-    # Return ∇ℓ - ∇penalty (should be 0 at optimum)
-    return grad_ll - grad_penalty
+    # Build conditions with KKT-aware handling of active bounds
+    T = eltype(unconstrained_conditions)
+    conditions = similar(unconstrained_conditions)
+    
+    for i in 1:n
+        if β_float[i] - lb[i] < ACTIVE_BOUND_TOL
+            # Active at lower bound: condition is β_i - lb_i
+            # This gives ∂c/∂β_i = 1, ∂c/∂ρ = 0 → dβ̂_i/dρ = 0
+            conditions[i] = β[i] - lb[i]
+        elseif ub[i] - β_float[i] < ACTIVE_BOUND_TOL
+            # Active at upper bound: condition is β_i - ub_i
+            conditions[i] = β[i] - ub[i]
+        else
+            # Interior point: use standard first-order condition
+            conditions[i] = unconstrained_conditions[i]
+        end
+    end
+    
+    return conditions
 end
 
 """
@@ -835,7 +1013,19 @@ end
 
 
 # =============================================================================
-# Analytical Gradient for PIJCV Criterion (CORRECT Formula with Third Derivatives)
+# SIGN CONVENTIONS (see scratch/PIJCV_IMPLICIT_DIFF_HANDOFF_2026-01-27.md)
+# =============================================================================
+# subject_grads[:, i] = gᵢ = -∇ℓᵢ(β̂)     (loss gradient, NEGATIVE of loglik gradient)
+# subject_hessians[i] = Hᵢ = -∇²ℓᵢ(β̂)    (loss Hessian, NEGATIVE of loglik Hessian)
+# H_λ = Σⱼ Hⱼ + λS                        (penalized Hessian)
+# H_{-i} = H_λ - Hᵢ                       (leave-one-out Hessian)
+# δᵢ = H_{-i}⁻¹ gᵢ                        (Newton step)
+# β̃_{-i} = β̂ + δᵢ                        (pseudo-estimate, PLUS sign)
+# V = Σᵢ -ℓᵢ(β̃_{-i})                      (criterion to minimize)
+# =============================================================================
+
+# =============================================================================
+# Analytical Gradient for PIJCV Criterion
 # =============================================================================
 
 """
@@ -852,16 +1042,16 @@ The CORRECT PIJCV criterion (NCV, Wood 2024, Equation 2) is:
     V(ρ) = Σᵢ -ℓᵢ(β̃₋ᵢ)
 
 where:
-- β̃₋ᵢ = β̂ - Δ⁻ⁱ is the pseudo-estimate (one Newton step from β̂)
+- β̃₋ᵢ = β̂ + Δ⁻ⁱ is the pseudo-estimate (one Newton step from β̂ toward LOO optimum)
 - Δ⁻ⁱ = (H_λ - Hᵢ)⁻¹ gᵢ is the LOO step
-- gᵢ = -∇ℓᵢ(β̂) is the per-subject score at the full MLE
-- Hᵢ = -∇²ℓᵢ(β̂) is the per-subject Hessian at the full MLE
+- gᵢ = -∇ℓᵢ(β̂) is the per-subject LOSS gradient (negative of loglik gradient)
+- Hᵢ = -∇²ℓᵢ(β̂) is the per-subject LOSS Hessian (negative of loglik Hessian)
 
 ## CORRECT Gradient Formula (with third derivatives)
 
     dV/dρ = Σᵢ [-∇ℓᵢ(β̃₋ᵢ)ᵀ · dβ̃₋ᵢ/dρ]
 
-where dβ̃₋ᵢ/dρ = dβ̂/dρ - dΔ⁻ⁱ/dρ and the chain rule gives:
+where dβ̃₋ᵢ/dρ = dβ̂/dρ + dΔ⁻ⁱ/dρ (PLUS sign!) and the chain rule gives:
 
     dΔ⁻ⁱ/dρ = H_loo⁻¹ · [dgᵢ/dρ - dH_loo/dρ · Δ⁻ⁱ]
 
@@ -900,8 +1090,9 @@ function compute_pijcv_with_gradient(
     subject_grads::Matrix{Float64},
     subject_hessians::Vector{<:Matrix{Float64}},
     H_unpenalized::Matrix{Float64},
-    dbeta_drho::Vector{Float64},
-    subject_third_derivatives::Union{Nothing, Vector{Array{Float64,3}}} = nothing
+    dbeta_drho::AbstractMatrix{Float64},  # (n_params × n_lambda) matrix
+    subject_third_derivatives::Union{Nothing, Vector{Array{Float64,3}}} = nothing,
+    check_conditioning::Bool = false  # Disabled by default for performance during optimization
 )
     lambda = exp.(log_lambda)
     n_lambda = length(lambda)
@@ -909,67 +1100,96 @@ function compute_pijcv_with_gradient(
     n_params = length(β)
     
     # ==========================================================================
-    # Build penalized Hessian H_λ and full S matrix
+    # Build penalized Hessian H_λ and per-λ penalty matrices S_by_lambda
+    # Uses same term→λⱼ mapping as _compute_penalty_gradient
     # ==========================================================================
     H_lambda = copy(H_unpenalized)
-    S_full = zeros(n_params, n_params)  # Combined penalty matrix
+    S_by_lambda = [zeros(n_params, n_params) for _ in 1:n_lambda]
     penalty = cache.penalty_config
+    lambda_idx = 1
     
-    # Baseline hazard terms
+    # Baseline hazard terms: each term gets its own λ
     for term in penalty.terms
         idx = term.hazard_indices
-        H_lambda[idx, idx] .+= lambda[1] .* term.S
-        S_full[idx, idx] .= Matrix(term.S)
+        λ_j = lambda_idx <= n_lambda ? lambda[lambda_idx] : lambda[end]
+        H_lambda[idx, idx] .+= λ_j .* term.S
+        if lambda_idx <= n_lambda
+            S_by_lambda[lambda_idx][idx, idx] .= Matrix(term.S)
+        end
+        lambda_idx += 1
     end
     
     # Total hazard terms
     for term in penalty.total_hazard_terms
+        λ_j = lambda_idx <= n_lambda ? lambda[lambda_idx] : lambda[end]
         for idx_range1 in term.hazard_indices
             for idx_range2 in term.hazard_indices
-                H_lambda[idx_range1, idx_range2] .+= lambda[1] .* term.S
-                S_full[idx_range1, idx_range2] .= Matrix(term.S)
+                H_lambda[idx_range1, idx_range2] .+= λ_j .* term.S
+                if lambda_idx <= n_lambda
+                    S_by_lambda[lambda_idx][idx_range1, idx_range2] .= Matrix(term.S)
+                end
             end
         end
+        lambda_idx += 1
     end
     
-    # Smooth covariate terms
-    for term in penalty.smooth_covariate_terms
-        idx = term.param_indices
-        H_lambda[idx, idx] .+= lambda[1] .* term.S
-        S_full[idx, idx] .= Matrix(term.S)
+    # Smooth covariate terms (handle shared_smooth_groups)
+    if !isempty(penalty.shared_smooth_groups)
+        # Build term -> lambda mapping for shared groups
+        term_to_lambda = Dict{Int, Int}()
+        for (group_idx, group) in enumerate(penalty.shared_smooth_groups)
+            for term_idx in group
+                term_to_lambda[term_idx] = lambda_idx
+            end
+            lambda_idx += 1
+        end
+        # Handle ungrouped terms
+        for term_idx in 1:length(penalty.smooth_covariate_terms)
+            if !haskey(term_to_lambda, term_idx)
+                term_to_lambda[term_idx] = lambda_idx
+                lambda_idx += 1
+            end
+        end
+        # Apply penalties
+        for (term_idx, term) in enumerate(penalty.smooth_covariate_terms)
+            idx = term.param_indices
+            λ_idx_j = term_to_lambda[term_idx]
+            λ_j = λ_idx_j <= n_lambda ? lambda[λ_idx_j] : lambda[end]
+            H_lambda[idx, idx] .+= λ_j .* term.S
+            if λ_idx_j <= n_lambda
+                S_by_lambda[λ_idx_j][idx, idx] .+= Matrix(term.S)  # += for shared groups
+            end
+        end
+    else
+        for term in penalty.smooth_covariate_terms
+            idx = term.param_indices
+            λ_j = lambda_idx <= n_lambda ? lambda[lambda_idx] : lambda[end]
+            H_lambda[idx, idx] .+= λ_j .* term.S
+            if lambda_idx <= n_lambda
+                S_by_lambda[lambda_idx][idx, idx] .= Matrix(term.S)
+            end
+            lambda_idx += 1
+        end
     end
     
     H_lambda_sym = Symmetric(H_lambda)
     
-    # Helper function to solve linear systems
-    function solve_system(A_sym, b)
-        try
-            return A_sym \ b
-        catch e
-            @debug "Linear solve failed" exception=e
-            return fill(NaN, length(b))
-        end
-    end
+    # ==========================================================================
+    # Compute third derivative contractions using JVP (Phase 4.3 optimization)
+    # Instead of materializing p×p×p tensors, we compute Σₗ (∂Hᵢ/∂βₗ)·vₗ directly
+    # for each direction v = dbeta_drho[:, j].
+    # ==========================================================================
+    # dH_times_v[i][j] = Σₗ (∂Hᵢ/∂βₗ)·(dβ̂/dρⱼ)ₗ  (p×p matrix)
+    dH_times_v_all = _compute_all_dH_times_v(β, dbeta_drho, cache)
     
     # ==========================================================================
-    # Compute third derivatives if not provided
-    # ∂Hᵢ/∂β is a tensor of shape (n_params, n_params, n_params)
-    # where ∂Hᵢ/∂β[:,:,l] is the derivative of Hᵢ w.r.t. βₗ
+    # Compute dH_λ/dρⱼ for each smoothing parameter j
+    # dH_λ/dρⱼ = λⱼ Sⱼ + Σᵢ [Σₗ (∂Hᵢ/∂βₗ)·(dβ̂/dρⱼ)ₗ]
     # ==========================================================================
-    dH_dbeta_all = if isnothing(subject_third_derivatives)
-        _compute_subject_third_derivatives(β, cache)
-    else
-        subject_third_derivatives
-    end
-    
-    # ==========================================================================
-    # Compute dH_λ/dρ with third derivatives
-    # dH_λ/dρ = λS + Σⱼ Σₗ (∂Hⱼ/∂βₗ)·(dβ̂/dρ)ₗ
-    # ==========================================================================
-    dH_lambda_drho = lambda[1] * S_full
+    dH_lambda_drho = [lambda[j] * S_by_lambda[j] for j in 1:n_lambda]
     for i in 1:n_subjects
-        for l in 1:n_params
-            dH_lambda_drho .+= dH_dbeta_all[i][:,:,l] * dbeta_drho[l]
+        for j in 1:n_lambda
+            dH_lambda_drho[j] .+= dH_times_v_all[i][j]
         end
     end
     
@@ -979,75 +1199,143 @@ function compute_pijcv_with_gradient(
     eval_cache = build_pijcv_eval_cache(cache.data)
     
     # ==========================================================================
-    # CORRECT PIJCV: V = Σᵢ -ℓᵢ(β̃₋ᵢ) where β̃₋ᵢ = β̂ - Δ⁻ⁱ
+    # CORRECT PIJCV: V = Σᵢ -ℓᵢ(β̃₋ᵢ) where β̃₋ᵢ = β̂ + Δ⁻ⁱ (PLUS sign!)
+    # Uses barrier-augmented Newton step to ensure β̃₋ᵢ ≥ lb (Phase 7)
     # ==========================================================================
     V = 0.0
     grad_V = zeros(n_lambda)
     
+    # Preallocate work vectors (Phase 4 optimization)
+    diff_result = DiffResults.GradientResult(zeros(n_params))
+    
+    # Conditioning diagnostics
+    ill_conditioned_subjects = Int[]
+    worst_cond = 0.0
+    worst_subject = 0
+    
+    # Barrier parameter (must match solve_hloo_barrier)
+    μ = 1e-6
+    lb = cache.lb
+    
     for i in 1:n_subjects
         gᵢ = subject_grads[:, i]
         Hᵢ = subject_hessians[i]
-        dH_dbeta_i = dH_dbeta_all[i]
+        dHᵢ_times_v = dH_times_v_all[i]  # Pre-computed JVP contractions for subject i
         
         # Leave-one-out penalized Hessian
         H_loo = H_lambda - Hᵢ
-        H_loo_sym = Symmetric(H_loo)
         
-        # Newton step: Δ⁻ⁱ = H_{λ,-i}⁻¹ gᵢ
-        Δᵢ = solve_system(H_loo_sym, gᵢ)
+        # Check LOO conditioning if requested
+        if check_conditioning
+            cond_num, is_ill_cond = check_loo_conditioning(H_loo, i)
+            if is_ill_cond
+                push!(ill_conditioned_subjects, i)
+            end
+            if cond_num > worst_cond
+                worst_cond = cond_num
+                worst_subject = i
+            end
+        end
+        
+        # Barrier-augmented Newton step: ensures β̃₋ᵢ ≥ lb (Phase 7)
+        # Δᵢ = (H_loo + μD⁻²)⁻¹ (gᵢ + μD⁻¹𝟙) where D = β - lb + √μ
+        barrier_result = solve_hloo_barrier(H_loo, gᵢ, lb, β; μ=μ)
+        Δᵢ = barrier_result.Δ
+        d_i = barrier_result.d
+        D_inv_i = barrier_result.D_inv
+        D_inv_sq_i = barrier_result.D_inv_sq
+        A_fact_i = barrier_result.A_fact
+        
         if any(isnan, Δᵢ)
             return (1e10, fill(0.0, n_lambda))
         end
         
-        # Pseudo-estimate: β̃₋ᵢ = β̂ - Δ⁻ⁱ
-        β_tilde_i = β .- Δᵢ
+        # Pseudo-estimate: β̃₋ᵢ = β̂ + Δ⁻ⁱ (PLUS sign!)
+        β_tilde_i = β .+ Δᵢ
         
         # CORRECT criterion: evaluate ACTUAL likelihood at pseudo-estimate
-        ll_at_pseudo = loglik_subject_cached(β_tilde_i, eval_cache, i)
+        # Use DiffResults to compute value and gradient in single pass (Phase 4)
+        ForwardDiff.gradient!(
+            diff_result,
+            b -> loglik_subject_cached(b, eval_cache, i),
+            β_tilde_i
+        )
+        ll_at_pseudo = DiffResults.value(diff_result)
+        grad_ll_at_pseudo = DiffResults.gradient(diff_result)
+        
         V_i = -ll_at_pseudo
         V += V_i
         
         # =======================================================================
-        # CORRECT gradient with third derivatives
+        # CORRECT gradient with third derivatives AND barrier terms for each λⱼ
+        # (Phase 7: barrier-augmented gradient)
         # =======================================================================
-        # dVᵢ/dρ = -∇ℓᵢ(β̃₋ᵢ)ᵀ · dβ̃₋ᵢ/dρ
-        # where dβ̃₋ᵢ/dρ = dβ̂/dρ - dΔ⁻ⁱ/dρ
+        # dVᵢ/dρⱼ = -∇ℓᵢ(β̃₋ᵢ)ᵀ · dβ̃₋ᵢ/dρⱼ
+        # where dβ̃₋ᵢ/dρⱼ = dβ̂/dρⱼ + dΔ⁻ⁱ/dρⱼ (PLUS sign!)
+        #
+        # For barrier-augmented step Δ = A⁻¹b where A = H_loo + μD⁻², b = g + μD⁻¹𝟙:
+        #   dΔ/dρⱼ = A⁻¹(db/dρⱼ - dA/dρⱼ·Δ)
         
-        # Gradient of likelihood at pseudo-estimate
-        grad_ll_at_pseudo = ForwardDiff.gradient(
-            b -> loglik_subject_cached(b, eval_cache, i), 
-            β_tilde_i
+        for j in 1:n_lambda
+            dbeta_j = view(dbeta_drho, :, j)
+            
+            # --- Barrier derivative terms (Phase 7) ---
+            # D = β - L + √μ, so dD/dρⱼ = dβ̂/dρⱼ (element-wise)
+            dD_drho_j = dbeta_j
+            
+            # d(D⁻¹)/dρⱼ = -D⁻² · dD/dρⱼ (element-wise)
+            d_D_inv_drho_j = -(D_inv_i .^ 2) .* dD_drho_j
+            
+            # d(D⁻²)/dρⱼ = -2D⁻³ · dD/dρⱼ (element-wise)
+            d_D_inv_sq_drho_j = -2.0 .* (D_inv_i .^ 3) .* dD_drho_j
+            
+            # --- db/dρⱼ = dgᵢ/dρⱼ + μ·d(D⁻¹𝟙)/dρⱼ ---
+            # dgᵢ/dρⱼ = +Hᵢ·dβ̂/dρⱼ (POSITIVE sign!)
+            dgᵢ_drho_j = Hᵢ * dbeta_j
+            db_drho_j = dgᵢ_drho_j .+ μ .* d_D_inv_drho_j
+            
+            # --- dA/dρⱼ = dH_{-i}/dρⱼ + μ·diag(d(D⁻²)/dρⱼ) ---
+            # dHᵢ/dρⱼ = Σₗ (∂Hᵢ/∂βₗ)·(dβ̂/dρⱼ)ₗ (pre-computed via JVP, Phase 4.3)
+            dHᵢ_drho_j = dHᵢ_times_v[j]
+            
+            # dH_loo/dρⱼ = dH_λ/dρⱼ - dHᵢ/dρⱼ
+            dH_loo_drho_j = dH_lambda_drho[j] - dHᵢ_drho_j
+            
+            # Add barrier Hessian derivative (diagonal term): μ·diag(d(D⁻²)/dρⱼ)
+            dA_drho_j = dH_loo_drho_j + μ * Diagonal(d_D_inv_sq_drho_j)
+            
+            # --- dΔ/dρⱼ = A⁻¹(db/dρⱼ - dA/dρⱼ·Δ) ---
+            # Reuse A_fact_i from solve_hloo_barrier
+            rhs_for_dDelta = db_drho_j - dA_drho_j * Δᵢ
+            dDelta_drho_j = A_fact_i \ rhs_for_dDelta
+            
+            if any(isnan, dDelta_drho_j)
+                continue
+            end
+            
+            # dβ̃₋ᵢ/dρⱼ = dβ̂/dρⱼ + dΔ⁻ⁱ/dρⱼ (PLUS sign!)
+            dbeta_tilde_drho_j = dbeta_j + dDelta_drho_j
+            
+            # dVᵢ/dρⱼ = -∇ℓᵢ(β̃₋ᵢ)ᵀ · dβ̃₋ᵢ/dρⱼ
+            dV_i_drho_j = -dot(grad_ll_at_pseudo, dbeta_tilde_drho_j)
+            grad_V[j] += dV_i_drho_j
+        end
+    end
+    
+    # Log conditioning summary if issues were detected
+    if check_conditioning && !isempty(ill_conditioned_subjects)
+        report = LOOConditioningReport(
+            length(ill_conditioned_subjects),
+            ill_conditioned_subjects,
+            worst_cond,
+            worst_subject
         )
-        
-        # dgᵢ/dρ = +Hᵢ·dβ̂/dρ (POSITIVE sign!)
-        # Since gᵢ = -∇ℓᵢ(β̂), we have dgᵢ/dρ = -∇²ℓᵢ(β̂)·dβ̂/dρ = Hᵢ·dβ̂/dρ
-        dgᵢ_drho = Hᵢ * dbeta_drho
-        
-        # dHᵢ/dρ = Σₗ (∂Hᵢ/∂βₗ)·(dβ̂/dρ)ₗ
-        dHᵢ_drho = zeros(n_params, n_params)
-        for l in 1:n_params
-            dHᵢ_drho .+= dH_dbeta_i[:,:,l] * dbeta_drho[l]
-        end
-        
-        # dH_loo/dρ = dH_λ/dρ - dHᵢ/dρ
-        dH_loo_drho = dH_lambda_drho - dHᵢ_drho
-        
-        # dΔ⁻ⁱ/dρ = H_loo⁻¹·(dgᵢ/dρ - dH_loo/dρ·Δᵢ)
-        dDelta_drho = solve_system(H_loo_sym, dgᵢ_drho - dH_loo_drho * Δᵢ)
-        if any(isnan, dDelta_drho)
-            continue
-        end
-        
-        # dβ̃₋ᵢ/dρ = dβ̂/dρ - dΔ⁻ⁱ/dρ
-        dbeta_tilde_drho = dbeta_drho - dDelta_drho
-        
-        # dVᵢ/dρ = -∇ℓᵢ(β̃₋ᵢ)ᵀ · dβ̃₋ᵢ/dρ
-        dV_i_drho = -dot(grad_ll_at_pseudo, dbeta_tilde_drho)
-        grad_V[1] += dV_i_drho
+        log_loo_conditioning_summary(report, n_subjects; context="PIJCV gradient")
     end
     
     return (V, grad_V)
 end
+
 
 """
     _compute_subject_third_derivatives(β, cache::ImplicitBetaCache) -> Vector{Array{Float64,3}}
@@ -1061,6 +1349,11 @@ the subject's Hessian with respect to βₗ.
 # Implementation
 Uses ForwardDiff.jacobian on the flattened Hessian:
     ∂Hᵢ/∂β = reshape(ForwardDiff.jacobian(β → vec(Hᵢ(β)), β), n_params, n_params, n_params)
+
+# Note
+This function materializes full p×p×p tensors and is O(p³) in memory.
+For large p, prefer using `_compute_dH_times_v` which computes the 
+contraction Σₗ (∂Hᵢ/∂βₗ)·vₗ directly using directional derivatives.
 """
 function _compute_subject_third_derivatives(β::Vector{Float64}, cache::ImplicitBetaCache{M, ExactData}) where M
     n_subjects = length(cache.data.paths)
@@ -1080,6 +1373,228 @@ function _compute_subject_third_derivatives(β::Vector{Float64}, cache::Implicit
     
     return third_derivs
 end
+
+
+"""
+    _compute_subject_third_derivatives(β, cache::ImplicitBetaCache{M, MPanelData}) -> Vector{Array{Float64,3}}
+
+Compute third derivatives ∂Hᵢ/∂β for all subjects for Markov panel data.
+"""
+function _compute_subject_third_derivatives(β::Vector{Float64}, cache::ImplicitBetaCache{M, MPanelData}) where M
+    n_subjects = length(cache.model.subjectindices)
+    n_params = length(β)
+    
+    third_derivs = Vector{Array{Float64,3}}(undef, n_subjects)
+    
+    for i in 1:n_subjects
+        # Compute Jacobian of flattened Hessian
+        H_flat_jac = ForwardDiff.jacobian(
+            b -> vec(-ForwardDiff.hessian(bb -> loglik_subject(bb, cache.data, i), b)),
+            β
+        )
+        # Reshape to tensor: third_derivs[i][:,:,l] = ∂Hᵢ/∂βₗ
+        third_derivs[i] = reshape(H_flat_jac, n_params, n_params, n_params)
+    end
+    
+    return third_derivs
+end
+
+
+"""
+    _compute_subject_third_derivatives(β, cache::ImplicitBetaCache{M, MCEMSelectionData}) -> Vector{Array{Float64,3}}
+
+Compute third derivatives ∂Hᵢ/∂β for all subjects for MCEM data.
+"""
+function _compute_subject_third_derivatives(β::Vector{Float64}, cache::ImplicitBetaCache{M, MCEMSelectionData}) where M
+    n_subjects = length(cache.model.subjectindices)
+    n_params = length(β)
+    
+    third_derivs = Vector{Array{Float64,3}}(undef, n_subjects)
+    
+    for i in 1:n_subjects
+        # Compute Jacobian of flattened Hessian
+        H_flat_jac = ForwardDiff.jacobian(
+            b -> vec(-ForwardDiff.hessian(bb -> loglik_subject(bb, cache.data, i), b)),
+            β
+        )
+        # Reshape to tensor: third_derivs[i][:,:,l] = ∂Hᵢ/∂βₗ
+        third_derivs[i] = reshape(H_flat_jac, n_params, n_params, n_params)
+    end
+    
+    return third_derivs
+end
+
+
+# =============================================================================
+# JVP-Based Third Derivative Contractions (Phase 4.3 Optimization)
+# =============================================================================
+# These functions compute Σₗ (∂Hᵢ/∂βₗ)·vₗ without materializing the full p×p×p tensor.
+# This reduces memory from O(p³) to O(p²) and computation from O(np³) to O(np²).
+# =============================================================================
+
+"""
+    _compute_dH_times_v(β, v, cache::ImplicitBetaCache, subject_idx::Int) -> Matrix{Float64}
+
+Compute the contraction Σₗ (∂Hᵢ/∂βₗ)·vₗ for a single subject using directional derivatives.
+
+This is the directional derivative of Hᵢ(β) in direction v, computed as:
+    d/dt [Hᵢ(β + t·v)]|_{t=0}
+
+# Mathematical Background
+The third derivative tensor T[j,k,l] = ∂²ℓᵢ/∂βⱼ∂βₖ∂βₗ is symmetric in all indices.
+The contraction Σₗ T[:,:,l]·vₗ equals the directional derivative of the Hessian.
+
+# Arguments
+- `β::Vector{Float64}`: Current parameter estimate
+- `v::AbstractVector{Float64}`: Direction vector for contraction
+- `cache::ImplicitBetaCache`: Contains model and data
+- `subject_idx::Int`: Subject index
+
+# Returns
+Matrix{Float64} of size (p, p) containing Σₗ (∂Hᵢ/∂βₗ)·vₗ
+
+# Performance
+O(p²) memory and O(p²) computation vs O(p³) for explicit tensor.
+"""
+function _compute_dH_times_v(
+    β::Vector{Float64},
+    v::AbstractVector{Float64},
+    cache::ImplicitBetaCache{M, ExactData},
+    subject_idx::Int
+) where M
+    n_params = length(β)
+    
+    # Directional derivative: d/dt [Hᵢ(β + t·v)]|_{t=0}
+    # Implemented as: ForwardDiff of the Hessian function at β, in direction v
+    # We use the JVP pattern: pushforward of H at β with tangent v
+    
+    # Compute Hessian function value and its Jacobian applied to v
+    # H(β + ε·v) ≈ H(β) + ε·(dH/dβ)·v
+    # The (dH/dβ)·v term is what we want
+    
+    hess_func = b -> vec(-ForwardDiff.hessian(bb -> loglik_subject(bb, cache.data, subject_idx), b))
+    
+    # Use ForwardDiff.Dual to compute directional derivative
+    β_dual = ForwardDiff.Dual.(β, v)
+    H_flat_dual = hess_func(β_dual)
+    
+    # Extract the derivative part (partials)
+    dH_times_v_flat = ForwardDiff.partials.(H_flat_dual, 1)
+    
+    return reshape(dH_times_v_flat, n_params, n_params)
+end
+
+function _compute_dH_times_v(
+    β::Vector{Float64},
+    v::AbstractVector{Float64},
+    cache::ImplicitBetaCache{M, MPanelData},
+    subject_idx::Int
+) where M
+    n_params = length(β)
+    
+    hess_func = b -> vec(-ForwardDiff.hessian(bb -> loglik_subject(bb, cache.data, subject_idx), b))
+    
+    β_dual = ForwardDiff.Dual.(β, v)
+    H_flat_dual = hess_func(β_dual)
+    dH_times_v_flat = ForwardDiff.partials.(H_flat_dual, 1)
+    
+    return reshape(dH_times_v_flat, n_params, n_params)
+end
+
+function _compute_dH_times_v(
+    β::Vector{Float64},
+    v::AbstractVector{Float64},
+    cache::ImplicitBetaCache{M, MCEMSelectionData},
+    subject_idx::Int
+) where M
+    n_params = length(β)
+    
+    hess_func = b -> vec(-ForwardDiff.hessian(bb -> loglik_subject(bb, cache.data, subject_idx), b))
+    
+    β_dual = ForwardDiff.Dual.(β, v)
+    H_flat_dual = hess_func(β_dual)
+    dH_times_v_flat = ForwardDiff.partials.(H_flat_dual, 1)
+    
+    return reshape(dH_times_v_flat, n_params, n_params)
+end
+
+
+"""
+    _compute_all_dH_times_v(β, V, cache::ImplicitBetaCache) -> Vector{Vector{Matrix{Float64}}}
+
+Compute contractions Σₗ (∂Hᵢ/∂βₗ)·V[j,l] for all subjects and all direction vectors.
+
+# Arguments
+- `β::Vector{Float64}`: Current parameter estimate
+- `V::AbstractMatrix{Float64}`: Direction vectors, shape (n_params, n_directions)
+- `cache::ImplicitBetaCache`: Contains model and data
+
+# Returns
+Vector of length n_subjects, where each element is a Vector of length n_directions,
+where each element is a (p, p) matrix: dH_times_v[i][j] = Σₗ (∂Hᵢ/∂βₗ)·V[l,j]
+"""
+function _compute_all_dH_times_v(
+    β::Vector{Float64},
+    V::AbstractMatrix{Float64},
+    cache::ImplicitBetaCache{M, ExactData}
+) where M
+    n_subjects = length(cache.data.paths)
+    n_directions = size(V, 2)
+    
+    result = Vector{Vector{Matrix{Float64}}}(undef, n_subjects)
+    
+    for i in 1:n_subjects
+        result[i] = Vector{Matrix{Float64}}(undef, n_directions)
+        for j in 1:n_directions
+            result[i][j] = _compute_dH_times_v(β, view(V, :, j), cache, i)
+        end
+    end
+    
+    return result
+end
+
+function _compute_all_dH_times_v(
+    β::Vector{Float64},
+    V::AbstractMatrix{Float64},
+    cache::ImplicitBetaCache{M, MPanelData}
+) where M
+    n_subjects = length(cache.model.subjectindices)
+    n_directions = size(V, 2)
+    
+    result = Vector{Vector{Matrix{Float64}}}(undef, n_subjects)
+    
+    for i in 1:n_subjects
+        result[i] = Vector{Matrix{Float64}}(undef, n_directions)
+        for j in 1:n_directions
+            result[i][j] = _compute_dH_times_v(β, view(V, :, j), cache, i)
+        end
+    end
+    
+    return result
+end
+
+function _compute_all_dH_times_v(
+    β::Vector{Float64},
+    V::AbstractMatrix{Float64},
+    cache::ImplicitBetaCache{M, MCEMSelectionData}
+) where M
+    n_subjects = length(cache.model.subjectindices)
+    n_directions = size(V, 2)
+    
+    result = Vector{Vector{Matrix{Float64}}}(undef, n_subjects)
+    
+    for i in 1:n_subjects
+        result[i] = Vector{Matrix{Float64}}(undef, n_directions)
+        for j in 1:n_directions
+            result[i][j] = _compute_dH_times_v(β, view(V, :, j), cache, i)
+        end
+    end
+    
+    return result
+end
+
+
+
 
 
 # =============================================================================
@@ -1189,8 +1704,8 @@ function _nested_optimization_pijcv_implicit(
     # Newton approximation. The gradients w.r.t. ρ come through β̂(ρ) via implicit diff
     # and through λ in the penalized Hessian directly.
     
-    # Define criterion AND gradient function using CORRECT analytical formulas
-    # with third derivatives for proper chain rule (see test_correct_pijcv_ad_v5.jl)
+    # Define criterion AND gradient function using NCV approximation (Wood 2024)
+    # Uses simplified gradient with dΔ/dρ weighting but ignores third derivatives for speed
     function ncv_criterion_and_gradient(log_lambda_vec)
         n_criterion_evals[] += 1
         
@@ -1205,11 +1720,12 @@ function _nested_optimization_pijcv_implicit(
         current_beta_ref[] = β_float
         
         # Compute dβ̂/dρ via ImplicitDifferentiation.jl
-        # This uses the IFT: dβ̂/dρ = -H_λ⁻¹ · (λS β̂)
+        # This uses the IFT: dβ̂/dρⱼ = -H_λ⁻¹ · (λⱼ Sⱼ β̂)
+        # Returns (n_params × n_lambda) matrix
         dbeta_drho = ForwardDiff.jacobian(
             ρ_vec -> implicit_beta(ρ_vec)[1],
             log_lambda_float
-        )[:, 1]  # Extract single column for scalar ρ
+        )
         
         # Compute subject gradients and Hessians at β̂
         subject_grads_ll, subject_hessians_ll = compute_subject_grads_and_hessians_fast(
@@ -1221,8 +1737,8 @@ function _nested_optimization_pijcv_implicit(
         subject_hessians = [-H for H in subject_hessians_ll]
         H_unpenalized = sum(subject_hessians)
         
-        # Compute criterion AND CORRECT analytical gradient simultaneously
-        # Now includes third derivatives for proper chain rule
+        # Compute criterion AND analytical gradient simultaneously
+        # Uses corrected NCV gradient (including dΔ/dρ) but ignoring expensive third derivatives
         V, grad_V = compute_pijcv_with_gradient(
             β_float,
             log_lambda_float,
@@ -1397,8 +1913,8 @@ end
 
 Nested optimization for PIJCV using ImplicitDifferentiation.jl for Markov panel data.
 
-Similar to `_nested_optimization_pijcv_implicit` but uses Markov-specific
-likelihood functions and state types.
+Uses analytical gradients via `compute_pijcv_with_gradient`, matching the ExactData
+pattern for efficiency and correctness.
 """
 function _nested_optimization_pijcv_markov_implicit(
     model::MultistateProcess,
@@ -1424,7 +1940,7 @@ function _nested_optimization_pijcv_markov_implicit(
     
     if verbose
         println("Optimizing λ via PIJCV with ImplicitDifferentiation.jl for Markov panel data")
-        println("  Method: $method, n_lambda: $n_lambda")
+        println("  Method: $method, n_lambda: $n_lambda, using analytical gradients")
     end
     
     # Build penalty_config
@@ -1441,54 +1957,65 @@ function _nested_optimization_pijcv_markov_implicit(
     n_criterion_evals = Ref(0)
     current_beta_ref = Ref(copy(beta_init))
     
-    # Define NCV criterion with implicit β
-    function ncv_criterion_implicit(log_lambda_vec)
+    # Define criterion AND gradient function using analytical gradient (Wood 2024 NCV)
+    function ncv_criterion_and_gradient(log_lambda_vec)
         n_criterion_evals[] += 1
         
-        # Get β̂(ρ) via implicit function
-        β_hat, z = implicit_beta(log_lambda_vec)
+        # Get β̂(ρ) via inner optimization (Float64 only)
+        log_lambda_float = Float64.(log_lambda_vec)
+        lambda_float = exp.(log_lambda_float)
+        penalty_current = set_hyperparameters(penalty_config, lambda_float)
         
-        # Update warm-start
-        current_beta_ref[] = Float64[ForwardDiff.value(x) for x in β_hat]
+        # Solve inner problem
+        β_float = _fit_inner_coefficients(model, data, penalty_current, current_beta_ref[];
+                                          lb=lb, ub=ub, maxiter=inner_maxiter)
+        current_beta_ref[] = β_float
         
-        # Extract Float64 values for criterion computation
-        β_float = current_beta_ref[]
-        ρ_float = Float64[ForwardDiff.value(x) for x in log_lambda_vec]
+        # Compute dβ̂/dρ via ImplicitDifferentiation.jl
+        # Returns (n_params × n_lambda) matrix
+        dbeta_drho = ForwardDiff.jacobian(
+            ρ_vec -> implicit_beta(ρ_vec)[1],
+            log_lambda_float
+        )
         
-        # Compute subject gradients and Hessians (Float64 only)
+        # Compute subject gradients and Hessians at β̂
         subject_grads_ll = compute_subject_gradients(β_float, model, books)
         subject_hessians_ll = compute_subject_hessians(β_float, model, books)
         
-        # Convert to loss convention
+        # Convert to loss convention (see sign conventions in this file)
         subject_grads = -subject_grads_ll
         subject_hessians = [-H for H in subject_hessians_ll]
         H_unpenalized = sum(subject_hessians)
         
-        # Build state for criterion
-        state = SmoothingSelectionStateMarkov(
+        # Compute criterion AND analytical gradient simultaneously
+        V, grad_V = compute_pijcv_with_gradient(
             β_float,
-            H_unpenalized,
-            subject_grads,
-            subject_hessians,
-            penalty_config,
-            n_subjects,
-            n_params,
-            model,
-            data
+            log_lambda_float,
+            cache;
+            subject_grads=subject_grads,
+            subject_hessians=subject_hessians,
+            H_unpenalized=H_unpenalized,
+            dbeta_drho=dbeta_drho
         )
         
-        # Compute criterion V(λ)
-        V = if selector.nfolds == 0
-            compute_pijcv_criterion_markov(ρ_float, state)
-        else
-            compute_pijkfold_criterion_markov(ρ_float, state, selector.nfolds)
-        end
-        
         if verbose && n_criterion_evals[] % 5 == 0
-            @info "Criterion eval $(n_criterion_evals[]): log(λ)=$(round.(ρ_float, digits=2)), V=$(round(V, digits=3))"
+            @info "Criterion eval $(n_criterion_evals[]): log(λ)=$(round.(log_lambda_float, digits=2)), V=$(round(V, digits=3)), ||∇V||=$(round(norm(grad_V), digits=4))"
         end
         
+        return (V, grad_V)
+    end
+    
+    # Wrapper for criterion only (for OptimizationFunction)
+    function ncv_criterion_only(log_lambda_vec, _)
+        V, _ = ncv_criterion_and_gradient(log_lambda_vec)
         return V
+    end
+    
+    # Wrapper for gradient only (for OptimizationFunction)
+    function ncv_gradient_only!(grad_storage, log_lambda_vec, _)
+        _, grad_V = ncv_criterion_and_gradient(log_lambda_vec)
+        grad_storage .= grad_V
+        return nothing
     end
     
     # Adaptive bounds for log(λ)
@@ -1516,13 +2043,12 @@ function _nested_optimization_pijcv_markov_implicit(
         log.(efs_result.lambda[1:n_lambda])
     end
     
-    # Set up optimization with ForwardDiff
-    adtype = Optimization.AutoForwardDiff()
-    optf = OptimizationFunction((ρ, _) -> ncv_criterion_implicit(ρ), adtype)
+    # Set up optimization with analytical gradient
+    optf = OptimizationFunction(ncv_criterion_only; grad=ncv_gradient_only!)
     prob = OptimizationProblem(optf, current_log_lambda, nothing; lb=log_lb, ub=log_ub)
     
     if verbose
-        println("  Using L-BFGS with implicit differentiation...")
+        println("  Using L-BFGS outer optimizer with analytical gradients...")
     end
     
     # Solve with Fminbox L-BFGS
@@ -1637,8 +2163,8 @@ end
 
 Nested optimization for PIJCV using ImplicitDifferentiation.jl for MCEM data.
 
-Similar to `_nested_optimization_pijcv_implicit` but uses importance-weighted
-likelihood functions for MCEM.
+Uses analytical gradients via `compute_pijcv_with_gradient`, matching the ExactData
+and Markov patterns for efficiency and correctness.
 """
 function _nested_optimization_pijcv_mcem_implicit(
     model::MultistateProcess,
@@ -1662,7 +2188,7 @@ function _nested_optimization_pijcv_mcem_implicit(
     
     if verbose
         println("Optimizing λ via PIJCV with ImplicitDifferentiation.jl for MCEM data")
-        println("  Method: $method, n_lambda: $n_lambda")
+        println("  Method: $method, n_lambda: $n_lambda, using analytical gradients")
     end
     
     # Build penalty_config
@@ -1679,49 +2205,60 @@ function _nested_optimization_pijcv_mcem_implicit(
     n_criterion_evals = Ref(0)
     current_beta_ref = Ref(copy(beta_init))
     
-    # Define NCV criterion with implicit β
-    function ncv_criterion_implicit(log_lambda_vec)
+    # Define criterion AND gradient function using analytical gradient (Wood 2024 NCV)
+    function ncv_criterion_and_gradient(log_lambda_vec)
         n_criterion_evals[] += 1
         
-        # Get β̂(ρ) via implicit function
-        β_hat, z = implicit_beta(log_lambda_vec)
+        # Get β̂(ρ) via inner optimization (Float64 only)
+        log_lambda_float = Float64.(log_lambda_vec)
+        lambda_float = exp.(log_lambda_float)
+        penalty_current = set_hyperparameters(penalty_config, lambda_float)
         
-        # Update warm-start
-        current_beta_ref[] = Float64[ForwardDiff.value(x) for x in β_hat]
+        # Solve inner problem
+        β_float = _fit_inner_coefficients(model, data, penalty_current, current_beta_ref[];
+                                          lb=lb, ub=ub, maxiter=inner_maxiter)
+        current_beta_ref[] = β_float
         
-        # Extract Float64 values for criterion computation
-        β_float = current_beta_ref[]
-        ρ_float = Float64[ForwardDiff.value(x) for x in log_lambda_vec]
+        # Compute dβ̂/dρ via ImplicitDifferentiation.jl
+        # Returns (n_params × n_lambda) matrix
+        dbeta_drho = ForwardDiff.jacobian(
+            ρ_vec -> implicit_beta(ρ_vec)[1],
+            log_lambda_float
+        )
         
-        # Compute subject gradients and Hessians (Float64 only)
+        # Compute subject gradients and Hessians at β̂ (already in loss convention)
         subject_grads, subject_hessians = _compute_subject_grads_hessians(β_float, cache)
         H_unpenalized = sum(subject_hessians)
         
-        # Build state for criterion
-        state = SmoothingSelectionStateMCEM(
+        # Compute criterion AND analytical gradient simultaneously
+        V, grad_V = compute_pijcv_with_gradient(
             β_float,
-            H_unpenalized,
-            subject_grads,
-            subject_hessians,
-            penalty_config,
-            n_subjects,
-            n_params,
-            model,
-            data
+            log_lambda_float,
+            cache;
+            subject_grads=subject_grads,
+            subject_hessians=subject_hessians,
+            H_unpenalized=H_unpenalized,
+            dbeta_drho=dbeta_drho
         )
         
-        # Compute criterion V(λ)
-        V = if selector.nfolds == 0
-            compute_pijcv_criterion_mcem(ρ_float, state)
-        else
-            compute_pijkfold_criterion_mcem(ρ_float, state, selector.nfolds)
-        end
-        
         if verbose && n_criterion_evals[] % 5 == 0
-            @info "Criterion eval $(n_criterion_evals[]): log(λ)=$(round.(ρ_float, digits=2)), V=$(round(V, digits=3))"
+            @info "Criterion eval $(n_criterion_evals[]): log(λ)=$(round.(log_lambda_float, digits=2)), V=$(round(V, digits=3)), ||∇V||=$(round(norm(grad_V), digits=4))"
         end
         
+        return (V, grad_V)
+    end
+    
+    # Wrapper for criterion only (for OptimizationFunction)
+    function ncv_criterion_only(log_lambda_vec, _)
+        V, _ = ncv_criterion_and_gradient(log_lambda_vec)
         return V
+    end
+    
+    # Wrapper for gradient only (for OptimizationFunction)
+    function ncv_gradient_only!(grad_storage, log_lambda_vec, _)
+        _, grad_V = ncv_criterion_and_gradient(log_lambda_vec)
+        grad_storage .= grad_V
+        return nothing
     end
     
     # Adaptive bounds for log(λ)
@@ -1742,13 +2279,12 @@ function _nested_optimization_pijcv_mcem_implicit(
     current_beta_ref[] = efs_result.warmstart_beta
     current_log_lambda = log.(efs_result.lambda[1:n_lambda])
     
-    # Set up optimization with ForwardDiff
-    adtype = Optimization.AutoForwardDiff()
-    optf = OptimizationFunction((ρ, _) -> ncv_criterion_implicit(ρ), adtype)
+    # Set up optimization with analytical gradient
+    optf = OptimizationFunction(ncv_criterion_only; grad=ncv_gradient_only!)
     prob = OptimizationProblem(optf, current_log_lambda, nothing; lb=log_lb, ub=log_ub)
     
     if verbose
-        println("  Using L-BFGS with implicit differentiation...")
+        println("  Using L-BFGS outer optimizer with analytical gradients...")
     end
     
     # Solve with Fminbox L-BFGS

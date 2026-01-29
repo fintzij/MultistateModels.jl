@@ -671,3 +671,100 @@ function compute_subject_hessians(params::AbstractVector, model::MultistateProce
     return hessians
 end
 
+# =============================================================================
+# ExactData interface: gradient and Hessian computation for exact (continuously observed) data
+# =============================================================================
+#
+# These methods use loglik_exact with return_ll_subj=true to compute per-subject
+# log-likelihoods, following the same pattern as the MPanelData versions.
+# This allows the gradient/Hessian computation to use the vectorized loglik_exact
+# infrastructure rather than computing path-by-path.
+#
+# IMPORTANT: These methods are designed to be compatible with the PIJCV analytical
+# gradient formula in compute_pijcv_with_gradient(), which requires subject-level
+# gradients and Hessians as inputs. Using the same interface as MPanelData ensures
+# consistency across data types.
+# =============================================================================
+
+"""
+    compute_subject_gradients(params, model::MultistateProcess, data::ExactData)
+
+Compute subject-level score vectors (gradients of log-likelihood) for exact data.
+
+This method uses `loglik_exact` with `return_ll_subj=true` to compute per-subject
+log-likelihoods, then differentiates each subject's contribution via ForwardDiff.
+
+# Arguments
+- `params::AbstractVector`: parameter vector (flat, on transformed scale)
+- `model::MultistateProcess`: multistate model with exact observation times
+- `data::ExactData`: exact data container with sample paths
+
+# Returns
+- `Matrix{Float64}`: p × n matrix where column i contains the score vector gᵢ
+
+# Notes
+- Uses the vectorized `loglik_exact` infrastructure for consistent behavior
+- Compatible with `compute_pijcv_with_gradient` analytical gradient formula
+"""
+function compute_subject_gradients(params::AbstractVector, model::MultistateProcess, data::ExactData)
+    nsubj = length(data.paths)
+    nparams = length(params)
+    
+    # preallocate output
+    grads = Matrix{Float64}(undef, nparams, nsubj)
+    
+    for i in 1:nsubj
+        # closure for subject i's log-likelihood
+        function ll_subj_i(pars)
+            # Use loglik_exact with return_ll_subj=true to get per-subject contributions
+            ll_subj_vec = loglik_exact(pars, data; neg=false, return_ll_subj=true)
+            return ll_subj_vec[i]
+        end
+        
+        grads[:, i] = ForwardDiff.gradient(ll_subj_i, params)
+    end
+    
+    return grads
+end
+
+"""
+    compute_subject_hessians(params, model::MultistateProcess, data::ExactData)
+
+Compute subject-level Hessian contributions for exact data.
+
+This method uses `loglik_exact` with `return_ll_subj=true` to compute per-subject
+log-likelihoods, then differentiates twice via ForwardDiff.hessian.
+
+# Arguments
+- `params::AbstractVector`: parameter vector (flat, on transformed scale)
+- `model::MultistateProcess`: multistate model with exact observation times
+- `data::ExactData`: exact data container with sample paths
+
+# Returns
+- `Vector{Matrix{Float64}}`: length-n vector where element i is the p × p Hessian Hᵢ
+
+# Notes
+- Uses the vectorized `loglik_exact` infrastructure for consistent behavior
+- Compatible with `compute_pijcv_with_gradient` analytical gradient formula
+"""
+function compute_subject_hessians(params::AbstractVector, model::MultistateProcess, data::ExactData)
+    nsubj = length(data.paths)
+    nparams = length(params)
+    
+    # preallocate output
+    hessians = [Matrix{Float64}(undef, nparams, nparams) for _ in 1:nsubj]
+    
+    for i in 1:nsubj
+        # closure for subject i's log-likelihood
+        function ll_subj_i(pars)
+            # Use loglik_exact with return_ll_subj=true to get per-subject contributions
+            ll_subj_vec = loglik_exact(pars, data; neg=false, return_ll_subj=true)
+            return ll_subj_vec[i]
+        end
+        
+        hessians[i] = ForwardDiff.hessian(ll_subj_i, params)
+    end
+    
+    return hessians
+end
+

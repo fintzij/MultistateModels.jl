@@ -45,8 +45,15 @@ function _select_hyperparameters(
     outer_maxiter::Int = 100,
     lambda_tol::Float64 = 1e-3,
     lambda_init::Union{Nothing, Vector{Float64}} = nothing,  # Warm-start for λ
+    alpha_info::Union{Nothing, Dict{Int, AlphaLearningInfo}} = nothing,  # For joint α optimization
+    alpha_groups::Union{Nothing, Vector{Vector{Int}}} = nothing,  # Groups of terms sharing α
     verbose::Bool = false
 )
+    # Joint alpha optimization for Markov data - TODO: implement JointAlphaLambdaStateMarkov
+    if !isnothing(alpha_info) && !isempty(alpha_info)
+        @warn "Joint (α, λ) optimization not yet implemented for Markov panel data. Using λ-only selection."
+    end
+    
     # NoSelection: return default λ with no optimization
     if selector isa NoSelection
         lambda = get_hyperparameters(penalty)
@@ -68,6 +75,21 @@ function _select_hyperparameters(
     # PIJCVSelector: Newton-approximated CV (Wood 2024 NCV)
     if selector isa PIJCVSelector
         method = selector.nfolds == 0 ? :pijcv : Symbol("pijcv$(selector.nfolds)")
+        
+        # Dispatch to implicit differentiation version if requested
+        if selector.use_implicit_diff
+            return _nested_optimization_pijcv_markov_implicit(
+                model, data, penalty, selector;
+                beta_init=beta_init,
+                inner_maxiter=inner_maxiter,
+                outer_maxiter=outer_maxiter,
+                lambda_tol=lambda_tol,
+                lambda_init=lambda_init,
+                verbose=verbose
+            )
+        end
+        
+        # Default: legacy nested AD
         return _nested_optimization_pijcv_markov(
             model, data, penalty, selector;
             beta_init=beta_init,

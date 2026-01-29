@@ -13,7 +13,8 @@
 # Split from loglik.jl for maintainability (January 2026)
 # =============================================================================
 
-function loglik_semi_markov(parameters, data::SMPanelData; neg=true, use_sampling_weight=true, parallel=false)
+function loglik_semi_markov(parameters, data::SMPanelData; neg=true, use_sampling_weight=true, parallel=false,
+                           hazard_eval_ctx::Union{Nothing, HazardEvalContext}=nothing)
 
     # Unflatten parameters to natural scale (AD-compatible)
     pars = unflatten_parameters(parameters, data.model)
@@ -26,21 +27,37 @@ function loglik_semi_markov(parameters, data::SMPanelData; neg=true, use_samplin
     nsubj = length(data.paths)
 
     # Build subject covariate cache (reusable across all paths)
-    subject_covars = build_subject_covar_cache(data.model)
+    # Use context if provided, otherwise build fresh
+    subject_covars = if hazard_eval_ctx !== nothing
+        hazard_eval_ctx.subject_covars
+    else
+        build_subject_covar_cache(data.model)
+    end
     
     # Element type for AD compatibility
     T = eltype(parameters)
     
     # Get covariate names for each hazard (precomputed)
-    covar_names_per_hazard = [
-        hasfield(typeof(hazards[h]), :covar_names) ? 
-            hazards[h].covar_names : 
-            extract_covar_names(hazards[h].parnames)
-        for h in 1:n_hazards
-    ]
+    covar_names_per_hazard = if hazard_eval_ctx !== nothing
+        hazard_eval_ctx.covar_names_per_hazard
+    else
+        [
+            hasfield(typeof(hazards[h]), :covar_names) ? 
+                hazards[h].covar_names : 
+                extract_covar_names(hazards[h].parnames)
+            for h in 1:n_hazards
+        ]
+    end
     
     # Check if any hazard uses time transform
     any_time_transform = any(h -> h.metadata.time_transform, hazards)
+    
+    # Extract hazard caches for spline optimization (if context provided and not AD mode)
+    _hazard_caches = if hazard_eval_ctx !== nothing && !is_ad_mode(T)
+        hazard_eval_ctx.hazard_caches
+    else
+        nothing
+    end
     
     # Count total paths for parallel decision
     n_total_paths = sum(length(data.paths[i]) for i in eachindex(data.paths))
@@ -80,7 +97,8 @@ function loglik_semi_markov(parameters, data::SMPanelData; neg=true, use_samplin
             
             ll_flat[k] = _compute_path_loglik_fused(
                 path, pars, hazards, totalhazards, tmat,
-                subj_cache, covar_names_per_hazard, tt_context, T
+                subj_cache, covar_names_per_hazard, tt_context, T;
+                flat_pars=parameters, hazard_caches=_hazard_caches
             )
         end
         
@@ -118,7 +136,8 @@ function loglik_semi_markov(parameters, data::SMPanelData; neg=true, use_samplin
                 
                 path_ll = _compute_path_loglik_fused(
                     path, pars, hazards, totalhazards, tmat,
-                    subj_cache, covar_names_per_hazard, tt_context, T
+                    subj_cache, covar_names_per_hazard, tt_context, T;
+                    flat_pars=parameters, hazard_caches=_hazard_caches
                 )
                 lls += path_ll * data.ImportanceWeights[i][j]
             end
@@ -141,7 +160,8 @@ Update log-likelihood for each individual and each path of panel data in a semi-
 This implementation uses the fused path-centric approach from `loglik_exact`, calling
 `_compute_path_loglik_fused` directly to avoid DataFrame allocation overhead.
 """
-function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
+function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData;
+                            hazard_eval_ctx::Union{Nothing, HazardEvalContext}=nothing)
 
     # Unflatten parameters to natural scale (AD-compatible)
     pars = unflatten_parameters(parameters, data.model)
@@ -153,18 +173,27 @@ function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
     n_hazards = length(hazards)
 
     # Build subject covariate cache (reusable across all paths)
-    subject_covars = build_subject_covar_cache(data.model)
+    # Use context if provided, otherwise build fresh
+    subject_covars = if hazard_eval_ctx !== nothing
+        hazard_eval_ctx.subject_covars
+    else
+        build_subject_covar_cache(data.model)
+    end
     
     # Element type for computation (Float64 for in-place version)
     T = Float64
     
     # Get covariate names for each hazard (precomputed)
-    covar_names_per_hazard = [
-        hasfield(typeof(hazards[h]), :covar_names) ? 
-            hazards[h].covar_names : 
-            extract_covar_names(hazards[h].parnames)
-        for h in 1:n_hazards
-    ]
+    covar_names_per_hazard = if hazard_eval_ctx !== nothing
+        hazard_eval_ctx.covar_names_per_hazard
+    else
+        [
+            hasfield(typeof(hazards[h]), :covar_names) ? 
+                hazards[h].covar_names : 
+                extract_covar_names(hazards[h].parnames)
+            for h in 1:n_hazards
+        ]
+    end
     
     # Check if any hazard uses time transform and create context if needed
     any_time_transform = any(h -> h.metadata.time_transform, hazards)
@@ -172,6 +201,13 @@ function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
         sample_subj = subject_covars[data.paths[1][1].subj]
         sample_df = isempty(sample_subj.covar_data) ? nothing : sample_subj.covar_data[1:1, :]
         maybe_time_transform_context(pars, sample_df, hazards)
+    else
+        nothing
+    end
+    
+    # Extract hazard caches for spline optimization (if context provided and not AD mode)
+    _hazard_caches = if hazard_eval_ctx !== nothing && !is_ad_mode(T)
+        hazard_eval_ctx.hazard_caches
     else
         nothing
     end
@@ -184,7 +220,8 @@ function loglik_semi_markov!(parameters, logliks::Vector{}, data::SMPanelData)
             
             logliks[i][j] = _compute_path_loglik_fused(
                 path, pars, hazards, totalhazards, tmat,
-                subj_cache, covar_names_per_hazard, tt_context, T
+                subj_cache, covar_names_per_hazard, tt_context, T;
+                flat_pars=parameters, hazard_caches=_hazard_caches
             )
         end
     end
@@ -315,9 +352,11 @@ Scalar (penalized) log-likelihood
 - For unpenalized likelihood, use `loglik_semi_markov` directly
 """
 function loglik_semi_markov_penalized(parameters, data::SMPanelData, penalty_config::PenaltyConfig;
-                                       neg::Bool=true, use_sampling_weight::Bool=true)
+                                       neg::Bool=true, use_sampling_weight::Bool=true,
+                                       hazard_eval_ctx::Union{Nothing, HazardEvalContext}=nothing)
     # Compute base log-likelihood (as negative for consistency)
-    nll_base = loglik_semi_markov(parameters, data; neg=true, use_sampling_weight=use_sampling_weight)
+    nll_base = loglik_semi_markov(parameters, data; neg=true, use_sampling_weight=use_sampling_weight,
+                                   hazard_eval_ctx=hazard_eval_ctx)
     
     # If no penalties, return base likelihood
     has_penalties(penalty_config) || return neg ? nll_base : -nll_base
@@ -372,7 +411,121 @@ This enables a consistent interface for both penalized and unpenalized fitting:
 - `loglik(params, data, penalty_config)` → penalized
 """
 function loglik(parameters, data::SMPanelData, penalty_config::PenaltyConfig; 
-                neg::Bool=true, use_sampling_weight::Bool=true)
+                neg::Bool=true, use_sampling_weight::Bool=true,
+                hazard_eval_ctx::Union{Nothing, HazardEvalContext}=nothing)
     loglik_semi_markov_penalized(parameters, data, penalty_config;
-                                  neg=neg, use_sampling_weight=use_sampling_weight)
+                                  neg=neg, use_sampling_weight=use_sampling_weight,
+                                  hazard_eval_ctx=hazard_eval_ctx)
+end
+
+# =============================================================================
+# Single-Subject Likelihood for PIJCV
+# =============================================================================
+
+"""
+    loglik_subject(parameters, data::MCEMSelectionData, subject_idx::Int)
+
+Compute importance-weighted log-likelihood for a single subject in MCEM data.
+
+This function is used by PIJCV criterion computation to evaluate the actual
+likelihood at leave-one-out parameter estimates. For MCEM, the subject likelihood
+is a weighted sum over sampled paths.
+
+# Arguments
+- `parameters`: Flat parameter vector (natural scale)
+- `data::MCEMSelectionData`: MCEM data container with paths and importance weights
+- `subject_idx::Int`: Subject index (1-based)
+
+# Returns
+- `Float64`: Subject-level importance-weighted log-likelihood (positive, not negated)
+
+# Mathematical Details
+For subject i with sampled paths {π_j} and importance weights {w_j}:
+
+    ℓᵢ(β) = Σⱼ wⱼ · log p(πⱼ | β)
+
+This is the Monte Carlo estimate of the expected complete-data log-likelihood.
+
+# Notes
+- Uses importance weights from the E-step
+- More expensive than Markov/Exact versions due to path summation
+- Result is NOT negated (returns positive log-likelihood)
+
+See also: [`loglik_semi_markov`](@ref), [`compute_pijcv_criterion_mcem`](@ref)
+"""
+function loglik_subject(parameters, data::MCEMSelectionData, subject_idx::Int)
+    model = data.model
+    paths = data.paths
+    weights = data.weights
+    
+    # Validate subject index
+    n_subj = length(paths)
+    @assert 1 <= subject_idx <= n_subj "Subject index $subject_idx out of range [1, $n_subj]"
+    
+    # Unflatten parameters to natural scale
+    pars = unflatten_parameters(parameters, model)
+    
+    # Get model components
+    hazards = model.hazards
+    totalhazards = model.totalhazards
+    tmat = model.tmat
+    n_hazards = length(hazards)
+    
+    # Build subject covariate cache
+    subject_covars = build_subject_covar_cache(model)
+    
+    # Element type for AD compatibility
+    T = eltype(parameters)
+    
+    # Get covariate names for each hazard
+    covar_names_per_hazard = [
+        hasfield(typeof(hazards[h]), :covar_names) ? 
+            hazards[h].covar_names : 
+            extract_covar_names(hazards[h].parnames)
+        for h in 1:n_hazards
+    ]
+    
+    # Check if any hazard uses time transform
+    any_time_transform = any(h -> h.metadata.time_transform, hazards)
+    
+    # Get subject weight
+    subj_weight = model.SubjectWeights[subject_idx]
+    
+    # Accumulate importance-weighted log-likelihood over paths
+    ll_i = zero(T)
+    n_paths = length(paths[subject_idx])
+    
+    for j in 1:n_paths
+        path = paths[subject_idx][j]
+        w_j = weights[subject_idx][j]
+        
+        # Skip paths with zero/non-finite weight
+        if !isfinite(w_j) || w_j == 0
+            continue
+        end
+        
+        # Get covariate cache for this subject
+        subj_cache = subject_covars[path.subj]
+        
+        # Create TimeTransformContext if needed
+        tt_context = if any_time_transform
+            sample_df = isempty(subj_cache.covar_data) ? nothing : subj_cache.covar_data[1:1, :]
+            maybe_time_transform_context(pars, sample_df, hazards)
+        else
+            nothing
+        end
+        
+        # Compute path log-likelihood
+        ll_path = _compute_path_loglik_fused(
+            path, pars, hazards, totalhazards, tmat,
+            subj_cache, covar_names_per_hazard,
+            tt_context, T
+        )
+        
+        # Accumulate with importance weight
+        ll_i += w_j * ll_path
+    end
+    
+    # Apply subject weight and return (positive log-likelihood)
+    return ll_i * subj_weight
 end

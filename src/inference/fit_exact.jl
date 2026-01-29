@@ -148,6 +148,12 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         println("Using $(threading_config.nthreads) threads for likelihood evaluation ($(n_paths) paths)")
     end
 
+    # Build hazard evaluation context for efficient caching
+    # This context pre-builds subject covariate caches and covariate name mappings
+    # that would otherwise be rebuilt on every likelihood evaluation.
+    # During AD (Dual parameters), the context is ignored for correctness.
+    hazard_eval_ctx = build_hazard_eval_context(model)
+
     # Use parameter bounds from model (generated at construction time)
     lb, ub = model.bounds.lb, model.bounds.ub
 
@@ -155,10 +161,13 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
     if isnothing(constraints) 
         # Standard unpenalized optimization path
         # Create likelihood function - parallel or sequential
+        # Capture hazard_eval_ctx in closure for caching support
         if use_parallel
-            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
+            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true,
+                                                        hazard_eval_ctx=hazard_eval_ctx)
         else
-            loglik_fn = loglik_exact
+            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true,
+                                                        hazard_eval_ctx=hazard_eval_ctx)
         end
         
         # Get estimates - use Ipopt for box-constrained optimization
@@ -202,10 +211,13 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         end
 
         # Create likelihood function - parallel or sequential (unpenalized)
+        # Capture hazard_eval_ctx in closure for caching support
         if use_parallel
-            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true)
+            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true, parallel=true,
+                                                        hazard_eval_ctx=hazard_eval_ctx)
         else
-            loglik_fn = loglik_exact
+            loglik_fn = (params, data) -> loglik_exact(params, data; neg=true,
+                                                        hazard_eval_ctx=hazard_eval_ctx)
         end
 
         # Resolve AD backend
@@ -241,7 +253,8 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
     end
 
     # Compute subject-level likelihood at the estimate (always UNPENALIZED for model comparison)
-    ll_subj = loglik_exact(sol.u, ExactData(model, samplepaths); return_ll_subj = true)
+    ll_subj = loglik_exact(sol.u, ExactData(model, samplepaths); return_ll_subj = true,
+                           hazard_eval_ctx=hazard_eval_ctx)
 
     # Build parameters structure for fitted parameters
     # Use the unflatten function from the model to convert flat params back to nested

@@ -13,6 +13,8 @@
 #   ├── dispatch_general.jl - General nested optimization for ExactData
 #   ├── common.jl           - SmoothingSelectionState, helper functions
 #   ├── pijcv.jl            - PIJCV/CV criterion functions for ExactData
+#   ├── pijcv_joint_alpha.jl- Joint (α, λ) optimization for adaptive weighting
+#   ├── implicit_diff.jl    - ImplicitDifferentiation.jl integration for efficient gradients
 #   └── deprecated.jl       - Deprecated select_smoothing_parameters functions
 #
 # =============================================================================
@@ -25,4 +27,6 @@ include("smoothing_selection/dispatch_mcem.jl")
 include("smoothing_selection/dispatch_general.jl")
 include("smoothing_selection/common.jl")
 include("smoothing_selection/pijcv.jl")
+include("smoothing_selection/pijcv_joint_alpha.jl")
+include("smoothing_selection/implicit_diff.jl")
 include("smoothing_selection/deprecated.jl")

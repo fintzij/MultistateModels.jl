@@ -48,6 +48,15 @@ or more samples may be needed.
 const PARETO_K_THRESHOLD = 0.7
 
 """
+Tolerance for detecting active bound constraints in implicit differentiation.
+
+When |β_i - lb_i| < ACTIVE_BOUND_TOL or |ub_i - β_i| < ACTIVE_BOUND_TOL,
+the parameter is considered at an active bound. This is used in KKT-aware
+implicit differentiation to correctly handle bound-constrained optima.
+"""
+const ACTIVE_BOUND_TOL = 1e-8
+
+"""
 Large fallback value for optimization criterion when numerical failures occur.
 
 Used in smoothing parameter selection to indicate failed computations (e.g.,
@@ -393,6 +402,26 @@ Used in rank-one Cholesky downdates to detect when the update would
 make the matrix non-positive-definite.
 """
 const CHOLESKY_DOWNDATE_TOL = 1e-10
+
+"""
+Threshold for flagging ill-conditioned leave-one-out Hessians.
+
+When the condition number of H_{λ,-i} exceeds this threshold, a warning
+is logged indicating that subject i may be critical for identifying
+certain parameters. This typically happens when a subject is the only
+(or dominant) source of information for a particular transition.
+
+Default: 1e10 (fairly permissive; avoids excessive warnings)
+"""
+const LOO_CONDITIONING_THRESHOLD = 1e10
+
+"""
+Maximum number of ill-conditioned LOO subjects to report individually.
+
+When many subjects have ill-conditioned H_{λ,-i}, we only report the first
+N subjects individually to avoid flooding the log.
+"""
+const MAX_LOO_CONDITIONING_WARNINGS = 5
 
 # =============================================================================
 # Constants Access Documentation

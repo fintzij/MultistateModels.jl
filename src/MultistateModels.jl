@@ -9,6 +9,7 @@ using Distributions
 using ElasticArrays
 using ExponentialUtilities
 using ForwardDiff
+using ImplicitDifferentiation
 using LinearAlgebra
 using MacroTools
 using NaNMath
@@ -19,12 +20,14 @@ using OptimizationOptimJL
 using OrderedCollections
 using ParameterHandling
 using ParetoSmooth
+using PrecompileTools
 using Preferences
 using QuadGK
 using RuntimeGeneratedFunctions
 using StatsBase
 using StatsFuns
 using StatsModels
+
 
 # make sure ForwardDiff is nan safe
 Preferences.set_preferences!(ForwardDiff, "nansafe_mode" => true)
@@ -287,6 +290,9 @@ include("types/data_containers.jl")
 # Infrastructure types (AD backends, threading config)
 include("types/infrastructure.jl")
 
+# Hazard evaluation cache types (unified caching for all hazard families)
+include("types/hazard_eval_cache.jl")
+
 # Penalty types for penalized likelihood fitting
 include("types/penalties.jl")
 
@@ -398,6 +404,9 @@ include("hazard/smooth_terms.jl")
 # model generation
 include("construction/multistatemodel.jl")
 
+# Spline evaluation with external cache (must be after multistatemodel.jl which includes spline_builder.jl)
+include("hazard/spline_cache_eval.jl")
+
 # declarative macros
 include("hazard/macros.jl")
 
@@ -435,5 +444,8 @@ include("output/variance.jl")
 
 # smoothing parameter selection (PIJCV, EFS, PERF, CV) - must be after variance.jl
 include("inference/smoothing_selection.jl")
+
+# precompilation workload (reduces TTFX for users)
+include("precompile.jl")
 
 end

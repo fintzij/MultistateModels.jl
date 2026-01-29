@@ -362,6 +362,8 @@ function _resolve_selector(select_lambda::Symbol, penalty::AbstractPenalty)
         NoSelection()
     elseif select_lambda == :pijcv || select_lambda == :pijlcv
         PIJCVSelector(0)  # LOO (0 means leave-one-out)
+    elseif select_lambda == :pijcv_fast || select_lambda == :pijcvq
+        PIJCVSelector(0, true)  # LOO with fast quadratic approximation (V_q)
     elseif select_lambda == :pijcv5
         PIJCVSelector(5)
     elseif select_lambda == :pijcv10
@@ -382,7 +384,7 @@ function _resolve_selector(select_lambda::Symbol, penalty::AbstractPenalty)
         PERFSelector()
     else
         throw(ArgumentError("Unknown select_lambda: :$select_lambda. " *
-            "Valid options are: :none, :pijcv, :pijcv5, :pijcv10, :pijcv20, " *
+            "Valid options are: :none, :pijcv, :pijcv_fast, :pijcv5, :pijcv10, :pijcv20, " *
             ":loocv, :cv5, :cv10, :cv20, :efs, :perf"))
     end
 end
