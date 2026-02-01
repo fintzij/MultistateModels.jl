@@ -1162,7 +1162,7 @@ Compute single-subject importance-weighted log-likelihood for MCEM data using ca
 function loglik_subject_cached(parameters, cache::PIJCVEvaluationCacheMCEM, subject_idx::Int)
     model = cache.model
     paths = cache.data.paths
-    weights = cache.data.weights
+    weights = cache.data.ImportanceWeights
     hazards = model.hazards
     totalhazards = model.totalhazards
     tmat = model.tmat

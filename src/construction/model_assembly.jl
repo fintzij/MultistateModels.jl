@@ -148,8 +148,8 @@ function build_emat(data::DataFrame, CensoringPatterns::Matrix{Float64}, Emissio
         # This is a soft constraint with a warning, as emission matrices can represent
         # unnormalized likelihoods in some use cases
         row_sums = sum(EmissionMatrix, dims=2)
-        if any(row_sums .> 1.0 + 1e-10)
-            bad_rows = findall(vec(row_sums) .> 1.0 + 1e-10)
+        if any(row_sums .> 1.0 + TPM_ROW_SUM_TOL)
+            bad_rows = findall(vec(row_sums) .> 1.0 + TPM_ROW_SUM_TOL)
             @warn "EmissionMatrix rows should sum to ≤ 1.0 for proper probability interpretation. " *
                   "Rows with sum > 1.0: $(bad_rows[1:min(5, length(bad_rows))]). " *
                   "This may indicate incorrect soft evidence specification."

@@ -362,6 +362,15 @@ improve numerical stability.
 """
 const MATRIX_REGULARIZATION_EPS = 1e-6
 
+"""
+Numerical zero tolerance for very small positive values.
+
+Used in penalty weighting, spline construction, and lambda selection
+where values smaller than this are treated as effectively zero.
+More stringent than `EIGENVALUE_ZERO_TOL` for numerical operations.
+"""
+const NUMERICAL_ZERO_TOL = 1e-14
+
 # =============================================================================
 # Importance Sampling
 # =============================================================================
@@ -396,6 +405,14 @@ Slightly looser than main optimization to improve speed.
 const LAMBDA_SELECTION_INNER_TOL = 1e-6
 
 """
+Lambda convergence tolerance.
+
+Used to determine when smoothing parameter λ has converged during
+hyperparameter selection. Iteration stops when |λ_new - λ_old| / |λ_old| < tol.
+"""
+const LAMBDA_CONVERGENCE_TOL = 1e-3
+
+"""
 Cholesky downdate tolerance.
 
 Used in rank-one Cholesky downdates to detect when the update would
@@ -422,6 +439,15 @@ When many subjects have ill-conditioned H_{λ,-i}, we only report the first
 N subjects individually to avoid flooding the log.
 """
 const MAX_LOO_CONDITIONING_WARNINGS = 5
+
+"""
+Maximum fraction of subjects that can have ill-conditioned LOO Hessians before
+the PIJCV criterion raises an error. If more than this fraction fails, the
+λ selection is unreliable and should be terminated early.
+
+Default: 0.10 (10% of subjects)
+"""
+const LOO_FAILURE_FRACTION_THRESHOLD = 0.10
 
 # =============================================================================
 # Constants Access Documentation

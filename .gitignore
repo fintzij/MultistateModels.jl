@@ -12,6 +12,8 @@
 scratch/data/*
 scratch/archive/
 scratch/refs/
+scratch/*.html
+scratch/*_files/
 LocalPreferences.toml
 test/testcoverage-gfm.md
 test/testcoverage.html
@@ -22,3 +24,4 @@ MultistateModelsTests/
 
 # JSS paper (separate private repo: https://github.com/fintzij/MultistateModels_JSS_Paper)
 docs/jss_paper/
+

@@ -101,28 +101,6 @@ struct ExponentialJumpSolver <: AbstractJumpSolver
     ExponentialJumpSolver(; fallback::OptimJumpSolver = OptimJumpSolver()) = new(fallback)
 end
 
-"""
-    HybridJumpSolver <: AbstractJumpSolver
-
-Automatically selects between exponential (closed-form) and ITP (root-finding)
-based on whether the current state's hazards are all Markov (exponential).
-
-This is the recommended solver for mixed models with both exponential and
-non-exponential transitions.
-
-# Fields  
-- `exp_solver::ExponentialJumpSolver`: Solver for exponential hazards
-- `itp_solver::OptimJumpSolver`: Solver for non-exponential hazards
-"""
-struct HybridJumpSolver <: AbstractJumpSolver
-    exp_solver::ExponentialJumpSolver
-    itp_solver::OptimJumpSolver
-    HybridJumpSolver(; 
-        exp_solver::ExponentialJumpSolver = ExponentialJumpSolver(),
-        itp_solver::OptimJumpSolver = OptimJumpSolver()
-    ) = new(exp_solver, itp_solver)
-end
-
 # ----------------------------------------------------------------------------
 # Helper Functions for Exponential Hazard Detection
 # ----------------------------------------------------------------------------

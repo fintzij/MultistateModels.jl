@@ -327,10 +327,10 @@ fitted = fit(semimarkov_model; solver=Optim.BFGS())
 
 ```
 
-See also: [`fit`](@ref), [`compare_variance_estimates`](@ref)
+See also: [`fit`](@ref)
 """
 function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfig} = :auto, constraints = nothing, solver = nothing, maxiter = DEFAULT_MCEM_MAXITER, tol = DEFAULT_MCEM_TOL, ascent_threshold = 0.1, stopping_threshold = 0.1, ess_growth_factor = sqrt(2.0), ess_increase_method::Symbol = :fixed, ascent_alpha::Float64 = 0.25, ascent_beta::Float64 = 0.25, ess_target_initial = DEFAULT_ESS_TARGET_INITIAL, max_ess = DEFAULT_MAX_ESS, max_sampling_effort = 20, npaths_additional = 10, block_hessian_speedup = 2.0, sir::Symbol = :adaptive_lhs, sir_pool_constant::Float64 = 2.0, sir_max_pool::Int = 8192, sir_resample::Symbol = :always, sir_degeneracy_threshold::Float64 = 0.7, sir_adaptive_threshold::Float64 = 2.0, sir_adaptive_min_iters::Int = 3, verbose = true, return_convergence_records = true, return_proposed_paths = false, vcov_type::Symbol = :ij, vcov_threshold = true, 
-    loo_method = :direct, penalty = :auto, lambda_init = 1.0, select_lambda::Symbol = :none, kwargs...)
+    loo_method = :direct, penalty = :auto, lambda_init = 1.0, select_lambda::Union{Symbol, AbstractHyperparameterSelector} = :none, kwargs...)
 
     # Validate vcov_type
     _validate_vcov_type(vcov_type)
@@ -475,6 +475,10 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
     # Track λ history for convergence records
     lambda_trace = use_lambda_selection ? ElasticArray{Float64, 2}(undef, penalty_config.n_lambda, 0) : nothing
     edf_trace = use_lambda_selection ? Vector{Float64}() : nothing
+    
+    # λ warmstart: Pass previous iteration's λ as starting point for next iteration
+    # This prevents oscillating λ values when importance weights change between iterations
+    lambda_warmstart = nothing  # Will be set after first λ selection
 
     # initialize ess target
     ess_target = ess_target_initial
@@ -775,32 +779,59 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
             # For SIR: use subsampled paths for λ selection (same as M-step)
             if use_sir
                 sir_data = create_sir_subsampled_data(samplepaths, sir_subsample_indices)
-                selection_data = MCEMSelectionData(model, sir_data.paths, sir_data.weights)
+                selection_data = SMPanelData(model, sir_data.paths, sir_data.weights)
             else
-                selection_data = MCEMSelectionData(model, samplepaths, ImportanceWeights)
+                selection_data = SMPanelData(model, samplepaths, ImportanceWeights)
             end
             
-            # Select λ for this iteration
+            # Select λ for this iteration (use warmstart from previous iteration if available)
             lambda_result = _select_hyperparameters(
                 model, selection_data, penalty_config, lambda_selector;
                 beta_init=params_cur,
+                lambda_init=lambda_warmstart,  # Warmstart from previous iteration
                 inner_maxiter=50,  # Relaxed for inner loop
                 outer_maxiter=100,
                 lambda_tol=1e-3,
                 verbose=(verbose && iter <= 3)  # Only print for first few iterations
             )
             
-            # Update penalty configuration with selected λ
-            penalty_config = lambda_result.penalty
+            # =====================================================================
+            # MCEM λ Dampening via Exponential Moving Average
+            # MC noise in gradients/Hessians can cause λ to oscillate between iterations.
+            # We apply an exponential moving average to stabilize:
+            #   λ_smoothed = γ × λ_new + (1 - γ) × λ_old
+            # where γ increases with iteration (less smoothing as MCEM converges)
+            # and decreases if oscillation is detected (more smoothing to stabilize).
+            # =====================================================================
+            if iter == 1 || isnothing(lambda_warmstart)
+                # First iteration: use selected λ directly
+                lambda_smoothed = lambda_result.lambda
+            else
+                # Compute adaptive dampening factor γ
+                gamma = compute_mcem_lambda_dampening_factor(iter, lambda_trace)
+                
+                # Apply exponential moving average
+                lambda_smoothed = gamma .* lambda_result.lambda .+ (1 - gamma) .* lambda_warmstart
+                
+                if verbose && gamma < 0.5
+                    println("  λ dampening: γ=$(round(gamma, digits=2)) (oscillation detected)")
+                end
+            end
+            
+            # Update penalty configuration with smoothed λ
+            penalty_config = set_hyperparameters(penalty_config, lambda_smoothed)
             warmstart_beta = lambda_result.warmstart_beta
             
-            # Track λ and EDF (extract total from NamedTuple)
-            append!(lambda_trace, lambda_result.lambda)
+            # Store smoothed λ for warmstarting next iteration
+            lambda_warmstart = lambda_smoothed
+            
+            # Track smoothed λ and EDF (extract total from NamedTuple)
+            # Note: We track the smoothed λ, not the raw selected λ
+            append!(lambda_trace, lambda_smoothed)
             push!(edf_trace, lambda_result.edf.total)
             
             if verbose
-                lambda_val = lambda_result.lambda
-                println("  λ-step: λ=$(round.(lambda_val, sigdigits=3)), EDF=$(round(lambda_result.edf.total, digits=1))")
+                println("  λ-step: λ=$(round.(lambda_smoothed, sigdigits=3)), EDF=$(round(lambda_result.edf.total, digits=1))")
             end
         end
         
@@ -1191,11 +1222,10 @@ function _fit_mcem(model::MultistateModel; proposal::Union{Symbol, ProposalConfi
         final_smoothing_parameters = final_lambda
         
         # Compute final EDF 
-        selection_data = MCEMSelectionData(model, samplepaths, ImportanceWeights)
-        edf_total = compute_edf_mcem(params_cur, final_lambda, penalty_config, selection_data)
-        # Note: per-hazard EDF breakdown would require tracking penalty term contributions separately
-        final_edf = (total = edf_total, per_term = [edf_total])
-        
+        selection_data = SMPanelData(model, samplepaths, ImportanceWeights)
+        final_edf = compute_edf_mcem(params_cur, final_lambda, penalty_config, selection_data)
+        edf_total = final_edf.total
+
         if verbose
             println("Final smoothing parameters: λ=$(round.(final_lambda, sigdigits=3))")
             println("Effective degrees of freedom: $(round(edf_total, digits=2))")

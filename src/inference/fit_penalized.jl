@@ -94,9 +94,9 @@ function _fit_exact_penalized(
     # Constraints with selection is not supported
     if !isnothing(constraints) && !(selector isa NoSelection)
         throw(ArgumentError(
-            "Constrained optimization with smoothing parameter selection is not supported. " *
-            "Either use constraints with select_lambda=:none (fixed λ), " *
-            "or remove constraints for automatic λ selection."
+            "Constrained optimization with automatic λ selection is NOT supported. " *
+            "Use `select_lambda=:none` and specify λ manually when using constraints (e.g., monotonicity). " *
+            "Example: fit(model, penalty=splinepenalty(trans=1, lambda=10.0), select_lambda=:none, constraints=mono_constraints)"
         ))
     end
     

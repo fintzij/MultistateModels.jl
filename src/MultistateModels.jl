@@ -77,12 +77,10 @@ export
     # --------------------------------------------------------------------------
     # Parameters: get_parameters(model; scale=:natural/:flat/:nested)
     # VCov: get_vcov(model; type=:model/:ij/:jk)
-    # Pseudovalues: get_pseudovalues(model; type=:jk/:ij)
     get_loglik,
     get_parameters,
     get_parnames,
     get_vcov,
-    get_pseudovalues,
     get_convergence_records,
     get_expanded_parameters,
     
@@ -92,7 +90,6 @@ export
     get_subject_gradients,
     get_loo_perturbations,
     get_influence_functions,
-    compare_variance_estimates,
     
     # --------------------------------------------------------------------------
     # Parameter manipulation
@@ -133,7 +130,6 @@ export
     # --------------------------------------------------------------------------
     OptimJumpSolver,
     ExponentialJumpSolver,
-    HybridJumpSolver,
     CachedTransformStrategy,
     DirectTransformStrategy,
     
@@ -231,6 +227,8 @@ export
     calibrate_splines!,
     build_penalty_matrix,
     build_weighted_penalty_matrix,
+    compute_penalty_matrix_derivative_wrt_alpha,
+    compute_weighted_penalty_matrix_with_derivative,
     build_spline_hazard_info,
     place_interior_knots_pooled,
     validate_shared_knots,
@@ -306,9 +304,6 @@ include("utilities/flatten.jl")
 
 # ReConstructor struct and flatten/unflatten API
 include("utilities/reconstructor.jl")
-
-# shared stats utilities
-include("utilities/stats.jl")
 
 # Parameter scale transformations (estimation <-> natural)
 include("utilities/transforms.jl")

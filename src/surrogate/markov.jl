@@ -1235,7 +1235,7 @@ function _fit_phasetype_mle(model::MultistateProcess,
                     theta0[idx] = dest_rate
                 else
                     # Earlier phases get minimal absorption (Coxian-like structure)
-                    theta0[idx] = 1e-5
+                    theta0[idx] = SURROGATE_PARAM_MIN
                 end
             end
         end
@@ -1383,7 +1383,7 @@ function _fit_phasetype_mle(model::MultistateProcess,
     sol = solve(prob, IpoptOptimizer();
                 print_level = verbose ? 3 : 0,
                 max_iter = maxiter,
-                tol = 1e-6)
+                tol = LAMBDA_SELECTION_INNER_TOL)
     
     # Extract fitted parameters
     theta_fit = sol.u

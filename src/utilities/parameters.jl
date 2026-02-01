@@ -554,37 +554,6 @@ function build_hazard_params(params::AbstractVector{<:Real}, parnames::Vector{Sy
 end
 
 """
-    extract_baseline_values(hazard_params::NamedTuple)
-
-Extract baseline parameter values as a vector from NamedTuple structure.
-
-# Arguments
-- `hazard_params`: NamedTuple with `baseline` field containing named parameters
-
-# Returns
-- Vector of baseline parameter values in order
-"""
-function extract_baseline_values(hazard_params::NamedTuple)
-    return collect(values(hazard_params.baseline))
-end
-
-"""
-    extract_covariate_values(hazard_params::NamedTuple)
-
-Extract covariate coefficient values as a vector from NamedTuple structure.
-
-# Arguments
-- `hazard_params`: NamedTuple with optional `covariates` field
-
-# Returns
-- Vector of covariate coefficient values, or empty vector if no covariates
-"""
-function extract_covariate_values(hazard_params::NamedTuple)
-    return haskey(hazard_params, :covariates) ? 
-           collect(values(hazard_params.covariates)) : Float64[]
-end
-
-"""
     extract_params_vector(hazard_params)
 
 Extract the full parameter vector from a hazard's NamedTuple params structure.

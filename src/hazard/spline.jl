@@ -167,6 +167,7 @@ function place_interior_knots_pooled(model::MultistateProcess, origin::Int, nkno
     
     # Pool sojourn times from all transitions from this origin
     pooled_sojourns = Float64[]
+    sizehint!(pooled_sojourns, nrow(model.data))  # Upper bound estimate
     
     # Check if we have exact data
     has_exact = _has_exact_transitions_from_origin(model, origin)
@@ -295,10 +296,15 @@ penalized likelihood evaluation.
 - `SplineHazardInfo`: Struct containing penalty matrix and basis information
 
 # Notes
-For monotone splines (hazard.monotone ≠ 0), the penalty matrix is automatically
-transformed from B-spline coefficient space to I-spline parameter space using
-`transform_penalty_for_monotone`. This ensures the penalty correctly penalizes
-the curvature of the underlying function, not the raw optimization parameters.
+The penalty matrix is normalized so that its maximum eigenvalue ≈ 1. This ensures
+the smoothing parameter λ has a consistent interpretation regardless of time scale
+or knot spacing. Without normalization, the GPS penalty matrix eigenvalues scale 
+as O(1/h²) where h is the knot spacing, causing λ selection to produce extreme values.
+
+For monotone splines (hazard.monotone ≠ 0), the penalty matrix is transformed from 
+B-spline coefficient space to I-spline parameter space using `transform_penalty_for_monotone`,
+then normalized. This ensures the penalty correctly penalizes the curvature of the 
+underlying function, not the raw optimization parameters.
 """
 function build_spline_hazard_info(hazard::RuntimeSplineHazard; penalty_order::Int=2)
     # Rebuild basis from hazard (same logic as _rebuild_spline_basis)
@@ -312,9 +318,20 @@ function build_spline_hazard_info(hazard::RuntimeSplineHazard; penalty_order::In
     # For monotone splines, transform penalty to I-spline parameter space
     # P(ests) = (λ/2) ests' (L' S L) ests where coefs = L * ests
     if hazard.monotone != 0
-        S = transform_penalty_for_monotone(S_bspline, basis; direction=hazard.monotone)
+        S_transformed = transform_penalty_for_monotone(S_bspline, basis; direction=hazard.monotone)
     else
-        S = S_bspline
+        S_transformed = S_bspline
+    end
+    
+    # CRITICAL: Normalize penalty matrix so max eigenvalue ≈ 1
+    # The GPS penalty matrix eigenvalues scale as O(1/h²) where h is knot spacing.
+    # Without normalization, λ selection algorithms converge to extreme values.
+    λ_max = maximum(eigvals(Symmetric(S_transformed)))
+    
+    S = if λ_max > NUMERICAL_ZERO_TOL  # Avoid division by near-zero
+        S_transformed / λ_max
+    else
+        S_transformed  # Degenerate case: penalty is essentially zero
     end
     
     return SplineHazardInfo(
@@ -446,6 +463,7 @@ function place_interior_knots(sojourns::AbstractVector{<:Real}, nknots::Integer;
             # Add more evenly spaced knots
             remaining = nknots - length(knots)
             gaps = Float64[]
+            sizehint!(gaps, nknots + 2)
             
             # Find largest gaps
             all_points = sort(vcat([lb], knots, [ub]))
@@ -1210,6 +1228,7 @@ function _compute_exit_quantiles_at_reference(model::MultistateProcess, statefro
     
     # Invert CDF to get quantiles via linear interpolation
     result = Float64[]
+    sizehint!(result, length(quantiles))
     sorted_quantiles = sort(quantiles)
     
     for q in sorted_quantiles
@@ -1401,10 +1420,15 @@ Build a function that converts flat parameter vector to nested structure.
 """
 function _build_unflatten_function(hazards::Vector{<:_Hazard})
     # Precompute offsets and sizes
+    n_hazards = length(hazards)
     offsets = Int[]
     sizes = Int[]
     baselines = Int[]
     haznames = Symbol[]
+    sizehint!(offsets, n_hazards)
+    sizehint!(sizes, n_hazards)
+    sizehint!(baselines, n_hazards)
+    sizehint!(haznames, n_hazards)
     
     offset = 0
     for haz in hazards

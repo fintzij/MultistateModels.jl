@@ -389,6 +389,13 @@ function _resolve_selector(select_lambda::Symbol, penalty::AbstractPenalty)
     end
 end
 
+# Identity method: if user passes a selector directly, just return it
+# (but still respect NoPenalty)
+function _resolve_selector(selector::AbstractHyperparameterSelector, penalty::AbstractPenalty)
+    penalty isa NoPenalty && return NoSelection()
+    return selector
+end
+
 """
     _validate_vcov_type(vcov_type::Symbol) -> Symbol
 

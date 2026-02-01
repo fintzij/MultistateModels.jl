@@ -447,11 +447,13 @@ struct PIJCVSelector <: AbstractHyperparameterSelector
     nfolds::Int
     use_quadratic::Bool  # If true, use fast V_q approximation instead of actual likelihood
     use_implicit_diff::Bool  # If true, use ImplicitDifferentiation.jl for efficient gradients
+    use_performance_iteration::Bool  # If true (default), use Wood (2024) performance iteration
     
     # Default use_implicit_diff=true for efficient gradient computation via IFT
-    function PIJCVSelector(nfolds::Int=0, use_quadratic::Bool=false, use_implicit_diff::Bool=true)
+    # Default use_performance_iteration=true for fast smoothing parameter selection
+    function PIJCVSelector(nfolds::Int=0, use_quadratic::Bool=false, use_implicit_diff::Bool=true, use_performance_iteration::Bool=true)
         nfolds >= 0 || throw(ArgumentError("nfolds must be ≥ 0"))
-        new(nfolds, use_quadratic, use_implicit_diff)
+        new(nfolds, use_quadratic, use_implicit_diff, use_performance_iteration)
     end
 end
 
@@ -494,8 +496,17 @@ assumed model structure is correct.
 # References
 - Fellner, W.H. (1986). Robust estimation of variance components.
 - Schall, R. (1991). Estimation in generalized linear models with random effects.
+
+# Fields
+- `use_performance_iteration::Bool`: If true (default), use Wood (2024) performance 
+  iteration (fast single-loop algorithm). If false, use slower nested optimization.
 """
-struct REMLSelector <: AbstractHyperparameterSelector end
+struct REMLSelector <: AbstractHyperparameterSelector
+    use_performance_iteration::Bool
+end
+
+# Keyword constructor with default
+REMLSelector(; use_performance_iteration::Bool=true) = REMLSelector(use_performance_iteration)
 
 """
     PERFSelector <: AbstractHyperparameterSelector
@@ -506,8 +517,17 @@ An alternative model selection criterion that balances fit and complexity.
 
 # References
 - Marra, G. & Radice, R. (2020). "PERF: Prediction error using random forests."
+
+# Fields
+- `use_performance_iteration::Bool`: If true (default), use Wood (2024) performance 
+  iteration (fast single-loop algorithm). If false, use slower nested optimization.
 """
-struct PERFSelector <: AbstractHyperparameterSelector end
+struct PERFSelector <: AbstractHyperparameterSelector
+    use_performance_iteration::Bool
+end
+
+# Keyword constructor with default
+PERFSelector(; use_performance_iteration::Bool=true) = PERFSelector(use_performance_iteration)
 
 # =============================================================================
 # Result Types

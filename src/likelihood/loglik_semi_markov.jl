@@ -456,7 +456,7 @@ See also: [`loglik_semi_markov`](@ref), [`compute_pijcv_criterion_mcem`](@ref)
 function loglik_subject(parameters, data::MCEMSelectionData, subject_idx::Int)
     model = data.model
     paths = data.paths
-    weights = data.weights
+    weights = data.ImportanceWeights
     
     # Validate subject index
     n_subj = length(paths)

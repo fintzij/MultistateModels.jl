@@ -31,6 +31,11 @@ Spline hazards are remade with the new parameters.
 As of v0.3.0, all parameters are on natural scale.
 """
 function set_parameters_flat!(model::MultistateProcess, flat_params::AbstractVector)
+    # Input validation
+    expected_len = length(model.parameters.flat)
+    @assert length(flat_params) == expected_len "Parameter vector length mismatch: got $(length(flat_params)), expected $expected_len"
+    @assert all(isfinite, flat_params) "Parameter vector contains NaN or Inf values"
+    
     # Unflatten to get nested structure
     params_nested = unflatten(model.parameters.reconstructor, flat_params)
     

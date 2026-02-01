@@ -9,6 +9,8 @@
   - **New functions**: `convert_collapsed_path_to_censored_data(path, subj_data, model)` converts collapsed paths back to censored data format preserving original observation times; `loglik_phasetype_forward(censored_data, surrogate)` computes marginal likelihood via forward algorithm on expanded phase state space.
   - **Deprecated**: `loglik_phasetype_collapsed_path()` now emits a deprecation warning and should not be used for importance sampling.
 
+- **Convergence validation**: `fit()` now validates that optimization objective and parameters are finite (not NaN/Inf) in addition to checking return codes. This catches silent optimization failures.
+
 ### Added
 
 - **Variance-Covariance with Constraints (Item #27)**: Models with constraints now always return variance-covariance matrices using the reduced Hessian approach. For constrained MLE with active constraints $c(\hat{\theta}) = 0$, the variance is computed as:
@@ -51,6 +53,12 @@
 
 - **Default penalty method**: `build_penalty_matrix()` now defaults to `:gps` method instead of `:integral`
 - **Error types**: Hazard validation now throws `ArgumentError` instead of `AssertionError` for invalid state indices
+
+### Deprecated (Scheduled for Removal in v0.4.0)
+
+The following items emit deprecation warnings and will be removed in v0.4.0:
+
+- **`penalty=nothing`**: Use `penalty=:none` for explicit unpenalized fitting, or `penalty=:auto` (default) for automatic penalization of spline hazards.
 
 ### Breaking Changes: Deprecation Removal
 

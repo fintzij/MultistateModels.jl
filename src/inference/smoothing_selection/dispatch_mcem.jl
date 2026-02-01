@@ -45,10 +45,11 @@ See also: [`MCEMSelectionData`](@ref), [`_fit_inner_coefficients`](@ref)
 """
 function _select_hyperparameters(
     model::MultistateProcess,
-    data::MCEMSelectionData,
+    data::SMPanelData,  # MCEMSelectionData is an alias for SMPanelData
     penalty::AbstractPenalty,
     selector::AbstractHyperparameterSelector;
     beta_init::Vector{Float64},
+    lambda_init::Union{Nothing, Vector{Float64}} = nothing,  # Warmstart from previous iteration
     inner_maxiter::Int = 50,
     outer_maxiter::Int = 100,
     lambda_tol::Float64 = 1e-3,

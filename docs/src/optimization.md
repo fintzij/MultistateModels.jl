@@ -207,8 +207,8 @@ The `select_lambda` argument controls how the smoothing parameter λ is chosen:
 fitted = fit(model; select_lambda=:pijcv)
 
 # Alternative methods
-fitted = fit(model; select_lambda=:efs)    # Expected Fisher scoring
-fitted = fit(model; select_lambda=:perf)   # Performance iteration
+fitted = fit(model; select_lambda=:efs)    # Extended Fellner-Schall / REML
+fitted = fit(model; select_lambda=:perf)   # PERF criterion (Marra & Radice 2020)
 fitted = fit(model; select_lambda=:loocv)  # Exact leave-one-out CV (slow)
 fitted = fit(model; select_lambda=:cv5)    # 5-fold cross-validation
 ```
@@ -217,12 +217,45 @@ fitted = fit(model; select_lambda=:cv5)    # 5-fold cross-validation
 |--------|-------------|------------|-----------------|
 | `:pijcv` | Predictive infinitesimal jackknife CV (Wood 2024) | O(np²) | Default choice |
 | `:pijcv5`, `:pijcv10`, `:pijcv20` | K-fold PIJCV variants | O(np²) | Large n |
-| `:efs` | Expected Fisher scoring criterion | O(np²) | Fast alternative |
-| `:perf` | Performance iteration (Wood & Fasiolo 2017) | O(np²) | GCV-like behavior |
+| `:efs` | Extended Fellner-Schall / REML criterion | O(np²) | Fast alternative |
+| `:perf` | PERF criterion (Marra & Radice 2020) | O(np²) | GCV-like behavior |
 | `:loocv` | Exact leave-one-out cross-validation | O(n²p²) | Gold standard (slow) |
 | `:cv5`, `:cv10`, `:cv20` | K-fold CV with refitting | O(knp²) | Model checking |
 
-**Reference**: Wood, S.N. (2024). "On Neighbourhood Cross Validation." arXiv:2404.16490
+**References**: 
+- Wood, S.N. (2024). "On Neighbourhood Cross Validation." arXiv:2404.16490
+- Marra, G. & Radice, R. (2020). "Penalized regression splines: theory and application"
+
+### Performance Iteration Algorithm
+
+All automatic smoothing parameter selection methods (PIJCV, EFS, PERF) use **performance iteration** (Wood 2024), a fast algorithm that alternates single Newton steps for coefficients β and smoothing parameters λ:
+
+```
+for iter = 1:maxiter
+    # Step 1: One Newton step for β given λ
+    H_λ = H_unpenalized + λ * S    # Penalized Hessian
+    Δβ = -(H_λ \ gradient)
+    β_new = β + Δβ
+    
+    # Step 2: One Newton step for λ given β
+    V, ∇V, ∂²V = criterion_with_derivatives(β_new, λ)
+    Δλ = -(∂²V \ ∇V)
+    λ_new = clamp(λ + Δλ, λ_min, λ_max)
+    
+    if converged: break
+end
+```
+
+**Key benefits**:
+- **Fast**: ~20-40 iterations total (vs. ~2500 for nested optimization)
+- **Unified**: Same algorithm for all criteria (PIJCV, EFS, PERF)
+- **Robust**: Line search and trust region safeguards for stability
+- **Multiple λ**: Handles scalar or vector smoothing parameters automatically
+
+The algorithm supports:
+- Scalar λ (single smoothing parameter for all hazards)
+- Vector λ (separate smoothing parameters per hazard)
+- Joint (λ, α) optimization for adaptive at-risk weighting
 
 ### Initial Lambda Value
 
@@ -254,6 +287,36 @@ total_edf = sum(values(fitted.edf))
 ```
 
 Lower EDF indicates more smoothing (simpler model). When EDF ≈ number of spline coefficients, the penalty has little effect.
+
+### Constraints and Smoothing Parameter Selection
+
+!!! warning "Limitation: Automatic λ selection is not supported with constrained splines"
+    
+    When using **monotone splines** (`monotone=1` or `monotone=-1`) or other constrained
+    splines, automatic smoothing parameter selection via PIJCV/EFS/PERF is **not supported**.
+    You must specify λ manually using `lambda_init`.
+
+**Why this limitation exists**: Automatic λ selection requires the penalty matrix Newton step
+to be well-defined, but constrained splines use an I-spline transformation that changes the
+optimization landscape. The performance iteration algorithm assumes an unconstrained Newton
+step for the coefficient update.
+
+**Workaround**: For monotone splines, manually tune λ via cross-validation:
+
+```julia
+# Monotone spline hazard (automatic λ selection NOT supported)
+h23 = Hazard(@formula(0 ~ 1), :sp, 2, 3; degree=3, monotone=1)
+model = multistatemodel(h12, h13, h23; data=df)
+
+# Manually specify λ - start with a grid search
+for λ in [0.01, 0.1, 1.0, 10.0, 100.0]
+    fitted = fit(model; penalty=SplinePenalty(), lambda_init=λ)
+    println("λ = $λ, loglik = $(fitted.loglik.total)")
+end
+
+# Use the λ that gives best holdout performance or clinical plausibility
+fitted = fit(model; penalty=SplinePenalty(), lambda_init=1.0)
+```
 
 ### Example: Illness-Death Model with Spline Hazards
 

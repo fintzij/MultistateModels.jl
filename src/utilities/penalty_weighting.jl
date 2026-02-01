@@ -682,6 +682,229 @@ function _path_time_in_state_in_interval(path::SamplePath, state::Int,
 end
 
 # =============================================================================
+# Penalty Matrix Derivative with Respect to Alpha
+# =============================================================================
+
+"""
+    compute_penalty_matrix_derivative_wrt_alpha(
+        D_matrix::AbstractMatrix,
+        interval_widths::AbstractVector{<:Real},
+        atrisk_counts::AbstractVector{<:Real},
+        alpha::Real
+    ) -> Matrix
+
+Compute derivative of weighted penalty matrix S(α) with respect to α.
+
+For adaptive penalty with at-risk weighting:
+    S(α) = Σ_q w_q(α) Δ_q DᵀD
+
+where w_q(α) = Y(t_q)^(-α) is the weight for interval q, Δ_q is the interval width,
+and DᵀD is the integrated basis derivative outer product for that interval.
+
+The derivative with respect to α is:
+    ∂S/∂α = Σ_q (∂w_q/∂α) Δ_q DᵀD
+          = -Σ_q log(Y(t_q)) Y(t_q)^(-α) Δ_q DᵀD
+
+# Arguments
+- `D_matrix::AbstractMatrix`: Base matrix DᵀD (e.g., from `build_penalty_matrix`)
+- `interval_widths::AbstractVector{<:Real}`: Δ_q for each interval (length n_intervals)
+- `atrisk_counts::AbstractVector{<:Real}`: Y(t_q) at-risk counts for each interval (length n_intervals)
+- `alpha::Real`: Current α value
+
+# Returns
+Matrix ∂S/∂α of same dimensions as D_matrix
+
+# Notes
+- Supports ForwardDiff: use generic `Real` type for alpha
+- At-risk counts are clamped to minimum of 1.0 to avoid numerical issues with log(0)
+- When α ≈ 0, the derivative still uses the -log(Y) * Y^(-α) formula
+- The function returns a negative-valued matrix (penalty decreases as α increases)
+
+# Mathematical Details
+The weight function is w(α) = Y^(-α) = exp(-α log(Y)), so:
+    ∂w/∂α = -log(Y) exp(-α log(Y)) = -log(Y) Y^(-α)
+
+For numerical stability:
+- Y ≤ 0 is clamped to 1.0 (shouldn't happen with proper at-risk computation)
+- log(Y) for small Y is computed directly (Julia handles log(1) = 0 correctly)
+
+# Example
+```julia
+# Suppose we have a penalty matrix S and want its α-derivative
+D = build_difference_matrix(n_basis, order=2)  # Difference matrix
+DtD = D' * D  # Base penalty structure
+
+# Interval data from spline knots
+interval_widths = [1.0, 1.0, 1.0, 1.0]  # 4 intervals
+atrisk_counts = [100.0, 80.0, 50.0, 20.0]  # At-risk in each interval
+
+alpha = 1.0
+dS_dalpha = compute_penalty_matrix_derivative_wrt_alpha(DtD, interval_widths, atrisk_counts, alpha)
+```
+
+See also: [`build_weighted_penalty_matrix`](@ref), [`AtRiskWeighting`](@ref)
+"""
+function compute_penalty_matrix_derivative_wrt_alpha(
+    D_matrix::AbstractMatrix,
+    interval_widths::AbstractVector{<:Real},
+    atrisk_counts::AbstractVector{<:Real},
+    alpha::Real
+)
+    # Input validation
+    n_intervals = length(interval_widths)
+    @assert length(atrisk_counts) == n_intervals "interval_widths and atrisk_counts must have same length"
+    @assert n_intervals > 0 "Must have at least one interval"
+    
+    K = size(D_matrix, 1)
+    @assert size(D_matrix, 2) == K "D_matrix must be square"
+    
+    # Initialize result matrix with appropriate type for AD compatibility
+    # Need to handle ForwardDiff.Dual types properly
+    T = promote_type(eltype(D_matrix), eltype(interval_widths), eltype(atrisk_counts), typeof(alpha))
+    dS_dalpha = zeros(T, K, K)
+    
+    # Compute derivative: ∂S/∂α = -Σ_q log(Y_q) Y_q^(-α) Δ_q D_matrix
+    for q in 1:n_intervals
+        Δ_q = interval_widths[q]
+        
+        # Skip degenerate intervals
+        Δ_q <= 0 && continue
+        
+        # Clamp at-risk count to minimum of 1.0 to avoid log(0) and Inf weights
+        Y_q = max(atrisk_counts[q], one(T))
+        
+        # Compute weight derivative: ∂w_q/∂α = -log(Y_q) * Y_q^(-α)
+        # Note: log(1.0) = 0.0, so intervals with Y=1 contribute zero derivative
+        log_Y_q = log(Y_q)
+        weight_deriv = -log_Y_q * Y_q^(-alpha)
+        
+        # Accumulate contribution
+        contribution = weight_deriv * Δ_q
+        dS_dalpha .+= contribution .* D_matrix
+    end
+    
+    return dS_dalpha
+end
+
+"""
+    compute_weighted_penalty_matrix_with_derivative(
+        basis,
+        order::Int,
+        atrisk_counts::AbstractVector{<:Real},
+        alpha::Real
+    ) -> (S::Matrix, dS_dalpha::Matrix)
+
+Compute both the weighted penalty matrix S(α) and its derivative ∂S/∂α simultaneously.
+
+This is more efficient than calling `build_weighted_penalty_matrix` and 
+`compute_penalty_matrix_derivative_wrt_alpha` separately, as it avoids redundant
+computation of basis derivatives.
+
+# Arguments
+- `basis`: BSplineKit basis object
+- `order::Int`: Derivative order for penalty (typically 2 for curvature)
+- `atrisk_counts::AbstractVector{<:Real}`: At-risk counts for each knot interval
+- `alpha::Real`: Current α value
+
+# Returns
+- `S`: Weighted penalty matrix S(α)
+- `dS_dalpha`: Derivative matrix ∂S/∂α
+
+# Notes
+For ForwardDiff compatibility, both outputs will have element type matching
+the promoted type of the inputs.
+
+See also: [`build_weighted_penalty_matrix`](@ref), [`compute_penalty_matrix_derivative_wrt_alpha`](@ref)
+"""
+function compute_weighted_penalty_matrix_with_derivative(
+    basis,
+    order::Int,
+    atrisk_counts::AbstractVector{<:Real},
+    alpha::Real
+)
+    order >= 1 || throw(ArgumentError("Penalty order must be ≥ 1, got $order"))
+    
+    # Get knot vector
+    knots = if basis isa BSplineBasis
+        collect(BSplineKit.knots(basis))
+    elseif basis isa RecombinedBSplineBasis
+        collect(BSplineKit.knots(parent(basis)))
+    else
+        throw(ArgumentError("Unsupported basis type: $(typeof(basis))"))
+    end
+    
+    K = length(basis)
+    spline_order = BSplineKit.order(basis)
+    deriv_order = spline_order - order
+    
+    if deriv_order < 1
+        # Derivative order exceeds spline degree
+        T = promote_type(eltype(atrisk_counts), typeof(alpha))
+        return zeros(T, K, K), zeros(T, K, K)
+    end
+    
+    unique_knots = unique(knots)
+    n_intervals = length(unique_knots) - 1
+    
+    @assert length(atrisk_counts) == n_intervals "atrisk_counts must have length $n_intervals"
+    
+    # Type for AD compatibility
+    T = promote_type(eltype(atrisk_counts), typeof(alpha))
+    
+    # Initialize matrices
+    S_w = zeros(T, K, K)
+    dS_dalpha = zeros(T, K, K)
+    
+    # Gauss-Legendre quadrature
+    n_gauss = max(deriv_order, 3)
+    gl_nodes, gl_weights = _gauss_legendre(n_gauss)
+    
+    # Process each interval
+    for q in 1:n_intervals
+        a, b = unique_knots[q], unique_knots[q + 1]
+        h = b - a
+        
+        h < NUMERICAL_ZERO_TOL && continue
+        
+        # Clamp at-risk count
+        Y_q = max(atrisk_counts[q], one(T))
+        
+        # Compute weight and its derivative
+        w_q = Y_q^(-alpha)
+        log_Y_q = log(Y_q)
+        dw_dalpha = -log_Y_q * w_q  # = -log(Y) * Y^(-α)
+        
+        # Transform Gauss points to [a, b]
+        for (i_pt, ξ) in enumerate(gl_nodes)
+            t = a + (ξ + 1) * h / 2
+            w_gauss = gl_weights[i_pt] * h / 2
+            
+            # Evaluate basis derivatives
+            deriv_vals = _evaluate_basis_derivatives(basis, t, order)
+            
+            # Accumulate contributions
+            for i in 1:K
+                for j in i:K
+                    outer_prod = deriv_vals[i] * deriv_vals[j] * w_gauss
+                    S_w[i, j] += w_q * outer_prod
+                    dS_dalpha[i, j] += dw_dalpha * outer_prod
+                end
+            end
+        end
+    end
+    
+    # Symmetrize
+    for i in 1:K
+        for j in (i+1):K
+            S_w[j, i] = S_w[i, j]
+            dS_dalpha[j, i] = dS_dalpha[i, j]
+        end
+    end
+    
+    return S_w, dS_dalpha
+end
+
+# =============================================================================
 # Alpha Learning for Adaptive Penalty Weighting (Phase 5)
 # =============================================================================
 
@@ -800,7 +1023,7 @@ function learn_alpha(model::MultistateProcess,
             if e isa PosDefException || e isa LAPACKException
                 # Fall back to eigenvalues for non-PD case
                 eigvals = eigen(Symmetric(H_pen)).values
-                eigvals_safe = max.(eigvals, 1e-10)
+                eigvals_safe = max.(eigvals, EIGENVALUE_ZERO_TOL)
                 sum(log.(eigvals_safe))
             else
                 rethrow(e)
@@ -851,7 +1074,7 @@ function _brent_minimize(f, a::Float64, b::Float64; tol::Float64=1e-4, maxiter::
     
     for iter in 1:maxiter
         midpoint = 0.5 * (a + b)
-        tol1 = tol * abs(x) + 1e-10
+        tol1 = tol * abs(x) + EIGENVALUE_ZERO_TOL
         tol2 = 2.0 * tol1
         
         # Check convergence
@@ -1060,7 +1283,7 @@ function update_penalty_with_alpha(penalty::QuadraticPenalty,
     λ_max_uniform = maximum(eigvals(Symmetric(S_uniform)))
     λ_max_weighted = maximum(eigvals(Symmetric(S_weighted)))
     
-    S_bspline = if λ_max_weighted > 1e-14
+    S_bspline = if λ_max_weighted > NUMERICAL_ZERO_TOL
         scale_factor = λ_max_uniform / λ_max_weighted
         S_weighted * scale_factor
     else

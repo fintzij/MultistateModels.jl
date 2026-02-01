@@ -564,37 +564,25 @@ end
 """
     MCEMSelectionData
 
-Data container for smoothing parameter (λ) selection within MCEM iterations.
+Type alias for SMPanelData used in smoothing parameter (λ) selection within MCEM iterations.
 
-This wraps the sampled paths and importance weights from the E-step for use
-in hyperparameter selection functions. Unlike SMPanelData, this type explicitly
-signals that we're doing λ selection (not the M-step optimization).
+This is identical to SMPanelData but allows code to dispatch differently when
+the data is being used for λ selection vs M-step optimization. In practice,
+you can use SMPanelData directly since MCEMSelectionData is just an alias.
 
 Within each MCEM iteration:
-1. E-step samples paths at β_current → paths, weights
+1. E-step samples paths at β_current → paths, ImportanceWeights
 2. λ-step uses MCEMSelectionData for PIJCV optimization
 3. M-step uses SMPanelData for final β optimization
 
-# Fields
-- `model::MultistateProcess`: The multistate model
-- `paths::Vector{Vector{SamplePath}}`: Sampled paths for each subject (outer vector over subjects)
-- `weights::Vector{Vector{Float64}}`: Normalized importance weights for each path
-
 # Key Insight
-Paths/weights are FIXED during λ selection. Q(β; paths, weights) is valid for 
+Paths/ImportanceWeights are FIXED during λ selection. Q(β; paths, weights) is valid for 
 ANY β via importance weighting. This allows jointly optimizing (λ, β) within
 each MCEM iteration using the same Monte Carlo approximation.
 
 See also: [`SMPanelData`](@ref), [`_select_hyperparameters`](@ref)
 """
-struct MCEMSelectionData
-    model::MultistateProcess
-    paths::Vector{Vector{SamplePath}}
-    weights::Vector{Vector{Float64}}
-end
-
-# Convenience constructor from SMPanelData
-MCEMSelectionData(sm_data::SMPanelData) = MCEMSelectionData(sm_data.model, sm_data.paths, sm_data.ImportanceWeights)
+const MCEMSelectionData = SMPanelData
 
 # =============================================================================
 # Lightweight Interval for Fused Likelihood

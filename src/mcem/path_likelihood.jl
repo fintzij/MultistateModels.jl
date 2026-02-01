@@ -140,54 +140,6 @@ function compute_surrogate_path_loglik(
 end
 
 # =============================================================================
-# Path Collapsing (PhaseType only)
-# =============================================================================
-
-"""
-    collapse_expanded_path(expanded_path::SamplePath, infra::MCEMInfrastructure{PhaseTypeSurrogate})
-
-Collapse an expanded (phase-level) path to original (macro-state) path.
-
-# Arguments
-- `expanded_path`: Path on expanded state space (phases)
-- `infra`: PhaseType infrastructure containing state mappings
-
-# Returns
-`SamplePath` on original state space
-"""
-function collapse_expanded_path(expanded_path::SamplePath, infra::MCEMInfrastructure{PhaseTypeSurrogate})
-    # Map each phase state back to its macro-state
-    phase_to_state = infra.surrogate.phase_to_state
-    
-    # Collapse states
-    collapsed_states = [phase_to_state[s] for s in expanded_path.states]
-    
-    # Remove consecutive duplicates (phases in same macro-state)
-    unique_times = Float64[]
-    unique_states = Int[]
-    
-    push!(unique_times, expanded_path.times[1])
-    push!(unique_states, collapsed_states[1])
-    
-    for i in 2:length(collapsed_states)
-        if collapsed_states[i] != collapsed_states[i-1]
-            push!(unique_times, expanded_path.times[i])
-            push!(unique_states, collapsed_states[i])
-        end
-    end
-    
-    # Add final time if different from last recorded
-    if unique_times[end] != expanded_path.times[end]
-        push!(unique_times, expanded_path.times[end])
-    end
-    
-    SamplePath(unique_times, unique_states)
-end
-
-# No-op for Markov (paths are already on original state space)
-collapse_expanded_path(path::SamplePath, infra::MCEMInfrastructure{MarkovSurrogate}) = path
-
-# =============================================================================
 # Convenience: Get surrogate parameters
 # =============================================================================
 

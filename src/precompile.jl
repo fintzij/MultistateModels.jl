@@ -57,13 +57,15 @@ using PrecompileTools: @compile_workload, @setup_workload
         # === Simulation (catch errors since random data may not work) ===
         try
             simulate(model_exp; tmax=3.0, nsim=2)
-        catch
+        catch e
+            @debug "Precompile simulation skipped" exception=(e, catch_backtrace())
         end
         
         # === Fitting (short iterations, catch errors) ===
         try
             fit(model_exp; maxiter=2, verbose=false)
-        catch
+        catch e
+            @debug "Precompile fit skipped" exception=(e, catch_backtrace())
         end
     end
 end

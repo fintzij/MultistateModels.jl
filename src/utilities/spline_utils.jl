@@ -94,10 +94,10 @@ function build_general_difference_matrix(knots::Vector{Float64}, d::Int, m::Int)
         end
         
         # Check for zero weights (would indicate coincident knots in interior)
-        if any(abs.(W_diag) .< 1e-14)
+        if any(abs.(W_diag) .< NUMERICAL_ZERO_TOL)
             @warn "Near-zero weight in general difference matrix at iteration j=$j (coincident knots?)" maxlog=1
             # Replace near-zero with small value to avoid division by zero
-            W_diag[abs.(W_diag) .< 1e-14] .= 1e-14
+            W_diag[abs.(W_diag) .< NUMERICAL_ZERO_TOL] .= NUMERICAL_ZERO_TOL
         end
         
         # Build weighted difference matrix: (n_next × n_current)
@@ -315,7 +315,7 @@ function build_penalty_matrix_integral(basis, order::Int; knots::Vector{Float64}
         h = b - a
         
         # Skip degenerate intervals
-        h < 1e-14 && continue
+        h < NUMERICAL_ZERO_TOL && continue
         
         # Transform Gauss points to [a, b]
         t_points = @. a + (gl_nodes + 1) * h / 2
@@ -558,7 +558,7 @@ function build_weighted_penalty_matrix(basis, order::Int,
         h = b - a
         
         # Skip degenerate intervals
-        h < 1e-14 && continue
+        h < NUMERICAL_ZERO_TOL && continue
         
         # Weight for this interval
         w_interval = interval_weights[q]

@@ -206,7 +206,7 @@ struct PhaseTypeDistribution
             throw(DimensionMismatch("Q must be $(n_phases+1) × $(n_phases+1)"))
         length(initial) == n_phases || 
             throw(DimensionMismatch("initial must have length $n_phases"))
-        abs(sum(initial) - 1.0) < 1e-10 || 
+        abs(sum(initial) - 1.0) < EIGENVALUE_ZERO_TOL || 
             throw(ArgumentError("initial distribution must sum to 1"))
         all(initial .>= 0) || 
             throw(ArgumentError("initial distribution must be non-negative"))
@@ -225,11 +225,7 @@ subintensity(ph::PhaseTypeDistribution) = ph.Q[1:ph.n_phases, 1:ph.n_phases]
 """Extract absorption rates from Q (last column, excluding absorbing row)."""
 absorption_rates(ph::PhaseTypeDistribution) = ph.Q[1:ph.n_phases, end]
 
-"""Extract Coxian progression rates (off-diagonal: Q[i, i+1])."""
-function progression_rates(ph::PhaseTypeDistribution)
-    n = ph.n_phases
-    n == 1 ? Float64[] : [ph.Q[i, i+1] for i in 1:n-1]
-end
+# Note: progression_rates was removed in 2026-01-29 cleanup (no callers).
 
 # =============================================================================
 # PhaseTypeConfig

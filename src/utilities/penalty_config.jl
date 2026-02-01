@@ -29,9 +29,14 @@ a weighted penalty matrix.
 - Penalty matrix (K × K), possibly transformed for monotone splines
 
 # Notes
-For at-risk weighted penalties, the matrix is normalized so that its maximum
-eigenvalue equals that of the corresponding uniform penalty. This ensures that
-the smoothing parameter λ has comparable interpretation across weighting schemes.
+All penalty matrices are normalized so that their maximum eigenvalue ≈ 1.
+This ensures that the smoothing parameter λ has a consistent interpretation
+regardless of time scale or knot spacing. Without normalization, the GPS 
+penalty matrix eigenvalues scale as O(1/h²) where h is the knot spacing,
+causing λ selection algorithms to produce extreme values.
+
+For at-risk weighted penalties, the weighting is applied first, then the
+matrix is normalized like the uniform case.
 """
 function _build_penalty_matrix_with_weighting(model::MultistateProcess, 
                                                hazard, 
@@ -41,7 +46,7 @@ function _build_penalty_matrix_with_weighting(model::MultistateProcess,
     basis = _rebuild_spline_basis(hazard)
     
     # Build penalty matrix based on weighting type
-    S_bspline = if weighting isa UniformWeighting
+    S_unnormalized = if weighting isa UniformWeighting
         # Standard GPS penalty matrix
         build_penalty_matrix(basis, order)
     elseif weighting isa AtRiskWeighting
@@ -50,24 +55,23 @@ function _build_penalty_matrix_with_weighting(model::MultistateProcess,
         atrisk = compute_atrisk_interval_averages(model, hazard, transition)
         
         # Build weighted penalty matrix (unnormalized)
-        S_weighted = build_weighted_penalty_matrix(basis, order, weighting, atrisk)
-        
-        # CRITICAL: Normalize so λ has comparable meaning to uniform penalty
-        # Without normalization, at-risk weighting can produce penalty matrices
-        # with eigenvalues ~500x smaller, causing λ selection to hit upper bounds.
-        # We scale so that max eigenvalue of weighted = max eigenvalue of uniform.
-        S_uniform = build_penalty_matrix(basis, order)
-        λ_max_uniform = maximum(eigvals(Symmetric(S_uniform)))
-        λ_max_weighted = maximum(eigvals(Symmetric(S_weighted)))
-        
-        if λ_max_weighted > 1e-14  # Avoid division by near-zero
-            scale_factor = λ_max_uniform / λ_max_weighted
-            S_weighted * scale_factor
-        else
-            S_weighted  # Degenerate case: penalty is essentially zero
-        end
+        build_weighted_penalty_matrix(basis, order, weighting, atrisk)
     else
         throw(ArgumentError("Unsupported weighting type: $(typeof(weighting))"))
+    end
+    
+    # CRITICAL: Normalize penalty matrix so max eigenvalue ≈ 1
+    # The GPS penalty matrix eigenvalues scale as O(1/h²) where h is knot spacing.
+    # For data with small time scales (e.g., [0,1] vs [0,100]), this causes 
+    # eigenvalues to vary by factors of 10^4 or more. Without normalization,
+    # λ selection algorithms converge to extreme values (λ → 0 or λ → ∞).
+    # Normalizing ensures λ=1 gives roughly equal weight to data fit vs smoothness.
+    λ_max = maximum(eigvals(Symmetric(S_unnormalized)))
+    
+    S_bspline = if λ_max > NUMERICAL_ZERO_TOL  # Avoid division by near-zero
+        S_unnormalized / λ_max
+    else
+        S_unnormalized  # Degenerate case: penalty is essentially zero
     end
     
     # For monotone splines, transform penalty to I-spline parameter space

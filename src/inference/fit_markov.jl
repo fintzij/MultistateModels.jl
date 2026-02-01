@@ -54,7 +54,7 @@ function _fit_markov_panel(model::MultistateModel; constraints = nothing, verbos
                           loo_method = :direct,
                           # Penalty kwargs (Phase M1)
                           penalty = :auto, lambda_init::Float64 = 1.0,
-                          select_lambda::Symbol = :none,
+                          select_lambda::Union{Symbol, AbstractHyperparameterSelector} = :none,
                           kwargs...)
 
     # =========================================================================
@@ -587,10 +587,11 @@ function _fit_markov_panel_penalized(
     # Post-processing
     # =========================================================================
     
-    # Check convergence
+    # Check convergence: retcode, finite objective, finite parameters
     sol_converged = hasfield(typeof(sol), :retcode) ? 
         (sol.retcode == ReturnCode.Success || sol.retcode == :Success) : 
         (sol.retcode == ReturnCode.Success)
+    sol_converged = sol_converged && isfinite(sol.objective) && all(isfinite, sol.u)
     
     # Warn about model-based variance with penalized models
     if vcov_type == :model && has_penalties(final_penalty)

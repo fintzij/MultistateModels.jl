@@ -65,7 +65,7 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
              vcov_type::Symbol = :ij, vcov_threshold = true,
              loo_method = :direct,
              penalty = :auto, lambda_init::Float64 = 1.0, 
-             select_lambda::Symbol = :pijcv, kwargs...)
+             select_lambda::Union{Symbol, AbstractHyperparameterSelector} = :pijcv, kwargs...)
 
     # =========================================================================
     # Validate inputs
@@ -186,10 +186,11 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
             rectify_coefs!(sol.u, model)
         end
         
-        # Check convergence and monotone spline constraints
+        # Check convergence: retcode, finite objective, finite parameters
         sol_converged = hasfield(typeof(sol), :retcode) ? 
             (sol.retcode == ReturnCode.Success || sol.retcode == :Success) : 
             (sol.retcode == ReturnCode.Success)
+        sol_converged = sol_converged && isfinite(sol.objective) && all(isfinite, sol.u)
         has_monotone = any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
         
         # Compute variance-covariance matrix based on vcov_type
@@ -237,10 +238,11 @@ function _fit_exact(model::MultistateModel; constraints = nothing, verbose = tru
         # Check for parameters at box bounds (may affect variance estimates)
         at_bounds = identify_bound_parameters(sol.u, lb, ub)
         
-        # Check convergence and monotone spline constraints  
+        # Check convergence: retcode, finite objective, finite parameters
         sol_converged = hasfield(typeof(sol), :retcode) ? 
             (sol.retcode == ReturnCode.Success || sol.retcode == :Success) : 
             (sol.retcode == ReturnCode.Success)
+        sol_converged = sol_converged && isfinite(sol.objective) && all(isfinite, sol.u)
         has_monotone = any(map(x -> (isa(x, _SplineHazard) && x.monotone != 0), model.hazards))
         
         # Compute variance-covariance matrix based on vcov_type
